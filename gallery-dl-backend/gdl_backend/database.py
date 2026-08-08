@@ -20,6 +20,11 @@ SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION = 8
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 ACTIVE_STATUSES = {"starting", "running", "cancelling"}
 TERMINAL_BATCH_STATUSES = {"succeeded", "completed_with_errors", "cancelled"}
+MAX_CRAWL_REVIEW_GROUPS = 10_000
+
+
+class CrawlReviewGroupLimitExceeded(RuntimeError):
+    pass
 
 
 class Database:
@@ -2019,14 +2024,19 @@ class Database:
         kind: str | None = None,
         limit: int = 12,
         offset: int = 0,
+        all_groups: bool = False,
     ) -> dict[str, Any]:
         where = "batch_id=? AND kind NOT LIKE 'auto_%'"
         params: list[Any] = [batch_id]
         if kind:
             where += " AND kind=?"
             params.append(kind)
-        page_limit = max(1, min(int(limit), 50))
-        page_offset = max(0, int(offset))
+        page_limit = (
+            MAX_CRAWL_REVIEW_GROUPS
+            if all_groups
+            else max(1, min(int(limit), 50))
+        )
+        page_offset = 0 if all_groups else max(0, int(offset))
         with self._read() as conn:
             total = int(
                 conn.execute(
@@ -2034,6 +2044,10 @@ class Database:
                     params,
                 ).fetchone()[0]
             )
+            if all_groups and total > MAX_CRAWL_REVIEW_GROUPS:
+                raise CrawlReviewGroupLimitExceeded(
+                    f"审核组数量超过全量读取上限 {MAX_CRAWL_REVIEW_GROUPS}"
+                )
             rows = conn.execute(
                 f"""
                 SELECT * FROM crawl_review_groups WHERE {where}
@@ -2061,7 +2075,12 @@ class Database:
                     bool(image and image.get("selected")) for image in group["images"]
                 )
                 groups.append(group)
-        return {"items": groups, "total": total, "limit": page_limit, "offset": page_offset}
+        return {
+            "items": groups,
+            "total": total,
+            "limit": len(groups) if all_groups else page_limit,
+            "offset": page_offset,
+        }
 
     # 审核状态、组和图片归属校验必须与选择更新原子完成。
     def update_crawl_review_decisions(

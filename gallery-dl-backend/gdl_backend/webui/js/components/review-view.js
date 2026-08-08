@@ -1,8 +1,19 @@
 import { createElement } from "../core/dom.js";
 import {
-  formatReviewBytes,
+  calculateReviewLayout,
+  calculateSynchronizedCrop,
+  clamp,
+  DEFAULT_MAGNIFICATION,
+  formatMagnification,
+  getContainContentRect,
+  normalizePointerCoordinates,
+  selectReferenceImage,
+  updateMagnification,
+} from "../core/review-loupe.js";
+import {
   reviewApplyCounts,
   reviewCanList,
+  reviewCompletionPresentation,
   reviewImageUrl,
   REVIEW_FILTERS,
 } from "../core/review-model.js";
@@ -24,7 +35,19 @@ const KIND_STATUS = Object.freeze({
   unreadable: "error",
 });
 
-function button(action, label, { primary = false, dangerous = false, small = false, title = "" } = {}) {
+const LOUPE_HIDE_DELAY_MS = 220;
+const LAYOUT_GAP_PX = 12;
+const DESKTOP_MIN_SHORT_EDGE_PX = 160;
+const MAX_CANVAS_DPR = 2;
+const CANVAS_ERROR_TEXT = "读取受限";
+
+function button(action, label, {
+  primary = false,
+  dangerous = false,
+  small = false,
+  title = "",
+  keyShortcuts = "",
+} = {}) {
   return createElement("button", {
     className: [
       "review-button",
@@ -33,27 +56,13 @@ function button(action, label, { primary = false, dangerous = false, small = fal
       small ? "review-button--small" : "",
     ].filter(Boolean).join(" "),
     text: label,
-    attributes: { type: "button", title: title || null },
+    attributes: {
+      type: "button",
+      title: title || null,
+      "aria-keyshortcuts": keyShortcuts || null,
+    },
     dataset: { reviewAction: action },
   });
-}
-
-function commandButton(action, key, label, options = {}) {
-  const control = button(action, "", { ...options, small: true });
-  control.classList.add("review-deck-command");
-  control.append(
-    createElement("kbd", { text: key, attributes: { "aria-hidden": "true" } }),
-    createElement("span", { text: label }),
-  );
-  control.setAttribute("aria-label", `${key}：${label}`);
-  return control;
-}
-
-function metric(label, value) {
-  return createElement("div", { className: "review-metric" }, [
-    createElement("span", { text: label }),
-    createElement("strong", { text: String(value) }),
-  ]);
 }
 
 function buildDom(context) {
@@ -85,7 +94,7 @@ function buildDom(context) {
     createElement("h1", { text: app.label, attributes: { id: headingId } }),
     createElement("p", {
       className: "app-summary",
-      text: "启动分析后，可逐页确认保留项；应用结果前会再次确认。",
+      text: "启动分析后，可在当前筛选中连续确认保留项；应用结果前会再次确认。",
     }),
   ]);
   const pickerRowHost = createElement("div", { dataset: { reviewPickerControls: "" } }, [batchControls]);
@@ -113,7 +122,6 @@ function buildDom(context) {
     className: "review-status-actions",
     dataset: { reviewStatusActions: "" },
   });
-  const stats = createElement("div", { className: "review-metrics", dataset: { reviewMetrics: "" } });
   const stateHost = createElement("div", { className: "review-state-host", dataset: { reviewStateHost: "" } });
   const workspace = createElement("section", {
     className: "review-panel review-workspace",
@@ -122,13 +130,12 @@ function buildDom(context) {
   }, [
     createElement("div", { className: "review-panel-heading" }, [
       createElement("div", {}, [
-        createElement("h2", { text: "去重与质量审核", attributes: { id: "review-workspace-title" } }),
+        createElement("h2", { text: "去重审核", attributes: { id: "review-workspace-title" } }),
         createElement("p", { text: "分析、应用与错误恢复继续沿用现有审核流程。" }),
       ]),
       statusBadge,
     ]),
     actionHost,
-    stats,
     stateHost,
   ]);
   const emptyHost = createElement("div", { dataset: { reviewEmpty: "" } });
@@ -160,6 +167,41 @@ function buildDom(context) {
       dataset: { reviewAction: "filter", reviewFilter: filter.id },
     }));
   }
+
+  const groupSelect = createElement("select", {
+    attributes: { "aria-label": "选择当前筛选中的审核组" },
+    dataset: { reviewGroupSelect: "" },
+  }, [createElement("option", { text: "当前筛选没有审核组", attributes: { value: "" } })]);
+  const groupPicker = createElement("div", {
+    className: "review-group-picker",
+    attributes: { "aria-label": "当前筛选全量组选择器" },
+    dataset: { reviewGroupPicker: "" },
+  }, [groupSelect]);
+
+  const zoomReadout = createElement("output", {
+    className: "review-loupe-zoom",
+    text: formatMagnification(DEFAULT_MAGNIFICATION),
+    attributes: { "aria-live": "polite", "aria-label": "镜片倍率" },
+    dataset: { reviewLoupeZoom: "" },
+  });
+  const loupeToggleButton = button("loupe-toggle", "启动放大镜", {
+    title: "快捷键 X：开启或关闭同步放大镜",
+  });
+  loupeToggleButton.setAttribute("aria-keyshortcuts", "x");
+  loupeToggleButton.setAttribute("aria-pressed", "false");
+  loupeToggleButton.setAttribute("aria-disabled", "true");
+  const loupePinButton = button("loupe-pin", "锁定坐标");
+  loupePinButton.setAttribute("aria-pressed", "false");
+  loupePinButton.setAttribute("aria-disabled", "true");
+  const loupeControls = createElement("div", {
+    className: "review-loupe-controls",
+    attributes: { "aria-label": "同步放大镜" },
+  }, [
+    zoomReadout,
+    loupeToggleButton,
+    loupePinButton,
+  ]);
+
   const deckBatchControlsHost = createElement("div", {
     className: "review-deck-batch-controls",
     dataset: { reviewDeckBatchControls: "" },
@@ -172,6 +214,8 @@ function buildDom(context) {
     createElement("div", { className: "review-deck-identity" }, [deckBatchId, deckStatusBadge]),
     createElement("div", { className: "review-deck-progress" }, [progressText, progressTrack]),
     tabs,
+    groupPicker,
+    loupeControls,
     createElement("div", { className: "review-deck-utilities" }, [deckBatchControlsHost, deckActionHost]),
   ]);
 
@@ -180,45 +224,44 @@ function buildDom(context) {
     attributes: { tabindex: "-1", role: "group", "aria-label": "当前审核组" },
     dataset: { reviewStage: "" },
   });
-  const inspector = createElement("aside", {
-    className: "review-deck-inspector",
-    attributes: {
-      id: "review-deck-inspector",
-      "aria-label": "图片属性与质量指标",
-    },
-    dataset: { reviewInspector: "" },
-  });
   const deckBody = createElement("div", {
     className: "review-deck-body",
-    dataset: { reviewDeckBody: "", inspector: "on" },
-  }, [stage, inspector]);
-  const filmstrip = createElement("nav", {
-    className: "review-deck-filmstrip",
-    attributes: { "aria-label": "本页审核组" },
-    dataset: { reviewFilmstrip: "" },
-  });
-  const commandHost = createElement("div", { className: "review-deck-command-list", dataset: { reviewCommands: "" } }, [
-    commandButton("prev-group", "←", "上一组"),
-    commandButton("next-group", "→", "下一组"),
-    commandButton("first-group", "Home", "本页首组"),
-    commandButton("last-group", "End", "本页末组"),
-    commandButton("accept", "⏎", "采纳并前进", { primary: true }),
-    commandButton("group-all", "A", "全部保留"),
-    commandButton("group-none", "D", "全部移除", { dangerous: true }),
-    commandButton("group-recommended", "R", "恢复推荐"),
-    commandButton("toggle-inspector", "I", "指标"),
-    commandButton("save", "S", "保存本页"),
+    dataset: { reviewDeckBody: "" },
+  }, [stage]);
+
+  const commandHost = createElement("div", {
+    className: "review-deck-command-list",
+    attributes: { "aria-label": "组导航" },
+    dataset: { reviewCommands: "" },
+  }, [
+    button("prev-group", "上一组", {
+      small: true,
+      title: "快捷键 Backspace：返回上一组",
+      keyShortcuts: "Backspace",
+    }),
+    button("next-group", "下一组", { small: true }),
+    createElement("div", {
+      className: "review-shortcut-hints",
+      attributes: { "aria-label": "审核快捷键" },
+    }, [
+      createElement("span", { text: "方向键  移动选中" }),
+      createElement("span", { text: "Space  切换保留" }),
+      createElement("span", {
+        text: "Enter  采纳并前进",
+        dataset: { reviewEnterHint: "" },
+      }),
+    ]),
   ]);
   const deckLiveHost = createElement("div", {
     className: "review-deck-live-host",
     dataset: { reviewDeckLive: "" },
-  });
+  }, [operationLive]);
   const statusBar = createElement("footer", { className: "review-deck-statusbar" }, [commandHost, deckLiveHost]);
   const deck = createElement("section", {
     className: "review-deck",
     attributes: { hidden: "", "aria-label": "专注分拣台" },
-    dataset: { reviewDeck: "" },
-  }, [deckHeader, deckBody, filmstrip, statusBar]);
+    dataset: { reviewDeck: "", loupeEnabled: "false", loupeActive: "false" },
+  }, [deckHeader, deckBody, statusBar]);
 
   root.classList.add("app-view", "review-app");
   root.dataset.mode = "panel";
@@ -238,7 +281,6 @@ function buildDom(context) {
     operationLive,
     statusBadge,
     actionHost,
-    stats,
     stateHost,
     nonDeckLiveHost,
     workspace,
@@ -251,30 +293,20 @@ function buildDom(context) {
     progressTrack,
     progressFill,
     tabs,
+    groupPicker,
+    groupSelect,
+    loupeControls,
+    zoomReadout,
+    loupeToggleButton,
+    loupePinButton,
     deckBatchControlsHost,
     deckActionHost,
     deckBody,
     stage,
-    inspector,
-    filmstrip,
     commandHost,
     deckLiveHost,
     statusBar,
   };
-}
-
-function imageFacts(image) {
-  const facts = [
-    image.width && image.height ? `${image.width}×${image.height}` : "尺寸未知",
-    image.format,
-    formatReviewBytes(image.bytes),
-  ];
-  if (image.jpegQuality !== null) facts.push(`约 Q${image.jpegQuality}`);
-  return facts.join(" · ");
-}
-
-function metricValue(value, digits) {
-  return value === null ? "—" : Number(value).toFixed(digits);
 }
 
 function currentGroup(review, focusedIndex) {
@@ -290,12 +322,25 @@ function nonDeckState(summary) {
     not_started: ["等待开始", "尚未开始去重分析", "开始后会先分析相似图片，再进入人工审核。"],
     waiting_for_crawl: ["等待采集结束", "批次尚未准备好", "采集结束后即可开始去重分析。"],
     pending: ["分析已排队", "正在等待分析资源", "状态会自动刷新，无需重复提交。"],
-    analyzing: ["正在分析", "正在计算近似图片与质量指标", "分析完成后会自动进入专注分拣台。"],
+    analyzing: ["正在分析", "正在计算近似图片分组", "分析完成后会自动进入专注分拣台。"],
     auto_applying: ["自动处理中", "正在应用无需人工确认的结果", "完成后会继续刷新审核状态。"],
     failed: ["分析失败", "去重分析未能完成", "可重试分析；若持续失败，请打开系统诊断。"],
     disabled: ["审核未启用", "当前服务未启用去重审核", "请先在服务配置中启用相应能力。"],
   };
   return presentations[summary.status] || [summary.statusLabel, "审核状态已更新", "请刷新或稍后重试。"];
+}
+
+function requestFrame(callback) {
+  if (typeof globalThis.requestAnimationFrame === "function") {
+    return globalThis.requestAnimationFrame(callback);
+  }
+  return globalThis.setTimeout(callback, 16);
+}
+
+function cancelFrame(handle) {
+  if (!handle) return;
+  if (typeof globalThis.cancelAnimationFrame === "function") globalThis.cancelAnimationFrame(handle);
+  else globalThis.clearTimeout(handle);
 }
 
 export function createReviewView(context) {
@@ -306,19 +351,33 @@ export function createReviewView(context) {
   let focusedIndex = 0;
   let activeImageId = "";
   let confirmedIds = new Set();
-  const compactInspectorQuery = typeof globalThis.matchMedia === "function"
-    ? globalThis.matchMedia("(max-width: 1007px)")
-    : null;
-  let inspectorCollapsed = compactInspectorQuery?.matches === true;
-  let inspectorUserToggled = false;
   let completionVisible = false;
-  let renderedPageKey = "";
+  let renderedWorkspaceKey = "";
   let adjacentPreviews = [];
   let imagesReleased = false;
+  let resizeObserver = null;
+  let layoutFrame = 0;
+  let interactionsActive = false;
+  let stageGeneration = 0;
+  let loupeAvailable = false;
+  const loupe = {
+    enabled: false,
+    active: false,
+    pinned: false,
+    sourceImageId: "",
+    u: 0.5,
+    v: 0.5,
+    magnification: DEFAULT_MAGNIFICATION,
+    drawFrame: 0,
+    hideTimer: 0,
+  };
 
   const reviewState = () => store.getState().review;
-  const deckPageKey = (review) => `${review.batchId}\u0000${review.filter}\u0000${review.offset}`;
-  const editable = (review = reviewState()) => review.summary?.status === "ready" && !busy;
+  const workspaceKey = (review) => `${review.batchId}\u0000${review.filter}`;
+  const editable = (review = reviewState()) => review.summary?.status === "ready" && !busy && Boolean(
+    currentGroup(review, focusedIndex)?.images.length,
+  );
+  const loupeEffective = () => loupe.enabled && loupeAvailable;
 
   const clearError = () => {
     renderedError?.destroy();
@@ -340,45 +399,164 @@ export function createReviewView(context) {
     elements.errorHost.replaceChildren(renderedError.element);
   };
 
+  const cancelHide = () => {
+    if (loupe.hideTimer) globalThis.clearTimeout(loupe.hideTimer);
+    loupe.hideTimer = 0;
+  };
+
+  const cancelDraw = () => {
+    cancelFrame(loupe.drawFrame);
+    loupe.drawFrame = 0;
+  };
+
+  const cancelLayout = () => {
+    cancelFrame(layoutFrame);
+    layoutFrame = 0;
+  };
+
+  const disconnectLayoutObserver = () => {
+    resizeObserver?.disconnect();
+    resizeObserver = null;
+    cancelLayout();
+  };
+
+  const updateSourceMarkers = () => {
+    for (const card of elements.stage.querySelectorAll("[data-review-image]")) {
+      card.dataset.loupeSource = String(Boolean(
+        loupe.active && loupe.sourceImageId && card.dataset.reviewImage === loupe.sourceImageId
+      ));
+    }
+  };
+
+  const updateLoupeUi = () => {
+    const effective = loupeEffective();
+    const active = effective && loupe.active;
+    const label = formatMagnification(loupe.magnification);
+    elements.deck.dataset.loupeEnabled = String(effective);
+    elements.deck.dataset.loupeActive = String(active);
+    elements.zoomReadout.textContent = label;
+    elements.loupeToggleButton.setAttribute("aria-pressed", String(loupe.enabled));
+    elements.loupeToggleButton.textContent = loupeAvailable
+      ? loupe.enabled ? "关闭放大镜" : "启动放大镜"
+      : "放大镜不可用";
+    elements.loupePinButton.setAttribute("aria-pressed", String(loupe.pinned));
+    elements.loupePinButton.textContent = loupe.pinned ? "解除锁定" : "锁定坐标";
+    elements.loupeToggleButton.disabled = !loupeAvailable || Boolean(busy);
+    elements.loupePinButton.disabled = !loupeAvailable || !loupe.enabled || Boolean(busy);
+    elements.loupeToggleButton.setAttribute("aria-disabled", String(elements.loupeToggleButton.disabled));
+    elements.loupePinButton.setAttribute("aria-disabled", String(elements.loupePinButton.disabled));
+    updateSourceMarkers();
+  };
+
+  const resetLoupePosition = ({ preserveEnabled = true } = {}) => {
+    cancelHide();
+    cancelDraw();
+    loupe.active = false;
+    loupe.pinned = false;
+    loupe.sourceImageId = "";
+    loupe.u = 0.5;
+    loupe.v = 0.5;
+    if (!preserveEnabled) loupe.enabled = false;
+    hideLoupeArtifacts();
+    updateLoupeUi();
+  };
+
   const releasePreloads = () => {
     for (const image of adjacentPreviews) image.removeAttribute("src");
     adjacentPreviews = [];
   };
 
+  const clearCanvasDiagnostics = (canvas) => {
+    for (const key of [
+      "sourceLeft", "sourceTop", "sourceWidth", "sourceHeight",
+      "edgeClamped", "sampleU", "sampleV",
+    ]) {
+      delete canvas.dataset[key];
+    }
+  };
+
+  const hideLoupeArtifacts = () => {
+    for (const crosshair of elements.stage.querySelectorAll("[data-review-crosshair]")) {
+      crosshair.dataset.visible = "false";
+    }
+    for (const canvas of elements.stage.querySelectorAll("[data-review-lens]")) {
+      canvas.dataset.visible = "false";
+      clearCanvasDiagnostics(canvas);
+      canvas.width = 1;
+      canvas.height = 1;
+    }
+    for (const errorLabel of elements.stage.querySelectorAll("[data-review-loupe-error]")) {
+      errorLabel.hidden = true;
+    }
+  };
+
   const releaseStageImages = () => {
-    for (const image of elements.stage.querySelectorAll("img")) image.removeAttribute("src");
+    stageGeneration += 1;
+    for (const image of elements.stage.querySelectorAll("img")) {
+      image.dataset.reviewDecoded = "false";
+      image.removeAttribute("src");
+    }
+    for (const canvas of elements.stage.querySelectorAll("canvas")) {
+      clearCanvasDiagnostics(canvas);
+      canvas.width = 1;
+      canvas.height = 1;
+    }
   };
 
   const releaseImages = () => {
+    resetLoupePosition({ preserveEnabled: true });
+    disconnectLayoutObserver();
     releaseStageImages();
     releasePreloads();
     imagesReleased = true;
   };
 
+  const scheduleDraw = () => {
+    if (loupe.drawFrame || !loupeEffective() || !loupe.active) return;
+    loupe.drawFrame = requestFrame(() => drawLoupeNow());
+  };
+
+  const markPreviewDecoded = async (preview, generation) => {
+    try {
+      if (typeof preview.decode === "function") await preview.decode();
+      if (generation !== stageGeneration || !preview.isConnected || !preview.naturalWidth || !preview.naturalHeight) return;
+      preview.dataset.reviewDecoded = "true";
+      scheduleDraw();
+    } catch {
+      if (generation === stageGeneration && preview.isConnected) preview.dataset.reviewDecoded = "false";
+    }
+  };
+
   const loadImageWindow = (review) => {
+    if (!interactionsActive) {
+      imagesReleased = true;
+      return;
+    }
     releasePreloads();
     const group = currentGroup(review, focusedIndex);
     if (!group) {
       imagesReleased = false;
       return;
     }
+    const generation = stageGeneration;
     for (const preview of elements.stage.querySelectorAll("[data-review-preview-image]")) {
       if (preview.dataset.previewFailed === "true" || preview.hasAttribute("src")) continue;
       const imageId = preview.dataset.reviewPreviewImage;
-      if (group.images.some((image) => image.id === imageId && image.readable)) {
-        preview.setAttribute("src", reviewImageUrl(review.batchId, imageId));
-      }
+      if (!group.images.some((image) => image.id === imageId && image.readable)) continue;
+      preview.dataset.reviewDecoded = "false";
+      preview.setAttribute("src", reviewImageUrl(review.batchId, imageId));
+      if (preview.complete && preview.naturalWidth) void markPreviewDecoded(preview, generation);
     }
-    const neighborIndexes = focusedIndex + 1 < review.groups.length
-      ? [focusedIndex + 1]
+    const neighborIndex = focusedIndex + 1 < review.groups.length
+      ? focusedIndex + 1
       : focusedIndex > 0
-        ? [focusedIndex - 1]
-        : [];
-    for (const index of neighborIndexes) {
-      for (const image of review.groups[index].images) {
+        ? focusedIndex - 1
+        : -1;
+    if (neighborIndex >= 0) {
+      for (const image of review.groups[neighborIndex].images) {
         if (!image.readable) continue;
         const preview = createElement("img", {
-          attributes: { alt: "", "aria-hidden": "true", decoding: "async" },
+          attributes: { alt: "", "aria-hidden": "true", decoding: "async", loading: "eager" },
         });
         preview.setAttribute("src", reviewImageUrl(review.batchId, image.id));
         adjacentPreviews.push(preview);
@@ -387,31 +565,14 @@ export function createReviewView(context) {
     imagesReleased = false;
   };
 
-  const syncInspectorVisibility = () => {
-    elements.inspector.hidden = inspectorCollapsed;
-    elements.deckBody.dataset.inspector = inspectorCollapsed ? "off" : "on";
-    for (const control of root.querySelectorAll('[data-review-action="toggle-inspector"]')) {
-      control.setAttribute("aria-controls", elements.inspector.id);
-      control.setAttribute("aria-expanded", String(!inspectorCollapsed));
-    }
-    const commandLabel = elements.commandHost.querySelector('[data-review-action="toggle-inspector"] span');
-    if (commandLabel) commandLabel.textContent = inspectorCollapsed ? "展开指标" : "收起指标";
-  };
-
-  const onInspectorViewportChange = (event) => {
-    if (inspectorUserToggled) return;
-    inspectorCollapsed = event.matches;
-    syncInspectorVisibility();
-  };
-
   const placeSharedElements = (deckMode, hasReview = false) => {
     if (deckMode) {
       elements.deckBatchControlsHost.append(elements.batchControls);
       elements.deckActionHost.append(elements.actionHost);
-      elements.deckLiveHost.append(elements.operationLive);
+      elements.deckLiveHost.prepend(elements.operationLive);
     } else {
       elements.pickerRowHost.append(elements.batchControls);
-      elements.workspace.insertBefore(elements.actionHost, elements.stats);
+      elements.workspace.insertBefore(elements.actionHost, elements.stateHost);
       elements[hasReview ? "workspace" : "picker"].append(elements.nonDeckLiveHost);
       elements.nonDeckLiveHost.append(elements.operationLive);
     }
@@ -454,24 +615,38 @@ export function createReviewView(context) {
     elements.actionHost.replaceChildren(...controls);
   };
 
-  const renderStats = (summary) => {
-    elements.stats.replaceChildren(
-      metric("全部图片", summary.totalImageCount),
-      metric("自动去重组", summary.automaticGroupCount),
-      metric("自动移除", summary.automaticRejectedImageCount),
-      metric("重复组", summary.duplicateGroupCount),
-      metric("当前保留", summary.selectedImageCount),
-      metric("已确认组", `${summary.decidedGroupCount}/${summary.totalGroupCount}`),
-      metric("读取失败", summary.unreadableImageCount),
-      ...(["applied", "apply_failed"].includes(summary.status)
-        ? [metric("已移出 / 失败", `${summary.rejectedImageCount}/${summary.failedImageCount}`)]
-        : []),
-    );
-  };
-
   const renderNonDeckState = (review) => {
     const [label, title, message] = nonDeckState(review.summary);
     elements.stateHost.replaceChildren(createEmptyState({ label, title, message }));
+  };
+
+  const groupOptionText = (group, index, count) => {
+    const state = group.kind === "unreadable"
+      ? "读取失败"
+      : group.decided || confirmedIds.has(group.id)
+        ? "已确认"
+        : "待提交";
+    return `${index + 1}/${count} · 组 ${group.ordinal} · ${KIND_LABELS[group.kind]} · ${state}`;
+  };
+
+  const renderGroupSelector = (review) => {
+    if (!review.groups.length) {
+      elements.groupSelect.replaceChildren(createElement("option", {
+        text: "当前筛选没有审核组",
+        attributes: { value: "" },
+      }));
+      return;
+    }
+    const options = review.groups.map((group, index) => {
+      const option = createElement("option", {
+        text: groupOptionText(group, index, review.groups.length),
+        attributes: { value: String(index) },
+      });
+      option.selected = index === focusedIndex;
+      return option;
+    });
+    elements.groupSelect.replaceChildren(...options);
+    elements.groupSelect.value = String(focusedIndex);
   };
 
   const renderDeckHeader = (review) => {
@@ -491,9 +666,10 @@ export function createReviewView(context) {
       tab.setAttribute("aria-selected", String(selected));
       tab.classList.toggle("review-tab--active", selected);
     }
+    renderGroupSelector(review);
   };
 
-  const buildImageCard = (review, group, image, index) => {
+  const buildImageCard = (review, group, image, index, generation) => {
     const fallback = createElement("span", {
       className: "review-image-fallback",
       text: image.readable ? "预览加载失败" : "图片不可读",
@@ -505,22 +681,60 @@ export function createReviewView(context) {
       const preview = createElement("img", {
         attributes: {
           alt: `组 ${group.ordinal} 图片 ${index + 1}`,
-          loading: "lazy",
+          loading: "eager",
           decoding: "async",
+          draggable: "false",
         },
-        dataset: { reviewPreviewImage: image.id },
+        dataset: { reviewPreviewImage: image.id, reviewDecoded: "false" },
+      });
+      preview.addEventListener("load", () => {
+        void markPreviewDecoded(preview, generation);
       });
       preview.addEventListener("error", () => {
+        if (generation !== stageGeneration || !preview.isConnected) return;
         preview.dataset.previewFailed = "true";
+        preview.dataset.reviewDecoded = "false";
         preview.hidden = true;
         preview.removeAttribute("src");
         fallback.hidden = false;
+        const failedMedia = preview.closest("[data-review-media]");
+        const failedCanvas = failedMedia?.querySelector("[data-review-lens]");
+        if (failedCanvas instanceof HTMLCanvasElement) {
+          clearCanvasDiagnostics(failedCanvas);
+          failedCanvas.width = 1;
+          failedCanvas.height = 1;
+        }
+        failedMedia?.querySelector("[data-review-crosshair]")?.remove();
+        failedCanvas?.remove();
+        failedMedia?.querySelector("[data-review-loupe-error]")?.remove();
+        loupeAvailable = group.images.some((candidate) => {
+          if (!candidate.readable) return false;
+          const candidatePreview = findByDataset(
+            elements.stage,
+            "[data-review-preview-image]",
+            "reviewPreviewImage",
+            candidate.id,
+          );
+          return Boolean(candidatePreview && candidatePreview.dataset.previewFailed !== "true");
+        });
+        if (!loupeAvailable) resetLoupePosition({ preserveEnabled: true });
+        syncControlAvailability(reviewState());
+        scheduleDraw();
       }, { once: true });
       mediaChildren.push(preview);
     }
     mediaChildren.push(
       fallback,
-      createElement("span", { className: "review-image-index", text: String(index + 1), attributes: { "aria-hidden": "true" } }),
+      createElement("span", {
+        className: "review-image-index",
+        text: String(index + 1),
+        attributes: { "aria-hidden": "true" },
+      }),
+      createElement("span", {
+        className: "review-image-active-marker",
+        text: "当前选中",
+        attributes: { "aria-hidden": "true" },
+      }),
     );
     if (image.recommended) {
       mediaChildren.push(createElement("span", { className: "review-recommended", text: "★ 推荐" }));
@@ -530,19 +744,30 @@ export function createReviewView(context) {
       text: image.selected ? "✓ 保留" : "✗ 移除",
       dataset: { reviewStamp: image.id, state: image.selected ? "keep" : "drop" },
     }));
-    const media = createElement("div", { className: "review-image-media" }, mediaChildren);
-    const details = [createElement("span", { text: imageFacts(image) })];
-    if (image.sharpness !== null || image.noiseSigma !== null) {
-      details.push(createElement("span", {
-        text: `清晰度 ${metricValue(image.sharpness, 1)} · 噪声 ${metricValue(image.noiseSigma, 2)}`,
-      }));
+    if (image.readable) {
+      mediaChildren.push(
+        createElement("span", {
+          className: "review-loupe-crosshair",
+          attributes: { "aria-hidden": "true" },
+          dataset: { reviewCrosshair: image.id, visible: "false" },
+        }),
+        createElement("canvas", {
+          className: "review-loupe-lens",
+          attributes: { "aria-hidden": "true" },
+          dataset: { reviewLens: image.id, visible: "false", renderMode: "nearest" },
+        }),
+        createElement("span", {
+          className: "review-loupe-error",
+          text: CANVAS_ERROR_TEXT,
+          attributes: { hidden: "", "aria-hidden": "true" },
+          dataset: { reviewLoupeError: image.id },
+        }),
+      );
     }
-    if (image.metrics) {
-      const metrics = [image.metrics.candidateLevel];
-      if (image.metrics.sscdSimilarity !== null) metrics.push(`SSCD ${image.metrics.sscdSimilarity.toFixed(3)}`);
-      if (image.metrics.dinoSimilarity !== null) metrics.push(`DINO ${image.metrics.dinoSimilarity.toFixed(3)}`);
-      details.push(createElement("span", { className: "review-image-metrics", text: metrics.join(" · ") }));
-    }
+    const media = createElement("div", {
+      className: "review-image-media",
+      dataset: { reviewMedia: image.id },
+    }, mediaChildren);
     const selectedLabel = image.selected ? "保留" : "移除";
     const recommendation = image.recommended ? "，推荐项" : "";
     return createElement("article", {
@@ -551,8 +776,9 @@ export function createReviewView(context) {
         role: "checkbox",
         tabindex: "0",
         "aria-checked": String(image.selected),
+        "aria-current": String(image.id === activeImageId),
         "aria-disabled": String(!editable(review)),
-        "aria-label": `图 ${index + 1}${recommendation}，当前${selectedLabel}，${imageFacts(image)}`,
+        "aria-label": `图 ${index + 1}${recommendation}，当前${selectedLabel}`,
       },
       dataset: {
         reviewImage: image.id,
@@ -560,23 +786,23 @@ export function createReviewView(context) {
         reviewImageIndex: index,
         selected: String(image.selected),
         active: String(image.id === activeImageId),
+        loupeSource: "false",
       },
-    }, [media, createElement("div", { className: "review-image-copy" }, details)]);
+    }, [media]);
   };
 
   const renderCompletion = () => {
     elements.stage.querySelector("[data-review-complete]")?.remove();
     if (!completionVisible) return;
-    const counts = reviewApplyCounts(reviewState().summary);
+    const review = reviewState();
+    const presentation = reviewCompletionPresentation(review.summary, review.filter);
     const overlay = createElement("div", {
       className: "review-deck-complete",
-      attributes: { role: "dialog", "aria-modal": "true", "aria-labelledby": "review-complete-title" },
-      dataset: { reviewComplete: "" },
+      attributes: { role: "dialog", "aria-labelledby": "review-complete-title" },
+      dataset: { reviewComplete: "", batchComplete: String(presentation.batchComplete) },
     }, [createElement("div", { className: "review-deck-complete-box" }, [
-      createElement("h2", { text: "本批次已全部过一遍", attributes: { id: "review-complete-title" } }),
-      createElement("p", {
-        text: `自动移除 ${counts.automatic} 张；最终保留 ${counts.selected} 张，预计移出 ${counts.rejected} 张。`,
-      }),
+      createElement("h2", { text: presentation.title, attributes: { id: "review-complete-title" } }),
+      createElement("p", { text: presentation.message }),
       createElement("div", { className: "review-deck-complete-actions" }, [
         button("apply", "应用并整理文件", { primary: true, dangerous: true }),
         button("return-review", "返回复查"),
@@ -586,17 +812,84 @@ export function createReviewView(context) {
     if (!busy) {
       queueMicrotask(() => {
         if (!completionVisible || busy || !root.contains(overlay)) return;
-        overlay.querySelector('[data-review-action="apply"]')?.focus({ preventScroll: true });
+        overlay.querySelector(
+          presentation.batchComplete
+            ? '[data-review-action="apply"]'
+            : '[data-review-action="return-review"]',
+        )?.focus({ preventScroll: true });
       });
     }
   };
 
+  const layoutImages = (group) => group.images.map((image) => ({
+    width: image.width > 0 ? image.width : 1,
+    height: image.height > 0 ? image.height : 1,
+    readable: Boolean(image.readable && image.width > 0 && image.height > 0),
+    recommended: image.recommended,
+  }));
+
+  const applyLayout = () => {
+    layoutFrame = 0;
+    const review = reviewState();
+    const group = currentGroup(review, focusedIndex);
+    const cards = elements.stage.querySelector("[data-review-cards]");
+    if (!group || !cards || !cards.clientWidth || !cards.clientHeight) return;
+    const minimumShortEdge = DESKTOP_MIN_SHORT_EDGE_PX;
+    const layout = calculateReviewLayout(
+      layoutImages(group),
+      cards.clientWidth,
+      cards.clientHeight,
+      LAYOUT_GAP_PX,
+      minimumShortEdge,
+    );
+    if (!layout.columns) return;
+    let tileWidth = layout.tileWidth;
+    let tileHeight = layout.tileHeight;
+    const shortEdge = Math.min(tileWidth, tileHeight);
+    if (shortEdge < minimumShortEdge) {
+      const scale = minimumShortEdge / Math.max(1, shortEdge);
+      tileWidth *= scale;
+      tileHeight *= scale;
+    }
+    const roundedWidth = Math.max(1, Math.floor(tileWidth));
+    const roundedHeight = Math.max(1, Math.floor(tileHeight));
+    cards.style.gridTemplateColumns = `repeat(${layout.columns}, ${roundedWidth}px)`;
+    cards.style.gridAutoRows = `${roundedHeight}px`;
+    cards.style.setProperty("--review-tile-width", `${roundedWidth}px`);
+    cards.style.setProperty("--review-tile-height", `${roundedHeight}px`);
+    cards.dataset.layoutReadable = String(layout.readable);
+    scheduleDraw();
+  };
+
+  const scheduleLayout = () => {
+    if (layoutFrame) return;
+    layoutFrame = requestFrame(applyLayout);
+  };
+
+  const observeCards = () => {
+    disconnectLayoutObserver();
+    if (!interactionsActive) return;
+    const cards = elements.stage.querySelector("[data-review-cards]");
+    if (!cards) return;
+    if (typeof globalThis.ResizeObserver === "function") {
+      resizeObserver = new globalThis.ResizeObserver(() => {
+        if (interactionsActive) scheduleLayout();
+      });
+      resizeObserver.observe(cards);
+    }
+    scheduleLayout();
+  };
+
   const renderStage = (review) => {
+    const group = currentGroup(review, focusedIndex);
+    const previousGroupId = elements.stage.dataset.reviewGroup || "";
+    if (previousGroupId !== (group?.id || "")) resetLoupePosition({ preserveEnabled: true });
+    disconnectLayoutObserver();
     releaseStageImages();
     releasePreloads();
-    const group = currentGroup(review, focusedIndex);
     elements.stage.replaceChildren();
     elements.stage.dataset.reviewGroup = group?.id || "";
+    loupeAvailable = Boolean(group?.images.some((image) => image.readable));
     if (!group) {
       elements.stage.setAttribute("aria-label", "当前筛选没有审核组");
       elements.stage.append(createEmptyState({
@@ -605,6 +898,7 @@ export function createReviewView(context) {
         message: "可切换筛选或选择其他批次。",
       }));
       imagesReleased = false;
+      updateLoupeUi();
       return;
     }
     if (!group.images.some((image) => image.id === activeImageId)) {
@@ -618,7 +912,6 @@ export function createReviewView(context) {
     const heading = createElement("div", { className: "review-deck-stage-heading" }, [
       createElement("strong", { text: `组 ${group.ordinal}` }),
       createStatusBadge(KIND_STATUS[group.kind], KIND_LABELS[group.kind], { compact: true }),
-      ...group.matchLevels.map((level) => createElement("span", { className: "review-match-level", text: level })),
       createElement("span", {
         className: "review-deck-selection-count",
         text: `${group.selectedImageCount}/${group.imageCount} 保留`,
@@ -629,159 +922,38 @@ export function createReviewView(context) {
         text: "只读浏览",
       })]),
     ]);
-    const layout = group.imageCount === 1
-      ? "single"
-      : group.imageCount === 2
-        ? "pair"
-        : group.imageCount <= 4
-          ? "grid"
-          : "strip";
-    const cards = createElement("div", {
-      className: "review-deck-cards",
-      dataset: { reviewCards: "", layout, count: group.imageCount },
-    });
-    for (const [index, image] of group.images.entries()) {
-      cards.append(buildImageCard(review, group, image, index));
-    }
-    elements.stage.append(heading, cards);
-    loadImageWindow(review);
-    renderCompletion();
-  };
-
-  const renderInspector = (review) => {
-    const group = currentGroup(review, focusedIndex);
-    if (!group) {
-      elements.inspector.replaceChildren(createEmptyState({
-        label: "无组可检查",
-        title: "指标栏暂无内容",
-        message: "切换筛选后可继续查看图片指标。",
+    if (!group.images.length) {
+      elements.stage.append(heading, createEmptyState({
+        label: "空审核组",
+        title: "当前组没有可显示图片",
+        message: "该组没有可用图片元数据；请切换其他组或刷新权威快照。",
       }));
-      syncInspectorVisibility();
+      imagesReleased = false;
+      updateLoupeUi();
+      renderCompletion();
       return;
     }
-    const header = createElement("div", { className: "review-deck-inspector-heading" }, [
-      createElement("h2", { text: "属性 / 指标" }),
-      button("toggle-inspector", "收起指标", { small: true }),
-    ]);
-    const info = createElement("div", { className: "review-deck-group-info" }, [
-      createElement("span", {}, [createElement("strong", { text: "类型：" }), KIND_LABELS[group.kind]]),
-      createElement("span", {}, [
-        createElement("strong", { text: "匹配：" }),
-        group.matchLevels.length ? group.matchLevels.join(" · ") : "无匹配级别",
-      ]),
-      createElement("span", { dataset: { reviewInspectorCount: "" } }, [
-        createElement("strong", { text: "保留：" }),
-        `${group.selectedImageCount}/${group.imageCount}`,
-      ]),
-    ]);
-    const head = createElement("thead", {}, [createElement("tr", {}, [
-      createElement("th", { text: "#", attributes: { scope: "col" } }),
-      createElement("th", { text: "尺寸", attributes: { scope: "col" } }),
-      createElement("th", { text: "格式·Q", attributes: { scope: "col" } }),
-      createElement("th", { text: "清晰·噪声", attributes: { scope: "col" } }),
-      createElement("th", { text: "SSCD·DINO", attributes: { scope: "col" } }),
-      createElement("th", { text: "体积", attributes: { scope: "col" } }),
-    ])]);
-    const body = createElement("tbody");
+    const cards = createElement("div", {
+      className: "review-deck-cards",
+      dataset: { reviewCards: "", count: group.imageCount, layoutReadable: "false" },
+    });
+    const generation = stageGeneration;
     for (const [index, image] of group.images.entries()) {
-      const quality = `${metricValue(image.sharpness, 1)} · ${metricValue(image.noiseSigma, 2)}`;
-      const similarities = image.metrics
-        ? `${metricValue(image.metrics.sscdSimilarity, 3)} · ${metricValue(image.metrics.dinoSimilarity, 3)}`
-        : "— · —";
-      body.append(createElement("tr", {
-        dataset: {
-          reviewInspectorImage: image.id,
-          selected: String(image.selected),
-          active: String(image.id === activeImageId),
-        },
-      }, [
-        createElement("th", { text: `${index + 1}${image.recommended ? " ★" : ""}`, attributes: { scope: "row" } }),
-        createElement("td", { text: image.width && image.height ? `${image.width}×${image.height}` : "—" }),
-        createElement("td", { text: `${image.format}${image.jpegQuality === null ? "" : ` · Q${image.jpegQuality}`}` }),
-        createElement("td", { text: quality }),
-        createElement("td", { text: similarities }),
-        createElement("td", { text: formatReviewBytes(image.bytes) }),
-      ]));
+      cards.append(buildImageCard(review, group, image, index, generation));
     }
-    const table = createElement("table", { className: "review-deck-inspector-table" }, [
-      createElement("caption", { className: "visually-hidden", text: `组 ${group.ordinal} 图片质量指标` }),
-      head,
-      body,
-    ]);
-    const bulkActions = createElement("div", { className: "review-bulk-actions review-deck-bulk-actions" }, [
-      button("page-all", "本页全部保留", { small: true }),
-      button("page-none", "本页全部移除", { dangerous: true, small: true }),
-      button("page-recommended", "本页恢复推荐", { small: true }),
-    ]);
-    elements.inspector.replaceChildren(header, info, table, bulkActions);
-    syncInspectorVisibility();
-  };
-
-  const filmstripStatus = (group) => ({
-    confirmed: group.decided || confirmedIds.has(group.id),
-    unreadable: group.kind === "unreadable",
-  });
-
-  const syncFilmstripCell = (cell, group, index) => {
-    const { confirmed, unreadable } = filmstripStatus(group);
-    const current = index === focusedIndex;
-    cell.dataset.state = unreadable ? "unreadable" : confirmed ? "confirmed" : "pending";
-    cell.dataset.confirmed = String(confirmed);
-    cell.dataset.current = String(current);
-    if (current) cell.setAttribute("aria-current", "true");
-    else cell.removeAttribute("aria-current");
-    const symbol = current ? "▣" : unreadable ? (confirmed ? "✗■" : "✗□") : confirmed ? "■" : "□";
-    cell.textContent = `${symbol} ${group.ordinal}`;
-    cell.setAttribute(
-      "aria-label",
-      `组 ${group.ordinal}，${unreadable ? "读取失败，" : ""}${confirmed ? "已确认" : "待确认"}`,
-    );
-  };
-
-  const renderFilmstrip = (review) => {
-    elements.filmstrip.replaceChildren();
-    elements.filmstrip.hidden = !review.groups.length;
-    if (!review.groups.length) return;
-    const previous = button("previous", "◀ 上一页", { small: true, title: "上一页（PageUp）" });
-    previous.classList.add("review-deck-page-button");
-    elements.filmstrip.append(previous);
-    const cells = createElement("div", { className: "review-deck-film-cells" });
-    for (const [index, group] of review.groups.entries()) {
-      const cell = button("focus-group", "", { small: true });
-      cell.classList.add("review-deck-film-cell");
-      cell.dataset.reviewGroup = group.id;
-      cell.dataset.reviewIndex = String(index);
-      syncFilmstripCell(cell, group, index);
-      cells.append(cell);
-    }
-    elements.filmstrip.append(cells);
-    const next = button("next", "下一页 ▶", { small: true, title: "下一页（PageDown）" });
-    next.classList.add("review-deck-page-button");
-    elements.filmstrip.append(next);
-    const pageCount = Math.max(1, Math.ceil(review.total / review.limit));
-    const pageNumber = Math.min(pageCount, Math.floor(review.offset / review.limit) + 1);
-    const absoluteGroup = review.total ? Math.min(review.total, review.offset + focusedIndex + 1) : 0;
-    elements.filmstrip.append(createElement("span", {
-      className: "review-deck-page-indicator",
-      text: `第 ${pageNumber}/共 ${pageCount} 页 · 组 ${absoluteGroup}/${review.total}`,
-      dataset: { reviewPageSummary: "" },
-    }));
-  };
-
-  const updateFilmstripCell = (groupId) => {
-    const review = reviewState();
-    const index = review.groups.findIndex((group) => group.id === groupId);
-    if (index < 0) return;
-    const cell = findByDataset(elements.filmstrip, "[data-review-group]", "reviewGroup", groupId);
-    if (cell) syncFilmstripCell(cell, review.groups[index], index);
+    elements.stage.append(heading, cards);
+    if (interactionsActive) loadImageWindow(review);
+    else imagesReleased = true;
+    observeCards();
+    updateLoupeUi();
+    renderCompletion();
   };
 
   const syncActiveImage = () => {
     for (const card of elements.stage.querySelectorAll("[data-review-image]")) {
-      card.dataset.active = String(card.dataset.reviewImage === activeImageId);
-    }
-    for (const row of elements.inspector.querySelectorAll("[data-review-inspector-image]")) {
-      row.dataset.active = String(row.dataset.reviewInspectorImage === activeImageId);
+      const active = card.dataset.reviewImage === activeImageId;
+      card.dataset.active = String(active);
+      card.setAttribute("aria-current", String(active));
     }
   };
 
@@ -795,7 +967,7 @@ export function createReviewView(context) {
       const recommendation = image.recommended ? "，推荐项" : "";
       card.setAttribute(
         "aria-label",
-        `图 ${imageNumber}${recommendation}，当前${image.selected ? "保留" : "移除"}，${imageFacts(image)}`,
+        `图 ${imageNumber}${recommendation}，当前${image.selected ? "保留" : "移除"}`,
       );
       const stamp = findByDataset(card, "[data-review-stamp]", "reviewStamp", image.id);
       if (stamp) {
@@ -803,43 +975,34 @@ export function createReviewView(context) {
         stamp.textContent = image.selected ? "✓ 保留" : "✗ 移除";
       }
     }
-    const row = findByDataset(elements.inspector, "[data-review-inspector-image]", "reviewInspectorImage", image.id);
-    if (row) row.dataset.selected = String(image.selected);
   };
 
   const syncSelections = (review) => {
     const group = currentGroup(review, focusedIndex);
     if (group && elements.stage.dataset.reviewGroup !== group.id) {
       renderStage(review);
-      renderInspector(review);
-      renderFilmstrip(review);
+      renderGroupSelector(review);
       return;
     }
     if (group) {
       const count = elements.stage.querySelector("[data-review-group-count]");
       if (count) count.textContent = `${group.selectedImageCount}/${group.imageCount} 保留`;
-      const inspectorCount = elements.inspector.querySelector("[data-review-inspector-count]");
-      if (inspectorCount) inspectorCount.replaceChildren(
-        createElement("strong", { text: "保留：" }),
-        `${group.selectedImageCount}/${group.imageCount}`,
-      );
       for (const image of group.images) applySelectionToCard(image);
     }
-    for (const item of review.groups) updateFilmstripCell(item.id);
+    renderGroupSelector(review);
     elements.operationLive.dataset.reviewDirty = String(review.dirty);
     syncActiveImage();
+    updateSourceMarkers();
     if (imagesReleased) loadImageWindow(review);
     if (completionVisible) renderCompletion();
   };
 
-  const resetLocalDeckState = (review, index = 0, { resetInspector = true } = {}) => {
+  const resetLocalDeckState = (review, index = 0) => {
     confirmedIds = new Set();
     completionVisible = false;
     focusedIndex = review.groups.length ? Math.max(0, Math.min(index, review.groups.length - 1)) : 0;
     activeImageId = currentGroup(review, focusedIndex)?.images[0]?.id || "";
-    if (resetInspector && !inspectorUserToggled) {
-      inspectorCollapsed = compactInspectorQuery?.matches === true;
-    }
+    resetLoupePosition({ preserveEnabled: true });
   };
 
   const controlDisabled = (action, review) => {
@@ -848,18 +1011,11 @@ export function createReviewView(context) {
     const ready = review.summary?.status === "ready";
     if (["load-batch", "refresh", "open-tasks", "start", "retry", "discard-reload"].includes(action)) return false;
     if (action === "filter") return false;
-    if (action === "previous") return review.offset <= 0;
-    if (action === "next") return review.offset + review.limit >= review.total;
-    if (action === "focus-group" || action === "toggle-inspector") return !hasGroups;
-    if (action === "prev-group") return !hasGroups || (focusedIndex === 0 && review.offset <= 0);
-    if (action === "next-group") {
-      return !hasGroups || (focusedIndex + 1 >= review.groups.length && review.offset + review.limit >= review.total);
-    }
-    if (action === "first-group" || action === "last-group" || action === "return-review") return !hasGroups;
-    if (["accept", "group-all", "group-none", "group-recommended", "page-all", "page-none", "page-recommended"].includes(action)) {
-      return !ready || !hasGroups;
-    }
-    if (action === "save") return !ready || !hasGroups || !review.dirty;
+    if (action === "prev-group") return !hasGroups || focusedIndex <= 0;
+    if (action === "next-group") return !hasGroups || focusedIndex + 1 >= review.groups.length;
+    if (action === "return-review") return !hasGroups;
+    if (action === "loupe-toggle") return !loupeAvailable;
+    if (action === "loupe-pin") return !loupeAvailable || !loupe.enabled;
     if (action === "apply") {
       if (!["ready", "apply_failed"].includes(review.summary?.status)) return true;
       return ready && review.summary.decidedGroupCount < review.summary.totalGroupCount && !review.dirty;
@@ -868,18 +1024,31 @@ export function createReviewView(context) {
   };
 
   const syncControlAvailability = (review) => {
+    const enterHint = elements.commandHost.querySelector("[data-review-enter-hint]");
+    if (enterHint) {
+      enterHint.textContent = reviewCanList(review.summary) && review.summary.status !== "ready"
+        ? "Enter  下一组"
+        : "Enter  采纳并前进";
+    }
     for (const control of root.querySelectorAll("button, select, input")) control.disabled = false;
     elements.batchSelect.disabled = Boolean(busy);
+    elements.groupSelect.disabled = Boolean(busy || !review.groups.length);
     for (const control of root.querySelectorAll("[data-review-action]")) {
-      control.disabled = controlDisabled(control.dataset.reviewAction, review);
+      const disabled = controlDisabled(control.dataset.reviewAction, review);
+      control.disabled = disabled;
+      control.setAttribute("aria-disabled", String(disabled));
     }
     elements.commandHost.hidden = !review.groups.length;
     for (const card of elements.stage.querySelectorAll("[data-review-image]")) {
       card.setAttribute("aria-disabled", String(!editable(review)));
     }
     if (busy) {
-      for (const control of root.querySelectorAll("button, select, input")) control.disabled = true;
+      for (const control of root.querySelectorAll("button, select, input")) {
+        control.disabled = true;
+        control.setAttribute("aria-disabled", "true");
+      }
     }
+    updateLoupeUi();
   };
 
   const renderReview = (review, previous, metadata) => {
@@ -899,7 +1068,8 @@ export function createReviewView(context) {
     placeSharedElements(deckMode, hasReview);
 
     if (!hasReview) {
-      renderedPageKey = "";
+      renderedWorkspaceKey = "";
+      loupeAvailable = false;
       releaseImages();
       syncControlAvailability(review);
       return;
@@ -907,43 +1077,39 @@ export function createReviewView(context) {
 
     renderActions(review);
     if (!deckMode) {
-      renderedPageKey = "";
+      renderedWorkspaceKey = "";
+      loupeAvailable = false;
       releaseImages();
       updateStatusBadge(elements.statusBadge, review.summary.statusKind, review.summary.statusLabel);
-      renderStats(review.summary);
       renderNonDeckState(review);
       elements.operationLive.dataset.reviewDirty = String(review.dirty);
       syncControlAvailability(review);
       return;
     }
 
-    const nextPageKey = deckPageKey(review);
-    const pageChanged = renderedPageKey !== nextPageKey;
-    if (pageChanged) {
-      resetLocalDeckState(review, 0, { resetInspector: true });
-      renderedPageKey = nextPageKey;
+    const nextWorkspaceKey = workspaceKey(review);
+    const contextChanged = renderedWorkspaceKey !== nextWorkspaceKey;
+    if (contextChanged) {
+      resetLocalDeckState(review, 0);
+      renderedWorkspaceKey = nextWorkspaceKey;
     } else if (focusedIndex >= review.groups.length) {
       focusedIndex = Math.max(0, review.groups.length - 1);
     }
     renderDeckHeader(review);
     const group = currentGroup(review, focusedIndex);
-    const stageShapeMatches = !pageChanged && elements.stage.dataset.reviewGroup === (group?.id || "") &&
+    const stageShapeMatches = !contextChanged && elements.stage.dataset.reviewGroup === (group?.id || "") &&
       [...elements.stage.querySelectorAll("[data-review-image]")].map((card) => card.dataset.reviewImage).join("\u0000") ===
       (group?.images || []).map((image) => image.id).join("\u0000");
     const statusChanged = previous?.summary?.status !== review.summary.status;
     const selectionOnly = [
       "review/imageSelectionChanged",
-      "review/groupModeChanged",
       "review/groupConfirmed",
-      "review/pageModeChanged",
       "review/pageSaved",
       "review/summaryReceived",
       "busy",
     ].includes(metadata?.type);
     if (!stageShapeMatches || statusChanged || (!selectionOnly && metadata?.type !== "review/workspaceReceived")) {
       renderStage(review);
-      renderInspector(review);
-      renderFilmstrip(review);
     } else {
       syncSelections(review);
     }
@@ -969,13 +1135,12 @@ export function createReviewView(context) {
     if (next !== focusedIndex || elements.stage.dataset.reviewGroup !== review.groups[next].id) {
       focusedIndex = next;
       activeImageId = review.groups[next].images[0]?.id || "";
+      renderGroupSelector(review);
       renderStage(review);
-      renderInspector(review);
-      renderFilmstrip(review);
       syncControlAvailability(review);
     } else {
       renderCompletion();
-      for (const group of review.groups) updateFilmstripCell(group.id);
+      renderGroupSelector(review);
       if (imagesReleased) loadImageWindow(review);
     }
     focusStage();
@@ -1001,25 +1166,16 @@ export function createReviewView(context) {
   const markConfirmed = (groupId) => {
     if (!reviewState().groups.some((group) => group.id === groupId)) return false;
     confirmedIds.add(groupId);
-    updateFilmstripCell(groupId);
+    renderGroupSelector(reviewState());
     return true;
   };
 
-  const toggleInspector = () => {
-    inspectorCollapsed = !inspectorCollapsed;
-    inspectorUserToggled = true;
-    syncInspectorVisibility();
-    return !inspectorCollapsed;
-  };
-
-  const resetPageState = (index = 0, { focus = true, resetInspector = true } = {}) => {
+  const resetWorkspaceState = (index = 0, { focus = true } = {}) => {
     const review = reviewState();
-    resetLocalDeckState(review, index, { resetInspector });
+    resetLocalDeckState(review, index);
     if (reviewCanList(review.summary)) {
       renderDeckHeader(review);
       renderStage(review);
-      renderInspector(review);
-      renderFilmstrip(review);
       syncControlAvailability(review);
       if (focus) focusStage();
     }
@@ -1040,14 +1196,306 @@ export function createReviewView(context) {
     return true;
   };
 
+  const previewContentRect = (preview) => {
+    if (!preview || preview.dataset.reviewDecoded !== "true" || !preview.naturalWidth || !preview.naturalHeight) {
+      return null;
+    }
+    const box = preview.getBoundingClientRect();
+    return getContainContentRect(
+      { width: preview.naturalWidth, height: preview.naturalHeight, readable: true },
+      { left: box.left, top: box.top, width: box.width, height: box.height },
+    );
+  };
+
+  const mediaFromEvent = (event) => {
+    if (!(event.target instanceof Element)) return null;
+    const media = event.target.closest("[data-review-media]");
+    return media && root.contains(media) ? media : null;
+  };
+
+  const updatePointerPosition = (event, media) => {
+    const preview = media?.querySelector("[data-review-preview-image]");
+    const content = previewContentRect(preview);
+    if (!content) return false;
+    const inside = event.clientX >= content.left && event.clientX <= content.left + content.width &&
+      event.clientY >= content.top && event.clientY <= content.top + content.height;
+    if (!inside) return false;
+    const coordinates = normalizePointerCoordinates(
+      { clientX: event.clientX, clientY: event.clientY },
+      content,
+    );
+    loupe.sourceImageId = media.dataset.reviewMedia || "";
+    loupe.u = coordinates.u;
+    loupe.v = coordinates.v;
+    return true;
+  };
+
+  const setLoupeActive = (active) => {
+    loupe.active = Boolean(active && loupeEffective());
+    if (!loupe.active) {
+      if (!loupe.pinned) loupe.sourceImageId = "";
+      hideLoupeArtifacts();
+    }
+    updateLoupeUi();
+  };
+
+  const scheduleHide = () => {
+    cancelHide();
+    if (loupe.pinned) return;
+    loupe.hideTimer = globalThis.setTimeout(() => {
+      loupe.hideTimer = 0;
+      if (!loupe.pinned) setLoupeActive(false);
+    }, LOUPE_HIDE_DELAY_MS);
+  };
+
+  const resizeCanvas = (canvas) => {
+    const cssWidth = Math.max(1, Math.round(canvas.clientWidth));
+    const cssHeight = Math.max(1, Math.round(canvas.clientHeight));
+    const density = Math.min(MAX_CANVAS_DPR, globalThis.devicePixelRatio || 1);
+    const width = Math.max(1, Math.round(cssWidth * density));
+    const height = Math.max(1, Math.round(cssHeight * density));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    return { cssWidth, cssHeight, density };
+  };
+
+  const drawCanvasError = (canvas) => {
+    clearCanvasDiagnostics(canvas);
+    const errorLabel = findByDataset(
+      canvas.parentElement,
+      "[data-review-loupe-error]",
+      "reviewLoupeError",
+      canvas.dataset.reviewLens || "",
+    );
+    if (errorLabel) {
+      errorLabel.style.left = canvas.style.left;
+      errorLabel.style.top = canvas.style.top;
+      errorLabel.hidden = false;
+    }
+    try {
+      const { density } = resizeCanvas(canvas);
+      const context2d = canvas.getContext("2d");
+      if (!context2d) return;
+      context2d.setTransform(1, 0, 0, 1, 0, 0);
+      context2d.fillStyle = "Canvas";
+      context2d.fillRect(0, 0, canvas.width, canvas.height);
+      context2d.fillStyle = "CanvasText";
+      context2d.font = `${13 * density}px monospace`;
+      context2d.textAlign = "center";
+      context2d.textBaseline = "middle";
+      context2d.fillText(CANVAS_ERROR_TEXT, canvas.width / 2, canvas.height / 2);
+    } catch {
+      // 固定 DOM 文本已经提供安全降级，不回显异常正文。
+    }
+  };
+
+  const referenceDimensions = (group) => {
+    const candidates = group.images.map((image) => {
+      const preview = findByDataset(elements.stage, "[data-review-preview-image]", "reviewPreviewImage", image.id);
+      const decoded = preview?.dataset.reviewDecoded === "true";
+      return {
+        width: decoded ? preview.naturalWidth : image.width,
+        height: decoded ? preview.naturalHeight : image.height,
+        readable: Boolean(image.readable && (decoded || (image.width > 0 && image.height > 0))),
+        recommended: image.recommended,
+      };
+    });
+    return selectReferenceImage(candidates);
+  };
+
+  function drawLoupeNow() {
+    loupe.drawFrame = 0;
+    if (!loupeEffective() || !loupe.active) {
+      updateLoupeUi();
+      return;
+    }
+    const review = reviewState();
+    const group = currentGroup(review, focusedIndex);
+    if (!group) return;
+    const reference = referenceDimensions(group);
+    if (!reference.available) return;
+    for (const image of group.images) {
+      if (!image.readable) continue;
+      const media = findByDataset(elements.stage, "[data-review-media]", "reviewMedia", image.id);
+      const preview = findByDataset(elements.stage, "[data-review-preview-image]", "reviewPreviewImage", image.id);
+      const crosshair = findByDataset(elements.stage, "[data-review-crosshair]", "reviewCrosshair", image.id);
+      const canvas = findByDataset(elements.stage, "[data-review-lens]", "reviewLens", image.id);
+      const errorLabel = findByDataset(elements.stage, "[data-review-loupe-error]", "reviewLoupeError", image.id);
+      const content = previewContentRect(preview);
+      const visible = Boolean(media && preview && crosshair && canvas && content);
+      if (crosshair) crosshair.dataset.visible = String(visible);
+      if (canvas) canvas.dataset.visible = String(visible);
+      if (!visible) {
+        if (canvas) clearCanvasDiagnostics(canvas);
+        continue;
+      }
+      const mediaRect = media.getBoundingClientRect();
+      const x = content.left - mediaRect.left + loupe.u * content.width;
+      const y = content.top - mediaRect.top + loupe.v * content.height;
+      crosshair.style.left = `${x}px`;
+      crosshair.style.top = `${y}px`;
+      const lensHalfWidth = canvas.clientWidth / 2;
+      const lensHalfHeight = canvas.clientHeight / 2;
+      const minimumX = Math.min(mediaRect.width / 2, lensHalfWidth + 5);
+      const maximumX = Math.max(minimumX, mediaRect.width - lensHalfWidth - 5);
+      const minimumY = Math.min(mediaRect.height / 2, lensHalfHeight + 5);
+      const maximumY = Math.max(minimumY, mediaRect.height - lensHalfHeight - 5);
+      canvas.style.left = `${clamp(x, minimumX, maximumX)}px`;
+      canvas.style.top = `${clamp(y, minimumY, maximumY)}px`;
+      try {
+        const { cssWidth, cssHeight, density } = resizeCanvas(canvas);
+        const crop = calculateSynchronizedCrop({
+          targetImage: {
+            width: preview.naturalWidth,
+            height: preview.naturalHeight,
+            readable: true,
+            recommended: image.recommended,
+          },
+          referenceImage: reference.image,
+          outputWidth: cssWidth,
+          outputHeight: cssHeight,
+          magnification: loupe.magnification,
+          u: loupe.u,
+          v: loupe.v,
+        });
+        if (!crop) continue;
+        const context2d = canvas.getContext("2d");
+        if (!context2d) throw new TypeError("canvas_context_unavailable");
+        context2d.setTransform(1, 0, 0, 1, 0, 0);
+        context2d.clearRect(0, 0, canvas.width, canvas.height);
+        context2d.imageSmoothingEnabled = false;
+        context2d.imageSmoothingQuality = "low";
+        context2d.drawImage(
+          preview,
+          crop.x,
+          crop.y,
+          crop.sourceWidth,
+          crop.sourceHeight,
+          0,
+          0,
+          cssWidth * density,
+          cssHeight * density,
+        );
+        canvas.dataset.renderMode = "nearest";
+        canvas.dataset.sourceLeft = String(crop.x);
+        canvas.dataset.sourceTop = String(crop.y);
+        canvas.dataset.sourceWidth = String(crop.sourceWidth);
+        canvas.dataset.sourceHeight = String(crop.sourceHeight);
+        canvas.dataset.sampleU = String(loupe.u);
+        canvas.dataset.sampleV = String(loupe.v);
+        const idealLeft = loupe.u * preview.naturalWidth - crop.sourceWidth / 2;
+        const idealTop = loupe.v * preview.naturalHeight - crop.sourceHeight / 2;
+        canvas.dataset.edgeClamped = String(
+          Math.abs(crop.x - idealLeft) > 1e-6 || Math.abs(crop.y - idealTop) > 1e-6,
+        );
+        if (errorLabel) errorLabel.hidden = true;
+      } catch {
+        drawCanvasError(canvas);
+      }
+    }
+    updateLoupeUi();
+  }
+
+  const toggleLoupe = () => {
+    if (!loupeAvailable) return null;
+    loupe.enabled = !loupe.enabled;
+    resetLoupePosition({ preserveEnabled: true });
+    syncControlAvailability(reviewState());
+    return loupe.enabled;
+  };
+
+  const toggleLoupePin = () => {
+    if (!loupeEffective()) return "";
+    cancelHide();
+    if (!loupe.active) {
+      const group = currentGroup(reviewState(), focusedIndex);
+      const source = group?.images.find((image) => image.readable && image.recommended)
+        || group?.images.find((image) => image.readable)
+        || null;
+      loupe.u = 0.5;
+      loupe.v = 0.5;
+      loupe.sourceImageId = source?.id || "";
+      loupe.active = true;
+    }
+    loupe.pinned = !loupe.pinned;
+    if (!loupe.pinned) scheduleHide();
+    updateLoupeUi();
+    scheduleDraw();
+    syncControlAvailability(reviewState());
+    return loupe.pinned ? "pinned" : "unpinned";
+  };
+
+  const onPointerOver = (event) => {
+    if (mediaFromEvent(event) && loupeEffective()) cancelHide();
+  };
+
+  const onPointerOut = (event) => {
+    const media = mediaFromEvent(event);
+    if (!media || !loupeEffective()) return;
+    if (event.relatedTarget instanceof Node && media.contains(event.relatedTarget)) return;
+    scheduleHide();
+  };
+
+  const onPointerMove = (event) => {
+    if (event.pointerType && event.pointerType !== "mouse") return;
+    const media = mediaFromEvent(event);
+    if (!media || !loupeEffective() || loupe.pinned) return;
+    if (!updatePointerPosition(event, media)) {
+      scheduleHide();
+      return;
+    }
+    cancelHide();
+    setLoupeActive(true);
+    scheduleDraw();
+  };
+
+  const onWheel = (event) => {
+    const media = mediaFromEvent(event);
+    if (!media || !loupeEffective()) return;
+    const valid = loupe.pinned && loupe.active ? true : updatePointerPosition(event, media);
+    if (!valid) return;
+    event.preventDefault();
+    cancelHide();
+    loupe.magnification = updateMagnification(loupe.magnification, event.deltaY, {
+      deltaMode: event.deltaMode,
+      pageSize: Math.max(1, elements.stage.clientHeight || 800),
+    });
+    loupe.active = true;
+    updateLoupeUi();
+    scheduleDraw();
+  };
+
+  const attachInteractions = () => {
+    if (interactionsActive) return;
+    interactionsActive = true;
+    root.addEventListener("pointerover", onPointerOver);
+    root.addEventListener("pointerout", onPointerOut);
+    root.addEventListener("pointermove", onPointerMove);
+    root.addEventListener("wheel", onWheel, { passive: false });
+    observeCards();
+  };
+
+  const detachInteractions = () => {
+    const wasActive = interactionsActive;
+    interactionsActive = false;
+    if (wasActive) {
+      root.removeEventListener("pointerover", onPointerOver);
+      root.removeEventListener("pointerout", onPointerOut);
+      root.removeEventListener("pointermove", onPointerMove);
+      root.removeEventListener("wheel", onWheel);
+    }
+    disconnectLayoutObserver();
+    resetLoupePosition({ preserveEnabled: false });
+  };
+
   const onFocusIn = (event) => {
     if (!(event.target instanceof Element)) return;
     const card = event.target.closest("[data-review-image]");
     if (card && root.contains(card)) setActiveImage(card.dataset.reviewImage || "");
   };
 
-  syncInspectorVisibility();
-  compactInspectorQuery?.addEventListener("change", onInspectorViewportChange);
   root.addEventListener("focusin", onFocusIn);
   const unsubscribeRecent = store.subscribe((state) => state.batches.recent, renderBatches, { fireImmediately: true });
   const unsubscribeReview = store.subscribe(selectors.review, renderReview, { fireImmediately: true });
@@ -1065,6 +1513,14 @@ export function createReviewView(context) {
       root.toggleAttribute("aria-busy", Boolean(kind));
       renderReview(reviewState(), reviewState(), { type: "busy" });
     },
+    activate() {
+      attachInteractions();
+      if (imagesReleased && reviewCanList(reviewState().summary)) loadImageWindow(reviewState());
+    },
+    deactivate() {
+      detachInteractions();
+      releaseImages();
+    },
     releaseImages,
     applyConfirmationText() {
       const counts = reviewApplyCounts(reviewState().summary);
@@ -1072,19 +1528,22 @@ export function createReviewView(context) {
     },
     getFocusedIndex: () => focusedIndex,
     getFocusedGroup: () => currentGroup(reviewState(), focusedIndex),
+    getActiveImageId: () => activeImageId,
+    isLoupeAvailable: () => loupeAvailable,
     setFocusedIndex,
     setActiveImage,
     focusStage,
     markConfirmed,
-    toggleInspector,
-    resetPageState,
+    resetWorkspaceState,
     showCompletion,
     hideCompletion,
     isCompletionVisible: () => completionVisible,
+    toggleLoupe,
+    toggleLoupePin,
     destroy() {
+      detachInteractions();
       unsubscribeRecent();
       unsubscribeReview();
-      compactInspectorQuery?.removeEventListener("change", onInspectorViewportChange);
       root.removeEventListener("focusin", onFocusIn);
       releaseImages();
       clearError();

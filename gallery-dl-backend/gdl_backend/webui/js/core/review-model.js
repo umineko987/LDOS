@@ -16,7 +16,8 @@ const STATUS_LABELS = Object.freeze({
   apply_failed: "部分处理失败", disabled: "审核未启用",
 });
 
-export const REVIEW_PAGE_LIMIT = 8;
+export const REVIEW_GROUP_LIMIT = 10_000;
+export const REVIEW_DECISION_BATCH_LIMIT = 50;
 export const REVIEW_POLL_INTERVAL_MS = 1_500;
 export const REVIEW_FILTERS = Object.freeze([
   Object.freeze({ id: "", label: "全部" }),
@@ -25,74 +26,63 @@ export const REVIEW_FILTERS = Object.freeze([
   Object.freeze({ id: "unreadable", label: "读取失败" }),
 ]);
 
-const DECK_EDIT_COMMANDS = new Set([
-  "accept-advance", "keep-all", "discard-all", "reset-recommended", "save",
-]);
-
-function requireDeckPosition({ focusedIndex, groupCount, offset, limit, total }) {
-  const values = { focusedIndex, groupCount, offset, limit, total };
-  if (!Object.values(values).every(Number.isInteger) || focusedIndex < 0 || groupCount < 0 ||
-      offset < 0 || limit <= 0 || total < 0 || (groupCount && focusedIndex >= groupCount)) {
-    throw new TypeError("审核分拣台位置无效");
+export function resolveDeckCommand(key, {
+  editable = false,
+  readOnly = false,
+  hasImages = false,
+  loupeAvailable = false,
+} = {}) {
+  if (typeof key !== "string") return null;
+  if (key === "Backspace") return "previous-group";
+  if (hasImages && (key === "ArrowLeft" || key === "ArrowUp")) {
+    return "focus-previous-image";
   }
-  return values;
+  if (hasImages && (key === "ArrowRight" || key === "ArrowDown")) {
+    return "focus-next-image";
+  }
+  if (key === " " && editable) return "toggle-active-image";
+  if (key === "Enter" && editable) return "accept-advance";
+  if (key === "Enter" && readOnly) return "browse-next-group";
+  if ((key === "x" || key === "X") && loupeAvailable) return "toggle-loupe";
+  return null;
 }
 
-export function resolveDeckCommand(key, { editable = false } = {}) {
-  if (typeof key !== "string") return null;
-  let command = null;
-  if (/^[1-9]$/.test(key)) command = `toggle-${key}`;
-  else if (key === "Enter" || key === " ") command = "accept-advance";
-  else if (key === "Backspace") command = "discard-all";
-  else if (key === "ArrowLeft") command = "prev-group";
-  else if (key === "ArrowRight") command = "next-group";
-  else if (key === "Home") command = "first-group";
-  else if (key === "End") command = "last-group";
-  else if (key === "PageUp") command = "prev-page";
-  else if (key === "PageDown") command = "next-page";
-  else {
-    const normalized = key.toLowerCase();
-    command = ({
-      a: "keep-all",
-      d: "discard-all",
-      r: "reset-recommended",
-      h: "prev-group",
-      l: "next-group",
-      i: "toggle-inspector",
-      s: "save",
-    })[normalized] || null;
+export function deckImageStepTarget(direction, { activeIndex, imageCount }) {
+  if (direction !== -1 && direction !== 1) throw new TypeError("审核图片方向无效");
+  if (!Number.isInteger(activeIndex) || !Number.isInteger(imageCount) || imageCount < 0 ||
+      (imageCount === 0 ? activeIndex !== -1 : activeIndex < 0 || activeIndex >= imageCount)) {
+    throw new TypeError("审核图片位置无效");
   }
-  const editCommand = /^toggle-[1-9]$/.test(command || "") || DECK_EDIT_COMMANDS.has(command);
-  return editCommand && !editable ? null : command;
+  if (!imageCount) return Object.freeze({ type: "empty" });
+  return Object.freeze({
+    type: "image",
+    index: Math.max(0, Math.min(activeIndex + direction, imageCount - 1)),
+  });
+}
+
+function requireDeckPosition({ focusedIndex, groupCount }) {
+  if (!Number.isInteger(focusedIndex) || !Number.isInteger(groupCount) ||
+      focusedIndex < 0 || groupCount < 0 || (groupCount && focusedIndex >= groupCount)) {
+    throw new TypeError("审核分拣台位置无效");
+  }
+  return { focusedIndex, groupCount };
 }
 
 export function deckAdvanceTarget(position) {
-  const { focusedIndex, groupCount, offset, limit, total } = requireDeckPosition(position);
+  const { focusedIndex, groupCount } = requireDeckPosition(position);
   if (groupCount && focusedIndex + 1 < groupCount) {
     return Object.freeze({ type: "group", index: focusedIndex + 1 });
-  }
-  if (offset + limit < total) {
-    return Object.freeze({ type: "next-page", offset: offset + limit });
   }
   return Object.freeze({ type: "complete" });
 }
 
 export function deckStepTarget(direction, position) {
   if (direction !== -1 && direction !== 1) throw new TypeError("审核分拣台方向无效");
-  const { focusedIndex, groupCount, offset, limit, total } = requireDeckPosition(position);
+  const { focusedIndex, groupCount } = requireDeckPosition(position);
   if (!groupCount) return Object.freeze({ type: "edge" });
-  if (direction < 0) {
-    if (focusedIndex > 0) return Object.freeze({ type: "group", index: focusedIndex - 1 });
-    if (offset > 0) return Object.freeze({ type: "prev-page", offset: Math.max(0, offset - limit) });
-    return Object.freeze({ type: "edge" });
-  }
-  if (focusedIndex + 1 < groupCount) {
-    return Object.freeze({ type: "group", index: focusedIndex + 1 });
-  }
-  if (offset + limit < total) {
-    return Object.freeze({ type: "next-page", offset: offset + limit });
-  }
-  return Object.freeze({ type: "edge" });
+  const index = focusedIndex + direction;
+  if (index < 0 || index >= groupCount) return Object.freeze({ type: "edge" });
+  return Object.freeze({ type: "group", index });
 }
 
 function isRecord(value) {
@@ -121,11 +111,6 @@ function boundedCount(value, maximum = 1_000_000_000) {
   return Number.isInteger(number) && number >= 0 && number <= maximum ? number : 0;
 }
 
-function boundedMetric(value, minimum = 0, maximum = 1_000_000_000) {
-  const number = Number(value);
-  return Number.isFinite(number) && number >= minimum && number <= maximum ? number : null;
-}
-
 function safeStatus(value) {
   return typeof value === "string" && REVIEW_STATUSES.has(value) ? value : "failed";
 }
@@ -136,20 +121,6 @@ function statusKind(status) {
   if (["not_started", "waiting_for_crawl", "apply_failed"].includes(status)) return "warning";
   if (status === "disabled") return "disabled";
   return "error";
-}
-
-function safeFormat(value) {
-  const format = safeText(value, "未知格式", 24).toUpperCase();
-  return /^[A-Z0-9+._-]{1,24}$/.test(format) ? format : "未知格式";
-}
-
-function sanitizeMetrics(value) {
-  if (!isRecord(value)) return null;
-  return Object.freeze({
-    candidateLevel: safeText(value.candidate_level, "候选", 40),
-    sscdSimilarity: boundedMetric(value.sscd_similarity, -1, 1),
-    dinoSimilarity: boundedMetric(value.dino_similarity, -1, 1),
-  });
 }
 
 function sanitizeImage(raw, imageIndex) {
@@ -165,12 +136,6 @@ function sanitizeImage(raw, imageIndex) {
     selected: Boolean(raw.selected),
     width: boundedCount(metadata.w, 1_000_000),
     height: boundedCount(metadata.h, 1_000_000),
-    format: safeFormat(metadata.format),
-    bytes: boundedCount(metadata.size, Number.MAX_SAFE_INTEGER),
-    jpegQuality: boundedMetric(metadata.jpeg_quality, 0, 100),
-    sharpness: boundedMetric(metadata.sharpness, -1_000_000, 1_000_000),
-    noiseSigma: boundedMetric(metadata.noise_sigma, 0, 1_000_000),
-    metrics: sanitizeMetrics(metadata.review_metrics),
   });
 }
 
@@ -179,22 +144,22 @@ function sanitizeGroup(raw, groupIndex) {
   const id = safeId(raw.id);
   if (!id) return null;
   const kind = typeof raw.kind === "string" && GROUP_KINDS.has(raw.kind) ? raw.kind : "single";
-  const images = [];
-  for (const item of Array.isArray(raw.images) ? raw.images.slice(0, 1_000) : []) {
-    const image = sanitizeImage(item, images.length);
-    if (image && !images.some((candidate) => candidate.id === image.id)) images.push(image);
+  if (!Array.isArray(raw.images) || raw.images.length > 1_000) {
+    throw new TypeError("审核组图片列表无效");
   }
-  const matchLevels = [];
-  for (const level of Array.isArray(raw.match_levels) ? raw.match_levels.slice(0, 12) : []) {
-    const text = safeText(level, "", 40);
-    if (text) matchLevels.push(text);
+  const images = [];
+  const imageIds = new Set();
+  for (const item of raw.images) {
+    const image = sanitizeImage(item, images.length);
+    if (!image || imageIds.has(image.id)) throw new TypeError("审核组包含无效或重复图片 ID");
+    imageIds.add(image.id);
+    images.push(image);
   }
   return Object.freeze({
     id,
     ordinal: boundedCount(raw.ordinal, 100_000) || groupIndex + 1,
     kind,
     decided: Boolean(raw.decided),
-    matchLevels,
     imageCount: images.length,
     selectedImageCount: images.filter((image) => image.selected).length,
     images,
@@ -232,60 +197,133 @@ export function sanitizeReviewSummary(value, batchId = value?.batch_id || value?
 
 export function sanitizeReviewPage(value, { batchId, filter = "", requestedOffset = 0 } = {}) {
   if (!isRecord(value) || !isRecord(value.groups) || !Array.isArray(value.groups.items)) {
-    throw new TypeError("审核分页格式无效");
+    throw new TypeError("审核全量快照格式无效");
   }
   const safeBatchId = safeId(batchId || value.batch_id);
-  if (!safeBatchId || !FILTERS.has(filter)) throw new TypeError("审核分页参数无效");
+  if (!safeBatchId || !FILTERS.has(filter) || requestedOffset !== 0) {
+    throw new TypeError("审核全量快照参数无效");
+  }
+  const items = value.groups.items;
+  const offset = Number(value.groups.offset);
+  const total = Number(value.groups.total);
+  const responseLimit = Number(value.groups.limit);
+  if (!Number.isInteger(offset) || offset !== 0 || !Number.isInteger(total) || total < 0 ||
+      total > REVIEW_GROUP_LIMIT || items.length > REVIEW_GROUP_LIMIT || total !== items.length ||
+      !Number.isInteger(responseLimit) || responseLimit !== items.length) {
+    throw new TypeError("审核全量快照边界无效");
+  }
   const summary = sanitizeReviewSummary(value, safeBatchId);
   const groups = [];
-  for (const raw of value.groups.items.slice(0, REVIEW_PAGE_LIMIT)) {
+  const groupIds = new Set();
+  const imageIds = new Set();
+  for (const raw of items) {
     const group = sanitizeGroup(raw, groups.length);
-    if (group && !groups.some((candidate) => candidate.id === group.id)) groups.push(group);
-  }
-  const offset = boundedCount(value.groups.offset, 1_000_000);
-  if (Math.abs(offset - boundedCount(requestedOffset, 1_000_000)) > REVIEW_PAGE_LIMIT) {
-    throw new TypeError("审核分页位置与请求不一致");
+    if (!group || groupIds.has(group.id) || (filter && group.kind !== filter)) {
+      throw new TypeError("审核全量快照包含无效或重复分组");
+    }
+    for (const image of group.images) {
+      if (imageIds.has(image.id)) throw new TypeError("审核全量快照包含重复图片 ID");
+      imageIds.add(image.id);
+    }
+    groupIds.add(group.id);
+    groups.push(group);
   }
   return Object.freeze({
     batchId: safeBatchId,
     summary,
     groups,
     filter,
-    offset,
-    limit: REVIEW_PAGE_LIMIT,
-    total: boundedCount(value.groups.total, 1_000_000),
+    offset: 0,
+    limit: responseLimit,
+    total,
     dirty: false,
+    dirtyGroupIds: Object.freeze([]),
   });
 }
 
 export function validateReviewState(value) {
   if (!isRecord(value) || !safeId(value.batchId) || !isRecord(value.summary) ||
-      !Array.isArray(value.groups) || !FILTERS.has(value.filter) || typeof value.dirty !== "boolean") {
+      !Array.isArray(value.groups) || value.groups.length > REVIEW_GROUP_LIMIT ||
+      !FILTERS.has(value.filter) || value.offset !== 0 || !Number.isInteger(value.limit) ||
+      value.limit < 0 || value.limit !== value.groups.length ||
+      value.total !== value.groups.length || typeof value.dirty !== "boolean" ||
+      !Array.isArray(value.dirtyGroupIds)) {
     throw new TypeError("审核状态数据无效");
   }
+  const groupIds = new Set();
+  const imageIds = new Set();
   for (const group of value.groups) {
-    if (!safeId(group.id) || !Array.isArray(group.images)) throw new TypeError("审核分组数据无效");
+    if (!safeId(group.id) || groupIds.has(group.id) || !Array.isArray(group.images)) {
+      throw new TypeError("审核分组数据无效");
+    }
+    groupIds.add(group.id);
+    const groupImageIds = new Set();
     for (const image of group.images) {
-      if (!safeId(image.id) || Object.prototype.hasOwnProperty.call(image, "relative_path") ||
+      if (!safeId(image.id) || groupImageIds.has(image.id) || imageIds.has(image.id) ||
+          Object.prototype.hasOwnProperty.call(image, "relative_path") ||
           Object.prototype.hasOwnProperty.call(image, "url")) {
         throw new TypeError("审核图片数据包含不允许的字段");
       }
+      groupImageIds.add(image.id);
+      imageIds.add(image.id);
     }
+  }
+  const dirtyIds = new Set();
+  for (const groupId of value.dirtyGroupIds) {
+    const normalized = safeId(groupId);
+    if (!normalized || normalized !== groupId || dirtyIds.has(groupId) || !groupIds.has(groupId)) {
+      throw new TypeError("待提交审核组 ID 无效、未知或重复");
+    }
+    dirtyIds.add(groupId);
+  }
+  if (value.dirty !== Boolean(value.dirtyGroupIds.length)) {
+    throw new TypeError("审核脏状态与待提交组不一致");
   }
   return value;
 }
 
+function addDirtyReviewGroups(reviewState, groupIds) {
+  const known = new Set(reviewState.groups.map((group) => group.id));
+  const nextIds = [...reviewState.dirtyGroupIds];
+  const dirty = new Set(nextIds);
+  for (const groupId of groupIds) {
+    if (!known.has(groupId)) continue;
+    if (!dirty.has(groupId)) {
+      dirty.add(groupId);
+      nextIds.push(groupId);
+    }
+  }
+  if (nextIds.length === reviewState.dirtyGroupIds.length) return reviewState;
+  return { ...reviewState, dirty: true, dirtyGroupIds: nextIds };
+}
+
 export function buildReviewDecisionPayload(reviewState) {
   validateReviewState(reviewState);
-  if (reviewState.summary.status !== "ready" || !reviewState.groups.length) {
-    throw new TypeError("当前审核页不能保存决策");
+  if (reviewState.summary.status !== "ready" || !reviewState.dirtyGroupIds.length) {
+    throw new TypeError("当前审核快照没有可保存的决策");
   }
-  return {
-    groups: reviewState.groups.map((group) => ({
+  const groupsById = new Map(reviewState.groups.map((group) => [group.id, group]));
+  const groups = reviewState.dirtyGroupIds.map((groupId) => {
+    const group = groupsById.get(groupId);
+    if (!group) throw new TypeError("待提交审核组 ID 未知");
+    return {
       group_id: group.id,
       selected_image_ids: group.images.filter((image) => image.selected).map((image) => image.id),
-    })),
-  };
+    };
+  });
+  if (!groups.length) throw new TypeError("审核决策 payload 不能为空");
+  return { groups };
+}
+
+export function splitReviewDecisionPayload(payload) {
+  if (!isRecord(payload) || !Array.isArray(payload.groups) || !payload.groups.length) {
+    throw new TypeError("审核决策 payload 不能为空");
+  }
+  const chunks = [];
+  for (let index = 0; index < payload.groups.length; index += REVIEW_DECISION_BATCH_LIMIT) {
+    chunks.push({ groups: payload.groups.slice(index, index + REVIEW_DECISION_BATCH_LIMIT) });
+  }
+  return chunks;
 }
 
 export function updateReviewImageSelection(reviewState, groupId, imageId, selected) {
@@ -295,12 +333,14 @@ export function updateReviewImageSelection(reviewState, groupId, imageId, select
   let changed = false;
   const groups = reviewState.groups.map((group) => {
     if (group.id !== safeGroupId) return group;
+    let groupChanged = false;
     const images = group.images.map((image) => {
       if (image.id !== safeImageId || image.selected === Boolean(selected)) return image;
       changed = true;
+      groupChanged = true;
       return { ...image, selected: Boolean(selected) };
     });
-    if (!changed) return group;
+    if (!groupChanged) return group;
     return {
       ...group,
       decided: false,
@@ -308,57 +348,35 @@ export function updateReviewImageSelection(reviewState, groupId, imageId, select
       images,
     };
   });
-  return changed ? { ...reviewState, groups, dirty: true } : reviewState;
+  return changed
+    ? addDirtyReviewGroups({ ...reviewState, groups }, [safeGroupId])
+    : reviewState;
 }
 
-export function setReviewGroupMode(reviewState, groupId, mode) {
+export function markReviewGroupDirty(reviewState, groupId) {
+  if (!isRecord(reviewState) || !isRecord(reviewState.summary) || !Array.isArray(reviewState.groups)) {
+    return reviewState;
+  }
   validateReviewState(reviewState);
-  if (!["all", "none", "recommended"].includes(mode)) throw new TypeError("审核选择模式无效");
   const safeGroupId = safeId(groupId);
-  let found = false;
-  const groups = reviewState.groups.map((group) => {
-    if (group.id !== safeGroupId) return group;
-    found = true;
-    const images = group.images.map((image) => ({
-      ...image,
-      selected: mode === "all" || (mode === "recommended" && image.recommended),
-    }));
-    return {
-      ...group,
-      decided: false,
-      selectedImageCount: images.filter((image) => image.selected).length,
-      images,
-    };
-  });
-  return found ? { ...reviewState, groups, dirty: true } : reviewState;
-}
-
-export function setReviewPageMode(reviewState, mode) {
-  validateReviewState(reviewState);
-  if (!["all", "none", "recommended"].includes(mode)) throw new TypeError("审核选择模式无效");
-  const groups = reviewState.groups.map((group) => {
-    const images = group.images.map((image) => ({
-      ...image,
-      selected: mode === "all" || (mode === "recommended" && image.recommended),
-    }));
-    return {
-      ...group,
-      decided: false,
-      selectedImageCount: images.filter((image) => image.selected).length,
-      images,
-    };
-  });
-  return { ...reviewState, groups, dirty: Boolean(groups.length) };
+  if (!safeGroupId || !reviewState.groups.some(
+    (group) => group.id === safeGroupId && group.images.length,
+  )) return reviewState;
+  return addDirtyReviewGroups(reviewState, [safeGroupId]);
 }
 
 export function markReviewPageSaved(reviewState, summary) {
   validateReviewState(reviewState);
   const safeSummary = sanitizeReviewSummary(summary, reviewState.batchId);
+  const savedIds = new Set(reviewState.dirtyGroupIds);
   return {
     ...reviewState,
     summary: safeSummary,
-    groups: reviewState.groups.map((group) => ({ ...group, decided: true })),
+    groups: reviewState.groups.map((group) => (
+      savedIds.has(group.id) ? { ...group, decided: true } : group
+    )),
     dirty: false,
+    dirtyGroupIds: [],
   };
 }
 
@@ -384,11 +402,29 @@ export function reviewApplyCounts(summary) {
   });
 }
 
-export function formatReviewBytes(value) {
-  const bytes = boundedCount(value, Number.MAX_SAFE_INTEGER);
-  if (bytes < 1_024) return `${bytes} B`;
-  if (bytes < 1_048_576) return `${(bytes / 1_024).toFixed(1)} KB`;
-  return `${(bytes / 1_048_576).toFixed(2)} MB`;
+export function reviewCompletionPresentation(summary, filter = "") {
+  if (!isRecord(summary) || !FILTERS.has(filter)) {
+    throw new TypeError("审核完成态参数无效");
+  }
+  const total = boundedCount(summary.totalGroupCount);
+  const decided = Math.min(total, boundedCount(summary.decidedGroupCount));
+  const remaining = Math.max(0, total - decided);
+  if (remaining) {
+    const filterLabel = REVIEW_FILTERS.find((item) => item.id === filter)?.label || "当前";
+    return Object.freeze({
+      batchComplete: false,
+      title: "当前筛选已过一遍",
+      message: `“${filterLabel}”筛选已到末组；权威摘要显示本批次仍有 ${remaining} 组未确认。请切换顶部筛选或从全量组选择器返回待确认组继续。`,
+      operationMessage: `当前筛选已过一遍；本批次仍有 ${remaining} 组未确认，请切换筛选继续。`,
+    });
+  }
+  const counts = reviewApplyCounts(summary);
+  return Object.freeze({
+    batchComplete: true,
+    title: "本批次已全部过一遍",
+    message: `自动移除 ${counts.automatic} 张；最终保留 ${counts.selected} 张，预计移出 ${counts.rejected} 张。`,
+    operationMessage: "最后一组已保存，本批次已完成复核。",
+  });
 }
 
 export function reviewImageUrl(batchId, imageId) {
@@ -415,7 +451,7 @@ export function reviewErrorGuidance(error) {
       ? "返回已结束批次列表并选择仍存在的批次。"
       : conflict
         ? "页面将重新读取最新状态，不会覆盖其他页面已保存的结果。"
-        : "保留本页更改并重试；若持续失败，请打开系统诊断。",
+        : "保留待提交组并重试；若持续失败，请打开系统诊断。",
   });
 }
 

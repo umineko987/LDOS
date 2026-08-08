@@ -35,7 +35,12 @@ from .auth import (
 )
 from .config import AppSettings
 from .crawl import CrawlPlanError, CrawlPlanner
-from .database import Database, TERMINAL_STATUSES
+from .database import (
+    CrawlReviewGroupLimitExceeded,
+    Database,
+    MAX_CRAWL_REVIEW_GROUPS,
+    TERMINAL_STATUSES,
+)
 from .diagnostics import (
     diagnostics_config_snapshot,
     diagnostics_scheduler_snapshot,
@@ -1955,6 +1960,7 @@ def create_app(
         kind: str | None = Query(default=None, pattern="^(duplicate|single|unreadable)$"),
         limit: int = Query(default=12, ge=1, le=50),
         offset: int = Query(default=0, ge=0),
+        all_groups: bool = Query(default=False, alias="all"),
         container: ServiceContainer = Depends(get_service),
     ):
         batch = container.db.get_crawl_batch(batch_id)
@@ -1962,22 +1968,42 @@ def create_app(
             raise ApiError(404, "crawl_not_found", "爬取批次不存在")
         if batch["status"] not in {"succeeded", "completed_with_errors", "cancelled"}:
             raise ApiError(409, "crawl_not_finished", "爬取批次结束后才会进入图片审核")
+        response_offset = 0 if all_groups else offset
+        response_limit = 0 if all_groups else limit
         review = container.db.get_crawl_review(batch_id)
         if review is None:
             status = "not_started" if container.settings.dedup.enabled else "disabled"
             return {
                 "batch_id": batch_id,
                 "status": status,
-                "groups": {"items": [], "total": 0, "limit": limit, "offset": offset},
+                "groups": {
+                    "items": [],
+                    "total": 0,
+                    "limit": response_limit,
+                    "offset": response_offset,
+                },
             }
-        page = {"items": [], "total": 0, "limit": limit, "offset": offset}
+        page = {
+            "items": [],
+            "total": 0,
+            "limit": response_limit,
+            "offset": response_offset,
+        }
         if review["status"] in {"ready", "applying", "applied", "apply_failed"}:
-            page = container.db.list_crawl_review_groups(
-                batch_id,
-                kind=kind,
-                limit=limit,
-                offset=offset,
-            )
+            try:
+                page = container.db.list_crawl_review_groups(
+                    batch_id,
+                    kind=kind,
+                    limit=limit,
+                    offset=offset,
+                    all_groups=all_groups,
+                )
+            except CrawlReviewGroupLimitExceeded as exc:
+                raise ApiError(
+                    413,
+                    "review_groups_too_large",
+                    f"全量审核组超过 {MAX_CRAWL_REVIEW_GROUPS} 组上限",
+                ) from exc
             for group in page["items"]:
                 for image in group["images"]:
                     image["url"] = (

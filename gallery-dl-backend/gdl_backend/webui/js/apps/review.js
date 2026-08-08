@@ -3,15 +3,18 @@ import { setElementInert } from "../core/dom.js";
 import {
   buildReviewDecisionPayload,
   createReviewRequestGate,
+  splitReviewDecisionPayload,
+  REVIEW_DECISION_BATCH_LIMIT,
   deckAdvanceTarget,
+  deckImageStepTarget,
   deckStepTarget,
   resolveDeckCommand,
   reviewCanList,
+  reviewCompletionPresentation,
   reviewErrorGuidance,
   sanitizeReviewPage,
   sanitizeReviewSummary,
   shouldPollReview,
-  REVIEW_PAGE_LIMIT,
   REVIEW_POLL_INTERVAL_MS,
 } from "../core/review-model.js";
 import { actionCreators } from "../core/store.js";
@@ -35,9 +38,9 @@ function reviewPath(batchId, suffix = "") {
   return `${REVIEW_ENDPOINTS.crawls}/${encodeURIComponent(requireBatchId(batchId))}/review${suffix}`;
 }
 
-function reviewPagePath(batchId, filter, offset) {
+function reviewWorkspacePath(batchId, filter) {
   const kind = filter ? `&kind=${encodeURIComponent(filter)}` : "";
-  return `${reviewPath(batchId)}?limit=${REVIEW_PAGE_LIMIT}&offset=${offset}${kind}`;
+  return `${reviewPath(batchId)}?all=true${kind}`;
 }
 
 function createReviewController(context) {
@@ -54,7 +57,9 @@ function createReviewController(context) {
   let leaveSave = null;
 
   const reviewState = () => store.getState().review;
-  const deckEditable = () => reviewState().summary?.status === "ready" && !busy;
+  const deckEditable = () => reviewState().summary?.status === "ready" && !busy && Boolean(
+    reviewState().groups[view.getFocusedIndex()]?.images.length,
+  );
   const abortRead = (entry) => entry?.controller.abort();
 
   const readRecent = async ({ replace = false, report = true } = {}) => {
@@ -99,7 +104,7 @@ function createReviewController(context) {
         return readPage({
           batchId: reviewState().batchId,
           filter: reviewState().filter,
-          offset: reviewState().offset,
+          offset: 0,
           externalSignal: signal,
           replace: false,
           report: false,
@@ -131,7 +136,7 @@ function createReviewController(context) {
     if (externalSignal?.aborted) abort();
     else externalSignal?.addEventListener("abort", abort, { once: true });
     const ticket = requestGate.beginRead(batchId, filter, offset);
-    const promise = api.get(reviewPagePath(batchId, filter, offset), { signal: controller.signal })
+    const promise = api.get(reviewWorkspacePath(batchId, filter), { signal: controller.signal })
       .then((response) => {
         if (!active || destroyed || controller.signal.aborted || !requestGate.isReadCurrent(ticket, {
           batchId: reviewState().batchId || batchId,
@@ -159,7 +164,7 @@ function createReviewController(context) {
 
   const refreshSummaryOnly = async (batchId, signal) => {
     try {
-      const response = await api.get(reviewPagePath(batchId, reviewState().filter, reviewState().offset), { signal });
+      const response = await api.get(reviewWorkspacePath(batchId, reviewState().filter), { signal });
       if (!signal.aborted && active && reviewState().batchId === batchId) {
         store.dispatch(actionCreators.reviewSummaryReceived(
           batchId,
@@ -180,50 +185,57 @@ function createReviewController(context) {
     else syncPolling();
   };
 
-  const persistPage = async ({ announce = true } = {}) => {
+  const persistPendingGroups = async ({ announce = true } = {}) => {
     const review = reviewState();
     if (!review.dirty) return true;
-    if (review.summary?.status !== "ready" || !review.groups.length) return false;
+    if (review.summary?.status !== "ready" || !review.groups.length || !review.dirtyGroupIds.length) return false;
     if (leaveSave) return leaveSave;
     let payload;
+    let chunks;
     try {
       payload = buildReviewDecisionPayload(review);
+      chunks = splitReviewDecisionPayload(payload);
     } catch (error) {
       view.showError(reviewErrorGuidance({ code: "invalid_review_decisions", status: 422 }));
       return false;
     }
-    if (active) view.setOperationMessage("正在保存本页审核决策……");
+    if (!chunks.length || chunks.some((chunk) => chunk.groups.length > REVIEW_DECISION_BATCH_LIMIT)) {
+      view.showError(reviewErrorGuidance({ code: "invalid_review_decisions", status: 422 }));
+      return false;
+    }
+    if (active) view.setOperationMessage("正在保存待提交的审核决策……");
     requestGate.beginWrite();
     abortRead(pageRead);
     const controller = new AbortController();
     operationController = controller;
     const batchId = review.batchId;
-    let captured = payload;
-    payload = null;
+    let captured = chunks;
+    chunks = null;
     const savePromise = (async () => {
       try {
-        const promise = api.put(reviewPath(batchId, "/decisions"), captured, { signal: controller.signal });
-        captured = null;
-        const summary = await promise;
-        if (destroyed || controller.signal.aborted || reviewState().batchId !== batchId) return false;
-        store.dispatch(actionCreators.reviewPageSaved(summary));
-        if (active) {
-          await readPage({
-            batchId,
-            filter: reviewState().filter,
-            offset: reviewState().offset,
-            replace: true,
-            report: false,
-          });
+        for (const chunk of captured) {
+          await api.put(reviewPath(batchId, "/decisions"), chunk, { signal: controller.signal });
         }
-        if (announce && active) view.setOperationMessage("本页已保存，并已重新读取最新内容。");
+        captured = null;
+        if (destroyed || controller.signal.aborted || reviewState().batchId !== batchId) return false;
+        const loaded = await readPage({
+          batchId,
+          filter: reviewState().filter,
+          offset: 0,
+          replace: true,
+          report: false,
+        });
+        if (!loaded || destroyed || controller.signal.aborted || reviewState().batchId !== batchId) {
+          return false;
+        }
+        if (announce && active) view.setOperationMessage("审核决策已保存，并已重新读取权威快照。");
         return true;
       } catch (error) {
         if (isAbortError(error) || controller.signal.aborted || destroyed) return false;
         if (active) {
           try { await refreshSummaryOnly(batchId, controller.signal); } catch { /* 保留原保存错误。 */ }
           view.showError(reviewErrorGuidance(error));
-          view.setOperationMessage("保存失败，本页更改已保留。请重试后再翻页、筛选或离开。");
+          view.setOperationMessage("保存失败，完整草稿与待提交组已保留。请重试后再切换筛选、批次或离开。");
         }
         return false;
       } finally {
@@ -236,27 +248,26 @@ function createReviewController(context) {
     return savePromise;
   };
 
-  const switchPage = async ({
+  const switchReviewContext = async ({
     filter = reviewState().filter,
-    offset = reviewState().offset,
     focus = "first",
   } = {}) => {
     if (busy || !reviewState().batchId) return false;
-    setBusy("page");
+    setBusy("workspace");
     try {
-      if (reviewState().dirty && !await persistPage({ announce: false })) return false;
+      if (reviewState().dirty && !await persistPendingGroups({ announce: false })) return false;
       view.releaseImages();
       const loaded = await readPage({
         batchId: reviewState().batchId,
         filter,
-        offset,
+        offset: 0,
         replace: true,
         report: true,
       });
       if (loaded && active) {
         const nextIndex = focus === "last" ? Math.max(0, reviewState().groups.length - 1) : 0;
-        view.resetPageState(nextIndex, { focus: true, resetInspector: true });
-        view.setOperationMessage("审核内容已加载。");
+        view.resetWorkspaceState(nextIndex, { focus: true });
+        view.setOperationMessage("当前筛选的全部审核组已加载。");
       }
       return loaded;
     } catch {
@@ -271,8 +282,7 @@ function createReviewController(context) {
     if (busy) return false;
     setBusy("load");
     try {
-      if (reviewState().batchId !== batchId && reviewState().dirty &&
-          !await persistPage({ announce: false })) {
+      if (reviewState().dirty && !await persistPendingGroups({ announce: false })) {
         return false;
       }
       requestGate.beginWrite();
@@ -282,7 +292,7 @@ function createReviewController(context) {
       view.clearError();
       const loaded = await readPage({ batchId, filter: "", offset: 0, replace: true, report: true });
       if (loaded && active) {
-        view.resetPageState(0, { focus: true, resetInspector: true });
+        view.resetWorkspaceState(0, { focus: true });
         view.setOperationMessage("已加载结束批次；打开批次不会自动开始分析。");
       }
       return loaded;
@@ -311,12 +321,12 @@ function createReviewController(context) {
       await readPage({
         batchId: review.batchId,
         filter: reviewState().filter,
-        offset: reviewState().offset,
+        offset: 0,
         replace: true,
         report: false,
       });
       if (reviewCanList(reviewState().summary)) {
-        view.resetPageState(0, { focus: true, resetInspector: true });
+        view.resetWorkspaceState(0, { focus: true });
       }
       view.setOperationMessage(successMessage);
       return true;
@@ -337,7 +347,7 @@ function createReviewController(context) {
       setBusy("save");
       let saved = false;
       try {
-        saved = await persistPage({ announce: false });
+        saved = await persistPendingGroups({ announce: false });
       } finally {
         setBusy("");
       }
@@ -345,7 +355,7 @@ function createReviewController(context) {
     }
     const review = reviewState();
     if (review.summary.status === "ready" && review.summary.decidedGroupCount < review.summary.totalGroupCount) {
-      view.setOperationMessage("仍有未确认分组，请逐页保存后再应用结果。");
+      view.setOperationMessage("仍有未确认分组，请确认并保存待提交组后再应用结果。");
       return;
     }
     const choice = await dialogs.open({
@@ -370,37 +380,37 @@ function createReviewController(context) {
     if (!review.dirty || !review.batchId) return false;
     const choice = await dialogs.open({
       title: "放弃未保存的更改？",
-      message: "审核状态已经变化，本页更改无法继续保存。可以放弃更改并重新加载最新内容。",
+      message: "审核状态已经变化，待提交组无法继续保存。可以放弃更改并重新加载最新内容。",
       confirmLabel: "放弃更改并重新加载",
       dangerous: true,
-      confirmationText: "只会清除本页未保存的更改，不会修改文件或已确认结果。",
+      confirmationText: "只会清除待提交组的未保存更改，不会修改文件或已确认结果。",
     });
     if (choice !== "confirm" || !active || destroyed) return false;
     const batchId = review.batchId;
     requestGate.beginWrite();
     store.dispatch(actionCreators.reviewCleared(batchId));
-    return switchPage({ filter: review.filter, offset: review.offset });
+    return switchReviewContext({ filter: review.filter });
   };
 
   const manualRefresh = async () => {
     if (busy) return;
     setBusy("refresh");
     try {
-      if (reviewState().dirty && !await persistPage({ announce: false })) return;
-      const [, pageLoaded] = await Promise.all([
+      if (reviewState().dirty && !await persistPendingGroups({ announce: false })) return;
+      const [, workspaceLoaded] = await Promise.all([
         readRecent({ replace: true, report: false }),
         reviewState().batchId
           ? readPage({
               batchId: reviewState().batchId,
               filter: reviewState().filter,
-              offset: reviewState().offset,
+              offset: 0,
               replace: true,
               report: true,
             })
           : Promise.resolve(false),
       ]);
-      if (pageLoaded && reviewCanList(reviewState().summary)) {
-        view.resetPageState(0, { focus: true, resetInspector: true });
+      if (workspaceLoaded && reviewCanList(reviewState().summary)) {
+        view.resetWorkspaceState(0, { focus: true });
       }
       if (active) view.setOperationMessage("已结束批次和当前审核状态已刷新。");
     } catch {
@@ -412,16 +422,10 @@ function createReviewController(context) {
 
   const focusedGroup = () => reviewState().groups[view.getFocusedIndex()] || null;
 
-  const deckPosition = () => {
-    const review = reviewState();
-    return {
-      focusedIndex: view.getFocusedIndex(),
-      groupCount: review.groups.length,
-      offset: review.offset,
-      limit: review.limit,
-      total: review.total,
-    };
-  };
+  const deckPosition = () => ({
+    focusedIndex: view.getFocusedIndex(),
+    groupCount: reviewState().groups.length,
+  });
 
   const announceFocusedGroup = (prefix = "已切换") => {
     const group = focusedGroup();
@@ -441,39 +445,36 @@ function createReviewController(context) {
     return true;
   };
 
-  const toggleImageAt = (index) => {
+  const moveActiveImage = (direction) => {
     const group = focusedGroup();
-    const image = group?.images[index] || null;
-    if (!group || !image) {
-      view.setOperationMessage(`当前组没有第 ${index + 1} 张图片。`);
-      return false;
-    }
-    return toggleImage(group.id, image.id);
-  };
-
-  const setFocusedGroupMode = (mode) => {
-    if (!deckEditable()) return false;
-    const group = focusedGroup();
-    if (!group) return false;
-    view.hideCompletion();
-    store.dispatch(actionCreators.reviewGroupModeChanged(group.id, mode));
-    const labels = { all: "全部保留", none: "全部移除", recommended: "恢复推荐选择" };
-    view.setOperationMessage(`组 ${group.ordinal}：${labels[mode]}。`);
+    if (busy || !reviewCanList(reviewState().summary) || !group?.images.length) return false;
+    const currentIndex = Math.max(
+      0,
+      group.images.findIndex((image) => image.id === view.getActiveImageId()),
+    );
+    const target = deckImageStepTarget(direction, {
+      activeIndex: currentIndex,
+      imageCount: group.images.length,
+    });
+    const nextImage = target.type === "image" ? group.images[target.index] : null;
+    if (!nextImage || !view.setActiveImage(nextImage.id, { focus: true })) return false;
+    view.setOperationMessage(`组 ${group.ordinal}：已聚焦图 ${nextImage.ordinal}。`);
     return true;
   };
 
-  const saveCurrentPage = async () => {
-    if (!deckEditable()) return false;
-    if (!reviewState().dirty) {
-      view.setOperationMessage("本页没有需要保存的更改。");
-      return true;
-    }
-    setBusy("save");
-    try {
-      return await persistPage({ announce: true });
-    } finally {
-      setBusy("");
-    }
+  const toggleActiveImage = () => {
+    const group = focusedGroup();
+    const imageId = view.getActiveImageId();
+    return Boolean(group && imageId && toggleImage(group.id, imageId, { focus: true }));
+  };
+
+  const toggleLoupe = () => {
+    const enabled = view.toggleLoupe();
+    if (enabled === null) return false;
+    view.setOperationMessage(enabled
+      ? "放大镜已启动；在图片内移动鼠标即可同步检查。"
+      : "放大镜已关闭；倍率会保留到下次启动。");
+    return true;
   };
 
   const navigateGroup = async (direction) => {
@@ -484,42 +485,8 @@ function createReviewController(context) {
       announceFocusedGroup();
       return true;
     }
-    if (target.type === "prev-page") {
-      const loaded = await switchPage({ offset: target.offset, focus: "last" });
-      if (loaded) announceFocusedGroup("已进入上一页，当前为");
-      return loaded;
-    }
-    if (target.type === "next-page") {
-      const loaded = await switchPage({ offset: target.offset, focus: "first" });
-      if (loaded) announceFocusedGroup("已进入下一页，当前为");
-      return loaded;
-    }
-    view.setOperationMessage(direction < 0 ? "已经是第一组。" : "已经是最后一组。");
+    view.setOperationMessage(direction < 0 ? "已经是当前筛选第一组。" : "已经是当前筛选最后一组。");
     return false;
-  };
-
-  const navigatePage = async (direction) => {
-    const review = reviewState();
-    if (busy || !reviewCanList(review.summary)) return false;
-    if (direction < 0) {
-      if (review.offset <= 0) {
-        view.setOperationMessage("已经是第一页。");
-        return false;
-      }
-      const loaded = await switchPage({
-        offset: Math.max(0, review.offset - REVIEW_PAGE_LIMIT),
-        focus: "last",
-      });
-      if (loaded) announceFocusedGroup("已进入上一页，当前为");
-      return loaded;
-    }
-    if (review.offset + review.limit >= review.total) {
-      view.setOperationMessage("已经是最后一页。");
-      return false;
-    }
-    const loaded = await switchPage({ offset: review.offset + REVIEW_PAGE_LIMIT, focus: "first" });
-    if (loaded) announceFocusedGroup("已进入下一页，当前为");
-    return loaded;
   };
 
   const acceptAndAdvance = async () => {
@@ -533,9 +500,6 @@ function createReviewController(context) {
     const target = deckAdvanceTarget({
       focusedIndex: view.getFocusedIndex(),
       groupCount: review.groups.length,
-      offset: review.offset,
-      limit: review.limit,
-      total: review.total,
     });
     if (target.type === "group") {
       view.setFocusedIndex(target.index);
@@ -543,57 +507,32 @@ function createReviewController(context) {
       view.setOperationMessage(`已采纳组 ${group.ordinal}，前进到组 ${next?.ordinal || target.index + 1}。`);
       return true;
     }
-    if (target.type === "next-page") {
-      const loaded = await switchPage({ offset: target.offset, focus: "first" });
-      if (loaded) {
-        const next = focusedGroup();
-        view.setOperationMessage(`已采纳组 ${group.ordinal}并保存本页，前进到组 ${next?.ordinal || target.offset + 1}。`);
-      }
-      return loaded;
-    }
-
     setBusy("save");
     let saved = false;
     try {
-      saved = await persistPage({ announce: false });
+      saved = await persistPendingGroups({ announce: false });
     } finally {
       setBusy("");
     }
     if (!saved || !active || destroyed) return false;
+    const completion = reviewCompletionPresentation(
+      reviewState().summary,
+      reviewState().filter,
+    );
     view.showCompletion();
-    view.setOperationMessage("最后一组已保存，本批次已完成复核。");
+    view.setOperationMessage(completion.operationMessage);
     return true;
   };
 
   const executeDeckCommand = async (command) => {
     if (!command || busy || !reviewCanList(reviewState().summary)) return false;
-    if (command === "toggle-inspector") {
-      const visible = view.toggleInspector();
-      view.setOperationMessage(visible ? "已展开指标栏。" : "已折叠指标栏。");
-      return true;
-    }
-    if (/^toggle-[1-9]$/.test(command)) return toggleImageAt(Number(command.slice(7)) - 1);
+    if (command === "previous-group") return navigateGroup(-1);
+    if (command === "focus-previous-image") return moveActiveImage(-1);
+    if (command === "focus-next-image") return moveActiveImage(1);
+    if (command === "toggle-active-image") return toggleActiveImage();
     if (command === "accept-advance") return acceptAndAdvance();
-    if (command === "keep-all") return setFocusedGroupMode("all");
-    if (command === "discard-all") return setFocusedGroupMode("none");
-    if (command === "reset-recommended") return setFocusedGroupMode("recommended");
-    if (command === "prev-group") return navigateGroup(-1);
-    if (command === "next-group") return navigateGroup(1);
-    if (command === "first-group") {
-      if (!reviewState().groups.length) return false;
-      view.setFocusedIndex(0);
-      announceFocusedGroup("已回到本页首组：");
-      return true;
-    }
-    if (command === "last-group") {
-      if (!reviewState().groups.length) return false;
-      view.setFocusedIndex(reviewState().groups.length - 1);
-      announceFocusedGroup("已到本页末组：");
-      return true;
-    }
-    if (command === "prev-page") return navigatePage(-1);
-    if (command === "next-page") return navigatePage(1);
-    if (command === "save") return saveCurrentPage();
+    if (command === "browse-next-group") return navigateGroup(1);
+    if (command === "toggle-loupe") return toggleLoupe();
     return false;
   };
 
@@ -616,61 +555,53 @@ function createReviewController(context) {
         kind: "retry", suffix: "/retry", successMessage: "去重分析已重新排队。",
       });
       else if (action === "filter") {
-        await switchPage({ filter: actionButton.dataset.reviewFilter || "", offset: 0, focus: "first" });
-      } else if (action === "previous") await navigatePage(-1);
-      else if (action === "next") await navigatePage(1);
-      else if (action === "save") await saveCurrentPage();
-      else if (action === "apply") await applyReview();
+        await switchReviewContext({ filter: actionButton.dataset.reviewFilter || "", focus: "first" });
+      } else if (action === "apply") await applyReview();
       else if (action === "discard-reload") await discardStaleAndReload();
-      else if (action === "accept") await acceptAndAdvance();
       else if (action === "prev-group") await navigateGroup(-1);
       else if (action === "next-group") await navigateGroup(1);
-      else if (action === "first-group") await executeDeckCommand("first-group");
-      else if (action === "last-group") await executeDeckCommand("last-group");
-      else if (action === "toggle-inspector") await executeDeckCommand("toggle-inspector");
-      else if (action === "focus-group") {
-        const index = Number(actionButton.dataset.reviewIndex);
-        if (Number.isInteger(index) && view.setFocusedIndex(index)) announceFocusedGroup();
+      else if (action === "loupe-toggle") toggleLoupe();
+      else if (action === "loupe-pin") {
+        const state = view.toggleLoupePin();
+        if (state) view.setOperationMessage(state === "pinned"
+          ? "同步坐标已锁定。"
+          : "同步坐标已解除锁定。");
       } else if (action === "return-review") {
         view.hideCompletion();
         view.setFocusedIndex(Math.max(0, reviewState().groups.length - 1));
         announceFocusedGroup("已返回复查：");
-      } else if (action.startsWith("page-")) {
-        if (!deckEditable()) return;
-        view.hideCompletion();
-        store.dispatch(actionCreators.reviewPageModeChanged(action.slice(5)));
-        view.setOperationMessage("已更新本页全部分组的保留模式。");
-      } else if (action === "group-all") setFocusedGroupMode("all");
-      else if (action === "group-none") setFocusedGroupMode("none");
-      else if (action === "group-recommended") setFocusedGroupMode("recommended");
+      }
       return;
     }
 
     const card = event.target.closest("[data-review-image]");
     if (!card || !root.contains(card)) return;
+    const imageId = card.dataset.reviewImage || "";
     toggleImage(
       card.dataset.reviewImageGroup || "",
-      card.dataset.reviewImage || "",
+      imageId,
       { focus: true },
     );
+  };
+
+  const onChange = (event) => {
+    if (!(event.target instanceof HTMLSelectElement) || !event.target.matches("[data-review-group-select]")) return;
+    const index = Number(event.target.value);
+    if (Number.isInteger(index) && view.setFocusedIndex(index)) announceFocusedGroup("已选择");
   };
 
   const onKeyDown = (event) => {
     if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || busy) return;
     const review = reviewState();
     if (!reviewCanList(review.summary)) return;
-    if (event.target instanceof Element) {
-      if (event.target.closest("input, select, textarea, [contenteditable]")) return;
-      if (event.target.closest("button, a[href]")) return;
-      const card = event.target.closest("[data-review-image]");
-      if (card && event.key === " ") {
-        if (!deckEditable()) return;
-        event.preventDefault();
-        card.click();
-        return;
-      }
-    }
-    const command = resolveDeckCommand(event.key, { editable: deckEditable() });
+    if (event.target instanceof Element &&
+        event.target.closest("input, select, textarea, button, a[href], [contenteditable]")) return;
+    const command = resolveDeckCommand(event.key, {
+      editable: deckEditable(),
+      readOnly: review.summary.status !== "ready",
+      hasImages: Boolean(focusedGroup()?.images.length),
+      loupeAvailable: view.isLoupeAvailable(),
+    });
     if (!command) return;
     event.preventDefault();
     void executeDeckCommand(command);
@@ -683,6 +614,7 @@ function createReviewController(context) {
   };
 
   root.addEventListener("click", onClick);
+  root.addEventListener("change", onChange);
   root.addEventListener("keydown", onKeyDown);
   globalThis.addEventListener?.("beforeunload", onBeforeUnload);
 
@@ -690,8 +622,8 @@ function createReviewController(context) {
     async beforeLeave() {
       if (!reviewState().dirty) return true;
       if (busy && leaveSave) return Boolean(await leaveSave);
-      view.setOperationMessage("正在保存未提交的审核更改，完成前不会切换页面……");
-      return Boolean(await persistPage({ announce: false }));
+      view.setOperationMessage("正在保存待提交组，完成前不会切换页面……");
+      return Boolean(await persistPendingGroups({ announce: false }));
     },
     activate() {
       if (destroyed || active) return;
@@ -700,23 +632,24 @@ function createReviewController(context) {
       root.hidden = false;
       setElementInert(root, false);
       root.dataset.lifecycle = "active";
+      view.activate();
       void readRecent({ replace: true, report: false }).catch(() => {});
       const current = reviewState();
       if (current.dirty) {
         if (reviewCanList(current.summary)) view.setFocusedIndex(view.getFocusedIndex());
-        view.setOperationMessage("本页有未保存的更改，已恢复本地草稿。");
+        view.setOperationMessage("存在未保存的待提交组，已恢复本地草稿。");
         return;
       }
       if (current.batchId) {
         void readPage({
           batchId: current.batchId,
           filter: current.filter,
-          offset: current.offset,
+          offset: 0,
           replace: true,
           report: true,
         }).then((loaded) => {
           if (loaded && active && reviewCanList(reviewState().summary)) {
-            view.resetPageState(0, { focus: true, resetInspector: true });
+            view.resetWorkspaceState(0, { focus: true });
           }
         }).catch(() => {});
         return;
@@ -743,7 +676,7 @@ function createReviewController(context) {
       abortRead(recentRead);
       busy = "";
       view.setBusy("");
-      view.releaseImages();
+      view.deactivate();
       root.hidden = true;
       setElementInert(root, true);
       root.dataset.lifecycle = "inactive";
@@ -759,8 +692,9 @@ function createReviewController(context) {
       polling.stop(REVIEW_POLL_KEY);
       abortRead(pageRead);
       abortRead(recentRead);
-      view.releaseImages();
+      view.deactivate();
       root.removeEventListener("click", onClick);
+      root.removeEventListener("change", onChange);
       root.removeEventListener("keydown", onKeyDown);
       globalThis.removeEventListener?.("beforeunload", onBeforeUnload);
       view.destroy();

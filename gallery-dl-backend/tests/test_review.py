@@ -8,7 +8,7 @@ from unittest import mock
 
 from gdl_backend.app import ServiceContainer, create_app
 from gdl_backend.config import DedupSettings
-from gdl_backend.database import Database
+from gdl_backend.database import CrawlReviewGroupLimitExceeded, Database
 from gdl_backend.review import DedupReviewManager
 from tests.helpers import local_test_client, make_settings
 
@@ -234,6 +234,31 @@ class ReviewManagerTests(unittest.TestCase):
                 )
                 self.assertEqual(duplicate_page["total"], 1)
                 self.assertEqual(len(duplicate_page["items"][0]["images"]), 2)
+                all_manual_groups = db.list_crawl_review_groups(
+                    "batch-review",
+                    limit=1,
+                    offset=99,
+                    all_groups=True,
+                )
+                self.assertEqual(all_manual_groups["offset"], 0)
+                self.assertEqual(all_manual_groups["limit"], 2)
+                self.assertEqual(all_manual_groups["total"], 2)
+                self.assertEqual(
+                    [group["id"] for group in all_manual_groups["items"]],
+                    ["duplicate-group", "single-group"],
+                )
+                self.assertNotIn(
+                    "automatic-exact-group",
+                    {group["id"] for group in all_manual_groups["items"]},
+                )
+                with (
+                    mock.patch("gdl_backend.database.MAX_CRAWL_REVIEW_GROUPS", 1),
+                    self.assertRaises(CrawlReviewGroupLimitExceeded),
+                ):
+                    db.list_crawl_review_groups(
+                        "batch-review",
+                        all_groups=True,
+                    )
 
                 with self.assertRaisesRegex(RuntimeError, "2 个图片组尚未确认"):
                     manager.apply("batch-review")
@@ -321,6 +346,65 @@ class ReviewApiTests(unittest.TestCase):
         self.client_context.__exit__(None, None, None)
         self.temporary.cleanup()
 
+    def test_review_api_all_true_and_legacy_pagination_are_compatible(self):
+        full = self.client.get(
+            "/api/v1/crawls/batch-api-review/review?all=true&limit=1&offset=99"
+        )
+        self.assertEqual(full.status_code, 200, full.text)
+        full_groups = full.json()["groups"]
+        self.assertEqual(full_groups["offset"], 0)
+        self.assertEqual(full_groups["limit"], 2)
+        self.assertEqual(full_groups["total"], 2)
+        self.assertEqual(
+            [(group["id"], group["ordinal"]) for group in full_groups["items"]],
+            [("duplicate-group", 1), ("single-group", 2)],
+        )
+
+        legacy = self.client.get(
+            "/api/v1/crawls/batch-api-review/review?limit=1&offset=1"
+        )
+        self.assertEqual(legacy.status_code, 200, legacy.text)
+        legacy_groups = legacy.json()["groups"]
+        self.assertEqual(legacy_groups["offset"], 1)
+        self.assertEqual(legacy_groups["limit"], 1)
+        self.assertEqual(legacy_groups["total"], 2)
+        self.assertEqual(
+            [group["id"] for group in legacy_groups["items"]],
+            ["single-group"],
+        )
+
+        duplicate = self.client.get(
+            "/api/v1/crawls/batch-api-review/review?all=true&kind=duplicate&offset=7"
+        )
+        self.assertEqual(duplicate.status_code, 200, duplicate.text)
+        duplicate_groups = duplicate.json()["groups"]
+        self.assertEqual(duplicate_groups["offset"], 0)
+        self.assertEqual(duplicate_groups["limit"], 1)
+        self.assertEqual(duplicate_groups["total"], 1)
+        self.assertEqual(
+            [group["kind"] for group in duplicate_groups["items"]],
+            ["duplicate"],
+        )
+        self.assertEqual(
+            duplicate_groups["items"][0]["images"][0]["url"],
+            full_groups["items"][0]["images"][0]["url"],
+        )
+
+    def test_review_api_maps_controlled_all_group_limit(self):
+        with mock.patch.object(
+            self.container.db,
+            "list_crawl_review_groups",
+            side_effect=CrawlReviewGroupLimitExceeded("too many"),
+        ):
+            response = self.client.get(
+                "/api/v1/crawls/batch-api-review/review?all=true"
+            )
+        self.assertEqual(response.status_code, 413, response.text)
+        self.assertEqual(
+            response.json()["error"]["code"],
+            "review_groups_too_large",
+        )
+
     def test_review_api_accepts_zero_selection_and_serves_images(self):
         listing = self.client.get(
             "/api/v1/crawls/batch-api-review/review?kind=duplicate"
@@ -340,6 +424,18 @@ class ReviewApiTests(unittest.TestCase):
         )
         self.assertEqual(decision.status_code, 200, decision.text)
         self.assertEqual(decision.json()["selected_image_count"], 1)
+        partial = self.client.get(
+            "/api/v1/crawls/batch-api-review/review?all=true"
+        )
+        self.assertEqual(partial.status_code, 200, partial.text)
+        self.assertEqual(partial.json()["decided_group_count"], 1)
+        self.assertEqual(
+            {
+                group["id"]: group["decided"]
+                for group in partial.json()["groups"]["items"]
+            },
+            {"duplicate-group": True, "single-group": False},
+        )
 
         incomplete = self.client.post(
             "/api/v1/crawls/batch-api-review/review/apply", json={}

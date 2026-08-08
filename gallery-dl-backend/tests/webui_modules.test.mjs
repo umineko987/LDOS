@@ -57,14 +57,37 @@ import {
   validatePolicyDraft,
 } from "../gdl_backend/webui/js/core/policy-model.js";
 import {
+  calculateReviewLayout,
+  calculateSynchronizedCrop,
+  clamp as loupeClamp,
+  containContentRect,
+  DEFAULT_MAGNIFICATION,
+  formatMagnification,
+  getContainContentRect,
+  MAX_MAGNIFICATION,
+  median as loupeMedian,
+  MIN_MAGNIFICATION,
+  normalizeImageDimensions,
+  normalizePointerCoordinates,
+  REFERENCE_PIXEL_HEIGHT,
+  selectReferenceImage,
+  updateMagnification,
+} from "../gdl_backend/webui/js/core/review-loupe.js";
+import {
   buildReviewDecisionPayload,
   deckAdvanceTarget,
+  deckImageStepTarget,
   deckStepTarget,
   resolveDeckCommand,
+  REVIEW_DECISION_BATCH_LIMIT,
+  REVIEW_GROUP_LIMIT,
   REVIEW_POLL_INTERVAL_MS,
+  reviewCompletionPresentation,
   reviewImageUrl,
   sanitizeReviewPage,
-  setReviewPageMode,
+  splitReviewDecisionPayload,
+  updateReviewImageSelection,
+  validateReviewState,
 } from "../gdl_backend/webui/js/core/review-model.js";
 import {
   batchProgress,
@@ -6402,7 +6425,7 @@ function rawReviewWorkflow() {
     groups: {
       total: 1,
       offset: 0,
-      limit: 8,
+      limit: 1,
       items: [{
         id: "group-1",
         ordinal: 1,
@@ -6433,84 +6456,222 @@ function rawReviewWorkflow() {
       }],
     },
     analysis_log_path: `/home/private/${WORKFLOW_SECRET}.log`,
+    error: `private error ${WORKFLOW_SECRET}`,
+    details: { traceback: `/home/private/${WORKFLOW_SECRET}.trace` },
   };
 }
 
-test("REVIEW deck 自动推进覆盖页内、跨页与完成边缘", () => {
+test("REVIEW deck 自动推进只在全量数组中前进并识别完成边缘", () => {
   assert.deepEqual(deckAdvanceTarget({
-    focusedIndex: 3, groupCount: 8, offset: 0, limit: 8, total: 16,
+    focusedIndex: 3, groupCount: 16,
   }), { type: "group", index: 4 });
   assert.deepEqual(deckAdvanceTarget({
-    focusedIndex: 7, groupCount: 8, offset: 0, limit: 8, total: 16,
-  }), { type: "next-page", offset: 8 });
-  assert.deepEqual(deckAdvanceTarget({
-    focusedIndex: 7, groupCount: 8, offset: 0, limit: 8, total: 8,
+    focusedIndex: 15, groupCount: 16,
   }), { type: "complete" });
   assert.deepEqual(deckAdvanceTarget({
-    focusedIndex: 0, groupCount: 1, offset: 8, limit: 8, total: 9,
+    focusedIndex: 0, groupCount: 1,
+  }), { type: "complete" });
+  assert.deepEqual(deckAdvanceTarget({
+    focusedIndex: 0, groupCount: 0,
   }), { type: "complete" });
 });
 
-test("REVIEW deck 键位在只读状态仅保留导航命令", () => {
-  assert.deepEqual([
-    resolveDeckCommand("Enter", { editable: true }),
-    resolveDeckCommand(" ", { editable: true }),
-    resolveDeckCommand("1", { editable: true }),
-    resolveDeckCommand("a", { editable: true }),
-    resolveDeckCommand("A", { editable: true }),
-  ], ["accept-advance", "accept-advance", "toggle-1", "keep-all", "keep-all"]);
-  assert.deepEqual([
-    resolveDeckCommand("Enter", { editable: false }),
-    resolveDeckCommand("1", { editable: false }),
-    resolveDeckCommand("a", { editable: false }),
-  ], [null, null, null]);
-  assert.equal(resolveDeckCommand("ArrowRight", { editable: false }), "next-group");
-  assert.deepEqual([
-    resolveDeckCommand("Backspace", { editable: true }),
-    resolveDeckCommand("R", { editable: true }),
-    resolveDeckCommand("h", { editable: false }),
-    resolveDeckCommand("l", { editable: false }),
-    resolveDeckCommand("Home", { editable: false }),
-    resolveDeckCommand("End", { editable: false }),
-    resolveDeckCommand("PageUp", { editable: false }),
-    resolveDeckCommand("PageDown", { editable: false }),
-    resolveDeckCommand("i", { editable: false }),
-    resolveDeckCommand("s", { editable: true }),
-  ], [
-    "discard-all", "reset-recommended", "prev-group", "next-group", "first-group",
-    "last-group", "prev-page", "next-page", "toggle-inspector", "save",
-  ]);
-  assert.equal(resolveDeckCommand("Escape", { editable: true }), null);
+test("REVIEW 完成态由权威总组数区分筛选结束与整批完成", () => {
+  const filtered = reviewCompletionPresentation({
+    totalGroupCount: 261,
+    decidedGroupCount: 53,
+    totalImageCount: 455,
+    selectedImageCount: 247,
+    automaticRejectedImageCount: 8,
+  }, "duplicate");
+  assert.equal(filtered.batchComplete, false);
+  assert.equal(filtered.title, "当前筛选已过一遍");
+  assert.match(filtered.message, /重复组.*仍有 208 组未确认.*切换顶部筛选/);
+  assert.doesNotMatch(filtered.operationMessage, /本批次已完成/);
+
+  const complete = reviewCompletionPresentation({
+    totalGroupCount: 261,
+    decidedGroupCount: 261,
+    totalImageCount: 455,
+    selectedImageCount: 247,
+    automaticRejectedImageCount: 8,
+  }, "");
+  assert.equal(complete.batchComplete, true);
+  assert.equal(complete.title, "本批次已全部过一遍");
+  assert.match(complete.message, /自动移除 8 张.*最终保留 247 张.*预计移出 208 张/);
+  assert.match(complete.operationMessage, /本批次已完成复核/);
+  assert.throws(() => reviewCompletionPresentation(null, "duplicate"), TypeError);
+  assert.throws(() => reviewCompletionPresentation({}, "unsafe"), TypeError);
 });
 
-test("REVIEW deck 图片切换命令不会吞掉指标命令", () => {
-  const source = readFileSync(
+test("REVIEW deck 快捷键按可编辑性、图片与镜片可用性解析", () => {
+  const browseImages = { editable: false, hasImages: true, loupeAvailable: false };
+  for (const [key, command] of [
+    ["ArrowLeft", "focus-previous-image"],
+    ["ArrowUp", "focus-previous-image"],
+    ["ArrowRight", "focus-next-image"],
+    ["ArrowDown", "focus-next-image"],
+  ]) {
+    assert.equal(resolveDeckCommand(key, browseImages), command, key);
+    assert.equal(resolveDeckCommand(key, { ...browseImages, editable: true }), command, key);
+  }
+  assert.equal(resolveDeckCommand("ArrowLeft", { hasImages: false }), null);
+  assert.equal(resolveDeckCommand("Backspace"), "previous-group");
+  assert.equal(resolveDeckCommand("Backspace", browseImages), "previous-group");
+  assert.equal(resolveDeckCommand(" ", { editable: true, hasImages: true }), "toggle-active-image");
+  assert.equal(resolveDeckCommand(" ", { editable: false, hasImages: true }), null);
+  assert.equal(resolveDeckCommand("Enter", { editable: true, hasImages: true }), "accept-advance");
+  assert.equal(resolveDeckCommand("Enter", { editable: false, readOnly: false, hasImages: true }), null);
+  assert.equal(
+    resolveDeckCommand("Enter", { editable: false, readOnly: true, hasImages: true }),
+    "browse-next-group",
+  );
+  for (const key of ["x", "X"]) {
+    assert.equal(resolveDeckCommand(key, { editable: true, loupeAvailable: true }), "toggle-loupe");
+    assert.equal(resolveDeckCommand(key, { editable: false, loupeAvailable: true }), "toggle-loupe");
+    assert.equal(resolveDeckCommand(key, { editable: true, loupeAvailable: false }), null);
+  }
+  for (const key of [
+    "1", "a", "A", "R", "h", "l", "Home", "End",
+    "PageUp", "PageDown", "i", "s", "p", "P", "Escape",
+  ]) {
+    assert.equal(resolveDeckCommand(key, {
+      editable: true,
+      hasImages: true,
+      loupeAvailable: true,
+    }), null, key);
+  }
+});
+
+test("REVIEW deck 底部只有两按钮和三行提示，镜片按钮独立声明 X", () => {
+  const viewSource = readFileSync(
+    new URL("../gdl_backend/webui/js/components/review-view.js", import.meta.url),
+    "utf8",
+  );
+  const appSource = readFileSync(
     new URL("../gdl_backend/webui/js/apps/review.js", import.meta.url),
     "utf8",
   );
-  const inspectorBranch = source.indexOf('if (command === "toggle-inspector")');
-  const imageToggleBranch = source.indexOf('if (/^toggle-[1-9]$/.test(command))');
-  assert.ok(inspectorBranch >= 0);
-  assert.ok(imageToggleBranch > inspectorBranch);
-  assert.match(source, /view\.toggleInspector\(\)/);
-  assert.doesNotMatch(source, /command\.startsWith\("toggle-"\)/);
+  const cssSource = readFileSync(
+    new URL("../gdl_backend/webui/styles/apps/review.css", import.meta.url),
+    "utf8",
+  );
+  const commandStart = viewSource.indexOf("const commandHost =");
+  const commandEnd = viewSource.indexOf("const deckLiveHost =", commandStart);
+  const commandSource = viewSource.slice(commandStart, commandEnd);
+  assert.ok(commandStart >= 0 && commandEnd > commandStart);
+  assert.equal((commandSource.match(/button\(/g) || []).length, 2);
+  assert.equal((commandSource.match(/button\("prev-group"/g) || []).length, 1);
+  assert.equal((commandSource.match(/button\("next-group"/g) || []).length, 1);
+  assert.equal((viewSource.match(/button\("prev-group"/g) || []).length, 1);
+  assert.equal((viewSource.match(/button\("next-group"/g) || []).length, 1);
+  assert.match(commandSource, /className: "review-shortcut-hints"/);
+  assert.equal((commandSource.match(/createElement\("span"/g) || []).length, 3);
+  for (const hint of [
+    "方向键  移动选中",
+    "Space  切换保留",
+    "Enter  采纳并前进",
+  ]) {
+    assert.equal(commandSource.split(`text: "${hint}"`).length - 1, 1, hint);
+  }
+  assert.doesNotMatch(commandSource, /<kbd|className:\s*"review-deck-command"|放大镜|keyShortcuts:\s*"x"/);
+  assert.match(commandSource, /title: "快捷键 Backspace：返回上一组"/);
+  assert.match(commandSource, /keyShortcuts: "Backspace"/);
+  assert.match(viewSource, /"aria-keyshortcuts": keyShortcuts \|\| null/);
+  assert.match(viewSource, /loupeToggleButton\.setAttribute\("aria-keyshortcuts", "x"\)/);
+  assert.match(viewSource, /title: "快捷键 X：开启或关闭同步放大镜"/);
+  assert.doesNotMatch(`${viewSource}\n${cssSource}`, /镜片 · 同步 · 锐利|review-loupe-label/);
+
+  for (const fingerprint of [
+    'className: "review-image-active-marker"',
+    'text: "当前选中"',
+    '"aria-current": String(image.id === activeImageId)',
+    'card.setAttribute("aria-current", String(active))',
+  ]) {
+    assert.equal(viewSource.includes(fingerprint), true, fingerprint);
+  }
+  assert.match(cssSource, /\.review-image-card\[data-active="true"\] \{[\s\S]*?opacity: 1;[\s\S]*?outline: 6px double/);
+  assert.match(cssSource, /\.review-image-card\[data-active="true"\] \.review-image-active-marker \{\s*display: block;/);
+  assert.match(cssSource, /\.review-image-active-marker \{[\s\S]*?color: var\(--imageweave-surface\);[\s\S]*?background: var\(--imageweave-accent\);/);
+
+  for (const fingerprint of [
+    'command === "previous-group"',
+    'command === "focus-previous-image"',
+    'command === "focus-next-image"',
+    'command === "toggle-active-image"',
+    'command === "accept-advance"',
+    'command === "browse-next-group"',
+    'command === "toggle-loupe"',
+    "view.setActiveImage(nextImage.id, { focus: true })",
+    "toggleImage(group.id, imageId, { focus: true })",
+    "view.toggleLoupe()",
+    'readOnly: review.summary.status !== "ready"',
+    'command === "browse-next-group") return navigateGroup(1)',
+    "放大镜已启动；在图片内移动鼠标即可同步检查。",
+    "放大镜已关闭；倍率会保留到下次启动。",
+    'event.target.closest("input, select, textarea, button, a[href], [contenteditable]")',
+  ]) {
+    assert.equal(appSource.includes(fingerprint), true, fingerprint);
+  }
+  assert.equal(appSource.includes("card.click()"), false);
+  assert.match(viewSource, /dataset: \{ reviewEnterHint: "" \}/);
+  assert.match(viewSource, /review\.summary\.status !== "ready"[\s\S]*?\? "Enter  下一组"[\s\S]*?: "Enter  采纳并前进"/);
+
+  for (const retired of [
+    "toggle-inspector", "review-deck-inspector", "review-metrics", "review-metric",
+    "review-image-fact", "filter-all", "filter-none", "filter-recommended",
+    "group-all", "group-none", "group-recommended", "jump-backward", "jump-forward",
+    "first-group", "last-group", "deckJumpTarget", "属性 / 指标",
+  ]) {
+    assert.equal(`${viewSource}\n${appSource}`.includes(retired), false, retired);
+  }
+  for (const retired of [
+    "touchGesture", "TOUCH_DRAG_THRESHOLD", "pointerdown", "pointerup", "pointercancel",
+  ]) {
+    assert.equal(viewSource.includes(retired), false, retired);
+  }
 });
 
-test("REVIEW deck 单步导航正确处理页内与跨页", () => {
-  const page = { focusedIndex: 3, groupCount: 8, offset: 8, limit: 8, total: 24 };
+test("REVIEW 当前组图片移动线性 clamp 且不循环或切组", () => {
+  assert.deepEqual(deckImageStepTarget(-1, {
+    activeIndex: 1, imageCount: 4,
+  }), { type: "image", index: 0 });
+  assert.deepEqual(deckImageStepTarget(1, {
+    activeIndex: 1, imageCount: 4,
+  }), { type: "image", index: 2 });
+  assert.deepEqual(deckImageStepTarget(-1, {
+    activeIndex: 0, imageCount: 4,
+  }), { type: "image", index: 0 });
+  assert.deepEqual(deckImageStepTarget(1, {
+    activeIndex: 3, imageCount: 4,
+  }), { type: "image", index: 3 });
+  assert.deepEqual(deckImageStepTarget(1, {
+    activeIndex: -1, imageCount: 0,
+  }), { type: "empty" });
+  assert.throws(() => deckImageStepTarget(0, {
+    activeIndex: 1, imageCount: 4,
+  }), TypeError);
+  assert.throws(() => deckImageStepTarget(1, {
+    activeIndex: 4, imageCount: 4,
+  }), TypeError);
+});
+
+test("REVIEW deck 单步导航始终在全量数组内 clamp", () => {
+  const position = { focusedIndex: 12, groupCount: 24 };
   assert.deepEqual([
-    deckStepTarget(-1, page),
-    deckStepTarget(1, page),
-  ], [{ type: "group", index: 2 }, { type: "group", index: 4 }]);
+    deckStepTarget(-1, position),
+    deckStepTarget(1, position),
+  ], [{ type: "group", index: 11 }, { type: "group", index: 13 }]);
   assert.deepEqual(deckStepTarget(-1, {
-    focusedIndex: 0, groupCount: 8, offset: 8, limit: 8, total: 24,
-  }), { type: "prev-page", offset: 0 });
+    focusedIndex: 0, groupCount: 24,
+  }), { type: "edge" });
   assert.deepEqual(deckStepTarget(1, {
-    focusedIndex: 7, groupCount: 8, offset: 8, limit: 8, total: 24,
-  }), { type: "next-page", offset: 16 });
+    focusedIndex: 23, groupCount: 24,
+  }), { type: "edge" });
+  assert.throws(() => deckStepTarget(0, position), TypeError);
 });
 
-test("REVIEW 组确认只对当前页已知组置脏且不改选择", () => {
+test("REVIEW 组确认只对全量快照已知组置脏且不改选择", () => {
   const page = sanitizeReviewPage(rawReviewWorkflow(), {
     batchId: "batch-123", filter: "", requestedOffset: 0,
   });
@@ -6522,9 +6683,15 @@ test("REVIEW 组确认只对当前页已知组置脏且不改选择", () => {
   store.dispatch(actionCreators.reviewGroupConfirmed("group-1"));
   assert.deepEqual({
     dirty: store.getState().review.dirty,
+    dirtyGroupIds: store.getState().review.dirtyGroupIds,
     selected: store.getState().review.groups[0].images.map((image) => image.selected),
     decided: store.getState().review.groups[0].decided,
-  }, { dirty: true, selected: [true, true], decided: false });
+  }, {
+    dirty: true,
+    dirtyGroupIds: ["group-1"],
+    selected: [true, true],
+    decided: false,
+  });
 
   const emptyStore = createStore({ reportError: () => {} });
   const emptyBefore = emptyStore.getState();
@@ -6532,17 +6699,65 @@ test("REVIEW 组确认只对当前页已知组置脏且不改选择", () => {
   assert.equal(emptyStore.getState(), emptyBefore);
 });
 
-test("REVIEW happy path 分页投影、推荐选择和决策 payload 不暴露路径", () => {
-  const page = sanitizeReviewPage(rawReviewWorkflow(), {
+test("REVIEW 全量投影、单组 payload、安全字段与保存清空", () => {
+  const raw = rawReviewWorkflow();
+  const secondImage = {
+    ...raw.groups.items[0].images[0],
+    id: "image-3",
+    ordinal: 1,
+  };
+  const secondGroup = {
+    ...raw.groups.items[0],
+    id: "group-2",
+    ordinal: 2,
+    kind: "single",
+    images: [secondImage],
+  };
+  const page = sanitizeReviewPage({
+    ...raw,
+    total_image_count: 3,
+    total_group_count: 2,
+    groups: {
+      items: [...raw.groups.items, secondGroup],
+      total: 2,
+      offset: 0,
+      limit: 2,
+    },
+  }, {
     batchId: "batch-123", filter: "", requestedOffset: 0,
   });
-  assert.equal(JSON.stringify(page).includes(WORKFLOW_SECRET), false);
-  assert.equal(JSON.stringify(page).includes("relative_path"), false);
-  const recommended = setReviewPageMode(page, "recommended");
-  const payload = buildReviewDecisionPayload(recommended);
-  assert.deepEqual(payload, {
+  const serialized = JSON.stringify(page);
+  assert.equal(serialized.includes(WORKFLOW_SECRET), false);
+  assert.equal(serialized.includes("relative_path"), false);
+  assert.equal(serialized.includes('"url"'), false);
+  for (const retiredMetric of ["matchLevels", "format", "bytes", "jpegQuality", "sharpness", "noiseSigma", "metrics"]) {
+    assert.equal(serialized.includes(`"${retiredMetric}"`), false, retiredMetric);
+  }
+  assert.deepEqual(page.dirtyGroupIds, []);
+  assert.equal(page.limit, 2);
+  assert.throws(() => buildReviewDecisionPayload(page), TypeError);
+
+  const changed = updateReviewImageSelection(page, "group-1", "image-2", false);
+  assert.deepEqual(changed.dirtyGroupIds, ["group-1"]);
+  assert.equal(changed.dirty, true);
+  assert.deepEqual(buildReviewDecisionPayload(changed), {
     groups: [{ group_id: "group-1", selected_image_ids: ["image-1"] }],
   });
+
+  const store = createStore({ reportError: () => {} });
+  store.dispatch(actionCreators.reviewWorkspaceReceived(changed));
+  store.dispatch(actionCreators.reviewPageSaved({
+    ...raw,
+    selected_image_count: 2,
+    decided_group_count: 1,
+  }));
+  assert.deepEqual(store.getState().review.dirtyGroupIds, []);
+  assert.equal(store.getState().review.dirty, false);
+  assert.deepEqual(
+    store.getState().review.groups.map((group) => group.decided),
+    [true, false],
+  );
+
   assert.equal(reviewImageUrl("batch-123", "image-1"), "/api/v1/crawls/batch-123/review/images/image-1");
   assert.deepEqual(REVIEW_ENDPOINTS, { crawls: "/api/v1/crawls" });
   for (const hook of ["mount", "activate", "beforeLeave", "deactivate", "unmount"]) {
@@ -6550,6 +6765,415 @@ test("REVIEW happy path 分页投影、推荐选择和决策 payload 不暴露�
   }
 });
 
+test("REVIEW 全量投影拒绝超限、非零 offset、筛选错配与危险脏 ID", () => {
+  const group = rawReviewWorkflow().groups.items[0];
+  const groups = Array.from({ length: REVIEW_GROUP_LIMIT }, (_, index) => ({
+    ...group,
+    id: `group-${index + 1}`,
+    ordinal: index + 1,
+    images: [],
+  }));
+  const raw = {
+    ...rawReviewWorkflow(),
+    total_group_count: groups.length,
+    groups: { items: groups, total: groups.length, offset: 0, limit: groups.length },
+  };
+  const projected = sanitizeReviewPage(raw, { batchId: "batch-123" });
+  assert.equal(projected.groups.length, REVIEW_GROUP_LIMIT);
+
+  const overflow = {
+    ...raw,
+    total_group_count: REVIEW_GROUP_LIMIT + 1,
+    groups: {
+      items: [...groups, { ...group, id: "group-overflow", ordinal: REVIEW_GROUP_LIMIT + 1, images: [] }],
+      total: REVIEW_GROUP_LIMIT + 1,
+      offset: 0,
+      limit: REVIEW_GROUP_LIMIT + 1,
+    },
+  };
+  assert.throws(() => sanitizeReviewPage(overflow, { batchId: "batch-123" }), TypeError);
+  assert.throws(() => sanitizeReviewPage({
+    ...rawReviewWorkflow(),
+    groups: { ...rawReviewWorkflow().groups, offset: 8 },
+  }, { batchId: "batch-123" }), TypeError);
+  assert.throws(() => sanitizeReviewPage(rawReviewWorkflow(), {
+    batchId: "batch-123", filter: "single",
+  }), TypeError);
+
+  const dirty = updateReviewImageSelection(
+    sanitizeReviewPage(rawReviewWorkflow(), { batchId: "batch-123" }),
+    "group-1",
+    "image-2",
+    false,
+  );
+  for (const dirtyGroupIds of [["group-missing"], ["group-1", "group-1"]]) {
+    assert.throws(() => validateReviewState({ ...dirty, dirtyGroupIds }), TypeError);
+    assert.throws(() => buildReviewDecisionPayload({ ...dirty, dirtyGroupIds }), TypeError);
+  }
+});
+
+test("REVIEW 空组保持只读且不会生成不可提交的脏决策", () => {
+  const raw = rawReviewWorkflow();
+  const empty = sanitizeReviewPage({
+    ...raw,
+    total_image_count: 0,
+    groups: {
+      ...raw.groups,
+      items: [{ ...raw.groups.items[0], images: [] }],
+    },
+  }, { batchId: "batch-123" });
+
+  const store = createStore({ reportError: () => {} });
+  store.dispatch(actionCreators.reviewWorkspaceReceived(empty));
+  store.dispatch(actionCreators.reviewGroupConfirmed("group-1"));
+  assert.equal(store.getState().review.dirty, false);
+  assert.deepEqual(store.getState().review.dirtyGroupIds, []);
+});
+
+test("REVIEW 控制器使用 all=true、串行 50 组 PUT 与权威重读", () => {
+  const source = readFileSync(
+    new URL("../gdl_backend/webui/js/apps/review.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /\?all=true/);
+  assert.match(source, /for \(const chunk of captured\)/);
+  assert.match(source, /await api\.put\(reviewPath\(batchId, "\/decisions"\), chunk/);
+  assert.match(source, /const loaded = await readPage\(/);
+  assert.match(source, /完整草稿与待提交组已保留/);
+  assert.doesNotMatch(source, /api\.put\([^\n]*captured/);
+});
+
+test("REVIEW 决策按 50 组分批且不产生空块", () => {
+  const groups = Array.from({ length: REVIEW_DECISION_BATCH_LIMIT * 2 + 1 }, (_, index) => ({
+    group_id: `group-${index + 1}`,
+    selected_image_ids: [],
+  }));
+  assert.deepEqual(
+    splitReviewDecisionPayload({ groups }).map((chunk) => chunk.groups.length),
+    [REVIEW_DECISION_BATCH_LIMIT, REVIEW_DECISION_BATCH_LIMIT, 1],
+  );
+  assert.throws(() => splitReviewDecisionPayload({ groups: [] }), TypeError);
+});
+
+test("REVIEW LOUPE 基础数值函数严格有限、规范化并冻结结果", () => {
+  assert.equal(loupeClamp(-4, 0, 1), 0);
+  assert.equal(loupeClamp(4, 0, 1), 1);
+  assert.equal(loupeClamp(0.4, 0, 1), 0.4);
+  assert.throws(() => loupeClamp(Number.NaN, 0, 1), TypeError);
+  assert.throws(() => loupeClamp(0, Number.NEGATIVE_INFINITY, 1), TypeError);
+  assert.throws(() => loupeClamp(0, 1, 0), RangeError);
+
+  const source = [3, Number.NaN, 1, Number.POSITIVE_INFINITY, 2];
+  assert.equal(loupeMedian(source), 2);
+  assert.deepEqual(source, [3, Number.NaN, 1, Number.POSITIVE_INFINITY, 2]);
+  assert.equal(loupeMedian([4, 1, 2, 3]), 3); // 沿用 demo 的上中位数
+  assert.equal(loupeMedian([Number.NaN, Number.NEGATIVE_INFINITY]), null);
+  assert.throws(() => loupeMedian(null), TypeError);
+
+  const normalized = normalizeImageDimensions({
+    width: 1984,
+    height: 2806,
+    readable: true,
+    recommended: true,
+    ignored: "不会进入结果",
+  });
+  assert.deepEqual(normalized, {
+    width: 1984,
+    height: 2806,
+    readable: true,
+    recommended: true,
+  });
+  assert.equal(Object.isFrozen(normalized), true);
+  assert.equal(normalizeImageDimensions({ metadata: { w: 1448, h: 2048 } }).width, 1448);
+  for (const bad of [
+    { width: 0, height: 1 },
+    { width: -1, height: 1 },
+    { width: Number.NaN, height: 1 },
+    { width: 1, height: Number.POSITIVE_INFINITY },
+    { width: "1984", height: 2806 },
+    { width: 1, height: 1, readable: 1 },
+    null,
+  ]) {
+    assert.equal(normalizeImageDimensions(bad), null);
+  }
+});
+
+test("REVIEW LOUPE 参考图优先推荐并安全回退", () => {
+  const images = [
+    { width: 100, height: 200, readable: false, recommended: true },
+    { width: 1984, height: 2806, readable: true, recommended: false },
+    { width: 1448, height: 2048, readable: true, recommended: true },
+    { width: 800, height: 1200, readable: false, recommended: false },
+  ];
+  const recommended = selectReferenceImage(images);
+  assert.deepEqual(recommended, {
+    available: true,
+    index: 2,
+    image: { width: 1448, height: 2048, readable: true, recommended: true },
+  });
+  assert.equal(Object.isFrozen(recommended), true);
+  assert.equal(Object.isFrozen(recommended.image), true);
+
+  const fallback = selectReferenceImage(images.map((image) => ({
+    ...image,
+    recommended: false,
+  })));
+  assert.equal(fallback.index, 1);
+  assert.equal(fallback.image.width, 1984);
+
+  const unavailable = selectReferenceImage([
+    { width: 100, height: 200, readable: false },
+    { width: Number.NaN, height: 20, readable: true },
+    { width: 0, height: 20, readable: true },
+  ]);
+  assert.deepEqual(unavailable, { available: false, index: -1, image: null });
+  assert.equal(Object.isFrozen(unavailable), true);
+});
+
+test("REVIEW LOUPE 自适应布局覆盖纵图、横图、混合图与任意数量", () => {
+  const vertical = (count) => Array.from({ length: count }, () => ({
+    width: 1984,
+    height: 2806,
+    readable: true,
+  }));
+  const desktop = (images) => calculateReviewLayout(images, 1200, 800, 12, 160);
+  for (const count of [1, 2, 3, 4]) {
+    const layout = desktop(vertical(count));
+    assert.equal(layout.ratio, 1984 / 2806);
+    assert.equal(layout.columns >= 1 && layout.columns <= count, true);
+    assert.equal(layout.rows, Math.ceil(count / layout.columns));
+    assert.equal(layout.readable, true);
+    assert.equal(Object.isFrozen(layout), true);
+    for (const key of ["tileWidth", "tileHeight", "ratio"]) {
+      assert.equal(Number.isFinite(layout[key]) && layout[key] > 0, true);
+    }
+  }
+
+  for (const count of [2, 3, 4]) {
+    const horizontal = desktop(Array.from({ length: count }, (_, index) => ({
+      width: index ? 3000 : 4000,
+      height: index ? 800 : 1000,
+      readable: true,
+    })));
+    assert.equal(horizontal.ratio, 2.6); // 中位宽高比被规格上限钳制
+    assert.equal(horizontal.readable, true);
+
+    const mixedPool = [
+      { width: 1984, height: 2806, readable: true },
+      { width: 4000, height: 1000, readable: true },
+      { width: 1448, height: 2048, readable: true },
+      { width: 3200, height: 1800, readable: true },
+    ];
+    const mixed = desktop(mixedPool.slice(0, count));
+    assert.equal(mixed.columns >= 1 && mixed.columns <= count, true);
+    assert.equal(mixed.rows, Math.ceil(count / mixed.columns));
+    assert.equal(mixed.readable, true);
+    assert.equal(mixed.ratio >= 0.38 && mixed.ratio <= 2.6, true);
+  }
+
+  const stableMixed = desktop([
+    { width: 1984, height: 2806, readable: true },
+    { width: 4000, height: 1000, readable: true },
+    { width: 1448, height: 2048, readable: true },
+  ]);
+  assert.equal(stableMixed.ratio, (1984 / 2806)); // 三项中位数稳定取中间比例
+
+  const many = vertical(9);
+  const first = calculateReviewLayout(many, 1400, 900, 12, 160);
+  const second = calculateReviewLayout(many, 1400, 900, 12, 160);
+  assert.deepEqual(first, second);
+  assert.equal(first.columns <= 9, true);
+  assert.equal(first.rows, Math.ceil(9 / first.columns));
+
+  const narrow = calculateReviewLayout(vertical(2), 360, 240, 12, 112);
+  assert.equal(narrow.readable, true);
+  const tiny = calculateReviewLayout(vertical(4), 100, 70, 12, 160);
+  assert.equal(tiny.readable, false);
+  assert.equal(tiny.columns >= 1 && tiny.columns <= 4, true);
+  assert.equal(Number.isFinite(tiny.tileWidth) && tiny.tileWidth > 0, true);
+
+  const unreadable = calculateReviewLayout([
+    { width: 1000, height: 1000, readable: false },
+    { width: 900, height: 1200, readable: false },
+  ], 1000, 700, 12, 160);
+  assert.equal(unreadable.readable, false);
+  assert.equal(unreadable.ratio, 1);
+  assert.equal(calculateReviewLayout([], 1000, 700, 12, 160).readable, false);
+});
+
+test("REVIEW LOUPE contain 内容矩形与指针坐标忽略留白和容器偏移", () => {
+  const horizontal = getContainContentRect(
+    { width: 400, height: 200, readable: true },
+    { left: 10, top: 20, width: 500, height: 300 },
+  );
+  assert.deepEqual(horizontal, { left: 10, top: 45, width: 500, height: 250 });
+  const vertical = containContentRect(
+    { width: 200, height: 400, readable: true },
+    { left: 10, top: 20, width: 500, height: 300 },
+  );
+  assert.deepEqual(vertical, { left: 185, top: 20, width: 150, height: 300 });
+
+  assert.deepEqual(
+    normalizePointerCoordinates({ x: 260, y: 170 }, horizontal),
+    { u: 0.5, v: 0.5 },
+  );
+  assert.deepEqual(
+    normalizePointerCoordinates({ x: -100, y: 1000 }, horizontal),
+    { u: 0, v: 1 },
+  );
+  assert.deepEqual(
+    normalizePointerCoordinates({ x: 510, y: 45 }, horizontal),
+    { u: 1, v: 0 },
+  );
+  assert.equal(getContainContentRect({ width: 0, height: 100 }, {
+    left: 0, top: 0, width: 100, height: 100,
+  }), null);
+  assert.throws(() => normalizePointerCoordinates({ x: Number.NaN, y: 1 }, horizontal), TypeError);
+});
+
+test("REVIEW LOUPE 同步 crop 覆盖真实尺寸、倍率、边缘与低分辨率目标", () => {
+  const referenceA = { width: 1984, height: 2806, readable: true, recommended: true };
+  const targetA = { width: 1448, height: 2048, readable: true, recommended: false };
+  const referenceB = { width: 2480, height: 3508, readable: true, recommended: true };
+  const targetB = { width: 848, height: 1199, readable: true, recommended: false };
+  const outputWidth = 200;
+  const outputHeight = 100;
+
+  for (const [target, reference] of [[targetA, referenceA], [targetB, referenceB]]) {
+    for (const magnification of [0.25, 0.5, 1.0]) {
+      for (const [u, v] of [
+        [0.5, 0.5],
+        [0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5],
+        [0, 0], [1, 0], [1, 1], [0, 1],
+      ]) {
+        const crop = calculateSynchronizedCrop(
+          target,
+          reference,
+          outputWidth,
+          outputHeight,
+          magnification,
+          u,
+          v,
+        );
+        assert.equal(Object.isFrozen(crop), true);
+        for (const value of Object.values(crop)) {
+          assert.equal(Number.isFinite(value), true);
+        }
+        assert.equal(crop.sourceWidth > 0 && crop.sourceHeight > 0, true);
+        assert.equal(crop.x >= 0 && crop.y >= 0, true);
+        assert.equal(crop.x + crop.sourceWidth <= target.width + 1e-9, true);
+        assert.equal(crop.y + crop.sourceHeight <= target.height + 1e-9, true);
+        assert.equal(crop.sourceWidth / crop.sourceHeight, outputWidth / outputHeight);
+        if (u === 0) assert.equal(crop.x, 0);
+        if (u === 1) assert.equal(crop.x + crop.sourceWidth, target.width);
+        if (v === 0) assert.equal(crop.y, 0);
+        if (v === 1) assert.equal(crop.y + crop.sourceHeight, target.height);
+      }
+    }
+  }
+
+  const expectedHeight = REFERENCE_PIXEL_HEIGHT * targetA.height / referenceA.height / 0.5;
+  const realPairCrop = calculateSynchronizedCrop(
+    targetA,
+    referenceA,
+    160,
+    160,
+    0.5,
+    0.5,
+    0.5,
+  );
+  assert.equal(realPairCrop.sourceHeight, expectedHeight);
+  assert.equal(realPairCrop.sourceWidth, expectedHeight);
+
+  const fallback = calculateSynchronizedCrop({
+    targetImage: targetA,
+    images: [
+      { ...referenceA, readable: false },
+      { ...referenceB, recommended: true },
+      { ...targetA, recommended: false },
+    ],
+    outputWidth: 160,
+    outputHeight: 160,
+    magnification: 1,
+    u: 0.5,
+    v: 0.5,
+  });
+  assert.equal(fallback.sourceHeight, 160 * targetA.height / referenceB.height);
+
+  const tinyTarget = calculateSynchronizedCrop({
+    targetImage: { width: 100, height: 100, readable: true },
+    referenceImage: { width: 200, height: 200, readable: true },
+    outputWidth: 400,
+    outputHeight: 100,
+    magnification: 0.25,
+    u: 0.5,
+    v: 0.5,
+  });
+  assert.equal(tinyTarget.sourceWidth <= 100, true);
+  assert.equal(tinyTarget.sourceHeight <= 100, true);
+  assert.equal(tinyTarget.sourceWidth / tinyTarget.sourceHeight, 4);
+  assert.equal(tinyTarget.x, 0);
+  assert.equal(tinyTarget.y, (100 - tinyTarget.sourceHeight) / 2);
+  assert.equal(tinyTarget.y >= 0 && tinyTarget.y + tinyTarget.sourceHeight <= 100, true);
+
+  assert.throws(() => calculateSynchronizedCrop(undefined, referenceA, 100, 100), TypeError);
+  assert.equal(calculateSynchronizedCrop(
+    { width: 100, height: 100, readable: false },
+    referenceA,
+    100,
+    100,
+    0.5,
+    0.5,
+    0.5,
+  ), null);
+  assert.equal(calculateSynchronizedCrop({
+    targetImage: targetA,
+    images: [{ width: 10, height: 10, readable: false }],
+    outputWidth: 100,
+    outputHeight: 100,
+    magnification: 0.5,
+    u: 0.5,
+    v: 0.5,
+  }), null);
+});
+
+test("REVIEW LOUPE 倍率指数滚轮、上下限与稳定标签", () => {
+  assert.equal(DEFAULT_MAGNIFICATION, 0.5);
+  assert.equal(MIN_MAGNIFICATION, 0.25);
+  assert.equal(MAX_MAGNIFICATION, 1.0);
+  assert.equal(updateMagnification(0.5, -100), 0.59);
+  assert.equal(updateMagnification(0.5, 100), 0.42372881355932207);
+  let zoom = DEFAULT_MAGNIFICATION;
+  for (let index = 0; index < 200; index += 1) zoom = updateMagnification(zoom, -1000);
+  assert.equal(zoom, 1.0);
+  assert.equal(formatMagnification(zoom), "1:1");
+  for (let index = 0; index < 400; index += 1) zoom = updateMagnification(zoom, 1000);
+  assert.equal(zoom, 0.25);
+  assert.equal(formatMagnification(0.25), "0.25x");
+  assert.equal(formatMagnification(0.5), "0.50x");
+  assert.equal(formatMagnification(1), "1:1");
+  assert.equal(updateMagnification({ magnification: 0.5, delta: -100 }), 0.59);
+  assert.ok(Math.abs(updateMagnification(0.5, -1, { deltaMode: 1 }) - 0.5134180412656631) < 1e-12);
+  for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    assert.throws(() => updateMagnification(0.5, value), TypeError);
+    assert.throws(() => updateMagnification(value, -1), TypeError);
+    assert.throws(() => formatMagnification(value), TypeError);
+  }
+  assert.throws(() => updateMagnification(0, -1), RangeError);
+  assert.throws(() => updateMagnification(0.5, -1, { deltaMode: 4 }), TypeError);
+});
+
+test("REVIEW LOUPE 源码保持纯内核且不含浏览器、网络或持久化依赖", () => {
+  const source = readFileSync(
+    new URL("../gdl_backend/webui/js/core/review-loupe.js", import.meta.url),
+    "utf8",
+  );
+  for (const forbidden of ["document", "window", "localStorage", "sessionStorage", "fetch"]) {
+    assert.equal(source.includes(forbidden), false, forbidden);
+  }
+  assert.equal(source.includes("getContext"), false);
+  assert.equal(source.includes("requestAnimationFrame"), false);
+});
 test("DIAG happy path 只保留能力、组件和计数白名单", () => {
   const config = {
     response_profile: "diagnostics",

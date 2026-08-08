@@ -9,9 +9,8 @@ import { sanitizePolicyResponse, validatePolicySnapshot } from "./policy-model.j
 import { sanitizeProxySources, sanitizeProxyStatus } from "./proxy-model.js";
 import {
   markReviewPageSaved,
+  markReviewGroupDirty,
   sanitizeReviewSummary,
-  setReviewGroupMode,
-  setReviewPageMode,
   updateReviewImageSelection,
   validateReviewState,
 } from "./review-model.js";
@@ -51,9 +50,7 @@ export const ACTION_TYPES = Object.freeze({
   REVIEW_WORKSPACE_RECEIVED: "review/workspaceReceived",
   REVIEW_SUMMARY_RECEIVED: "review/summaryReceived",
   REVIEW_IMAGE_SELECTION_CHANGED: "review/imageSelectionChanged",
-  REVIEW_GROUP_MODE_CHANGED: "review/groupModeChanged",
   REVIEW_GROUP_CONFIRMED: "review/groupConfirmed",
-  REVIEW_PAGE_MODE_CHANGED: "review/pageModeChanged",
   REVIEW_PAGE_SAVED: "review/pageSaved",
   REVIEW_CLEARED: "review/cleared",
   UI_WINDOW_OPENED: "ui/windowOpened",
@@ -133,9 +130,10 @@ export function createInitialState({ windows = [] } = {}) {
       groups: [],
       filter: "",
       offset: 0,
-      limit: 8,
+      limit: 0,
       total: 0,
       dirty: false,
+      dirtyGroupIds: [],
     },
     ui: {
       windows: normalizedWindows,
@@ -424,9 +422,10 @@ function emptyReviewState(batchId = "") {
     groups: [],
     filter: "",
     offset: 0,
-    limit: 8,
+    limit: 0,
     total: 0,
     dirty: false,
+    dirtyGroupIds: [],
   };
 }
 
@@ -592,18 +591,10 @@ function reduceRootState(state, action) {
           requireBoolean(action.payload?.selected, "审核图片选择状态"),
         ),
       };
-    case ACTION_TYPES.REVIEW_GROUP_MODE_CHANGED:
-      return {
-        ...state,
-        review: setReviewGroupMode(state.review, action.payload?.groupId, action.payload?.mode),
-      };
     case ACTION_TYPES.REVIEW_GROUP_CONFIRMED: {
-      const groupId = action.payload?.groupId;
-      if (state.review.dirty || !state.review.groups.some((group) => group.id === groupId)) return state;
-      return { ...state, review: { ...state.review, dirty: true } };
+      const review = markReviewGroupDirty(state.review, action.payload?.groupId);
+      return review === state.review ? state : { ...state, review };
     }
-    case ACTION_TYPES.REVIEW_PAGE_MODE_CHANGED:
-      return { ...state, review: setReviewPageMode(state.review, action.payload?.mode) };
     case ACTION_TYPES.REVIEW_PAGE_SAVED:
       return { ...state, review: markReviewPageSaved(state.review, action.payload?.summary) };
     case ACTION_TYPES.REVIEW_CLEARED:
@@ -756,17 +747,10 @@ export const actionCreators = Object.freeze({
   reviewImageSelectionChanged(groupId, imageId, selected) {
     return action(ACTION_TYPES.REVIEW_IMAGE_SELECTION_CHANGED, { groupId, imageId, selected });
   },
-  reviewGroupModeChanged(groupId, mode) {
-    return action(ACTION_TYPES.REVIEW_GROUP_MODE_CHANGED, { groupId, mode });
-  },
   reviewGroupConfirmed(groupId) {
     return action(ACTION_TYPES.REVIEW_GROUP_CONFIRMED, { groupId });
   },
-  reviewPageModeChanged(mode) {
-    return action(ACTION_TYPES.REVIEW_PAGE_MODE_CHANGED, { mode });
-  },
-  reviewPageSaved(summary) {
-    const batchId = typeof summary?.batch_id === "string" ? summary.batch_id : "";
+  reviewPageSaved(summary, batchId = summary?.batch_id || summary?.batchId) {
     return action(ACTION_TYPES.REVIEW_PAGE_SAVED, {
       summary: sanitizeReviewSummary(summary, batchId),
     });

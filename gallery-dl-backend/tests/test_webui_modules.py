@@ -69,6 +69,7 @@ class WebUiModuleTests(unittest.TestCase):
             *(webui / "js" / "apps").glob("*.js"),
             *(webui / "js" / "components").glob("*.js"),
             *(webui / "js" / "core").glob("*-model.js"),
+            webui / "js" / "core" / "review-loupe.js",
         ]
         combined = "\n".join(path.read_text(encoding="utf-8") for path in business_paths)
         for forbidden in (
@@ -80,6 +81,13 @@ class WebUiModuleTests(unittest.TestCase):
             "console.",
         ):
             self.assertNotIn(forbidden, combined)
+
+        loupe = (webui / "js" / "core" / "review-loupe.js").read_text(
+            encoding="utf-8"
+        )
+        for forbidden in ("document", "window", "localStorage", "sessionStorage", "fetch"):
+            self.assertNotIn(forbidden, loupe)
+        self.assertIn("Object.freeze", loupe)
 
         proxy = app_sources["proxy.js"]
         vault = app_sources["vault.js"]
@@ -96,6 +104,8 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn('BATCH_POLL_KEY = "batches.active"', tasks)
         self.assertIn("queueMicrotask", tasks)
         self.assertIn('REVIEW_POLL_KEY = "review.active"', review)
+        self.assertIn("?all=true", review)
+        self.assertIn("splitReviewDecisionPayload", review)
         self.assertIn("queueMicrotask", review)
         self.assertIn('DIAGNOSTICS_POLL_KEY = "diagnostics.snapshot"', diagnostics)
         self.assertNotIn("/api/", personalization)
@@ -161,6 +171,292 @@ class WebUiModuleTests(unittest.TestCase):
                     selector_call.search(source),
                     f"{path.relative_to(backend_root)} 必须只在窗口根元素内查询 DOM",
                 )
+
+    def test_review_focus_deck_static_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        review_app = (webui / "js" / "apps" / "review.js").read_text(
+            encoding="utf-8"
+        )
+        review_view = (
+            webui / "js" / "components" / "review-view.js"
+        ).read_text(encoding="utf-8")
+        review_model = (
+            webui / "js" / "core" / "review-model.js"
+        ).read_text(encoding="utf-8")
+        review_loupe = (
+            webui / "js" / "core" / "review-loupe.js"
+        ).read_text(encoding="utf-8")
+        review_css = (
+            webui / "styles" / "apps" / "review.css"
+        ).read_text(encoding="utf-8")
+
+        # 全量选择器已经完全替代胶片条、服务端页按钮和跨页命令。
+        for retired in (
+            "filmstrip",
+            "review-deck-film",
+            "review-deck-page",
+            "prev-page",
+            "next-page",
+            "上一页",
+            "下一页",
+        ):
+            self.assertNotIn(retired, review_view + review_css)
+        self.assertIn('dataset: { reviewGroupSelect: "" }', review_view)
+        self.assertIn('"aria-label": "当前筛选全量组选择器"', review_view)
+        self.assertIn("review.groups.map((group, index)", review_view)
+
+        # review 元数据只通过 all=true 读取；底部只保留两枚组导航按钮与三行纯文本提示。
+        self.assertIn('return `${reviewPath(batchId)}?all=true${kind}`;', review_app)
+        self.assertEqual(review_app.count("api.get(reviewWorkspacePath("), 2)
+        self.assertNotIn("api.get(reviewPath(", review_app)
+        command_start = review_view.index("const commandHost =")
+        command_end = review_view.index("const deckLiveHost =", command_start)
+        command_source = review_view[command_start:command_end]
+        self.assertEqual(command_source.count("button("), 2)
+        self.assertEqual(command_source.count('button("prev-group"'), 1)
+        self.assertEqual(command_source.count('button("next-group"'), 1)
+        self.assertEqual(review_view.count('button("prev-group"'), 1)
+        self.assertEqual(review_view.count('button("next-group"'), 1)
+        self.assertEqual(command_source.count('createElement("span"'), 3)
+        self.assertIn('className: "review-shortcut-hints"', command_source)
+        for hint in (
+            "方向键  移动选中",
+            "Space  切换保留",
+            "Enter  采纳并前进",
+        ):
+            self.assertEqual(command_source.count(f'text: "{hint}"'), 1, hint)
+        self.assertNotIn("<kbd", command_source)
+        self.assertNotIn('className: "review-deck-command"', command_source)
+        self.assertNotIn("放大镜", command_source)
+        self.assertNotIn('keyShortcuts: "x"', command_source)
+        self.assertIn('title: "快捷键 Backspace：返回上一组"', command_source)
+        self.assertIn('keyShortcuts: "Backspace"', command_source)
+        self.assertIn('"aria-keyshortcuts": keyShortcuts || null', review_view)
+
+        # 四方向键在线性图片序列内 clamp；Enter 在只读模式浏览下一组，Backspace 返回上一组。
+        for fingerprint in (
+            'key === "Backspace"',
+            'return "previous-group"',
+            '(key === "ArrowLeft" || key === "ArrowUp")',
+            '(key === "ArrowRight" || key === "ArrowDown")',
+            'key === " " && editable',
+            'key === "Enter" && editable',
+            'key === "Enter" && readOnly',
+            '(key === "x" || key === "X") && loupeAvailable',
+            'return "focus-previous-image"',
+            'return "focus-next-image"',
+            'return "toggle-active-image"',
+            'return "accept-advance"',
+            'return "browse-next-group"',
+            'return "toggle-loupe"',
+            "deckImageStepTarget",
+            "Math.max(0, Math.min(activeIndex + direction, imageCount - 1))",
+        ):
+            self.assertIn(fingerprint, review_model)
+        for fingerprint in (
+            'action === "prev-group"',
+            'action === "next-group"',
+            'command === "previous-group"',
+            'command === "focus-previous-image"',
+            'command === "focus-next-image"',
+            'command === "toggle-active-image"',
+            'command === "accept-advance"',
+            'command === "browse-next-group"',
+            'command === "toggle-loupe"',
+            "view.setActiveImage(nextImage.id, { focus: true })",
+            "toggleImage(group.id, imageId, { focus: true })",
+            "view.isLoupeAvailable()",
+            "view.toggleLoupe()",
+            'readOnly: review.summary.status !== "ready"',
+            'command === "browse-next-group") return navigateGroup(1)',
+            'event.target.closest("input, select, textarea, button, a[href], [contenteditable]")',
+            "event.isComposing",
+            "event.altKey",
+            "event.ctrlKey",
+            "event.metaKey",
+            "放大镜已启动；在图片内移动鼠标即可同步检查。",
+            "放大镜已关闭；倍率会保留到下次启动。",
+        ):
+            self.assertIn(fingerprint, review_app)
+        self.assertIn(
+            'loupeToggleButton.setAttribute("aria-keyshortcuts", "x")',
+            review_view,
+        )
+        self.assertIn('title: "快捷键 X：开启或关闭同步放大镜"', review_view)
+        self.assertIn('dataset: { reviewEnterHint: "" }', review_view)
+        self.assertIn('? "Enter  下一组"', review_view)
+        self.assertIn(': "Enter  采纳并前进"', review_view)
+        self.assertNotIn("镜片 · 同步 · 锐利", review_view + review_css)
+        self.assertNotIn("review-loupe-label", review_view + review_css)
+
+        # 活动图片必须有独立于保留/移除状态的显眼标记和无障碍当前项状态。
+        for fingerprint in (
+            'className: "review-image-active-marker"',
+            'text: "当前选中"',
+            '"aria-current": String(image.id === activeImageId)',
+            'card.setAttribute("aria-current", String(active))',
+        ):
+            self.assertIn(fingerprint, review_view)
+        self.assertRegex(
+            review_css,
+            r'\.review-image-card\[data-active="true"\]\s*\{[^}]*opacity:\s*1;[^}]*outline:\s*6px double',
+        )
+        self.assertRegex(
+            review_css,
+            r'\.review-image-card\[data-active="true"\]\s+\.review-image-active-marker\s*\{\s*display:\s*block;',
+        )
+        self.assertIn(".review-image-active-marker,", review_css)
+
+        for retired in (
+            "deckJumpTarget",
+            "jumpGroups",
+            "jump-backward",
+            "jump-forward",
+            "first-group",
+            "last-group",
+            'key === "PageUp"',
+            'key === "PageDown"',
+            'key === "Home"',
+            'key === "End"',
+        ):
+            self.assertNotIn(retired, review_app + review_model + review_view)
+
+        # 正式 view 必须实际消费全部镜片/布局纯函数，而不是只导入未接线。
+        for symbol in (
+            "calculateReviewLayout",
+            "getContainContentRect",
+            "normalizePointerCoordinates",
+            "calculateSynchronizedCrop",
+            "updateMagnification",
+        ):
+            self.assertGreaterEqual(review_view.count(symbol), 2, symbol)
+
+        # 默认关闭、RAF/observer、DPR 与锐利 Canvas 降级契约继续保留。
+        for fingerprint in (
+            "enabled: false",
+            'setAttribute("aria-pressed"',
+            'setAttribute("aria-disabled"',
+            "new globalThis.ResizeObserver",
+            "requestFrame(applyLayout)",
+            "MAX_CANVAS_DPR = 2",
+            "Math.min(MAX_CANVAS_DPR, globalThis.devicePixelRatio || 1)",
+            "context2d.imageSmoothingEnabled = false",
+            'CANVAS_ERROR_TEXT = "读取受限"',
+            'renderMode: "nearest"',
+            "canvas.dataset.sourceLeft",
+            "canvas.dataset.sourceTop",
+            "canvas.dataset.sourceWidth",
+            "canvas.dataset.sourceHeight",
+            "canvas.dataset.edgeClamped",
+        ):
+            self.assertIn(fingerprint, review_view)
+
+        # 图片窗口只能由当前组和一个相邻组组成，所有生命周期都释放媒体与异步资源。
+        self.assertEqual(review_view.count("const neighborIndex ="), 1)
+        self.assertIn("focusedIndex + 1 < review.groups.length", review_view)
+        self.assertIn("focusedIndex - 1", review_view)
+        self.assertIn("adjacentPreviews.push(preview)", review_view)
+        for fingerprint in (
+            'image.removeAttribute("src")',
+            "releaseStageImages();",
+            "releasePreloads();",
+            "disconnectLayoutObserver();",
+            "cancelHide();",
+            "cancelDraw();",
+            'root.removeEventListener("pointermove"',
+            "unsubscribeRecent();",
+            "unsubscribeReview();",
+        ):
+            self.assertIn(fingerprint, review_view)
+        self.assertIn("view.deactivate();", review_app)
+        self.assertIn("view.destroy();", review_app)
+
+        # 桌面鼠标镜片、checkbox 语义与舞台级键盘操作保留，移动/触控专用逻辑必须不存在。
+        for fingerprint in (
+            'event.pointerType && event.pointerType !== "mouse"',
+            'event.target.closest("[data-review-image]")',
+            "getActiveImageId: () => activeImageId",
+            "isLoupeAvailable: () => loupeAvailable",
+            'role: "checkbox"',
+            'tabindex: "0"',
+        ):
+            self.assertIn(fingerprint, review_app + review_view)
+        for retired in (
+            "TOUCH_DRAG_THRESHOLD",
+            "touchGesture",
+            "suppressedClickImageId",
+            "consumeSuppressedCardClick",
+            "card.click();",
+            'addEventListener("pointerdown"',
+            'addEventListener("pointerup"',
+            'addEventListener("pointercancel"',
+            'event.key.toLowerCase() === "p"',
+            'event.key === "Escape"',
+        ):
+            self.assertNotIn(retired, review_app + review_view)
+
+        # 指标侧栏、图片参数条和批量模式均已删除，舞台独占主体列。
+        for retired in (
+            "review-deck-inspector",
+            "review-metrics",
+            "review-metric",
+            "review-image-fact",
+            "toggle-inspector",
+            "filter-all",
+            "filter-none",
+            "filter-recommended",
+            "group-all",
+            "group-none",
+            "group-recommended",
+            "属性 / 指标",
+            "matchLevels",
+            "jpegQuality",
+        ):
+            self.assertNotIn(retired, review_app + review_view + review_model + review_css)
+        self.assertRegex(
+            review_css,
+            r"\.review-deck-body\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)",
+        )
+
+        # 不可读图不创建镜片；加载失败会销毁无效 Canvas 并重算按钮可用性。
+        self.assertIn("if (image.readable) {", review_view)
+        self.assertIn("failedCanvas?.remove();", review_view)
+        self.assertIn("loupeAvailable = group.images.some", review_view)
+        self.assertIn("if (!group.images.length)", review_view)
+
+        # REVIEW 不再包含移动端/小视口 CSS，仅保留纯可访问性媒体查询。
+        for retired in (
+            "@media (max-width",
+            "@media (max-height",
+            "@media (pointer: coarse)",
+            "touch-action",
+        ):
+            self.assertNotIn(retired, review_css)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", review_css)
+        self.assertIn("@media (forced-colors: active)", review_css)
+
+        # review 运行时代码不得旁路 API、写存储、创建私有 URL 或使用全局 document selector。
+        combined = "\n".join((review_app, review_view, review_model, review_loupe))
+        for forbidden in (
+            "innerHTML",
+            "fetch(",
+            "globalThis.fetch",
+            "XMLHttpRequest",
+            "localStorage",
+            "sessionStorage",
+            "new Blob",
+            "URL.createObjectURL",
+            "data:image",
+            "error.message",
+            ".details",
+        ):
+            self.assertNotIn(forbidden, combined)
+        self.assertIsNone(
+            re.search(r"\bdocument\s*\.\s*(?:querySelector|getElementById)\s*\(", combined)
+        )
+        self.assertNotRegex(review_model, r"\b(?:relative_path|analysis_log_path)\s*:")
+        self.assertNotRegex(review_view, r"\b(?:relative_path|analysis_log_path|raw_url)\b")
 
     def test_polling_focus_t14_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
@@ -853,6 +1149,10 @@ class WebUiModuleTests(unittest.TestCase):
             shutil.copytree(
                 source_webui / "js",
                 test_root / "gdl_backend" / "webui" / "js",
+            )
+            shutil.copytree(
+                source_webui / "styles",
+                test_root / "gdl_backend" / "webui" / "styles",
             )
             (test_root / "tests").mkdir()
             shutil.copy2(source_test, test_root / "tests" / source_test.name)

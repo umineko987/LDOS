@@ -9,7 +9,8 @@
 
 This module extracts the relevant protocol flow from
 ``gallery_dl.extractor.exhentai`` and only depends on ``requests``.  See
-``docs/eh-reference/README.md`` for integration and rate-limit notes.
+the repository-local ``/docs/eh-protocol-reference.md`` for integration and
+rate-limit notes.
 It intentionally exposes small methods that can be copied into another
 application:
 
