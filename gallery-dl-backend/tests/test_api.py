@@ -18,6 +18,18 @@ from gdl_backend.site import SiteInfo
 from tests.helpers import local_test_client, make_settings
 
 
+def _json_strings(value: object):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield str(key)
+            yield from _json_strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _json_strings(item)
+
+
 class _FakeMonotonicClock:
     def __init__(self, now: float = 0.0) -> None:
         self.now = float(now)
@@ -274,14 +286,17 @@ class ApiTests(unittest.TestCase):
     def test_diagnostics_profiles_are_minimal_and_legacy_compatible(self):
         legacy_config = self.client.get("/api/v1/config")
         self.assertEqual(legacy_config.status_code, 200, legacy_config.text)
-        self.assertIn("runtime_dir", legacy_config.json())
-        self.assertIn(str(self.settings.runtime_dir), legacy_config.text)
+        legacy_payload = legacy_config.json()
+        self.assertIn("runtime_dir", legacy_payload)
+        self.assertEqual(legacy_payload["runtime_dir"], str(self.settings.runtime_dir))
 
         safe_config = self.client.get("/api/v1/config?view=diagnostics")
         self.assertEqual(safe_config.status_code, 200, safe_config.text)
-        self.assertEqual(safe_config.json()["response_profile"], "diagnostics")
-        self.assertFalse(safe_config.json()["secrets_exposed"])
-        self.assertTrue(safe_config.json()["server"]["loopback_only"])
+        safe_payload = safe_config.json()
+        self.assertEqual(safe_payload["response_profile"], "diagnostics")
+        self.assertFalse(safe_payload["secrets_exposed"])
+        self.assertTrue(safe_payload["server"]["loopback_only"])
+        safe_strings = tuple(_json_strings(safe_payload))
         for forbidden in (
             str(self.settings.runtime_dir),
             str(self.settings.database_path),
@@ -292,7 +307,10 @@ class ApiTests(unittest.TestCase):
             "authorization_proxy",
             "subscription_urls",
         ):
-            self.assertNotIn(forbidden, safe_config.text)
+            self.assertFalse(
+                any(forbidden in value for value in safe_strings),
+                forbidden,
+            )
 
         legacy_scheduler = self.client.get("/api/v1/scheduler/status")
         self.assertEqual(legacy_scheduler.status_code, 200, legacy_scheduler.text)
@@ -398,6 +416,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status_styles.status_code, 200)
         main_source = self.client.get("/ui/js/main.js")
         self.assertEqual(main_source.status_code, 200)
+        desktop_style_text = desktop_styles.text.replace("\r\n", "\n")
         self.assertIn(':root[data-motion="off"]', status_styles.text)
         self.assertIn(
             "@media (prefers-reduced-motion: reduce)",
@@ -423,15 +442,15 @@ class ApiTests(unittest.TestCase):
         self.assertIn("motion: motionController", main_source.text)
         self.assertIn("personalization: personalizationController", main_source.text)
         separator = ".desktop-wallpaper {"
-        self.assertIn(separator, desktop_styles.text)
-        wallpaper_rule = desktop_styles.text.partition(separator)[2].partition("}")[0]
+        self.assertIn(separator, desktop_style_text)
+        wallpaper_rule = desktop_style_text.partition(separator)[2].partition("}")[0]
         self.assertIn("background: #20242a;", wallpaper_rule.lower())
         self.assertIn("pointer-events: none;", wallpaper_rule)
         self.assertNotIn("animation", wallpaper_rule)
         self.assertNotIn("transition", wallpaper_rule)
         self.assertIn(
             ".desktop-wallpaper__image,\n.desktop-wallpaper__mask {",
-            desktop_styles.text,
+            desktop_style_text,
         )
         for color_id, color_value in {
             "graphite": "#20242a",
@@ -443,11 +462,11 @@ class ApiTests(unittest.TestCase):
         }.items():
             self.assertIn(
                 f".desktop-wallpaper--{color_id} {{\n  background: {color_value};",
-                desktop_styles.text.lower(),
+                desktop_style_text.lower(),
             )
 
         static_background_sources = "\n".join(
-            (index.text, desktop_styles.text, main_source.text)
+            (index.text, desktop_style_text, main_source.text)
         ).lower()
         for forbidden in (
             "cloud-background",
@@ -1084,7 +1103,7 @@ class ApiTests(unittest.TestCase):
             json={"url": "https://x.com/example/status/123456", "proxy_mode": "direct"},
         )
         self.assertEqual(response.status_code, 202, response.text)
-        self.assertEqual(response.json()["cookies_file"], str(cookie_path))
+        self.assertEqual(response.json()["cookies_file"], str(cookie_path.resolve()))
 
     def _policy_view_payload(self, **overrides):
         payload = {

@@ -283,7 +283,9 @@ class ManagedProxySourceStoreTests(unittest.TestCase):
             store.set_node_file(str(outside))
         with self.assertRaises(ProxySourceValidationError) as directory_error:
             store.set_node_file(str(self.allowed_root))
-        self.assertEqual(directory_error.exception.reason, "not_regular")
+        # Windows 的 os.open 会在 fstat 前拒绝目录；POSIX 则能打开后判定文件类型。
+        expected_reason = "unavailable" if os.name == "nt" else "not_regular"
+        self.assertEqual(directory_error.exception.reason, expected_reason)
 
         invalid_encoding = self.allowed_root / "invalid.txt"
         invalid_encoding.write_bytes(b"\xff\xfe\xff")

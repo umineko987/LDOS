@@ -492,8 +492,8 @@ class ProxyNodeRootConfigTests(unittest.TestCase):
             self.assertEqual(
                 settings.proxy.allowed_node_roots,
                 [
-                    Path(os.path.abspath(root / "subscriptions")),
-                    Path(os.path.abspath(root / "external" / "nodes")),
+                    (root / "subscriptions").resolve(),
+                    (root / "external" / "nodes").resolve(),
                 ],
             )
             public = settings.public_dict()["proxy"]["allowed_node_roots"]
@@ -506,7 +506,7 @@ class ProxyNodeRootConfigTests(unittest.TestCase):
             settings = AppSettings.load(self._write_config(root, {}))
             self.assertEqual(
                 settings.proxy.allowed_node_roots,
-                [Path(os.path.abspath(root / ".." / "subscriptions"))],
+                [(root / ".." / "subscriptions").resolve()],
             )
 
     def test_empty_or_overbroad_node_root_is_rejected(self):
