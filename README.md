@@ -6,8 +6,8 @@ ImageWeave 是一个在本机运行的插画与图库采集工作台。它通过
 [gallery-dl](https://codeberg.org/mikf/gallery-dl) 批次下载、任务管理、代理与站点授权，以及图片去重审核整合在一起。
 WebUI 由后端直接提供，不需要 Node.js 或单独启动前端服务。
 
-> 当前自动化验证主要覆盖 Linux x86_64 纯 CPU 路径。仓库提供 Windows 和 NVIDIA CUDA 12.8
-> 安装脚本，但这两条路径尚未纳入现有 CI。
+> 自动化工作流覆盖 Linux x86_64 与 Windows x64 纯 CPU 快速门槛；真实模型闭环配置为每周及手动运行。
+> 仓库也提供 NVIDIA CUDA 12.8 安装脚本，但 CUDA 路径尚未纳入现有 CI。
 
 ## 核心功能
 
@@ -109,8 +109,9 @@ GDL_BACKEND_CONFIG=/path/to/config.json ./scripts/run.sh --port 8788
 
 ## Windows 安装
 
-Windows 当前没有一键安装器；以下命令需要在仓库根目录的 PowerShell 中执行，并且未由现有 CI 自动验证。
-如果 PowerShell 拒绝执行本地脚本，可以先只为当前进程放行：
+Windows 当前没有一键安装器；以下命令需要在仓库根目录的 PowerShell 中执行。Windows x64 纯 CPU
+路径已纳入 CI，CUDA 12.8 路径尚未在 GPU runner 上验证。如果 PowerShell 拒绝执行本地脚本，
+可以先只为当前进程放行：
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -135,6 +136,8 @@ python -m venv .\gallery-dl-backend\.venv
 # 或 NVIDIA CUDA 12.8
 .\setup-dedup.ps1 -Device cuda
 ```
+
+若只想验证锁定依赖、暂不下载模型，可添加 `-SkipModels`；启用去重前必须重新运行不带该参数的命令。
 
 首次创建配置：
 

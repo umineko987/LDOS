@@ -2,7 +2,8 @@ param(
     [ValidateSet("cpu", "cuda")]
     [string]$Device = "cuda",
     [string]$ProxyUrl = "",
-    [switch]$NoProxy
+    [switch]$NoProxy,
+    [switch]$SkipModels
 )
 
 $ErrorActionPreference = "Stop"
@@ -117,9 +118,13 @@ if ($LASTEXITCODE -ne 0) {
     throw "$deviceName 环境校验失败。"
 }
 
-& $venvPython $scriptPath --prepare-models --device $deviceName
-if ($LASTEXITCODE -ne 0) {
-    throw "准备 SSCD/DINOv2 模型失败。"
+if ($SkipModels) {
+    Write-Host "跳过模型下载；启用去重前请重新运行不带 -SkipModels 的命令。"
+    Write-Host "环境准备完成：device=$deviceName, python=$venvPython"
+} else {
+    & $venvPython $scriptPath --prepare-models --device $deviceName
+    if ($LASTEXITCODE -ne 0) {
+        throw "准备 SSCD/DINOv2 模型失败。"
+    }
+    Write-Host "环境与模型准备完成：device=$deviceName, python=$venvPython"
 }
-
-Write-Host "环境与模型准备完成：device=$deviceName, python=$venvPython"

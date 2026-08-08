@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import resource
 import subprocess
 import sys
 import tempfile
@@ -14,6 +13,11 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw
+
+try:
+    import resource
+except ImportError:  # Windows 不提供 resource；模型闭环本身仍可完整验证。
+    resource = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,7 +76,7 @@ def health_probe(url: str) -> tuple[bool, float]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="真实 SSCD+DINOv2 Linux CPU worker 闭环")
+    parser = argparse.ArgumentParser(description="真实 SSCD+DINOv2 CPU worker 闭环")
     parser.add_argument("--base-images", type=int, default=4, help="基础图数量；实际图片为两倍")
     parser.add_argument("--model-dir", type=Path, default=ROOT / ".models")
     parser.add_argument("--work-dir", type=Path, help="保留样本、manifest 与日志；默认使用临时目录")
@@ -174,7 +178,11 @@ def main() -> int:
         if probes and probe_failures:
             raise RuntimeError(f"worker 运行期间 /healthz 失败 {probe_failures}/{probes} 次")
 
-        peak_rss_kib = int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
+        peak_rss_kib = (
+            int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
+            if resource is not None
+            else None
+        )
         report = {
             "ok": True,
             "generated_images": image_count,
