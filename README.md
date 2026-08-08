@@ -1,6 +1,6 @@
 # ImageWeave
 
-![ImageWeave 桌面式 WebUI](./assets/imageweave-webui.png)
+![ImageWeave 桌面式 WebUI](./assets/example.png)
 
 ImageWeave 是一个在本机运行的插画与图库采集工作台。它通过桌面式 WebUI，把跨站来源发现、
 [gallery-dl](https://codeberg.org/mikf/gallery-dl) 批次下载、任务管理、代理与站点授权，以及图片去重审核整合在一起。
