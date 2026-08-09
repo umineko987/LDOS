@@ -21,11 +21,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api_routes import create_auth_router, create_diagnostics_router
-from .api_routes.body_limits import (
-    enforce_policy_body_limit,
-    enforce_proxy_source_body_limit,
+from .api_routes import (
+    create_auth_router,
+    create_diagnostics_router,
+    create_proxy_router,
 )
+from .api_routes.body_limits import enforce_policy_body_limit
 from .api_routes.dependencies import get_service
 from .api_routes.errors import ApiError
 from .api_routes.validation import (
@@ -45,10 +46,7 @@ from .database import (
     MAX_CRAWL_REVIEW_GROUPS,
     TERMINAL_STATUSES,
 )
-from .diagnostics import (
-    diagnostics_proxy_health_snapshot,
-    diagnostics_scheduler_snapshot,
-)
+from .diagnostics import diagnostics_scheduler_snapshot
 from .discovery import (
     DiscoveryError,
     DiscoveryService,
@@ -73,30 +71,14 @@ from .policy_view import (
     policy_view_snapshot,
     safe_policy_dict,
 )
-from .proxy import ProxyPoolAdapter, ProxyPoolConflict, ProxyPoolError
-from .proxy_source_store import (
-    ManagedProxySourceStore,
-    ProxySourceNotFound,
-    ProxySourcePathForbidden,
-    ProxySourceSnapshot,
-    ProxySourceStoreConflict,
-    ProxySourceStoreCorrupt,
-    ProxySourceStoreError,
-    ProxySourceValidationError,
-)
+from .proxy import ProxyPoolAdapter
+from .proxy_source_store import ManagedProxySourceStore
 from .redaction import redact_text, safe_exception_category
 from .review import DedupReviewManager, resolve_review_file
 from .scheduler import TaskScheduler
 from .schemas import (
     CrawlRerunRequest,
     CrawlRequest,
-    ProxyInlineNodesCreate,
-    ProxyInlineNodeUpdate,
-    ProxyNodeFileUpdate,
-    ProxyProbeRequest,
-    ProxyStartRequest,
-    ProxyStopRequest,
-    ProxySubscriptionUpdate,
     RetryRequest,
     ReviewDecisions,
     SearchRequest,
@@ -540,6 +522,7 @@ def create_app(
 
     app.include_router(create_diagnostics_router(settings))
     app.include_router(create_auth_router())
+    app.include_router(create_proxy_router())
     api = APIRouter(prefix="/api/v1")
 
     def _allowed_request_files(
@@ -2082,211 +2065,6 @@ def create_app(
                 "site": name,
             }
         return {"deleted": True, "site": name}
-
-    def _raise_proxy_source_error(exc: ProxySourceStoreError) -> None:
-        if isinstance(exc, ProxySourceNotFound):
-            raise ApiError(404, "proxy_source_not_found", exc.message) from exc
-        if isinstance(exc, ProxySourcePathForbidden):
-            raise ApiError(
-                422,
-                "proxy_source_path_forbidden",
-                exc.message,
-                exc.details,
-            ) from exc
-        if isinstance(exc, ProxySourceValidationError):
-            code = {
-                "subscription": "invalid_proxy_subscription",
-                "inline_node": "invalid_proxy_inline_node",
-                "node_file": "invalid_proxy_node_file",
-                "source_id": "invalid_proxy_source_id",
-            }[exc.category]
-            raise ApiError(422, code, exc.message, exc.details) from exc
-        if isinstance(exc, (ProxySourceStoreCorrupt, ProxySourceStoreConflict)):
-            raise ApiError(
-                409,
-                "proxy_sources_store_error",
-                exc.message,
-                {"reason": exc.reason},
-            ) from exc
-        raise ApiError(
-            503,
-            "proxy_sources_store_error",
-            exc.message,
-            {"reason": exc.reason},
-        ) from exc
-
-    async def _proxy_sources_response(
-        container: ServiceContainer,
-        snapshot: ProxySourceSnapshot | None = None,
-    ) -> dict[str, Any]:
-        try:
-            return await asyncio.to_thread(
-                container.proxy_sources.public_snapshot,
-                snapshot,
-                active_revision=container.proxy.active_revision,
-            )
-        except ProxySourceStoreError as exc:
-            _raise_proxy_source_error(exc)
-            raise AssertionError("unreachable")
-
-    async def _proxy_source_change(
-        container: ServiceContainer,
-        call,
-    ) -> dict[str, Any]:
-        try:
-            snapshot = await asyncio.to_thread(call)
-        except ProxySourceStoreError as exc:
-            _raise_proxy_source_error(exc)
-            raise AssertionError("unreachable")
-        return await _proxy_sources_response(container, snapshot)
-
-    @api.get("/proxy/sources")
-    async def proxy_sources(container: ServiceContainer = Depends(get_service)):
-        return await _proxy_sources_response(container)
-
-    @api.post("/proxy/sources/subscriptions")
-    async def add_proxy_subscription(
-        body: ProxySubscriptionUpdate,
-        container: ServiceContainer = Depends(get_service),
-        _body_limit: None = Depends(enforce_proxy_source_body_limit),
-    ):
-        return await _proxy_source_change(
-            container,
-            lambda: container.proxy_sources.add_subscription(body.url),
-        )
-
-    @api.put("/proxy/sources/subscriptions/{source_id}")
-    async def replace_proxy_subscription(
-        source_id: str,
-        body: ProxySubscriptionUpdate,
-        container: ServiceContainer = Depends(get_service),
-        _body_limit: None = Depends(enforce_proxy_source_body_limit),
-    ):
-        return await _proxy_source_change(
-            container,
-            lambda: container.proxy_sources.replace_subscription(source_id, body.url),
-        )
-
-    @api.delete("/proxy/sources/subscriptions/{source_id}")
-    async def delete_proxy_subscription(
-        source_id: str,
-        container: ServiceContainer = Depends(get_service),
-    ):
-        return await _proxy_source_change(
-            container,
-            lambda: container.proxy_sources.delete_subscription(source_id),
-        )
-
-    @api.put("/proxy/sources/node-file")
-    async def set_proxy_node_file(
-        body: ProxyNodeFileUpdate,
-        container: ServiceContainer = Depends(get_service),
-        _body_limit: None = Depends(enforce_proxy_source_body_limit),
-    ):
-        return await _proxy_source_change(
-            container,
-            lambda: container.proxy_sources.set_node_file(body.path),
-        )
-
-    @api.delete("/proxy/sources/node-file")
-    async def clear_proxy_node_file(
-        container: ServiceContainer = Depends(get_service),
-    ):
-        return await _proxy_source_change(
-            container,
-            container.proxy_sources.clear_node_file,
-        )
-
-    @api.post("/proxy/sources/inline-nodes")
-    async def add_proxy_inline_nodes(
-        body: ProxyInlineNodesCreate,
-        container: ServiceContainer = Depends(get_service),
-        _body_limit: None = Depends(enforce_proxy_source_body_limit),
-    ):
-        return await _proxy_source_change(
-            container,
-            lambda: container.proxy_sources.add_inline_nodes(body.nodes),
-        )
-
-    @api.put("/proxy/sources/inline-nodes/{source_id}")
-    async def replace_proxy_inline_node(
-        source_id: str,
-        body: ProxyInlineNodeUpdate,
-        container: ServiceContainer = Depends(get_service),
-        _body_limit: None = Depends(enforce_proxy_source_body_limit),
-    ):
-        return await _proxy_source_change(
-            container,
-            lambda: container.proxy_sources.replace_inline_node(source_id, body.node),
-        )
-
-    @api.delete("/proxy/sources/inline-nodes/{source_id}")
-    async def delete_proxy_inline_node(
-        source_id: str,
-        container: ServiceContainer = Depends(get_service),
-    ):
-        return await _proxy_source_change(
-            container,
-            lambda: container.proxy_sources.delete_inline_node(source_id),
-        )
-
-    @api.delete("/proxy/sources/override")
-    async def reset_proxy_sources_override(
-        container: ServiceContainer = Depends(get_service),
-    ):
-        return await _proxy_source_change(
-            container,
-            container.proxy_sources.reset_override,
-        )
-
-    @api.get("/proxy/status")
-    async def proxy_status(container: ServiceContainer = Depends(get_service)):
-        health_loop = diagnostics_proxy_health_snapshot(
-            container.proxy_health_summary()
-        )
-        status = await asyncio.to_thread(container.proxy.status)
-        return {**status, "health_loop": health_loop}
-
-    async def _proxy_action(call):
-        try:
-            return await asyncio.to_thread(call)
-        except ProxyPoolConflict as exc:
-            raise ApiError(409, "proxy_conflict", str(exc)) from exc
-        except (ProxyPoolError, FileNotFoundError, ValueError, RuntimeError) as exc:
-            raise ApiError(503, "proxy_error", redact_text(exc, limit=500)) from exc
-
-    @api.post("/proxy/start")
-    async def proxy_start(body: ProxyStartRequest, container: ServiceContainer = Depends(get_service)):
-        return await _proxy_action(
-            lambda: container.proxy.start(force_refresh=body.force_refresh, probe_url=body.probe_url)
-        )
-
-    @api.post("/proxy/reload")
-    async def proxy_reload(body: ProxyStartRequest, container: ServiceContainer = Depends(get_service)):
-        return await _proxy_action(
-            lambda: container.proxy.reload(force_refresh=body.force_refresh, probe_url=body.probe_url)
-        )
-
-    @api.post("/proxy/stop")
-    async def proxy_stop(body: ProxyStopRequest, container: ServiceContainer = Depends(get_service)):
-        return await _proxy_action(lambda: container.proxy.stop(force=body.force))
-
-    @api.post("/proxy/probe")
-    async def proxy_probe(body: ProxyProbeRequest, container: ServiceContainer = Depends(get_service)):
-        target = body.target_url
-        if body.site and not target:
-            target = container.policy_for(_validate_site_name(body.site)).probe_url
-        if target:
-            try:
-                await asyncio.to_thread(
-                    _validate_network_target,
-                    target,
-                    container.settings.server.allow_private_targets,
-                    strict=container.settings.server.strict_target_dns,
-                )
-            except ValueError as exc:
-                raise ApiError(422, "invalid_probe_target", str(exc)) from exc
-        return await _proxy_action(lambda: container.proxy.probe(target_url=target, node_id=body.node_id))
 
     @api.get("/scheduler/status")
     async def scheduler_status(
