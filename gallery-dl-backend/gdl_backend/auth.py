@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import os
 import pickle
@@ -57,6 +58,10 @@ PIXIV_LOGIN_URL_RE = re.compile(r"https://app-api\.pixiv\.net/web/v1/login\?[^\s
 AUTH_PROXY_METADATA_KEY = "_authorization_proxy"
 VAULT_RESPONSE_PROFILE = "vault"
 MAX_AUTH_PROXY_REQUEST_BYTES = 1_024
+# Pixiv refresh tokens and the existing fixtures are tens of bytes (the upstream
+# gallery-dl example is 43 ASCII bytes). 1 KiB leaves ample compatibility
+# headroom while bounding work before any cache BLOB is deserialized.
+_MAX_PIXIV_CACHE_VALUE_BYTES = 1_024
 _VAULT_SESSION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _VAULT_SESSION_STATES = {
     "starting",
@@ -258,6 +263,47 @@ def chrome_proxy_server(proxy_url: str) -> str:
     return f"{scheme}://{host}:{port}" if port is not None else f"{scheme}://{host}"
 
 
+class _PixivCacheTokenUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str) -> Any:
+        raise pickle.UnpicklingError("Pixiv cache globals are disabled")
+
+    def persistent_load(self, pid: object) -> Any:
+        raise pickle.UnpicklingError("Pixiv cache persistent IDs are disabled")
+
+
+def _decode_pixiv_cache_token(value: object) -> str | None:
+    """Decode only the token forms written by gallery-dl's Pixiv cache."""
+
+    if isinstance(value, str):
+        if len(value) > _MAX_PIXIV_CACHE_VALUE_BYTES:
+            return None
+        try:
+            encoded_size = len(value.encode("utf-8", "strict"))
+        except UnicodeError:
+            return None
+        return value if encoded_size <= _MAX_PIXIV_CACHE_VALUE_BYTES else None
+
+    if not isinstance(value, (bytes, bytearray)):
+        return None
+    if len(value) > _MAX_PIXIV_CACHE_VALUE_BYTES:
+        return None
+
+    stream = io.BytesIO(bytes(value))
+    try:
+        token = _PixivCacheTokenUnpickler(stream).load()
+        if stream.read(1):
+            return None
+        if token is None:
+            return None
+        if not isinstance(token, str) or len(token) > _MAX_PIXIV_CACHE_VALUE_BYTES:
+            return None
+        if len(token.encode("utf-8", "strict")) > _MAX_PIXIV_CACHE_VALUE_BYTES:
+            return None
+        return token
+    except Exception:
+        return None
+
+
 class AuthError(RuntimeError):
     def __init__(self, code: str, message: str, details: Any = None) -> None:
         super().__init__(message)
@@ -446,22 +492,11 @@ class AuthManager:
         # A cache miss for pixiv (no refresh token) is not empty: upstream's cache
         # decorator stores the func's return value, and `_refresh_token_cache` returns
         # None, so gallery-dl writes pickle.dumps(None) — a 4-byte blob with expires=0.
-        # The old `length(value) > 2` test treated that as a valid token, so an
-        # unauthenticated pixiv run made GET /auth report "authorized" forever. Decode
-        # each row and require an actual non-empty string token instead. Real tokens are
-        # pickled bytes; fall back to plain text for older/manually-written rows.
+        # Decode each row through the Pixiv-specific restricted path and require an
+        # actual non-empty string token. SQLite TEXT remains a legacy compatibility
+        # format; malformed BLOBs are never retried as text.
         for (value,) in rows:
-            token: Any = None
-            if isinstance(value, (bytes, bytearray)):
-                try:
-                    token = pickle.loads(value)
-                except Exception:
-                    try:
-                        token = bytes(value).decode("utf-8", "strict")
-                    except Exception:
-                        token = None
-            else:
-                token = value
+            token = _decode_pixiv_cache_token(value)
             if isinstance(token, str) and token.strip():
                 return True
         return False
