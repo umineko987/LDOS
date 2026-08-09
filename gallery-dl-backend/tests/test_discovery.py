@@ -2191,6 +2191,116 @@ class DiscoveryParserTests(unittest.TestCase):
         self.assertIn("search%5Bany_name_matches%5D=eijune+sound", call["url"])
         self.assertEqual(call["extra_args"][:3], ["--dump-json", "--child-range", "1-3"])
 
+    def test_characterization_parser_keeps_first_hit_and_source_order(self):
+        payload = [
+            [
+                6,
+                "https://e-hentai.org/g/30/aaaaaaaaaa/",
+                {"gallery_id": 30, "gallery_token": "aaaaaaaaaa"},
+            ],
+            [
+                6,
+                "https://e-hentai.org/g/20/bbbbbbbbbb/",
+                {"gallery_id": 20, "gallery_token": "bbbbbbbbbb"},
+            ],
+            [
+                6,
+                "https://e-hentai.org/g/30/cccccccccc/",
+                {"gallery_id": 30, "gallery_token": "cccccccccc"},
+            ],
+            [
+                6,
+                "https://e-hentai.org/g/10/dddddddddd/",
+                {"gallery_id": 10, "gallery_token": "dddddddddd"},
+            ],
+            [-1, {"error": "HttpError", "message": "late rate limit"}],
+        ]
+
+        candidates, authors = parse_discovery_output(
+            "exhentai",
+            json.dumps(payload),
+            source_url="https://e-hentai.org/?f_search=fixture",
+            limit=2,
+        )
+
+        self.assertEqual([item["id"] for item in candidates], ["30", "20"])
+        self.assertEqual(
+            candidates[0]["url"],
+            "https://e-hentai.org/g/30/aaaaaaaaaa/",
+        )
+        self.assertEqual(
+            candidates[0]["metadata"]["gallery_token"],
+            "aaaaaaaaaa",
+        )
+        self.assertEqual(authors, [])
+
+    def test_characterization_address_projection_keeps_order_and_evidence(self):
+        result = {
+            "alias_keywords": ["別名"],
+            "candidates": [
+                {
+                    "id": "30",
+                    "title": "direct",
+                    "download_url": "https://e-hentai.org/g/30/aaaaaaaaaa/",
+                    "matched_keywords": ["fixture", "別名"],
+                    "metadata": {"tags": ["artist:first"]},
+                },
+                {
+                    "id": "20",
+                    "title": "alias",
+                    "download_url": "https://e-hentai.org/g/20/bbbbbbbbbb/",
+                    "matched_keywords": ["別名"],
+                    "metadata": {"tags": ["artist:second"]},
+                },
+            ],
+        }
+
+        addresses = discovery_addresses(
+            "exhentai",
+            result,
+            keyword="fixture",
+            limit=2,
+        )
+
+        self.assertEqual(
+            [item["id"] for item in addresses],
+            ["exhentai:gallery:30", "exhentai:gallery:20"],
+        )
+        self.assertEqual(
+            addresses[0]["evidence_reasons"],
+            ["keyword_gallery_search", "danbooru_alias_search"],
+        )
+        self.assertEqual(
+            addresses[1]["evidence_reasons"],
+            ["danbooru_alias_search"],
+        )
+        self.assertEqual(
+            [facet["namespace"] for facet in exhentai_tag_facets(addresses)],
+            ["artist"],
+        )
+
+    def test_characterization_proxy_projection_never_exposes_endpoint(self):
+        lease = ProxyLease(
+            task_id="fixture",
+            node_id="node-secret.example:29443",
+            endpoint="http://user:password@node-secret.example:29443",
+            name="route via node-secret.example:29443",
+            protocol="http",
+            tags=["fixture"],
+            acquired_at=1.0,
+        )
+
+        projected = DiscoveryService._proxy_metadata("required", lease)
+
+        self.assertEqual(
+            set(projected),
+            {"mode", "used", "node_id", "node_name", "protocol"},
+        )
+        self.assertTrue(projected["used"])
+        rendered = json.dumps(projected, ensure_ascii=False)
+        for secret in ("user", "password", "node-secret.example", "29443"):
+            self.assertNotIn(secret, rendered)
+
     def test_missing_credentials_reference_is_explicit(self):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(ValueError):
