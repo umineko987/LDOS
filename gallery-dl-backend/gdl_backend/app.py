@@ -5,15 +5,14 @@ import logging
 import os
 import re
 import socket
-import sqlite3
 import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request
+from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,17 +26,15 @@ from .api_routes import (
     create_diagnostics_router,
     create_discovery_router,
     create_ordered_task_enqueuer,
+    create_policies_router,
     create_proxy_router,
     create_review_router,
     create_scheduler_router,
     create_tasks_router,
 )
-from .api_routes.body_limits import enforce_policy_body_limit
-from .api_routes.dependencies import get_service
 from .api_routes.errors import ApiError
 from .api_routes.validation import (
     validate_network_target as _validate_network_target,
-    validate_site_name as _validate_site_name,
 )
 from .auth import AuthManager
 from .config import AppSettings
@@ -48,14 +45,6 @@ from .encrypted_dns import EncryptedDNSResolver, NetworkTargetValidator
 from .gallery import GalleryRunner
 from .log_writer import TaskLogWriter
 from .ordered_crawl import OrderedCrawlManager
-from .policy_view import (
-    POLICY_RESPONSE_PROFILE,
-    PolicyViewValidationError,
-    is_policy_site,
-    policy_view_item,
-    policy_view_snapshot,
-    safe_policy_dict,
-)
 from .proxy import ProxyPoolAdapter
 from .proxy_source_store import ManagedProxySourceStore
 from .redaction import redact_text, safe_exception_category
@@ -65,14 +54,12 @@ from .schemas import (
     SitePolicy,
     build_runtime_site_policy,
 )
-from .site_policy import EDITABLE_SITE_POLICY_FIELDS, EditableSitePolicy
+from .site_policy import EDITABLE_SITE_POLICY_FIELDS
 from .site import SiteResolver
 
 _BACKGROUND_LOOP_WARNING_INTERVAL_SECONDS = 60.0
 
 logger = logging.getLogger(__name__)
-PolicyResponseView = Literal["legacy", "policy"]
-
 class ServiceContainer:
     def __init__(self, settings: AppSettings) -> None:
         if os.name != "nt":
@@ -474,149 +461,8 @@ def create_app(
     app.include_router(create_discovery_router())
     app.include_router(create_crawls_router())
     app.include_router(create_review_router())
+    app.include_router(create_policies_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
-    api = APIRouter(prefix="/api/v1")
 
-    def _require_policy_site(name: str) -> None:
-        if not is_policy_site(name):
-            raise ApiError(
-                422,
-                "unsupported_policy_site",
-                "该站点不能在此处设置",
-            )
-
-    def _raise_policy_store_error(exc: Exception) -> None:
-        raise ApiError(
-            503,
-            "policy_store_error",
-            "站点设置暂时无法保存或读取",
-        ) from exc
-
-    def _legacy_policy_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        projected: list[dict[str, Any]] = []
-        for item in items:
-            site = item.get("site")
-            if not isinstance(site, str) or not is_policy_site(site):
-                continue
-            projected.append(
-                {
-                    "site": site,
-                    "policy": safe_policy_dict(item.get("policy")),
-                    "updated_at": item.get("updated_at"),
-                }
-            )
-        return projected
-
-    @api.get("/sites/policies")
-    async def site_policies(
-        view: PolicyResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            stored = container.db.list_site_policies()
-            if view == "legacy":
-                return {
-                    "default": safe_policy_dict(container.settings.default_site_policy),
-                    "items": _legacy_policy_items(stored),
-                }
-            return policy_view_snapshot(
-                container.settings.default_site_policy,
-                stored,
-            )
-        except (sqlite3.Error, TypeError, ValueError) as exc:
-            _raise_policy_store_error(exc)
-
-    @api.get("/sites/policies/{site}")
-    async def get_site_policy(
-        site: str,
-        view: PolicyResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        name = _validate_site_name(site)
-        _require_policy_site(name)
-        try:
-            stored = container.db.get_site_policy(name)
-            if view == "legacy":
-                if stored is not None:
-                    return {
-                        "site": name,
-                        "policy": safe_policy_dict(stored.get("policy")),
-                        "updated_at": stored.get("updated_at"),
-                    }
-                return {
-                    "site": name,
-                    "policy": safe_policy_dict(container.settings.default_site_policy),
-                    "inherited": True,
-                }
-            if stored is None:
-                return policy_view_item(
-                    name,
-                    container.settings.default_site_policy,
-                    inherited=True,
-                )
-            return policy_view_item(
-                name,
-                stored.get("policy"),
-                inherited=False,
-                updated_at=stored.get("updated_at"),
-            )
-        except (sqlite3.Error, TypeError, ValueError) as exc:
-            _raise_policy_store_error(exc)
-
-    @api.put("/sites/policies/{site}")
-    async def put_site_policy(
-        site: str,
-        body: EditableSitePolicy,
-        view: PolicyResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-        _body_limit: None = Depends(enforce_policy_body_limit),
-    ):
-        name = _validate_site_name(site)
-        _require_policy_site(name)
-        try:
-            policy = safe_policy_dict(body, require_complete=True)
-        except PolicyViewValidationError as exc:
-            raise ApiError(
-                422,
-                "invalid_policy",
-                "站点设置中有不支持或不正确的字段",
-                exc.safe_details(),
-            ) from exc
-        try:
-            stored = container.db.put_site_policy(name, policy)
-        except (sqlite3.Error, TypeError, ValueError) as exc:
-            _raise_policy_store_error(exc)
-        if view == "legacy":
-            return stored
-        return policy_view_item(
-            name,
-            stored["policy"],
-            inherited=False,
-            updated_at=stored.get("updated_at"),
-        )
-
-    @api.delete("/sites/policies/{site}")
-    async def delete_site_policy(
-        site: str,
-        view: PolicyResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        name = _validate_site_name(site)
-        _require_policy_site(name)
-        try:
-            deleted = container.db.delete_site_policy(name)
-        except (sqlite3.Error, TypeError, ValueError) as exc:
-            _raise_policy_store_error(exc)
-        if not deleted:
-            raise ApiError(404, "site_policy_not_found", "该站点没有单独保存的设置")
-        if view == "policy":
-            return {
-                "response_profile": POLICY_RESPONSE_PROFILE,
-                "deleted": True,
-                "site": name,
-            }
-        return {"deleted": True, "site": name}
-
-    app.include_router(api)
     return app

@@ -129,9 +129,11 @@ class AppRoutingContractTests(unittest.TestCase):
         routes = {
             (next(iter(route.methods)), route.path): route
             for route in _included_api_routes(self.app.router)
-            if route.path.startswith("/api/v1/")
         }
-        service_free = {("GET", "/api/v1/search/sites")}
+        service_free = {
+            ("GET", "/"),
+            ("GET", "/api/v1/search/sites"),
+        }
         dependency_calls = set()
         for key, route in routes.items():
             if key in service_free:
@@ -150,6 +152,61 @@ class AppRoutingContractTests(unittest.TestCase):
             app=SimpleNamespace(state=SimpleNamespace(container=self.container))
         )
         self.assertIs(dependency(request), self.container)
+        self.assertIs(self.app.state.container, self.container)
+
+        for key, route in routes.items():
+            self.assertTrue(
+                route.endpoint.__module__.startswith("gdl_backend.api_routes."),
+                key,
+            )
+            closure_values = [
+                cell.cell_contents for cell in (route.endpoint.__closure__ or ())
+            ]
+            self.assertFalse(
+                any(value is self.container for value in closure_values),
+                key,
+            )
+
+    def test_each_domain_is_owned_by_its_router_module(self):
+        routes = {
+            (next(iter(route.methods)), route.path): route
+            for route in _included_api_routes(self.app.router)
+        }
+        expected_modules = {
+            "diagnostics": "gdl_backend.api_routes.diagnostics",
+            "auth": "gdl_backend.api_routes.auth",
+            "tasks": "gdl_backend.api_routes.tasks",
+            "discovery": "gdl_backend.api_routes.discovery",
+            "crawls": "gdl_backend.api_routes.crawls",
+            "review": "gdl_backend.api_routes.review",
+            "policies": "gdl_backend.api_routes.policies",
+            "proxy": "gdl_backend.api_routes.proxy",
+            "scheduler": "gdl_backend.api_routes.scheduler",
+        }
+
+        for key, route in routes.items():
+            path = route.path
+            if path in {"/", "/healthz", "/readyz", "/api/v1/config"}:
+                domain = "diagnostics"
+            elif path.startswith("/api/v1/auth"):
+                domain = "auth"
+            elif path.startswith("/api/v1/tasks"):
+                domain = "tasks"
+            elif path.startswith("/api/v1/search"):
+                domain = "discovery"
+            elif "/review" in path:
+                domain = "review"
+            elif path.startswith("/api/v1/crawls"):
+                domain = "crawls"
+            elif path.startswith("/api/v1/sites/policies"):
+                domain = "policies"
+            elif path.startswith("/api/v1/proxy"):
+                domain = "proxy"
+            elif path.startswith("/api/v1/scheduler"):
+                domain = "scheduler"
+            else:
+                self.fail(f"unowned route: {key}")
+            self.assertEqual(route.endpoint.__module__, expected_modules[domain], key)
 
     def test_search_input_plan_and_result_aggregation_are_pure(self):
         body = SearchRequest.model_validate(
