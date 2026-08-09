@@ -208,7 +208,14 @@ class LocalProxyForwarderOwnershipTests(unittest.TestCase):
             instance_key=key,
         )
         self.assertTrue(used)
-        self.assertEqual(first_url, second_url)
+        # A just-closed exclusive socket can remain temporarily unavailable,
+        # especially on Windows.  The documented bind fallback may therefore
+        # choose a fresh ephemeral port; the contract is a new live instance,
+        # not reuse of the stale endpoint string.
+        self.assertTrue(second_url.startswith("http://127.0.0.1:"))
+        second_port = int(second_url.rsplit(":", 1)[1])
+        with socket.create_connection(("127.0.0.1", second_port), timeout=1):
+            pass
         self.assertIsNot(forwarder._FORWARDERS[key], stale)
         self.assertTrue(forwarder._FORWARDERS[key].is_running)
 
