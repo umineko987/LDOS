@@ -5,6 +5,7 @@ import io
 import json
 import os
 import pickle
+import pickletools
 import re
 import shutil
 import sqlite3
@@ -288,8 +289,19 @@ def _decode_pixiv_cache_token(value: object) -> str | None:
     if len(value) > _MAX_PIXIV_CACHE_VALUE_BYTES:
         return None
 
-    stream = io.BytesIO(bytes(value))
+    payload = bytes(value)
     try:
+        stop_position = next(
+            position
+            for opcode, _argument, position in pickletools.genops(payload)
+            if opcode.name == "STOP"
+        )
+        if stop_position != len(payload) - 1:
+            return None
+
+        # Unpickler can prefetch a complete FRAME past STOP, so checking the
+        # underlying stream alone is not sufficient for framed Pickles.
+        stream = io.BytesIO(payload)
         token = _PixivCacheTokenUnpickler(stream).load()
         if stream.read(1):
             return None
