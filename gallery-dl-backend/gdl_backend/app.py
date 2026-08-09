@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import re
-import socket
+import socket  # Compatibility patch surface for _validate_network_target callers.
 import sys
 import time
 import uuid
@@ -32,6 +32,8 @@ from .api_routes import (
     create_scheduler_router,
     create_tasks_router,
 )
+# Keep these names importable from gdl_backend.app while their implementations
+# live outside the composition root.
 from .api_routes.errors import ApiError
 from .api_routes.validation import (
     validate_network_target as _validate_network_target,
@@ -60,6 +62,8 @@ from .site import SiteResolver
 _BACKGROUND_LOOP_WARNING_INTERVAL_SECONDS = 60.0
 
 logger = logging.getLogger(__name__)
+
+
 class ServiceContainer:
     def __init__(self, settings: AppSettings) -> None:
         if os.name != "nt":
