@@ -1,4 +1,4 @@
-import { getApplicationById } from "./app-registry.js";
+import { getApplicationDefinitionById } from "./app-definitions.js";
 import { actionCreators, selectors } from "./store.js";
 
 export const WINDOW_LAYOUT_DEBOUNCE_MS = 300;
@@ -7,6 +7,7 @@ export function createShellActions({
   store,
   router,
   storage,
+  getRegisteredApplicationById = getApplicationDefinitionById,
   setTimeoutFn = (callback, delay) => globalThis.setTimeout(callback, delay),
   clearTimeoutFn = (timerId) => globalThis.clearTimeout(timerId),
 }) {
@@ -21,6 +22,9 @@ export function createShellActions({
   ) {
     throw new TypeError("actions 需要安全存储服务");
   }
+  if (typeof getRegisteredApplicationById !== "function") {
+    throw new TypeError("actions 需要应用查询服务");
+  }
   if (typeof setTimeoutFn !== "function" || typeof clearTimeoutFn !== "function") {
     throw new TypeError("actions 需要有效的定时器服务");
   }
@@ -32,7 +36,7 @@ export function createShellActions({
   let destroyed = false;
 
   const requireRegisteredAppId = (appId) => {
-    if (typeof appId !== "string" || !getApplicationById(appId)) {
+    if (typeof appId !== "string" || !getApplicationDefinitionById(appId)) {
       throw new TypeError("跨应用导航目标无效");
     }
     return appId;
@@ -118,7 +122,7 @@ export function createShellActions({
   };
 
   const routeResolved = (app) => {
-    const registered = app && getApplicationById(app.id);
+    const registered = app && getRegisteredApplicationById(app.id);
     if (!registered || registered !== app) throw new TypeError("路由结果不是已注册应用");
     const existing = windowStack().find((record) => record.appId === app.id);
     const alreadyFocused = existing

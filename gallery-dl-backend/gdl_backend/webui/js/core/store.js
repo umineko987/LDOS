@@ -1,4 +1,4 @@
-import { getApplicationById } from "./app-registry.js";
+import { getApplicationDefinitionById } from "./app-definitions.js";
 import {
   crawlCandidateVisible,
   projectCrawlSearchResponse,
@@ -245,7 +245,7 @@ function requireString(value, label, maximum = 160) {
 }
 
 function requireAppId(value) {
-  if (typeof value !== "string" || !getApplicationById(value)) {
+  if (typeof value !== "string" || !getApplicationDefinitionById(value)) {
     throw new TypeError("应用 ID 无效");
   }
   return value;
@@ -314,7 +314,7 @@ function withDerivedWindowFocus(state) {
 }
 
 function defaultWindowRecord(appId) {
-  const app = getApplicationById(requireAppId(appId));
+  const app = getApplicationDefinitionById(requireAppId(appId));
   return {
     appId,
     windowState: requireWindowState(app.defaultWindowState),

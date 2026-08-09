@@ -1,4 +1,7 @@
-import { getApplicationById } from "./app-registry.js";
+import {
+  DEFAULT_APP_ID,
+  getApplicationDefinitionById,
+} from "./app-definitions.js";
 import { clampRect } from "./window-geometry.js";
 import {
   normalizePersonalizationPreferences,
@@ -77,7 +80,7 @@ export function isValidBatchId(value) {
 }
 
 function requireApplicationId(appId) {
-  if (typeof appId !== "string" || !getApplicationById(appId)) {
+  if (typeof appId !== "string" || !getApplicationDefinitionById(appId)) {
     throw new TypeError("应用 ID 无效");
   }
   return appId;
@@ -157,7 +160,7 @@ function projectWindowRecord(
     throw new TypeError("窗口记录无效");
   }
   const appId = ownDataValue(value, "appId");
-  const app = typeof appId === "string" ? getApplicationById(appId) : null;
+  const app = typeof appId === "string" ? getApplicationDefinitionById(appId) : null;
   if (!app) throw new TypeError("应用 ID 无效");
   if (readyOnly && app.availability !== "ready") return null;
   const windowState = ownDataValue(value, "windowState");
@@ -183,8 +186,8 @@ export function createDefaultWindowLayout(
   geometryOptions = {},
 ) {
   return [{
-    appId: "crawl",
-    windowState: getApplicationById("crawl").defaultWindowState,
+    appId: DEFAULT_APP_ID,
+    windowState: getApplicationDefinitionById(DEFAULT_APP_ID).defaultWindowState,
     rect: clampWindowRect(DEFAULT_WINDOW_RECT, viewport, geometryOptions),
   }];
 }
@@ -200,7 +203,7 @@ function deserializeWindowLayout(serialized, viewport, geometryOptions) {
       if (!hasExactDataKeys(value, ["appId", "windowState", "rect"])) return null;
       const appId = ownDataValue(value, "appId");
       if (typeof appId !== "string") return null;
-      const app = getApplicationById(appId);
+      const app = getApplicationDefinitionById(appId);
       if (!app || app.availability !== "ready") continue;
       windows.push(projectWindowRecord(value, {
         readyOnly: true,
@@ -296,7 +299,7 @@ export function createStorageService({
     readCurrentApp() {
       const value = safeRead(sessionStorage, STORAGE_KEYS.currentApp);
       if (value === null) return null;
-      if (value.length <= 32 && getApplicationById(value)) return value;
+      if (value.length <= 32 && getApplicationDefinitionById(value)) return value;
       safeRemove(sessionStorage, STORAGE_KEYS.currentApp);
       return null;
     },

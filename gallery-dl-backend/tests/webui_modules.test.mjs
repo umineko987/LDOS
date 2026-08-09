@@ -1506,6 +1506,7 @@ test("跨应用 action 先调用 router，只有路由结果才能更新 focused
     store,
     router: { navigate: (target) => navigations.push(target) },
     storage,
+    getRegisteredApplicationById: getApplicationById,
     setTimeoutFn: timers.setTimeout,
     clearTimeoutFn: timers.clearTimeout,
   });
@@ -1515,6 +1516,10 @@ test("跨应用 action 先调用 router，只有路由结果才能更新 focused
   assert.equal(store.getState().ui.focusedAppId, null);
   actions.routeResolved(getApplicationById("review"));
   assert.equal(store.getState().ui.focusedAppId, "review");
+  assert.throws(
+    () => actions.routeResolved({ ...getApplicationById("tasks") }),
+    /路由结果不是已注册应用/,
+  );
   assert.equal(store.getState().ui.windows[0].windowState, "maximized");
   actions.toggleWindowMaximized("review");
   assert.equal(store.getState().ui.windows[0].windowState, "normal");

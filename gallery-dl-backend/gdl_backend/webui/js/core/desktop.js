@@ -1,4 +1,4 @@
-import { applications } from "./app-registry.js";
+import { applications, getApplicationById } from "./app-registry.js";
 import { createShellActions } from "./actions.js";
 import { createHashRouter } from "./router.js";
 import { createElement, requireElement, setElementInert } from "./dom.js";
@@ -281,7 +281,12 @@ export function initializeDesktop(root = document, services = {}) {
   };
 
   router = createHashRouter(activateRoute);
-  actions = createShellActions({ store, router, storage });
+  actions = createShellActions({
+    store,
+    router,
+    storage,
+    getRegisteredApplicationById: getApplicationById,
+  });
 
   windowManager = createWindowManager({
     windowLayer,

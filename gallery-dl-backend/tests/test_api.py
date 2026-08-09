@@ -755,6 +755,9 @@ class ApiTests(unittest.TestCase):
             "/ui/js/main.js",
             "/ui/js/core/api.js",
             "/ui/js/core/actions.js",
+            "/ui/js/core/app-definitions.js",
+            "/ui/js/core/app-registry-factory.js",
+            "/ui/js/core/app-registry.js",
             "/ui/js/core/router.js",
             "/ui/js/core/store.js",
             "/ui/js/core/polling.js",
@@ -811,7 +814,9 @@ class ApiTests(unittest.TestCase):
             )
 
         registry = self.client.get("/ui/js/core/app-registry.js")
+        definitions = self.client.get("/ui/js/core/app-definitions.js")
         self.assertEqual(registry.status_code, 200)
+        self.assertEqual(definitions.status_code, 200)
         app_contract = {
             "crawl": "/crawl",
             "tasks": "/tasks",
@@ -826,14 +831,16 @@ class ApiTests(unittest.TestCase):
             "export": "/export",
         }
         for app_id, route in app_contract.items():
-            self.assertEqual(registry.text.count(f'id: "{app_id}"'), 1)
-            self.assertEqual(registry.text.count(f'route: "{route}"'), 1)
-        self.assertEqual(registry.text.count('availability: "ready"'), 8)
-        self.assertEqual(registry.text.count('availability: "placeholder"'), 3)
-        self.assertIn('defaultWindowState: "maximized"', registry.text)
+            self.assertEqual(definitions.text.count(f'id: "{app_id}"'), 1)
+            self.assertEqual(definitions.text.count(f'route: "{route}"'), 1)
+        self.assertEqual(definitions.text.count('availability: "ready"'), 8)
+        self.assertEqual(definitions.text.count('availability: "placeholder"'), 3)
+        self.assertIn('defaultWindowState: "maximized"', definitions.text)
 
         javascript_paths = [
             "/ui/js/main.js",
+            "/ui/js/core/app-definitions.js",
+            "/ui/js/core/app-registry-factory.js",
             "/ui/js/core/app-registry.js",
             "/ui/js/core/router.js",
             "/ui/js/core/desktop.js",
@@ -863,6 +870,8 @@ class ApiTests(unittest.TestCase):
         core_paths = [
             "/ui/js/core/api.js",
             "/ui/js/core/actions.js",
+            "/ui/js/core/app-definitions.js",
+            "/ui/js/core/app-registry-factory.js",
             "/ui/js/core/app-registry.js",
             "/ui/js/core/desktop.js",
             "/ui/js/core/dom.js",

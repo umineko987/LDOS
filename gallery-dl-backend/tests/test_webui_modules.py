@@ -843,16 +843,16 @@ class WebUiModuleTests(unittest.TestCase):
         policy_css = (webui / "styles" / "apps" / "policy.css").read_text(
             encoding="utf-8"
         )
-        registry = (webui / "js" / "core" / "app-registry.js").read_text(
+        definitions = (webui / "js" / "core" / "app-definitions.js").read_text(
             encoding="utf-8"
         )
         combined = "\n".join(
             (policy_dom, policy_view, policy_app, policy_model, policy_css)
         )
 
-        self.assertIn('id: "policy"', registry)
-        self.assertIn('label: "站点设置"', registry)
-        self.assertIn('windowTitle: "C:\\\\IMAGEWEAVE\\\\POLICY.CPL"', registry)
+        self.assertIn('id: "policy"', definitions)
+        self.assertIn('label: "站点设置"', definitions)
+        self.assertIn('windowTitle: "C:\\\\IMAGEWEAVE\\\\POLICY.CPL"', definitions)
         self.assertIn('createElement("legend", { text: "选择站点" })', policy_dom)
         for label in (
             "最大并发数",
@@ -1353,7 +1353,7 @@ class WebUiModuleTests(unittest.TestCase):
         router = (webui / "js" / "core" / "router.js").read_text(
             encoding="utf-8"
         )
-        registry = (webui / "js" / "core" / "app-registry.js").read_text(
+        definitions = (webui / "js" / "core" / "app-definitions.js").read_text(
             encoding="utf-8"
         )
         desktop_css = (webui / "styles" / "desktop.css").read_text(
@@ -1439,8 +1439,8 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn('event.key !== "Enter" && event.key !== " "', desktop)
         self.assertIn('application?.availability === "ready"', router)
         for app_id in ("gallery", "schedule", "export"):
-            self.assertEqual(registry.count(f'id: "{app_id}"'), 1)
-        self.assertEqual(registry.count('availability: "placeholder"'), 3)
+            self.assertEqual(definitions.count(f'id: "{app_id}"'), 1)
+        self.assertEqual(definitions.count('availability: "placeholder"'), 3)
 
         self.assertIn(".task-window-list", desktop_css)
         self.assertIn('.task-window-button[aria-pressed="true"]', desktop_css)

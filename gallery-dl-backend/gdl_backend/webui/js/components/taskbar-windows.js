@@ -1,4 +1,4 @@
-import { getApplicationById } from "../core/app-registry.js";
+import { getApplicationDefinitionById } from "../core/app-definitions.js";
 import { createElement } from "../core/dom.js";
 
 export const _TASKBAR_VISIBLE_LIMIT = 6;
@@ -8,7 +8,7 @@ const TASKBAR_OVERFLOW_LIST_ID = "task-window-overflow-list";
 export function describeTaskbarWindows(windowStack, focusedAppId) {
   if (!Array.isArray(windowStack)) throw new TypeError("任务栏窗口栈必须是数组");
   return Object.freeze(windowStack.map((record) => {
-    const app = getApplicationById(record?.appId);
+    const app = getApplicationDefinitionById(record?.appId);
     if (!app) throw new TypeError("任务栏窗口应用无效");
     const minimized = record.windowState === "minimized";
     const focused = !minimized && record.appId === focusedAppId;
@@ -33,7 +33,7 @@ export function activateTaskbarWindow(descriptor, {
   const activation = descriptor?.activation;
   if (
     typeof appId !== "string"
-    || !getApplicationById(appId)
+    || !getApplicationDefinitionById(appId)
     || !["minimize", "restore", "focus"].includes(activation)
     || typeof canActivate !== "function"
     || canActivate(appId, descriptor) !== true
