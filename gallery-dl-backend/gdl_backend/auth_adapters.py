@@ -371,10 +371,11 @@ class BrowserOrchestrator:
                 session.state = "cancelled"
                 session.message = "登录窗口已关闭。"
             raise
-        except Exception as exc:
+        except Exception:
             if session.state != "cancelled":
                 session.state = "failed"
-                session.error = str(exc)[:500] or "共享授权浏览器登录失败"
+                # CDP/browser exceptions can embed visited URLs or remote text.
+                session.error = "共享授权浏览器登录失败"
                 session.message = session.error
         finally:
             await self._close_managed_target(session)
@@ -428,19 +429,20 @@ class BrowserOrchestrator:
                 session.state = "cancelled"
                 session.message = "Pixiv 授权标签页已关闭。"
             raise
-        except TimeoutError as exc:
+        except TimeoutError:
             if session.state != "cancelled":
                 session.state = "timed_out"
-                session.error = str(exc)[:500] or "Pixiv 登录等待超时"
+                session.error = "Pixiv 登录等待超时"
                 session.message = session.error
                 await stop_oauth_process(session)
                 cleanup_oauth_cache(session.cache_file)
         except Exception as exc:
             if session.state != "cancelled":
                 session.state = "failed"
+                # Only an AuthManager-supplied controlled message may cross the
+                # adapter boundary; arbitrary CDP/third-party exception text may not.
                 session.error = (
                     controlled_error_message(exc)
-                    or str(exc)[:500]
                     or "Pixiv 共享浏览器授权失败"
                 )
                 session.message = session.error

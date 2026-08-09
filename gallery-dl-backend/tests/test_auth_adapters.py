@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from gdl_backend.auth_adapters import (
+    BrowserHost,
     BrowserOrchestrator,
     BrowserRuntimeAdapter,
     GalleryDlPixivOAuthAdapter,
@@ -97,6 +100,81 @@ class AuthAdapterTests(unittest.TestCase):
                 "process.wait",
             ],
         )
+
+    def test_browser_monitor_never_projects_raw_third_party_failures(self):
+        secret = "RAW_BROWSER_ADAPTER_SECRET"
+
+        class Process:
+            returncode = None
+
+            async def wait(self) -> int:
+                self.returncode = 0
+                return 0
+
+        process = Process()
+        runtime = BrowserRuntimeAdapter(
+            discover_chrome=lambda _explicit: Path("/fixture/chrome"),
+            allocate_debug_port=lambda: 32123,
+            spawn_process=AsyncMock(return_value=process),
+            read_browser_websocket=lambda _port: (32123, "ws://browser"),
+            open_login_target=lambda *_args: "target-id",
+            capture_pixiv_callback=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError(
+                    f"https://third-party.invalid/private/{secret} token={secret}"
+                )
+            ),
+            get_site_cookies=lambda *_args: [],
+            managed_login_ready=lambda *_args: False,
+            close_target=lambda *_args: None,
+            close_browser=lambda *_args: None,
+            write_netscape_cookies=lambda *_args: None,
+            terminate_process=AsyncMock(),
+        )
+        orchestrator = BrowserOrchestrator(
+            profile_dir=Path("/unused/profile"),
+            chrome_executable="",
+            login_timeout_seconds=30,
+            proxy_provider=lambda: "",
+            runtime=runtime,
+        )
+        host = BrowserHost(
+            process=process,
+            profile_dir=Path("/unused/profile"),
+            debug_port=32123,
+            websocket_url="ws://browser",
+        )
+        session = SimpleNamespace(
+            id="pixiv-adapter-failure",
+            process=SimpleNamespace(returncode=None),
+            created_at=time.time(),
+            cache_file=Path("/unused/cache.sqlite3"),
+            authorization_url="https://app-api.pixiv.net/web/v1/login?state=STATE",
+            state="starting_browser",
+            message="",
+            error="",
+            browser_websocket_url="",
+            browser_target_id="",
+        )
+
+        async def run() -> None:
+            await orchestrator.monitor_pixiv_session(
+                session,
+                login_timeout_seconds=30,
+                authorization_lock=asyncio.Lock(),
+                ensure_host=AsyncMock(return_value=host),
+                is_current=lambda _session: True,
+                complete_oauth=AsyncMock(),
+                stop_oauth_process=AsyncMock(),
+                cleanup_oauth_cache=lambda _path: None,
+                controlled_error_message=lambda _exc: None,
+                release_authorization=AsyncMock(),
+            )
+
+        asyncio.run(run())
+        self.assertEqual(session.state, "failed")
+        self.assertEqual(session.error, "Pixiv 共享浏览器授权失败")
+        self.assertNotIn(secret, session.error)
+        self.assertNotIn("third-party.invalid", session.error)
 
     def test_gallery_dl_oauth_adapter_owns_argv_pipes_output_and_code(self):
         class Stream:

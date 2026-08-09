@@ -408,6 +408,29 @@ class AuthFacadeContractTests(unittest.TestCase):
         self.assertNotIn("auth_token", str(metadata))
         self.assertNotIn("ct0", str(metadata))
 
+    def test_managed_invalidation_never_returns_raw_worker_content(self):
+        secret = "RAW_AUTH_FAILURE_SECRET"
+        cookie_path = self.auth._cookie_path("twitter")
+        expires = int(time.time()) + 3600
+        cookie_path.write_text(
+            "# Netscape HTTP Cookie File\n\n"
+            f".x.com\tTRUE\t/\tTRUE\t{expires}\tauth_token\tAUTH\n"
+            f".x.com\tTRUE\t/\tTRUE\t{expires}\tct0\tCSRF\n",
+            encoding="utf-8",
+        )
+        changed = asyncio.run(
+            self.auth.invalidate_if_managed(
+                "twitter",
+                str(cookie_path),
+                f"https://third-party.invalid/private/{secret} Cookie: {secret}",
+            )
+        )
+        self.assertTrue(changed)
+        status = self.auth.status("twitter")
+        self.assertEqual(status["invalid_reason"], "登录凭证失效")
+        self.assertNotIn(secret, str(status))
+        self.assertNotIn("third-party.invalid", str(status))
+
 
 if __name__ == "__main__":
     unittest.main()

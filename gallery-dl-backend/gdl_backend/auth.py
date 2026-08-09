@@ -820,14 +820,14 @@ class AuthManager:
             return False
         async with self._lock:
             metadata = self._site_metadata(value)
-            lines = [line.strip() for line in str(message or "").splitlines() if line.strip()]
-            reason = lines[-1] if lines else "登录凭证失效"
+            # Worker output is an untrusted third-party boundary. Keep only the
+            # invalidation fact; never persist or return its raw URL/token text.
             metadata.update(
                 {
                     "method": "managed_browser",
                     "browser": "project_chrome",
                     "invalidated_at": time.time(),
-                    "invalid_reason": reason[:500],
+                    "invalid_reason": "登录凭证失效",
                 }
             )
             self._update_metadata(value, metadata)
