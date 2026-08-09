@@ -8,7 +8,12 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from gdl_backend.database import Database
+from gdl_backend import _database_schema
+from gdl_backend.database import (
+    CURRENT_SCHEMA_VERSION,
+    SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION,
+    Database,
+)
 
 
 PUBLIC_DATABASE_SIGNATURES = {
@@ -231,6 +236,19 @@ class DatabaseTransactionBoundaryTests(unittest.TestCase):
         self.assertIn('self._conn.execute("COMMIT")', source)
         self.assertIn('self._conn.execute("ROLLBACK")', source)
         self.assertIn("with self._lock", source)
+
+    def test_schema_module_uses_database_owned_connection_and_transaction(self) -> None:
+        source = inspect.getsource(_database_schema)
+        self.assertNotIn("sqlite3.connect(", source)
+        self.assertNotIn('execute("BEGIN', source)
+        self.assertNotIn('execute("COMMIT', source)
+        self.assertNotIn('execute("ROLLBACK', source)
+        self.assertIn("with transaction() as conn", source)
+        self.assertEqual(CURRENT_SCHEMA_VERSION, _database_schema.CURRENT_SCHEMA_VERSION)
+        self.assertEqual(
+            SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION,
+            _database_schema.SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION,
+        )
 
     def test_failed_begin_immediate_does_not_poison_shared_connection(self) -> None:
         proxy = _FailFirstBeginConnection(self.db._conn)
