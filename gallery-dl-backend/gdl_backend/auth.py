@@ -5,7 +5,6 @@ import json
 import os
 import shutil
 import sqlite3
-import subprocess
 import sys
 import time
 import uuid
@@ -16,6 +15,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from .auth_adapters import (
+    BrowserHost as ManagedBrowserHost,
+    BrowserOrchestrator,
+    BrowserOrchestratorError,
+    BrowserRuntimeAdapter,
+    GalleryDlPixivOAuthAdapter,
+)
 from .auth_projection import (
     SUPPORTED_AUTH_SITES,
     VAULT_RESPONSE_PROFILE,
@@ -141,15 +147,6 @@ class ManagedBrowserLoginSession:
         }
 
 
-@dataclass(slots=True)
-class ManagedBrowserHost:
-    process: asyncio.subprocess.Process
-    profile_dir: Path
-    debug_port: int
-    websocket_url: str
-    proxy_url: str = ""
-
-
 class AuthManager:
     """Manage local site authorization without exposing credential values to API clients."""
 
@@ -171,11 +168,56 @@ class AuthManager:
         )
         self.metadata_file = self.managed_dir / "auth-metadata.json"
         self._lock = asyncio.Lock()
-        self._host_lock = asyncio.Lock()
         self._authorization_lock = asyncio.Lock()
+        browser_runtime = BrowserRuntimeAdapter(
+            # These late-bound lambdas intentionally preserve auth.py's historical
+            # patch seams while routing production I/O through an explicit adapter.
+            discover_chrome=lambda configured: discover_chrome_executable(configured),
+            allocate_debug_port=lambda: allocate_debug_port(),
+            spawn_process=lambda *command, **kwargs: asyncio.create_subprocess_exec(
+                *command,
+                **kwargs,
+            ),
+            read_browser_websocket=lambda port: read_browser_websocket(port),
+            open_login_target=lambda websocket, url: open_login_target(websocket, url),
+            capture_pixiv_callback=lambda websocket, target, url, **kwargs: (
+                capture_pixiv_oauth_callback(websocket, target, url, **kwargs)
+            ),
+            get_site_cookies=lambda websocket, spec: get_site_cookies(websocket, spec),
+            managed_login_ready=lambda websocket, spec, target: managed_login_ready(
+                websocket,
+                spec,
+                target,
+            ),
+            close_target=lambda websocket, target: close_target(websocket, target),
+            close_browser=lambda websocket: close_browser(websocket),
+            write_netscape_cookies=lambda path, cookies: write_netscape_cookies(
+                path,
+                cookies,
+            ),
+            terminate_process=lambda process, timeout: terminate_process(process, timeout),
+        )
+        self._browser_orchestrator = BrowserOrchestrator(
+            profile_dir=self.browser_profile_dir,
+            chrome_executable=settings.auth.chrome_executable,
+            login_timeout_seconds=settings.auth.browser_login_timeout_seconds,
+            proxy_provider=self.authorization_proxy,
+            runtime=browser_runtime,
+        )
+        # Private lock/host names remain as the thinnest compatibility surface for
+        # tests and internal callers that patched auth.py before the adapter split.
+        self._host_lock = self._browser_orchestrator.host_lock
+        self._pixiv_oauth_adapter = GalleryDlPixivOAuthAdapter(
+            python_executable=settings.gallery.python_executable or sys.executable,
+            repo_path=settings.gallery.repo_path,
+            spawn_process=lambda *command, **kwargs: asyncio.create_subprocess_exec(
+                *command,
+                **kwargs,
+            ),
+            terminate_process=lambda process, timeout: terminate_process(process, timeout),
+        )
         self._pixiv_session: PixivOAuthSession | None = None
         self._browser_sessions: dict[str, ManagedBrowserLoginSession] = {}
-        self._browser_host: ManagedBrowserHost | None = None
         self._active_authorization_id = ""
         self._profile_resetting = False
         # mtime-keyed memo for _cookie_status: the scheduler calls managed_credentials_available
@@ -190,6 +232,16 @@ class AuthManager:
             *(self._cookie_path(site) for site in COOKIE_REQUIREMENTS),
         ):
             secure_private_path(path)
+
+    @property
+    def _browser_host(self) -> ManagedBrowserHost | None:
+        """Compatibility facade; BrowserOrchestrator owns the actual host."""
+
+        return self._browser_orchestrator.host
+
+    @_browser_host.setter
+    def _browser_host(self, value: ManagedBrowserHost | None) -> None:
+        self._browser_orchestrator.host = value
 
     @staticmethod
     def _default_gallery_cache() -> Path:
@@ -280,14 +332,9 @@ class AuthManager:
                 pass
 
     def browser_profile_status(self) -> dict[str, Any]:
-        host = self._browser_host
-        return {
-            "shared": True,
-            "present": self.browser_profile_dir.is_dir(),
-            "running": bool(host and host.process.returncode is None),
-            "resetting": self._profile_resetting,
-            "sites": ["twitter", "pixiv", "exhentai"],
-        }
+        return self._browser_orchestrator.profile_status(
+            resetting=self._profile_resetting,
+        )
 
     def _authorization_proxy_override(self) -> dict[str, Any] | None:
         value = self._metadata().get(AUTH_PROXY_METADATA_KEY)
@@ -364,124 +411,29 @@ class AuthManager:
         return self.proxy_status()
 
     async def _close_browser_host_instance(self, host: ManagedBrowserHost) -> None:
-        if host.websocket_url:
-            await asyncio.to_thread(close_browser, host.websocket_url)
-        if host.process.returncode is None:
-            try:
-                await asyncio.wait_for(host.process.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                await terminate_process(host.process, 2)
+        """Compatibility facade for the former auth.py process helper."""
+
+        await self._browser_orchestrator.close_host_instance(host)
 
     async def _stop_browser_host(self) -> None:
-        async with self._host_lock:
-            host = self._browser_host
-            self._browser_host = None
-        if host is not None:
-            await self._close_browser_host_instance(host)
+        """Compatibility facade; the orchestrator owns Chromium disposal."""
+
+        await self._browser_orchestrator.stop()
 
     async def _ensure_browser_host(self) -> ManagedBrowserHost:
-        async with self._host_lock:
-            proxy_url = self.authorization_proxy()
-            host = self._browser_host
-            # --proxy-server 只能在启动时注入：代理变更后已运行的宿主必须重启，
-            # 否则本次授权仍走旧线路。
-            if (
-                host is not None
-                and host.process.returncode is None
-                and host.proxy_url == proxy_url
-            ):
-                endpoint = await asyncio.to_thread(read_browser_websocket, host.debug_port)
-                if endpoint:
-                    host.websocket_url = endpoint[1]
-                    return host
-            if host is not None:
-                self._browser_host = None
-                await self._close_browser_host_instance(host)
+        """Compatibility facade preserving AuthError codes and auth.py patch seams."""
 
-            try:
-                chrome = await asyncio.to_thread(
-                    discover_chrome_executable,
-                    self.settings.auth.chrome_executable,
-                )
-            except FileNotFoundError as exc:
-                raise AuthError(
-                    "chrome_not_found",
-                    "没有找到 Chrome 或 Chromium，请配置 auth.chrome_executable",
-                ) from exc
-
-            profile_dir = self.browser_profile_dir
-            ensure_private_directory(profile_dir)
-            try:
-                (profile_dir / "DevToolsActivePort").unlink()
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                raise AuthError("browser_profile_busy", "共享授权浏览器配置正在使用中") from exc
-
-            debug_port = allocate_debug_port()
-            command = [
-                str(chrome),
-                f"--user-data-dir={profile_dir}",
-                "--profile-directory=Default",
-                f"--remote-debugging-port={debug_port}",
-                "--remote-debugging-address=127.0.0.1",
-                "--start-maximized",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--disable-default-apps",
-            ]
-            if proxy_url:
-                # Chrome 默认对回环地址绕过代理，DevTools 端口不受影响。
-                command.append(f"--proxy-server={chrome_proxy_server(proxy_url)}")
-            command.append("about:blank")
-            kwargs: dict[str, Any] = {
-                "stdout": asyncio.subprocess.DEVNULL,
-                "stderr": asyncio.subprocess.DEVNULL,
-            }
-            if os.name == "nt":
-                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-            else:
-                kwargs["start_new_session"] = True
-            try:
-                process = await asyncio.create_subprocess_exec(*command, **kwargs)
-            except (OSError, RuntimeError) as exc:
-                raise AuthError("browser_login_start_failed", "共享授权浏览器启动失败") from exc
-
-            deadline = time.time() + min(
-                15.0,
-                self.settings.auth.browser_login_timeout_seconds,
-            )
-            websocket_url = ""
-            while time.time() < deadline:
-                if process.returncode is not None:
-                    break
-                endpoint = await asyncio.to_thread(read_browser_websocket, debug_port)
-                if endpoint:
-                    websocket_url = endpoint[1]
-                    break
-                await asyncio.sleep(0.1)
-            if not websocket_url:
-                if process.returncode is None:
-                    await terminate_process(process, 2)
-                raise AuthError("browser_login_start_failed", "共享授权浏览器启动超时")
-
-            host = ManagedBrowserHost(
-                process=process,
-                profile_dir=profile_dir,
-                debug_port=debug_port,
-                websocket_url=websocket_url,
-                proxy_url=proxy_url,
-            )
-            self._browser_host = host
-            return host
+        try:
+            return await self._browser_orchestrator.ensure_host()
+        except BrowserOrchestratorError as exc:
+            raise AuthError(exc.code, exc.message) from exc
 
     async def _close_pixiv_target(self, session: PixivOAuthSession) -> None:
         websocket_url = session.browser_websocket_url
         target_id = session.browser_target_id
         session.browser_websocket_url = ""
         session.browser_target_id = ""
-        if websocket_url and target_id:
-            await asyncio.to_thread(close_target, websocket_url, target_id)
+        await self._browser_orchestrator.close_target(websocket_url, target_id)
 
     async def _release_authorization(self, session_id: str) -> None:
         async with self._lock:
@@ -489,8 +441,7 @@ class AuthManager:
                 self._active_authorization_id = ""
 
     async def _stop_pixiv_process(self, session: PixivOAuthSession) -> None:
-        if session.process.returncode is None:
-            await terminate_process(session.process, 2)
+        await self._pixiv_oauth_adapter.stop(session.process)
         if session.reader_task and not session.reader_task.done():
             try:
                 await asyncio.wait_for(asyncio.shield(session.reader_task), timeout=5)
@@ -728,8 +679,7 @@ class AuthManager:
         target_id = session.target_id
         session.websocket_url = ""
         session.target_id = ""
-        if websocket_url and target_id:
-            await asyncio.to_thread(close_target, websocket_url, target_id)
+        await self._browser_orchestrator.close_target(websocket_url, target_id)
 
     async def _dispose_browser_session(
         self,
@@ -755,8 +705,7 @@ class AuthManager:
                 if session.state == "cancelled":
                     return
                 session.websocket_url = host.websocket_url
-                session.target_id = await asyncio.to_thread(
-                    open_login_target,
+                session.target_id = await self._browser_orchestrator.open_target(
                     host.websocket_url,
                     spec.login_url,
                 )
@@ -768,8 +717,7 @@ class AuthManager:
                         return
                     if host.process.returncode is not None:
                         raise RuntimeError("共享授权浏览器已关闭")
-                    cookies = await asyncio.to_thread(
-                        get_site_cookies,
+                    cookies = await self._browser_orchestrator.site_cookies(
                         session.websocket_url,
                         spec,
                     )
@@ -777,8 +725,7 @@ class AuthManager:
                     cookies_ready = set(spec.required).issubset(names)
                     page_ready = bool(
                         cookies_ready
-                        and await asyncio.to_thread(
-                            managed_login_ready,
+                        and await self._browser_orchestrator.login_ready(
                             session.websocket_url,
                             spec,
                             session.target_id,
@@ -786,8 +733,7 @@ class AuthManager:
                     )
                     if time.time() < session.expires_at and page_ready:
                         recommended_missing = sorted(set(spec.recommended) - names)
-                        await asyncio.to_thread(
-                            write_netscape_cookies,
+                        await self._browser_orchestrator.write_cookies(
                             self._cookie_path(session.site),
                             cookies,
                         )
@@ -937,27 +883,22 @@ class AuthManager:
         return True
 
     async def _read_pixiv_oauth(self, session: PixivOAuthSession) -> None:
-        stream = session.process.stdout
         pending = ""
-        if stream is not None:
-            while True:
-                chunk = await stream.read(2048)
-                if not chunk:
-                    break
-                text = chunk.decode("utf-8", "replace")
-                if not session.authorization_url:
-                    pending = (pending + text)[-16384:]
-                    authorization_url = find_pixiv_login_url(pending)
-                    if authorization_url:
-                        session.authorization_url = authorization_url
-                        session.state = "awaiting_code"
-                        session.message = "正在打开共享授权浏览器。"
-                        session.ready.set()
-                        pending = ""
-                lower = text.lower()
-                if "expired, try again" in lower or "invalid_grant" in lower:
-                    session.error = "授权码已过期，请重新开始 Pixiv 授权。"
-        returncode = await session.process.wait()
+        async for chunk in self._pixiv_oauth_adapter.output_chunks(session.process):
+            text = chunk.decode("utf-8", "replace")
+            if not session.authorization_url:
+                pending = (pending + text)[-16384:]
+                authorization_url = find_pixiv_login_url(pending)
+                if authorization_url:
+                    session.authorization_url = authorization_url
+                    session.state = "awaiting_code"
+                    session.message = "正在打开共享授权浏览器。"
+                    session.ready.set()
+                    pending = ""
+            lower = text.lower()
+            if "expired, try again" in lower or "invalid_grant" in lower:
+                session.error = "授权码已过期，请重新开始 Pixiv 授权。"
+        returncode = await self._pixiv_oauth_adapter.wait(session.process)
         if session.state in {"cancelled", "failed", "timed_out"}:
             pass
         elif returncode == 0 and self._pixiv_token_cached(session.cache_file):
@@ -989,16 +930,14 @@ class AuthManager:
                     session.created_at + self.settings.auth.browser_login_timeout_seconds,
                 )
                 session.browser_websocket_url = host.websocket_url
-                session.browser_target_id = await asyncio.to_thread(
-                    open_login_target,
+                session.browser_target_id = await self._browser_orchestrator.open_target(
                     host.websocket_url,
                     "about:blank",
                 )
                 session.state = "awaiting_login"
                 session.message = "请在共享授权浏览器中完成 Pixiv 登录；回调会自动捕获。"
                 remaining = max(1.0, deadline - time.time())
-                callback = await asyncio.to_thread(
-                    capture_pixiv_oauth_callback,
+                callback = await self._browser_orchestrator.capture_pixiv_callback(
                     session.browser_websocket_url,
                     session.browser_target_id,
                     session.authorization_url,
@@ -1062,43 +1001,11 @@ class AuthManager:
             self._cleanup_oauth_cache(session_cache)
             await self._release_authorization(session_id)
             raise AuthError("pixiv_oauth_start_failed", "启动 Pixiv 登录授权失败") from exc
-        command = [
-            self.settings.gallery.python_executable or sys.executable,
-            "-m",
-            "gallery_dl",
-            "--config-ignore",
-            "--cache-file",
-            str(session_cache),
-            "-o",
-            "extractor.oauth.browser=false",
-            "-o",
-            "extractor.oauth.input=true",
-        ]
-        proxy_url = self.authorization_proxy()
-        if proxy_url:
-            # 覆盖 gallery-dl 侧的 token 交换请求（oauth.secure.pixiv.net）。
-            command += ["-o", f"proxy={proxy_url}"]
-        command.append("oauth:pixiv")
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
-        env["PYTHONIOENCODING"] = "utf-8"
-        pythonpath = [str(self.settings.gallery.repo_path)]
-        if env.get("PYTHONPATH"):
-            pythonpath.append(env["PYTHONPATH"])
-        env["PYTHONPATH"] = os.pathsep.join(pythonpath)
-        kwargs: dict[str, Any] = {
-            "cwd": str(self.settings.gallery.repo_path),
-            "env": env,
-            "stdin": asyncio.subprocess.PIPE,
-            "stdout": asyncio.subprocess.PIPE,
-            "stderr": asyncio.subprocess.STDOUT,
-        }
-        if os.name == "nt":
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-        else:
-            kwargs["start_new_session"] = True
         try:
-            process = await asyncio.create_subprocess_exec(*command, **kwargs)
+            process = await self._pixiv_oauth_adapter.start(
+                session_cache,
+                proxy_url=self.authorization_proxy(),
+            )
         except Exception as exc:
             self._cleanup_oauth_cache(session_cache)
             await self._release_authorization(session_id)
@@ -1177,19 +1084,16 @@ class AuthManager:
             session.completion_claimed = True
             session.state = "exchanging"
             session.message = "已捕获 Pixiv 回调，正在交换授权码。"
-            stdin = session.process.stdin
 
         try:
-            stdin.write((code + "\n").encode("utf-8"))
-            await stdin.drain()
-            stdin.close()
+            await self._pixiv_oauth_adapter.submit_code(session.process, code)
         except (BrokenPipeError, ConnectionError, OSError) as exc:
             session.error = "Pixiv 授权输入通道已经关闭"
             session.message = session.error
             raise AuthError("pixiv_oauth_process_ended", session.error) from exc
 
         try:
-            await asyncio.wait_for(session.process.wait(), timeout=60)
+            await self._pixiv_oauth_adapter.wait(session.process, timeout=60)
             if session.reader_task:
                 await asyncio.wait_for(asyncio.shield(session.reader_task), timeout=5)
         except asyncio.TimeoutError as exc:
