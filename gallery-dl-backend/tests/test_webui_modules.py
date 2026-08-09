@@ -8,7 +8,324 @@ import unittest
 from pathlib import Path
 
 
+def _javascript_tokens(source: str) -> list[tuple[str, str, bool]]:
+    """Tokenize enough JavaScript to identify static module declarations."""
+    tokens: list[tuple[str, str, bool]] = []
+    position = 0
+    line_has_code = False
+    length = len(source)
+
+    while position < length:
+        character = source[position]
+        if character.isspace():
+            if character in "\r\n":
+                line_has_code = False
+            position += 1
+            continue
+        if source.startswith("//", position):
+            newline = source.find("\n", position + 2)
+            position = length if newline < 0 else newline
+            continue
+        if source.startswith("/*", position):
+            end = source.find("*/", position + 2)
+            if end < 0:
+                raise AssertionError("JavaScript 块注释未闭合")
+            if "\n" in source[position : end + 2]:
+                line_has_code = False
+            position = end + 2
+            continue
+
+        at_line_start = not line_has_code
+        if character in {'"', "'"}:
+            quote = character
+            value: list[str] = []
+            position += 1
+            while position < length:
+                character = source[position]
+                if character == "\\":
+                    if position + 1 >= length:
+                        raise AssertionError("JavaScript 字符串转义未闭合")
+                    value.append(source[position + 1])
+                    position += 2
+                    continue
+                if character == quote:
+                    position += 1
+                    break
+                if character in "\r\n":
+                    raise AssertionError("JavaScript 字符串未闭合")
+                value.append(character)
+                position += 1
+            else:
+                raise AssertionError("JavaScript 字符串未闭合")
+            tokens.append(("string", "".join(value), at_line_start))
+            line_has_code = True
+            continue
+
+        if character == "`":
+            position += 1
+            while position < length:
+                character = source[position]
+                if character == "\\":
+                    position += 2
+                    continue
+                if character == "`":
+                    position += 1
+                    break
+                position += 1
+            else:
+                raise AssertionError("JavaScript 模板字符串未闭合")
+            tokens.append(("template", "", at_line_start))
+            line_has_code = True
+            continue
+
+        if character.isalpha() or character in "_$":
+            end = position + 1
+            while end < length and (
+                source[end].isalnum() or source[end] in "_$"
+            ):
+                end += 1
+            tokens.append(("identifier", source[position:end], at_line_start))
+            position = end
+            line_has_code = True
+            continue
+
+        tokens.append(("punctuation", character, at_line_start))
+        position += 1
+        line_has_code = True
+
+    return tokens
+
+
+def _static_module_specifiers(source: str) -> tuple[str, ...]:
+    """Parse specifiers from static import and re-export declarations."""
+    tokens = _javascript_tokens(source)
+    specifiers: list[str] = []
+    for index, (kind, value, at_line_start) in enumerate(tokens):
+        if kind != "identifier" or not at_line_start or value not in {"import", "export"}:
+            continue
+        next_index = index + 1
+        if next_index >= len(tokens):
+            continue
+        next_kind, next_value, _ = tokens[next_index]
+
+        if value == "import" and next_kind == "string":
+            specifiers.append(next_value)
+            continue
+        if value == "import" and next_kind == "punctuation" and next_value in {"(", "."}:
+            continue
+        if value == "export" and not (
+            next_kind == "punctuation" and next_value in {"*", "{"}
+        ):
+            continue
+
+        cursor = next_index
+        while cursor < len(tokens):
+            token_kind, token_value, _ = tokens[cursor]
+            if token_kind == "punctuation" and token_value == ";":
+                break
+            if token_kind == "identifier" and token_value == "from":
+                if cursor + 1 < len(tokens) and tokens[cursor + 1][0] == "string":
+                    specifiers.append(tokens[cursor + 1][1])
+                break
+            cursor += 1
+    return tuple(specifiers)
+
+
+def _javascript_import_graph(javascript_root: Path) -> dict[Path, set[Path]]:
+    root = javascript_root.resolve()
+    modules = {path.resolve() for path in root.rglob("*.js")}
+    graph: dict[Path, set[Path]] = {path: set() for path in sorted(modules)}
+    for source_path in graph:
+        source = source_path.read_text(encoding="utf-8")
+        for specifier in _static_module_specifiers(source):
+            if not specifier.startswith("."):
+                continue
+            target = (source_path.parent / specifier).resolve()
+            if target.suffix == "":
+                target = target.with_suffix(".js")
+            try:
+                target.relative_to(root)
+            except ValueError as error:
+                raise AssertionError(
+                    f"相对静态 import/export 越出 WebUI JS 根目录：{source_path} -> {specifier}"
+                ) from error
+            if target not in modules:
+                raise AssertionError(
+                    f"相对静态 import/export 目标不存在：{source_path} -> {specifier}"
+                )
+            graph[source_path].add(target)
+    return graph
+
+
+def _strongly_connected_components(graph: dict[Path, set[Path]]) -> list[tuple[Path, ...]]:
+    next_index = 0
+    indices: dict[Path, int] = {}
+    low_links: dict[Path, int] = {}
+    stack: list[Path] = []
+    on_stack: set[Path] = set()
+    components: list[tuple[Path, ...]] = []
+
+    def visit(node: Path) -> None:
+        nonlocal next_index
+        indices[node] = next_index
+        low_links[node] = next_index
+        next_index += 1
+        stack.append(node)
+        on_stack.add(node)
+
+        for dependency in sorted(graph[node]):
+            if dependency not in indices:
+                visit(dependency)
+                low_links[node] = min(low_links[node], low_links[dependency])
+            elif dependency in on_stack:
+                low_links[node] = min(low_links[node], indices[dependency])
+
+        if low_links[node] != indices[node]:
+            return
+        component: list[Path] = []
+        while True:
+            member = stack.pop()
+            on_stack.remove(member)
+            component.append(member)
+            if member == node:
+                break
+        components.append(tuple(sorted(component)))
+
+    for node in sorted(graph):
+        if node not in indices:
+            visit(node)
+    return components
+
+
+def _dependency_closure(graph: dict[Path, set[Path]], entrypoint: Path) -> set[Path]:
+    closure: set[Path] = set()
+    pending = [entrypoint.resolve()]
+    while pending:
+        module = pending.pop()
+        if module in closure:
+            continue
+        closure.add(module)
+        pending.extend(graph[module] - closure)
+    return closure
+
+
 class WebUiModuleTests(unittest.TestCase):
+    def test_static_module_parser_resolves_imports_and_reexports(self):
+        source = """
+            import defaultExport from "./alpha";
+            import { beta } from "./beta.js";
+            import "./side-effect";
+            export { gamma } from "../shared/gamma";
+            export * from "./delta.js";
+            const lazy = import("./dynamic.js");
+            const text = 'import "./not-code.js"';
+        """
+        self.assertEqual(
+            _static_module_specifiers(source),
+            (
+                "./alpha",
+                "./beta.js",
+                "./side-effect",
+                "../shared/gamma",
+                "./delta.js",
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "main.js").write_text(
+                'import value from "./dependency";\nexport { value };\n',
+                encoding="utf-8",
+            )
+            (root / "dependency.js").write_text(
+                "export default 1;\n",
+                encoding="utf-8",
+            )
+            graph = _javascript_import_graph(root)
+            self.assertEqual(
+                graph[(root / "main.js").resolve()],
+                {(root / "dependency.js").resolve()},
+            )
+
+    def test_webui_static_import_graph_has_no_multi_module_components(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        javascript_root = backend_root / "gdl_backend" / "webui" / "js"
+        graph = _javascript_import_graph(javascript_root)
+        components = [
+            component
+            for component in _strongly_connected_components(graph)
+            if len(component) > 1
+        ]
+        rendered = [
+            [str(path.relative_to(javascript_root.resolve())) for path in component]
+            for component in components
+        ]
+        self.assertEqual(rendered, [], f"WebUI 静态 import graph 存在循环：{rendered}")
+
+    def test_store_static_dependency_closure_excludes_apps_and_views(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        javascript_root = backend_root / "gdl_backend" / "webui" / "js"
+        graph = _javascript_import_graph(javascript_root)
+        closure = _dependency_closure(graph, javascript_root / "core" / "store.js")
+        relative_paths = sorted(
+            str(path.relative_to(javascript_root.resolve())) for path in closure
+        )
+        forbidden = [
+            path
+            for path in relative_paths
+            if path.startswith("apps/")
+            or (path.startswith("components/") and path.endswith("-view.js"))
+        ]
+        self.assertEqual(
+            forbidden,
+            [],
+            f"store.js 依赖闭包不得加载应用控制器或视图：{forbidden}",
+        )
+
+    def test_store_imports_without_application_controllers_or_views(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("未安装 Node.js；生产运行不依赖 Node.js")
+
+        backend_root = Path(__file__).resolve().parents[1]
+        source_javascript = backend_root / "gdl_backend" / "webui" / "js"
+        with tempfile.TemporaryDirectory() as temporary:
+            test_root = Path(temporary)
+            javascript_root = test_root / "gdl_backend" / "webui" / "js"
+            shutil.copytree(source_javascript, javascript_root)
+            shutil.rmtree(javascript_root / "apps")
+            for view in (javascript_root / "components").glob("*-view.js"):
+                view.unlink()
+            (test_root / "package.json").write_text(
+                '{"type":"module","private":true}\n',
+                encoding="utf-8",
+            )
+            script = """
+                import {
+                  createInitialState,
+                  createStore,
+                } from "./gdl_backend/webui/js/core/store.js";
+                const initial = createInitialState();
+                const store = createStore({ initialState: initial, reportError() {} });
+                if (store.getState().ui.windows.length !== 0) process.exitCode = 2;
+            """
+            completed = subprocess.run(
+                [node, "--input-type=module", "--eval", script],
+                cwd=test_root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+                check=False,
+            )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            "store.js 无控制器/视图时必须可独立加载：\n"
+            f"STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}",
+        )
+
     def test_business_modules_static_security_boundaries(self):
         backend_root = Path(__file__).resolve().parents[1]
         webui = backend_root / "gdl_backend" / "webui"

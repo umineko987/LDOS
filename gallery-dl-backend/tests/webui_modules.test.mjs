@@ -17,6 +17,7 @@ import {
 } from "../gdl_backend/webui/js/core/actions.js";
 import {
   applications,
+  DEFAULT_APP_ID,
   DEFAULT_ROUTE,
   getApplicationById,
 } from "../gdl_backend/webui/js/core/app-registry.js";
@@ -241,6 +242,133 @@ import proxyApplication, {
 import vaultApplication, {
   VAULT_ENDPOINTS,
 } from "../gdl_backend/webui/js/apps/vault.js";
+
+const EXPECTED_APPLICATION_METADATA = Object.freeze([
+  Object.freeze({
+    id: "crawl",
+    label: "图片采集",
+    icon: "download",
+    route: "/crawl",
+    windowTitle: "C:\\IMAGEWEAVE\\CRAWL.EXE",
+    availability: "ready",
+    defaultWindowState: "normal",
+  }),
+  Object.freeze({
+    id: "tasks",
+    label: "批次管理",
+    icon: "list",
+    route: "/tasks",
+    windowTitle: "C:\\IMAGEWEAVE\\TASKMGR.EXE",
+    availability: "ready",
+    defaultWindowState: "normal",
+  }),
+  Object.freeze({
+    id: "proxy",
+    label: "代理管理",
+    icon: "network",
+    route: "/proxy",
+    windowTitle: "C:\\IMAGEWEAVE\\PROXY.CPL",
+    availability: "ready",
+    defaultWindowState: "normal",
+  }),
+  Object.freeze({
+    id: "vault",
+    label: "授权管理",
+    icon: "key",
+    route: "/vault",
+    windowTitle: "C:\\IMAGEWEAVE\\VAULT.CPL",
+    availability: "ready",
+    defaultWindowState: "normal",
+  }),
+  Object.freeze({
+    id: "review",
+    label: "去重审核",
+    icon: "images",
+    route: "/review",
+    windowTitle: "C:\\IMAGEWEAVE\\REVIEW.EXE",
+    availability: "ready",
+    defaultWindowState: "maximized",
+  }),
+  Object.freeze({
+    id: "policy",
+    label: "站点设置",
+    icon: "sliders",
+    route: "/policy",
+    windowTitle: "C:\\IMAGEWEAVE\\POLICY.CPL",
+    availability: "ready",
+    defaultWindowState: "normal",
+  }),
+  Object.freeze({
+    id: "diagnostics",
+    label: "系统诊断",
+    icon: "activity",
+    route: "/diagnostics",
+    windowTitle: "C:\\IMAGEWEAVE\\DIAG.EXE",
+    availability: "ready",
+    defaultWindowState: "normal",
+  }),
+  Object.freeze({
+    id: "personalization",
+    label: "外观设置",
+    icon: "sliders",
+    route: "/personalization",
+    windowTitle: "C:\\IMAGEWEAVE\\DESKTOP.CPL",
+    availability: "ready",
+    defaultWindowState: "normal",
+  }),
+  Object.freeze({
+    id: "gallery",
+    label: "图片库",
+    icon: "folder",
+    route: "/gallery",
+    windowTitle: "C:\\IMAGEWEAVE\\GALLERY.EXE",
+    availability: "placeholder",
+    defaultWindowState: "normal",
+  }),
+  Object.freeze({
+    id: "schedule",
+    label: "定时任务",
+    icon: "calendar",
+    route: "/schedule",
+    windowTitle: "C:\\IMAGEWEAVE\\SCHEDULE.EXE",
+    availability: "placeholder",
+    defaultWindowState: "normal",
+  }),
+  Object.freeze({
+    id: "export",
+    label: "数据集导出",
+    icon: "archive",
+    route: "/export",
+    windowTitle: "C:\\IMAGEWEAVE\\EXPORT.EXE",
+    availability: "placeholder",
+    defaultWindowState: "normal",
+  }),
+]);
+
+const APPLICATION_METADATA_KEYS = Object.freeze([
+  "id",
+  "label",
+  "icon",
+  "route",
+  "windowTitle",
+  "availability",
+  "defaultWindowState",
+]);
+
+function applicationMetadataSnapshot(items) {
+  return items.map((item) => Object.fromEntries(
+    APPLICATION_METADATA_KEYS.map((key) => [key, item[key]]),
+  ));
+}
+
+function completeApplicationController() {
+  return {
+    mount() {},
+    activate() {},
+    deactivate() {},
+    unmount() {},
+  };
+}
 
 function windowRect(overrides = {}) {
   return { x: 48, y: 36, w: 720, h: 480, ...overrides };
@@ -1032,6 +1160,140 @@ function createFakePolling(options = {}) {
   });
   return { manager, timers, visibility, errors };
 }
+
+test("应用 registry 保持 11 项元数据、默认路由与生命周期基线", async () => {
+  const registryModule = await import("../gdl_backend/webui/js/core/app-registry.js");
+  assert.deepEqual(Object.keys(registryModule).sort(), [
+    "DEFAULT_APP_ID",
+    "DEFAULT_ROUTE",
+    "applications",
+    "getApplicationById",
+    "getApplicationByRoute",
+  ]);
+  assert.equal(DEFAULT_APP_ID, "crawl");
+  assert.equal(DEFAULT_ROUTE, "/crawl");
+  assert.equal(applications.length, 11);
+  assert.deepEqual(applicationMetadataSnapshot(applications), EXPECTED_APPLICATION_METADATA);
+  assert.deepEqual(
+    applications.filter((application) => application.availability === "placeholder")
+      .map((application) => application.id),
+    ["gallery", "schedule", "export"],
+  );
+  for (const application of applications) {
+    assert.equal(Object.isFrozen(application), true, application.id);
+    for (const hook of ["mount", "activate", "deactivate", "unmount"]) {
+      assert.equal(typeof application[hook], "function", `${application.id}.${hook}`);
+    }
+  }
+  assert.deepEqual(
+    applications.filter((application) => typeof application.beforeLeave === "function")
+      .map((application) => application.id),
+    ["review", "policy", "personalization"],
+  );
+  assert.deepEqual(
+    applications.filter((application) => typeof application.beforeWindowHide === "function")
+      .map((application) => application.id),
+    ["policy", "personalization"],
+  );
+});
+
+test("纯 app metadata 与 registry 合并结果逐项一致", async () => {
+  const {
+    applicationDefinitions,
+    DEFAULT_APP_ID: metadataDefaultAppId,
+    DEFAULT_ROUTE: metadataDefaultRoute,
+    getApplicationDefinitionById,
+    getApplicationDefinitionByRoute,
+  } = await import("../gdl_backend/webui/js/core/app-definitions.js");
+
+  assert.equal(metadataDefaultAppId, DEFAULT_APP_ID);
+  assert.equal(metadataDefaultRoute, DEFAULT_ROUTE);
+  assert.equal(Object.isFrozen(applicationDefinitions), true);
+  assert.deepEqual(applicationMetadataSnapshot(applicationDefinitions), EXPECTED_APPLICATION_METADATA);
+  for (const [index, definition] of applicationDefinitions.entries()) {
+    assert.equal(Object.isFrozen(definition), true, definition.id);
+    assert.deepEqual(Object.keys(definition), APPLICATION_METADATA_KEYS, definition.id);
+    for (const hook of ["mount", "activate", "deactivate", "unmount"]) {
+      assert.equal(hook in definition, false, `${definition.id}.${hook}`);
+    }
+    assert.equal(getApplicationDefinitionById(definition.id), definition);
+    assert.equal(getApplicationDefinitionByRoute(definition.route), definition);
+    assert.deepEqual(
+      applicationMetadataSnapshot([applications[index]]),
+      applicationMetadataSnapshot([definition]),
+    );
+  }
+  assert.equal(getApplicationDefinitionById("unknown"), null);
+  assert.equal(getApplicationDefinitionByRoute("/unknown"), null);
+});
+
+test("registry 按 ID 合并并拒绝重复、缺失、多余控制器及不完整生命周期", async () => {
+  const { createApplicationRegistry } = await import(
+    "../gdl_backend/webui/js/core/app-registry-factory.js"
+  );
+  const fixtureDefinitions = () => EXPECTED_APPLICATION_METADATA.slice(0, 2)
+    .map((definition) => ({ ...definition }));
+
+  const crawlController = completeApplicationController();
+  const tasksController = completeApplicationController();
+  const registry = createApplicationRegistry(fixtureDefinitions(), [
+    ["tasks", tasksController],
+    ["crawl", crawlController],
+  ]);
+  assert.deepEqual(registry.applications.map((application) => application.id), ["crawl", "tasks"]);
+  assert.equal(registry.getApplicationById("crawl").mount, crawlController.mount);
+  assert.equal(registry.getApplicationByRoute("/tasks").activate, tasksController.activate);
+
+  const duplicateId = fixtureDefinitions();
+  duplicateId[1].id = duplicateId[0].id;
+  assert.throws(
+    () => createApplicationRegistry(duplicateId, [["crawl", crawlController]]),
+    /应用 ID 重复：crawl/,
+  );
+
+  const duplicateRoute = fixtureDefinitions();
+  duplicateRoute[1].route = duplicateRoute[0].route;
+  assert.throws(
+    () => createApplicationRegistry(duplicateRoute, [
+      ["crawl", crawlController],
+      ["tasks", tasksController],
+    ]),
+    /应用路由重复：\/crawl/,
+  );
+
+  assert.throws(
+    () => createApplicationRegistry(fixtureDefinitions(), [["crawl", crawlController]]),
+    /tasks 缺少控制器/,
+  );
+  assert.throws(
+    () => createApplicationRegistry(fixtureDefinitions(), [
+      ["crawl", crawlController],
+      ["tasks", tasksController],
+      ["extra", completeApplicationController()],
+    ]),
+    /存在多余控制器：extra/,
+  );
+  assert.throws(
+    () => createApplicationRegistry(fixtureDefinitions(), [
+      ["crawl", crawlController],
+      ["crawl", completeApplicationController()],
+      ["tasks", tasksController],
+    ]),
+    /控制器 ID 重复：crawl/,
+  );
+
+  for (const hook of ["mount", "activate", "deactivate", "unmount"]) {
+    const incompleteController = completeApplicationController();
+    delete incompleteController[hook];
+    assert.throws(
+      () => createApplicationRegistry(fixtureDefinitions(), [
+        ["crawl", incompleteController],
+        ["tasks", tasksController],
+      ]),
+      new RegExp(`crawl 缺少生命周期方法：${hook}`),
+    );
+  }
+});
 
 test("API 请求构造只在存在请求体时发送 JSON Content-Type", () => {
   const post = buildRequestOptions("post", {
