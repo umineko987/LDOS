@@ -14,6 +14,7 @@ import requests
 
 from .config import ProxySettings
 from .file_security import ensure_private_directory
+from .proxy_adapters import ProxyRuntimeAdapter, ProxyRuntimeBindings
 from .proxy_core import TunnelTransportCore
 from .proxy_policy import (
     ProbeTargetViolation,
@@ -80,6 +81,23 @@ class ProxyPoolAdapter:
         self._source_provider = source_provider
         self.runtime_dir = Path(os.path.abspath(os.fspath(runtime_dir / "proxy")))
         ensure_private_directory(self.runtime_dir)
+        self._runtime_adapter = ProxyRuntimeAdapter(
+            ProxyRuntimeBindings(
+                # Late binding preserves proxy.py's established patch surfaces while
+                # making every external dependency explicit and instance-scoped.
+                snapshot_from_settings=lambda current: snapshot_from_settings(current),
+                fetch_subscriptions=lambda urls, **kwargs: fetch_subscriptions(
+                    urls,
+                    **kwargs,
+                ),
+                read_proxy_node_file=lambda path: read_proxy_node_file(path),
+                parse_subscription_text=lambda text: parse_subscription_text(text),
+                create_native_pool=lambda endpoints: NativeProxyPool(endpoints),
+                create_forwarder=lambda endpoint: LocalHTTPForwarder(endpoint),
+                create_transport_core=lambda **kwargs: TunnelTransportCore(**kwargs),
+                requests_get=lambda *args, **kwargs: requests.get(*args, **kwargs),
+            )
+        )
         self._lock = threading.RLock()
         self._lifecycle_lock = threading.RLock()
         self._pool: NativeProxyPool | None = None
@@ -110,10 +128,10 @@ class ProxyPoolAdapter:
         }
 
     def _source_snapshot(self) -> ProxySourceSnapshot:
-        provider = self._source_provider
-        if provider is None:
-            return snapshot_from_settings(self.settings)
-        snapshot = provider() if callable(provider) else provider.snapshot()
+        snapshot = self._runtime_adapter.source_snapshot(
+            self.settings,
+            self._source_provider,
+        )
         if not isinstance(snapshot, ProxySourceSnapshot):
             raise ProxyPoolError("代理源提供器返回了无效快照")
         return snapshot
@@ -247,34 +265,18 @@ class ProxyPoolAdapter:
     ) -> tuple[list[_NodeRecord], dict[str, Any]]:
         del force_refresh  # 拉取始终显式执行，不存在隐藏的外部缓存。
         sources = snapshot or self._source_snapshot()
-        parsed_nodes: list[ParsedProxyNode] = []
-        warnings: list[str] = []
-        if sources.subscription_urls:
-            try:
-                remote_nodes, remote_warnings = fetch_subscriptions(
-                    sources.subscription_urls,
-                    timeout=self.settings.subscription_timeout_seconds,
-                    max_workers=min(8, max(1, len(sources.subscription_urls))),
-                )
-            except ValueError as exc:
-                # 订阅并非唯一来源时允许本地文件和内联节点继续加载。
-                if not sources.node_file and not sources.inline_nodes:
-                    raise
-                remote_nodes, remote_warnings = [], [self._safe_warning(exc, sources)]
-            parsed_nodes.extend(remote_nodes)
-            warnings.extend(remote_warnings)
-        if sources.node_file:
-            try:
-                _, file_nodes = read_proxy_node_file(sources.node_file)
-            except (
-                ProxySourcePathForbidden,
-                ProxySourceStoreError,
-                ProxySourceValidationError,
-            ) as exc:
-                raise ProxyPoolError("节点文件不可用或未通过安全校验") from exc
-            parsed_nodes.extend(file_nodes)
-        if sources.inline_nodes:
-            parsed_nodes.extend(parse_subscription_text("\n".join(sources.inline_nodes)))
+        try:
+            parsed_nodes, warnings = self._runtime_adapter.load_source_nodes(
+                sources,
+                subscription_timeout_seconds=self.settings.subscription_timeout_seconds,
+                warning_projector=lambda warning: self._safe_warning(warning, sources),
+            )
+        except (
+            ProxySourcePathForbidden,
+            ProxySourceStoreError,
+            ProxySourceValidationError,
+        ) as exc:
+            raise ProxyPoolError("节点文件不可用或未通过安全校验") from exc
 
         records: list[_NodeRecord] = []
         core_candidates: list[ParsedProxyNode] = []
@@ -361,7 +363,7 @@ class ProxyPoolAdapter:
                 with self._lock:
                     core_candidates = list(self._core_candidates)
                 if core_candidates:
-                    new_core = TunnelTransportCore(
+                    new_core = self._runtime_adapter.create_transport_core(
                         binary_path=self.settings.transport_core_binary,
                         expected_sha256=self.settings.transport_core_sha256,
                         runtime_dir=self.runtime_dir / "transport-core",
@@ -410,7 +412,9 @@ class ProxyPoolAdapter:
                 if not records:
                     raise ProxyPoolError("节点源中未解析出可直接使用的 HTTP/HTTPS/SOCKS 代理")
                 self._set_records(records)
-                native_pool = NativeProxyPool(record.endpoint for record in records)
+                native_pool = self._runtime_adapter.create_native_pool(
+                    record.endpoint for record in records
+                )
                 with self._lock:
                     self._pool = native_pool
                     self._transport_core = new_core
@@ -561,16 +565,11 @@ class ProxyPoolAdapter:
         healthy = False
         error = ""
         try:
-            response = requests.get(
+            status_code = self._runtime_adapter.probe_http_status(
                 target_url,
-                proxies={"http": endpoint, "https": endpoint},
-                headers={"User-Agent": "gallery-dl-backend-probe/1.0"},
-                timeout=self.settings.probe_timeout_seconds,
-                allow_redirects=False,
-                stream=True,
+                endpoint=endpoint,
+                timeout_seconds=self.settings.probe_timeout_seconds,
             )
-            status_code = int(response.status_code)
-            response.close()
             healthy = status_code < 500 and status_code != 407
             if not healthy:
                 error = f"代理探活返回 HTTP {status_code}"
@@ -777,7 +776,7 @@ class ProxyPoolAdapter:
                 parsed = urlsplit(record.endpoint)
                 if record.protocol in {"http", "https"} and (parsed.username or parsed.password):
                     try:
-                        forwarder = LocalHTTPForwarder(record.endpoint)
+                        forwarder = self._runtime_adapter.create_forwarder(record.endpoint)
                         endpoint = forwarder.start()
                     except Exception as exc:
                         if forwarder is not None:
