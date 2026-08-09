@@ -17,6 +17,16 @@ from .process_control import terminate_stale_process
 from .proxy import ProxyLease, ProxyPoolAdapter, ProxyPoolUnavailable
 from .redaction import redact_text, safe_exception_category
 from .schemas import TaskPolicy
+from ._scheduler_decisions import (
+    attempt_status,
+    decide_task_transition,
+    parse_task_policy,
+    proxy_failure_plan,
+    resolve_allowed_proxy_ids,
+    retry_delay_seconds,
+    updated_tried_proxy_ids,
+    upgrade_partial_artifact_failure,
+)
 
 
 _DISPATCH_REFILL_ROUNDS = 2
@@ -98,15 +108,14 @@ class TaskScheduler:
         self._wake.set()
 
     def _policy(self, task: dict[str, Any]) -> TaskPolicy:
-        return TaskPolicy.model_validate(task.get("policy") or {})
+        return parse_task_policy(task)
 
     def _allowed_proxy_ids(self, policy: TaskPolicy) -> set[str] | None:
-        if policy.allowed_proxy_ids is not None:
-            return set(policy.allowed_proxy_ids)
-        if not policy.proxy_probe_scope:
-            return None
-        probe = self.db.get_crawl_address_proxy_probe(policy.proxy_probe_scope)
-        return set(probe["node_ids"]) if probe is not None else set()
+        probe_node_ids: list[str] | None = None
+        if policy.allowed_proxy_ids is None and policy.proxy_probe_scope:
+            probe = self.db.get_crawl_address_proxy_probe(policy.proxy_probe_scope)
+            probe_node_ids = probe["node_ids"] if probe is not None else None
+        return resolve_allowed_proxy_ids(policy, probe_node_ids)
 
     def _record_dispatch_failure(self, exc: Exception) -> None:
         category = safe_exception_category(exc)
@@ -395,20 +404,22 @@ class TaskScheduler:
                     # connection, not even in prefer mode: remind and terminate
                     # the task (non-retryable) until the core is fixed and the
                     # pool restarted. Other acquire errors keep the branch below.
+                    plan = proxy_failure_plan(proxy_mode, "pool_unavailable")
                     decision = FailureDecision(
                         "proxy_unavailable",
-                        False,
-                        False,
+                        plan.retryable,
+                        plan.proxy_fault,
                         f"代理不可用，任务已终止（不会回退直连）：{redact_text(exc, limit=500)}",
                     )
                     await log("backend", decision.message)
                     raise _ExecutionFinished
                 except Exception as exc:
-                    if proxy_mode == "required":
+                    plan = proxy_failure_plan(proxy_mode, "acquire_error")
+                    if plan.action == "fail":
                         decision = FailureDecision(
                             "proxy_unavailable",
-                            True,
-                            True,
+                            plan.retryable,
+                            plan.proxy_fault,
                             "required 模式下代理租约获取失败："
                             f"{redact_text(exc, limit=500)}",
                         )
@@ -420,11 +431,17 @@ class TaskScheduler:
                     public_endpoint = redact_text(lease.endpoint, limit=500)
                     self.db.set_lease(task_id, attempt_id, lease.node_id, public_endpoint, task["site"])
                     await log("backend", f"已分配代理节点 {lease.name} ({lease.protocol}) -> {public_endpoint}")
-                elif proxy_mode == "required":
-                    decision = FailureDecision("proxy_unavailable", True, False, "当前没有符合站点策略的健康代理节点")
-                    await log("backend", decision.message)
-                    raise _ExecutionFinished
                 else:
+                    plan = proxy_failure_plan(proxy_mode, "empty")
+                    if plan.action == "fail":
+                        decision = FailureDecision(
+                            "proxy_unavailable",
+                            plan.retryable,
+                            plan.proxy_fault,
+                            "当前没有符合站点策略的健康代理节点",
+                        )
+                        await log("backend", decision.message)
+                        raise _ExecutionFinished
                     await log("backend", "代理池当前无可租用节点，本次任务使用直连")
 
             current = self.db.get_task(task_id)
@@ -476,14 +493,10 @@ class TaskScheduler:
                 # bounded retry (capped by max_attempts): gallery-dl skips already-saved
                 # files and re-fetches only what is missing. Zero artifacts = a pure
                 # extraction failure that downloaded nothing, which stays terminal.
-                if (
-                    decision.error_class == "extraction_error"
-                    and not decision.retryable
-                    and task_artifacts
-                ):
-                    decision = FailureDecision(
-                        "extraction_partial", True, decision.proxy_fault, decision.message
-                    )
+                decision = upgrade_partial_artifact_failure(
+                    decision,
+                    len(task_artifacts),
+                )
         except _ExecutionFinished:
             pass
         except asyncio.CancelledError:
@@ -558,7 +571,7 @@ class TaskScheduler:
         self.db.finish_attempt(
             attempt_id,
             exit_code=exit_code,
-            status="succeeded" if decision.error_class == "success" else "cancelled" if decision.error_class == "cancelled" else "failed",
+            status=attempt_status(decision),
             error_class=decision.error_class,
             error_message=decision.message,
             retryable=decision.retryable,
@@ -570,7 +583,14 @@ class TaskScheduler:
             self.db.update_artifacts(task_id, count, total)
 
         latest = self.db.get_task(task_id)
-        if (latest and latest.get("cancel_requested")) or decision.error_class == "cancelled":
+        max_attempts = int((latest or task or {}).get("max_attempts", 1))
+        transition = decide_task_transition(
+            decision,
+            cancel_requested=bool(latest and latest.get("cancel_requested")),
+            attempt_no=attempt_no,
+            max_attempts=max_attempts,
+        )
+        if transition == "cancelled":
             self.db.complete_task(
                 task_id,
                 "cancelled",
@@ -580,15 +600,16 @@ class TaskScheduler:
                 expected_attempt_id=attempt_id,
             )
             return
-        if decision.error_class == "success":
+        if transition == "succeeded":
             self.db.complete_task(task_id, "succeeded", exit_code=exit_code, expected_attempt_id=attempt_id)
             return
 
-        max_attempts = int((latest or task or {}).get("max_attempts", 1))
-        tried = list((latest or task or {}).get("tried_proxy_ids") or [])
-        if lease is not None and decision.proxy_fault and lease.node_id not in tried:
-            tried.append(lease.node_id)
-        if decision.retryable and attempt_no < max_attempts:
+        tried = updated_tried_proxy_ids(
+            (latest or task or {}).get("tried_proxy_ids") or [],
+            proxy_node_id=lease.node_id if lease is not None else None,
+            proxy_fault=decision.proxy_fault,
+        )
+        if transition == "requeue":
             base = policy.backoff_base_seconds if policy else 2.0
             # A manual retry round pins backoff_anchor_attempt to the attempt_count it
             # inherited, so this round's exponent restarts at 0 instead of compounding
@@ -596,9 +617,13 @@ class TaskScheduler:
             # so retries within a single round keep escalating. The exponential term is
             # then capped so a deep sequence can never schedule an absurd delay.
             anchor = int((latest or task or {}).get("backoff_anchor_attempt", 0) or 0)
-            exponent = max(0, attempt_no - 1 - anchor)
-            delay = min(base * (2 ** exponent), self.settings.retry_backoff_cap_seconds)
-            delay += random.uniform(0.0, self.settings.retry_jitter_seconds)
+            delay = retry_delay_seconds(
+                base_seconds=base,
+                attempt_no=attempt_no,
+                backoff_anchor_attempt=anchor,
+                cap_seconds=self.settings.retry_backoff_cap_seconds,
+                jitter_seconds=random.uniform(0.0, self.settings.retry_jitter_seconds),
+            )
             self.db.requeue_task(
                 task_id,
                 next_run_at=time.time() + delay,
