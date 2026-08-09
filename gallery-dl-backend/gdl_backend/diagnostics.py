@@ -475,13 +475,22 @@ def dedup_components(
 def project_proxy_component(
     settings: AppSettings,
     live_status: dict[str, Any] | None = None,
+    *,
+    proxy_health: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    health_loop = (
+        _background_loop_snapshot(proxy_health)
+        if proxy_health is not None
+        else None
+    )
+    health_details = {"health_loop": health_loop} if health_loop is not None else {}
     if not settings.proxy.enabled:
         return _component(
             "disabled",
             "项目抓取代理池未启用（安装下载代理不计作节点源）",
             required=False,
             source_count=0,
+            **health_details,
         )
     source_count = (
         len(settings.proxy.subscription_urls)
@@ -489,19 +498,42 @@ def project_proxy_component(
         + int(settings.proxy.node_file is not None and settings.proxy.node_file.is_file())
     )
     if source_count == 0:
-        return _component("error", "项目抓取代理池已启用，但没有配置节点源", source_count=0)
+        return _component(
+            "error",
+            "项目抓取代理池已启用，但没有配置节点源",
+            source_count=0,
+            **health_details,
+        )
+    health_unavailable = health_loop is not None and (
+        health_loop["state"] == "unexpected_exit"
+        or (
+            health_loop["state"] in {"running", "degraded"}
+            and not health_loop["operational"]
+        )
+    )
+    if health_unavailable:
+        return _component(
+            "error",
+            "代理健康监控循环意外结束",
+            source_count=source_count,
+            running=bool(live_status and live_status.get("running")),
+            healthy=_bounded_count((live_status or {}).get("healthy")),
+            **health_details,
+        )
     if live_status is not None and settings.proxy.auto_start and not live_status.get("running"):
         return _component(
             "error",
             "项目抓取代理池自动启动后未运行",
             source_count=source_count,
+            **health_details,
         )
     return _component(
         "ok",
         "项目抓取代理池已配置",
         source_count=source_count,
         running=bool(live_status and live_status.get("running")),
-        healthy=int((live_status or {}).get("healthy") or 0),
+        healthy=_bounded_count((live_status or {}).get("healthy")),
+        **health_details,
     )
 
 
@@ -580,6 +612,12 @@ def diagnostics_config_snapshot(settings: AppSettings) -> dict[str, Any]:
     }
 
 
+def diagnostics_proxy_health_snapshot(proxy_health: dict[str, Any]) -> dict[str, Any]:
+    """Project proxy monitor state without exposing exception or proxy payloads."""
+
+    return _background_loop_snapshot(proxy_health)
+
+
 def diagnostics_scheduler_snapshot(
     scheduler: dict[str, Any],
     ordered_crawls: dict[str, Any],
@@ -618,6 +656,7 @@ def readiness_snapshot(
     *,
     database_ok: bool,
     live_proxy_status: dict[str, Any],
+    proxy_health: dict[str, Any] | None,
     scheduler: dict[str, Any],
     ordered_crawls: dict[str, Any],
 ) -> dict[str, Any]:
@@ -644,7 +683,11 @@ def readiness_snapshot(
             "ok" if gallery_ok else "error",
             "gallery-dl submodule 可用" if gallery_ok else "gallery-dl submodule 缺失",
         ),
-        "project_proxy": project_proxy_component(settings, live_proxy_status),
+        "project_proxy": project_proxy_component(
+            settings,
+            live_proxy_status,
+            proxy_health=proxy_health,
+        ),
         "mihomo": mihomo_component(settings),
         "scheduler": _component(
             "error" if scheduler_unavailable else "ok",

@@ -29,6 +29,7 @@ class ServiceContainerObservabilityTests(unittest.IsolatedAsyncioTestCase):
         self.temporary.cleanup()
 
     async def test_proxy_health_loop_rate_limits_failures_and_records_recovery(self) -> None:
+        self.settings.proxy.health_interval_seconds = 1.0
         entered = [asyncio.Event() for _ in range(5)]
         releases = [asyncio.Event() for _ in range(4)]
         blocked = asyncio.Event()
@@ -109,8 +110,8 @@ class ServiceContainerObservabilityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(intervals, [5.0] * 5)
         self.container.proxy.probe.assert_called_once_with()
-        warnings = [line for line in captured.output if ":WARNING:" in line]
-        recoveries = [line for line in captured.output if ":INFO:" in line]
+        warnings = [line for line in captured.output if line.startswith("WARNING:")]
+        recoveries = [line for line in captured.output if line.startswith("INFO:")]
         self.assertEqual(len(warnings), 1, captured.output)
         self.assertEqual(len(recoveries), 1, captured.output)
         serialized_logs = "\n".join(captured.output)

@@ -43,6 +43,7 @@ from .database import (
 )
 from .diagnostics import (
     diagnostics_config_snapshot,
+    diagnostics_proxy_health_snapshot,
     diagnostics_scheduler_snapshot,
     readiness_snapshot,
 )
@@ -83,7 +84,7 @@ from .proxy_source_store import (
     ProxySourceStoreError,
     ProxySourceValidationError,
 )
-from .redaction import redact_text
+from .redaction import redact_text, safe_exception_category
 from .review import DedupReviewManager, resolve_review_file
 from .scheduler import TaskScheduler
 from .schemas import (
@@ -112,7 +113,9 @@ from .site import SiteInfo, SiteResolver
 # lookup before proceeding without alias expansion.  The lookup keeps running
 # for the danbooru source itself, which awaits it in full.
 _ALIAS_LOOKUP_WAIT_SECONDS = 30.0
+_BACKGROUND_LOOP_WARNING_INTERVAL_SECONDS = 60.0
 
+logger = logging.getLogger(__name__)
 _search_logger = logging.getLogger("gdl_backend.search")
 AuthResponseView = Literal["legacy", "vault"]
 PolicyResponseView = Literal["legacy", "policy"]
@@ -226,6 +229,13 @@ class ServiceContainer:
         )
         self._health_task: asyncio.Task | None = None
         self._started = False
+        self._stopping = False
+        self._proxy_health_consecutive_failures = 0
+        self._proxy_health_last_error_at: float | None = None
+        self._proxy_health_last_error_category: str | None = None
+        self._proxy_health_last_success_at: float | None = None
+        self._proxy_health_last_recovery_at: float | None = None
+        self._proxy_health_last_warning_at: float | None = None
 
     def policy_for(self, site: str) -> SitePolicy:
         stored = self.db.get_site_policy(site)
@@ -236,6 +246,7 @@ class ServiceContainer:
         if self._started:
             return
         self._started = True
+        self._stopping = False
         if self.settings.proxy.enabled and self.settings.proxy.auto_start:
             try:
                 await asyncio.to_thread(self.proxy.start, force_refresh=True)
@@ -269,6 +280,7 @@ class ServiceContainer:
             self._health_task = asyncio.create_task(self._proxy_health_loop(), name="proxy-health-monitor")
 
     async def stop(self) -> None:
+        self._stopping = True
         if self._health_task is not None:
             self._health_task.cancel()
             await asyncio.gather(self._health_task, return_exceptions=True)
@@ -279,10 +291,74 @@ class ServiceContainer:
         await self.auth.stop()
         try:
             await asyncio.to_thread(self.proxy.stop, force=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "proxy shutdown failure; category=%s; continuing service shutdown",
+                safe_exception_category(exc),
+            )
         self.db.close()
         self._started = False
+
+    def _record_proxy_health_failure(self, exc: Exception) -> None:
+        category = safe_exception_category(exc)
+        self._proxy_health_consecutive_failures += 1
+        self._proxy_health_last_error_at = time.time()
+        self._proxy_health_last_error_category = category
+        now = time.monotonic()
+        if (
+            self._proxy_health_last_warning_at is None
+            or now - self._proxy_health_last_warning_at
+            >= _BACKGROUND_LOOP_WARNING_INTERVAL_SECONDS
+        ):
+            self._proxy_health_last_warning_at = now
+            logger.warning(
+                "proxy health loop failure; category=%s consecutive_failures=%d",
+                category,
+                self._proxy_health_consecutive_failures,
+            )
+
+    def _record_proxy_health_success(self) -> None:
+        now = time.time()
+        self._proxy_health_last_success_at = now
+        if self._proxy_health_consecutive_failures <= 0:
+            return
+        failures = self._proxy_health_consecutive_failures
+        category = self._proxy_health_last_error_category or "unexpected_error"
+        self._proxy_health_consecutive_failures = 0
+        self._proxy_health_last_recovery_at = now
+        self._proxy_health_last_warning_at = None
+        logger.info(
+            "proxy health loop recovered; category=%s previous_failures=%d",
+            redact_text(category, limit=32),
+            failures,
+        )
+
+    def proxy_health_summary(self) -> dict[str, Any]:
+        task = self._health_task
+        running = task is not None and not task.done()
+        unexpected_exit = (
+            task is not None and task.done() and self._started and not self._stopping
+        )
+        if unexpected_exit:
+            state = "unexpected_exit"
+        elif self._stopping:
+            state = "stopping" if running else "stopped"
+        elif running:
+            state = (
+                "degraded" if self._proxy_health_consecutive_failures else "running"
+            )
+        else:
+            state = "not_started"
+        return {
+            "state": state,
+            "running": running and not self._stopping,
+            "operational": not unexpected_exit,
+            "consecutive_failures": self._proxy_health_consecutive_failures,
+            "last_error_category": self._proxy_health_last_error_category,
+            "last_error_at": self._proxy_health_last_error_at,
+            "last_success_at": self._proxy_health_last_success_at,
+            "last_recovery_at": self._proxy_health_last_recovery_at,
+        }
 
     async def _proxy_health_loop(self) -> None:
         interval = max(5.0, self.settings.proxy.health_interval_seconds)
@@ -292,9 +368,11 @@ class ServiceContainer:
                 status = await asyncio.to_thread(self.proxy.status)
                 if status.get("running"):
                     await asyncio.to_thread(self.proxy.probe)
+                self._record_proxy_health_success()
             except asyncio.CancelledError:
                 break
-            except Exception:
+            except Exception as exc:
+                self._record_proxy_health_failure(exc)
                 continue
 
 
@@ -651,12 +729,14 @@ def create_app(
         # 事件循环拥有的可变状态必须在循环上取快照，不能带进工作线程。
         scheduler_summary = service.scheduler.active_summary()
         ordered_summary = service.ordered_crawls.status()
+        proxy_health = service.proxy_health_summary()
 
         def snapshot() -> dict[str, Any]:
             return readiness_snapshot(
                 settings,
                 database_ok=service.db.ping(),
                 live_proxy_status=service.proxy.status(),
+                proxy_health=proxy_health,
                 scheduler=scheduler_summary,
                 ordered_crawls=ordered_summary,
             )
@@ -2572,7 +2652,11 @@ def create_app(
 
     @api.get("/proxy/status")
     async def proxy_status(container: ServiceContainer = Depends(get_service)):
-        return await asyncio.to_thread(container.proxy.status)
+        health_loop = diagnostics_proxy_health_snapshot(
+            container.proxy_health_summary()
+        )
+        status = await asyncio.to_thread(container.proxy.status)
+        return {**status, "health_loop": health_loop}
 
     async def _proxy_action(call):
         try:

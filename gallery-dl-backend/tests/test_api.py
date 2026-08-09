@@ -524,8 +524,23 @@ class ApiTests(unittest.TestCase):
                 return_value=degraded_health,
             ),
         ):
+            proxy_status = self.client.get("/api/v1/proxy/status")
             degraded = self.client.get("/readyz")
 
+        self.assertEqual(proxy_status.status_code, 200, proxy_status.text)
+        self.assertEqual(
+            proxy_status.json()["health_loop"],
+            {
+                "state": "degraded",
+                "running": True,
+                "operational": True,
+                "consecutive_failures": 2,
+                "last_error_category": "runtime_error",
+                "last_error_at": 10.0,
+                "last_success_at": 9.0,
+                "last_recovery_at": None,
+            },
+        )
         self.assertEqual(degraded.status_code, 200, degraded.text)
         proxy_component = degraded.json()["components"]["project_proxy"]
         self.assertEqual(proxy_component["status"], "ok")
@@ -534,7 +549,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(health_loop["consecutive_failures"], 2)
         self.assertEqual(health_loop["last_error_category"], "runtime_error")
         self.assertNotIn("raw_exception", health_loop)
-        safe_strings = tuple(_json_strings(degraded.json()))
+        safe_strings = tuple(
+            _json_strings({"proxy": proxy_status.json(), "ready": degraded.json()})
+        )
         for forbidden in (
             "proxy-diag-token-29081",
             "proxy-diag-cookie-29081",
