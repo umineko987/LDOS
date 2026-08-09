@@ -1,0 +1,67 @@
+{
+  "files": {
+    "embeddings.json": {
+      "bytes": 108439,
+      "role": "pinned SSCD and DINOv2 outputs for clean-checkout tests",
+      "sha256": "f8f0f8f949ac1747054e3ea84e6e111178aad0dc819a4dea0968685c0815a657"
+    },
+    "recolored-sketch-a.png": {
+      "bytes": 47354,
+      "role": "source image for the recolored outline pair",
+      "sha256": "e147aca58ff635a7c10509085b7734119678fab3080590581cbd9b012fd88703"
+    },
+    "recolored-sketch-b.png": {
+      "bytes": 46156,
+      "role": "recolored image for the L1-SSCD pair",
+      "sha256": "29ab4e27d88d6a45d6a9489dcb1f898bd452d7ca42256def92d290d3341a6c78"
+    },
+    "structure-color.png": {
+      "bytes": 55187,
+      "role": "color image for the structural pair",
+      "sha256": "9d02d118826768d9569f91719c50d541730177ee9d486bfe0f77e8d50dd3baa1"
+    },
+    "structure-gray.png": {
+      "bytes": 48107,
+      "role": "grayscale structural variant for the L2 pair",
+      "sha256": "200fe6f80f08cc409b5bedeccdd2d1355e800b45defe72d3302d6fc06b7b2a65"
+    }
+  },
+  "license": {
+    "notice": "Copyright (c) 2026 ImageWeave contributors; see ../../../LICENSE",
+    "spdx": "MIT"
+  },
+  "models": {
+    "dino": {
+      "artifact_sha256": "b938bf1bc15cd2ec0feacfe3a1bb553fe8ea9ca46a7e1d8d00217f29aef60cd9",
+      "source": "facebookresearch/dinov2:7764ea0f912e53c92e82eb78a2a1631e92725fc8",
+      "vector_key": "dino_embedding"
+    },
+    "sscd": {
+      "artifact_sha256": "9f26bd4c848cc19b73d2ae92eea6e04886f61a7b764ceb7a13aeee62e6a6db56",
+      "source": "https://dl.fbaipublicfiles.com/sscd-copy-detection/sscd_disc_mixup.torchscript.pt",
+      "vector_key": "sscd_embedding"
+    }
+  },
+  "origin": "All four images are original deterministic drawings rendered by generate.py. No downloaded or user-owned image is included. Model weights are not redistributed.",
+  "pairs": {
+    "color-grayscale-structure": {
+      "expected_level": "L2-结构",
+      "files": [
+        "structure-color.png",
+        "structure-gray.png"
+      ]
+    },
+    "recolored-sketch": {
+      "expected_level": "L1-SSCD",
+      "files": [
+        "recolored-sketch-a.png",
+        "recolored-sketch-b.png"
+      ]
+    }
+  },
+  "reproduction": {
+    "embeddings": "./.venv/bin/python tests/fixtures/real_variant_pairs/refresh_embeddings.py --model-dir .models",
+    "images": "./.venv/bin/python tests/fixtures/real_variant_pairs/generate.py"
+  },
+  "schema_version": 1
+}
