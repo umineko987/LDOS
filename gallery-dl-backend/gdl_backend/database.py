@@ -14,6 +14,7 @@ from ._database_crawl_repository import (
     CrawlRepository,
     refresh_crawl_batch_counts,
 )
+from ._database_proxy_repository import ProxyProbeRepository
 from ._database_repository import (
     ACTIVE_STATUSES,
     TERMINAL_BATCH_STATUSES,
@@ -93,6 +94,12 @@ class Database:
             clock=lambda: time.time(),
             max_groups=lambda: MAX_CRAWL_REVIEW_GROUPS,
             get_review=lambda batch_id: self.get_crawl_review(batch_id),
+        )
+        self._proxy_probe_repository = ProxyProbeRepository(
+            read=self._read,
+            transaction=self._transaction,
+            clock=lambda: time.time(),
+            get_probe=lambda address_id: self.get_crawl_address_proxy_probe(address_id),
         )
         secure_sqlite_files(self.path)
 
@@ -561,64 +568,16 @@ class Database:
         healthy_node_ids: list[str],
         error: str = "",
     ) -> dict[str, Any]:
-        checked_at = time.time()
-        node_ids = list(dict.fromkeys(str(value) for value in healthy_node_ids if str(value)))
-        with self._transaction() as conn:
-            address = conn.execute(
-                "SELECT id FROM crawl_addresses WHERE id=?",
-                (address_id,),
-            ).fetchone()
-            if address is None:
-                raise KeyError(address_id)
-            conn.execute(
-                """
-                INSERT INTO crawl_address_proxy_probes(
-                    address_id, target_url, total_count, healthy_count, checked_at, last_error
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(address_id) DO UPDATE SET
-                    target_url=excluded.target_url,
-                    total_count=excluded.total_count,
-                    healthy_count=excluded.healthy_count,
-                    checked_at=excluded.checked_at,
-                    last_error=excluded.last_error
-                """,
-                (
-                    address_id,
-                    target_url,
-                    max(0, int(total_count)),
-                    len(node_ids),
-                    checked_at,
-                    redact_text(error, limit=2000),
-                ),
-            )
-            conn.execute(
-                "DELETE FROM crawl_address_proxy_nodes WHERE address_id=?",
-                (address_id,),
-            )
-            conn.executemany(
-                "INSERT INTO crawl_address_proxy_nodes(address_id, node_id) VALUES (?, ?)",
-                ((address_id, node_id) for node_id in node_ids),
-            )
-        return self.get_crawl_address_proxy_probe(address_id)  # type: ignore[return-value]
+        return self._proxy_probe_repository.save_crawl_address_proxy_probe(
+            address_id,
+            target_url=target_url,
+            total_count=total_count,
+            healthy_node_ids=healthy_node_ids,
+            error=error,
+        )
 
     def get_crawl_address_proxy_probe(self, address_id: str) -> dict[str, Any] | None:
-        with self._read() as conn:
-            row = conn.execute(
-                "SELECT * FROM crawl_address_proxy_probes WHERE address_id=?",
-                (address_id,),
-            ).fetchone()
-            if row is None:
-                return None
-            node_rows = conn.execute(
-                """
-                SELECT node_id FROM crawl_address_proxy_nodes
-                WHERE address_id=? ORDER BY node_id
-                """,
-                (address_id,),
-            ).fetchall()
-        result = dict(row)
-        result["node_ids"] = [str(item["node_id"]) for item in node_rows]
-        return result
+        return self._proxy_probe_repository.get_crawl_address_proxy_probe(address_id)
 
     # 地址存在性读取、条件状态更新与批次激活必须共用写事务。
     def begin_crawl_address_planning(self, address_id: str) -> bool:

@@ -10,6 +10,7 @@ from typing import Any
 
 from gdl_backend import (
     _database_crawl_repository,
+    _database_proxy_repository,
     _database_review_repository,
     _database_schema,
     _database_task_repository,
@@ -332,6 +333,56 @@ class DatabaseTransactionBoundaryTests(unittest.TestCase):
 
         self.assertEqual(proxy.control_statements, ["BEGIN IMMEDIATE", "COMMIT"])
         self.assertEqual(self.db.get_crawl_review(batch_id)["status"], "ready")
+
+    def test_proxy_repository_uses_database_owned_boundaries(self) -> None:
+        source = inspect.getsource(_database_proxy_repository)
+        self.assertNotIn("sqlite3.connect(", source)
+        self.assertNotIn('execute("BEGIN', source)
+        self.assertNotIn('execute("COMMIT', source)
+        self.assertNotIn('execute("ROLLBACK', source)
+        repository = self.db._proxy_probe_repository
+        self.assertIs(repository._read.__self__, self.db)
+        self.assertIs(repository._transaction.__self__, self.db)
+
+    def test_proxy_probe_node_failure_rolls_back_summary_and_nodes(self) -> None:
+        batch_id = "batch-proxy-rollback"
+        self._create_analyzing_review(batch_id)
+        address_id = f"{batch_id}-address"
+        original = self.db.save_crawl_address_proxy_probe(
+            address_id,
+            target_url="https://example.com/original",
+            total_count=1,
+            healthy_node_ids=["original-node"],
+        )
+        self.db._conn.executescript(
+            """
+            CREATE TRIGGER fail_proxy_node_insert
+            BEFORE INSERT ON crawl_address_proxy_nodes
+            WHEN NEW.node_id='failing-node'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected proxy-node failure');
+            END;
+            """
+        )
+
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "injected proxy-node"):
+            self.db.save_crawl_address_proxy_probe(
+                address_id,
+                target_url="https://example.com/replacement",
+                total_count=2,
+                healthy_node_ids=["healthy-node", "failing-node"],
+            )
+
+        self.assertEqual(self.db.get_crawl_address_proxy_probe(address_id), original)
+        self.db._conn.execute("DROP TRIGGER fail_proxy_node_insert")
+        replacement = self.db.save_crawl_address_proxy_probe(
+            address_id,
+            target_url="https://example.com/replacement",
+            total_count=2,
+            healthy_node_ids=["healthy-node"],
+        )
+        self.assertEqual(replacement["target_url"], "https://example.com/replacement")
+        self.assertEqual(replacement["node_ids"], ["healthy-node"])
 
     def test_failed_begin_immediate_does_not_poison_shared_connection(self) -> None:
         proxy = _FailFirstBeginConnection(self.db._conn)
