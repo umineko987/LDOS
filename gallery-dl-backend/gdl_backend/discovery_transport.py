@@ -458,6 +458,7 @@ class DiscoveryTransport:
         fallback_node_tags: list[str] | None = None,
         acquire_error_fatal: bool = True,
         required_lease_message: str = "当前没有符合站点策略的健康代理节点",
+        direct_target_prevalidated: bool = False,
         cleanup: AttemptCleanup | None = None,
     ) -> TransportResult[T]:
         mode: ProxyMode = proxy_mode or policy.proxy_mode
@@ -466,7 +467,7 @@ class DiscoveryTransport:
         last_proxy = self.proxy_metadata(mode, None)
         last_failure = AttemptFailure("搜索任务没有返回结果", retryable=False)
 
-        if secure_target and mode == "direct":
+        if secure_target and mode == "direct" and not direct_target_prevalidated:
             await self.validate_direct(target_url)
 
         for attempt_number in range(1, attempts + 1):
