@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .api_routes import (
     create_auth_router,
+    create_crawls_router,
     create_diagnostics_router,
     create_discovery_router,
     create_ordered_task_enqueuer,
@@ -33,15 +34,8 @@ from .api_routes import (
 from .api_routes.body_limits import enforce_policy_body_limit
 from .api_routes.dependencies import get_service
 from .api_routes.errors import ApiError
-from .api_routes.request_inputs import (
-    allowed_request_files as _allowed_request_files,
-    managed_request_credentials as _managed_request_credentials,
-)
 from .api_routes.validation import (
-    range_argument_present as _range_argument_present,
-    validate_idempotency_key as _validate_idempotency_key,
     validate_network_target as _validate_network_target,
-    validate_site_match as _validate_site_match,
     validate_site_name as _validate_site_name,
 )
 from .auth import AuthManager
@@ -52,12 +46,7 @@ from .database import (
     Database,
     MAX_CRAWL_REVIEW_GROUPS,
 )
-from .discovery import (
-    DiscoveryService,
-    canonical_gallery_address,
-    search_site,
-    validate_discovery_args,
-)
+from .discovery import DiscoveryService
 from .encrypted_dns import EncryptedDNSResolver, NetworkTargetValidator
 from .gallery import GalleryRunner
 from .log_writer import TaskLogWriter
@@ -76,9 +65,6 @@ from .redaction import redact_text, safe_exception_category
 from .review import DedupReviewManager, resolve_review_file
 from .scheduler import TaskScheduler
 from .schemas import (
-    CrawlRerunRequest,
-    CrawlRequest,
-    RetryRequest,
     ReviewDecisions,
     SitePolicy,
     build_runtime_site_policy,
@@ -490,222 +476,10 @@ def create_app(
     service.ordered_crawls.set_enqueue(create_ordered_task_enqueuer(service))
     app.include_router(create_tasks_router())
     app.include_router(create_discovery_router())
+    app.include_router(create_crawls_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
     api = APIRouter(prefix="/api/v1")
-
-    async def _perform_crawl(
-        body: CrawlRequest,
-        *,
-        container: ServiceContainer,
-        idempotency_key: str | None,
-    ) -> tuple[dict[str, Any], bool]:
-        base_key = _validate_idempotency_key(idempotency_key)
-        if base_key is not None:
-            existing = container.db.get_crawl_batch_by_idempotency(base_key)
-            if existing is not None:
-                return existing, False
-        try:
-            container.gallery.validate_args(body.extra_args)
-            validate_discovery_args(body.discovery_extra_args)
-            if _range_argument_present(body.extra_args):
-                raise ValueError("图片范围参数由单地址并发规划器管理")
-
-            canonical_sources: list[tuple[str, Any]] = []
-            seen_sites: set[str] = set()
-            for source in body.sources:
-                site = search_site(source.site).site
-                if site in seen_sites:
-                    raise ValueError(f"sources 重复配置来源: {site}")
-                seen_sites.add(site)
-                canonical_sources.append((site, source))
-
-            batch_id = str(uuid.uuid4())
-            output_dir = container.settings.task_output_dir(body.output_dir, f"batch-{batch_id}")
-            flattened: list[dict[str, Any]] = []
-            for source_order, (site, source) in enumerate(canonical_sources):
-                policy = container.policy_for(site)
-                if source.eh_download is not None and site != "exhentai":
-                    raise ValueError("eh_download 仅适用于 EH/EHX 来源")
-                download_options = (
-                    {"eh": source.eh_download.model_dump()}
-                    if source.eh_download is not None
-                    else {}
-                )
-
-                def source_value(name: str):
-                    if name in source.model_fields_set:
-                        return getattr(source, name)
-                    return getattr(body, name)
-
-                task_args = [*body.extra_args, *source.extra_args]
-                discovery_args = [*body.discovery_extra_args, *source.discovery_extra_args]
-                container.gallery.validate_args(task_args)
-                validate_discovery_args(discovery_args)
-                if _range_argument_present(task_args):
-                    raise ValueError("图片范围参数由单地址并发规划器管理")
-                credentials_ref, cookies_value, config_value = _managed_request_credentials(
-                    container,
-                    site,
-                    credentials_ref=source_value("credentials_ref"),
-                    cookies_file=source_value("cookies_file"),
-                    config_file=source_value("config_file"),
-                )
-                cookies, config_file = _allowed_request_files(
-                    container,
-                    cookies_file=cookies_value,
-                    config_file=config_value,
-                )
-                mode = source_value("proxy_mode") or policy.proxy_mode
-                max_attempts = source_value("max_attempts") or (policy.retry_limit + 1)
-                priority = source.priority if "priority" in source.model_fields_set else body.priority
-                timeout_seconds = (
-                    source.timeout_seconds
-                    if "timeout_seconds" in source.model_fields_set
-                    else body.timeout_seconds
-                )
-                for address_order, address in enumerate(source.addresses):
-                    url = canonical_gallery_address(site, address.url)
-                    try:
-                        await asyncio.to_thread(
-                            _validate_network_target,
-                            url,
-                            container.settings.server.allow_private_targets,
-                            strict=container.settings.server.strict_target_dns,
-                        )
-                    except ValueError:
-                        if mode == "direct":
-                            raise
-                        try:
-                            cache_fallback_allowed = await asyncio.to_thread(
-                                container.network_validator.validate_proxy_cache_fallback,
-                                url,
-                            )
-                        except Exception:
-                            # 缓存仅是临时放行辅助；任何内部异常都必须保留
-                            # 原始本机 DNS 校验错误，不能改变 API 的 422 行为。
-                            cache_fallback_allowed = False
-                        if not cache_fallback_allowed:
-                            raise
-                    site_info = await asyncio.to_thread(container.resolver.resolve, url)
-                    if site_info.supported:
-                        _validate_site_match(site, site_info.site)
-                    if site == "exhentai" and not re.search(
-                        r"https?://(?:e-|ex)hentai\.org/g/\d+/[0-9a-f]{10}/?",
-                        url,
-                        re.I,
-                    ):
-                        raise ValueError("EH 来源地址必须是具体画廊 /g/GID/TOKEN/")
-                    address_args = [*task_args, *address.extra_args]
-                    container.gallery.validate_args(address_args)
-                    if _range_argument_present(address_args):
-                        raise ValueError("图片范围参数由单地址并发规划器管理")
-                    flattened.append(
-                        {
-                            "id": str(uuid.uuid5(uuid.UUID(batch_id), f"{source_order}:{address_order}:{url}")),
-                            "site": site,
-                            "source_order": source_order,
-                            "address_order": address_order,
-                            "url": url,
-                            "label": address.label or "",
-                            "address_type": address.address_type or "",
-                            "proxy_mode": mode,
-                            "max_attempts": max_attempts,
-                            "priority": priority,
-                            "credentials_ref": credentials_ref,
-                            "cookies_file": str(cookies) if cookies else None,
-                            "config_file": str(config_file) if config_file else None,
-                            "download_options": download_options,
-                            "extra_args": address_args,
-                            "discovery_args": discovery_args,
-                            "timeout_seconds": timeout_seconds,
-                        }
-                    )
-            batch_id, created = container.db.create_crawl_batch(
-                {
-                    "id": batch_id,
-                    "output_dir": str(output_dir),
-                    "concurrency": min(
-                        body.concurrency,
-                        container.settings.scheduler.max_concurrent_tasks,
-                    ),
-                    "max_tasks": body.max_tasks,
-                },
-                flattened,
-                idempotency_key=base_key,
-            )
-            container.ordered_crawls.notify()
-            result = container.db.get_crawl_batch(batch_id)
-            if result is None:
-                raise RuntimeError("顺序爬取批次创建后读取失败")
-            result["created"] = created
-            result["requested_concurrency"] = body.concurrency
-            result["effective_concurrency"] = min(
-                body.concurrency,
-                container.settings.scheduler.max_concurrent_tasks,
-            )
-            return result, created
-        except ValueError as exc:
-            raise ApiError(422, "invalid_crawl", str(exc)) from exc
-
-    @api.post("/crawls")
-    async def create_crawl(
-        body: CrawlRequest,
-        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        result, created = await _perform_crawl(
-            body,
-            container=container,
-            idempotency_key=idempotency_key,
-        )
-        return JSONResponse(status_code=202 if created else 200, content=result)
-
-    @api.get("/crawls")
-    async def list_crawls(
-        limit: int = Query(default=50, ge=1, le=500),
-        offset: int = Query(default=0, ge=0),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        return {
-            "items": container.db.list_crawl_batches(limit=limit, offset=offset),
-            "limit": limit,
-            "offset": offset,
-        }
-
-    @api.get("/crawls/{batch_id}")
-    async def get_crawl(batch_id: str, container: ServiceContainer = Depends(get_service)):
-        batch = container.db.get_crawl_batch(batch_id)
-        if batch is None:
-            raise ApiError(404, "crawl_not_found", "爬取批次不存在")
-        if (
-            batch["status"] in {"succeeded", "completed_with_errors", "cancelled"}
-            and batch.get("review") is None
-        ):
-            status = "not_started" if container.settings.dedup.enabled else "disabled"
-            batch["review"] = {"batch_id": batch_id, "status": status}
-        return batch
-
-    @api.get("/crawls/{batch_id}/tasks")
-    async def list_crawl_tasks(
-        batch_id: str,
-        address_id: str | None = None,
-        limit: int = Query(default=100, ge=1, le=1000),
-        offset: int = Query(default=0, ge=0),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        if container.db.get_crawl_batch(batch_id) is None:
-            raise ApiError(404, "crawl_not_found", "爬取批次不存在")
-        return {
-            "items": container.db.list_crawl_tasks(
-                batch_id,
-                address_id=address_id,
-                limit=limit,
-                offset=offset,
-            ),
-            "limit": limit,
-            "offset": offset,
-        }
 
     @api.get("/crawls/{batch_id}/review")
     async def get_crawl_review(
@@ -847,92 +621,6 @@ def create_app(
             if target.is_file():
                 return FileResponse(target)
         raise ApiError(404, "review_image_not_found", "审核图片文件不存在")
-
-    @api.post("/crawls/{batch_id}/cancel")
-    async def cancel_crawl(batch_id: str, container: ServiceContainer = Depends(get_service)):
-        batch, task_ids = container.db.request_cancel_crawl_batch(batch_id)
-        if batch is None:
-            raise ApiError(404, "crawl_not_found", "爬取批次不存在")
-        for task_id in task_ids:
-            await container.scheduler.cancel(task_id)
-        container.ordered_crawls.notify()
-        container.db.finish_crawl_batch_if_ready(batch_id)
-        return container.db.get_crawl_batch(batch_id)
-
-    @api.post("/crawls/{batch_id}/retry", status_code=202)
-    async def retry_crawl_failed(
-        batch_id: str,
-        body: RetryRequest,
-        container: ServiceContainer = Depends(get_service),
-    ):
-        batch = container.db.get_crawl_batch(batch_id)
-        if batch is None:
-            raise ApiError(404, "crawl_not_found", "爬取批次不存在")
-        # Same guard as /rerun: requeuing failed tasks pulls the batch back to running
-        # and re-downloads into the batch's output_dir. If dedup review is mid-flight it
-        # is scanning/moving that same tree, so the two would corrupt each other.
-        if batch["status"] not in {"succeeded", "completed_with_errors", "cancelled"}:
-            raise ApiError(409, "crawl_not_finished", "批次仍在运行，结束后才能重试失败任务")
-        review = batch.get("review")
-        if review is not None and review.get("status") in _REVIEW_IN_FLIGHT:
-            raise ApiError(409, "review_in_progress", "图片审核进行中，结束后才能重试失败任务")
-        result = container.db.retry_failed_crawl_tasks(
-            batch_id,
-            body.additional_attempts,
-        )
-        if result is None:
-            raise ApiError(404, "crawl_not_found", "爬取批次不存在")
-        if not result["retried_count"] and not result.get("replanned_address_count"):
-            raise ApiError(
-                409,
-                "crawl_no_failed_tasks",
-                "批次没有可重新排队的失败任务或待重规划的地址",
-            )
-        container.scheduler.notify()
-        container.ordered_crawls.notify()
-        for address_id in result.get("address_ids", []):
-            container.db.finish_crawl_address_if_terminal(address_id)
-        container.db.finish_crawl_batch_if_ready(batch_id)
-        return {
-            **result,
-            "batch": container.db.get_crawl_batch(batch_id),
-        }
-
-    # Review states in which a background worker is actively scanning or moving the
-    # batch's files. Re-crawling under any of these would race the analysis/apply, so
-    # the rerun endpoint blocks them. A stale finished review (ready/applied/failed/
-    # apply_failed/waiting_for_crawl) does not touch files and must not block.
-    _REVIEW_IN_FLIGHT = {"pending", "analyzing", "applying", "auto_applying"}
-
-    @api.post("/crawls/{batch_id}/rerun", status_code=202)
-    async def rerun_crawl(
-        batch_id: str,
-        body: CrawlRerunRequest,
-        container: ServiceContainer = Depends(get_service),
-    ):
-        batch = container.db.get_crawl_batch(batch_id)
-        if batch is None:
-            raise ApiError(404, "crawl_not_found", "爬取批次不存在")
-        if batch["status"] not in {"succeeded", "completed_with_errors", "cancelled"}:
-            raise ApiError(409, "crawl_not_finished", "批次仍在运行，结束后才能重新爬取")
-        review = batch.get("review")
-        if review is not None and review.get("status") in _REVIEW_IN_FLIGHT:
-            raise ApiError(409, "review_in_progress", "图片审核进行中，结束后才能重新爬取")
-        result = container.db.rerun_crawl_batch(
-            batch_id,
-            body.additional_attempts,
-            requeue_succeeded=body.requeue_succeeded,
-        )
-        if result is None:
-            raise ApiError(404, "crawl_not_found", "爬取批次不存在")
-        if result.get("not_terminal"):
-            raise ApiError(409, "crawl_not_finished", "批次仍在运行，结束后才能重新爬取")
-        container.scheduler.notify()
-        container.ordered_crawls.notify()
-        return {
-            **result,
-            "batch": container.db.get_crawl_batch(batch_id),
-        }
 
     def _require_policy_site(name: str) -> None:
         if not is_policy_site(name):
