@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import html
-import os
 import re
 import shutil
 import uuid
@@ -15,6 +14,7 @@ from curl_cffi import requests as curl_requests
 
 from .classifier import FailureDecision, classify_result
 from .discovery_contracts import DiscoveryError
+from .discovery_transport import DiscoveryHttpSession, DiscoveryTransport
 from .discovery_transforms import (
     _DANBOORU_TAG_CATEGORY_NAMES,
     _DNS_ERROR_CODES,
@@ -39,12 +39,7 @@ from .discovery_transforms import (
     search_site_catalog,
     validate_discovery_args,
 )
-from .encrypted_dns import (
-    EncryptedDNSError,
-    NetworkTargetValidator,
-    validate_network_target_syntax,
-)
-from .file_security import ensure_private_directory
+from .encrypted_dns import EncryptedDNSError, NetworkTargetValidator
 from .gallery import GalleryRunner
 from .proxy import ProxyLease, ProxyPoolAdapter, ProxyPoolUnavailable
 from .redaction import redact_text
@@ -97,75 +92,46 @@ def _danbooru_json_request(
     one is present.
     """
 
-    session = curl_requests.Session(trust_env=False)
-    session.headers["User-Agent"] = "gallery-dl-backend/0.3"
-    try:
-        response = session.get(
+    with DiscoveryHttpSession(
+        lambda: curl_requests.Session(trust_env=False),
+        backend="curl",
+        proxy_url=proxy_url,
+    ) as session:
+        response = session.request_json(
+            "get",
             url,
             params=params,
-            proxy=proxy_url,
-            timeout=max(1.0, float(timeout)),
-            allow_redirects=False,
-            verify=True,
+            timeout=timeout,
+            default_status_code=0,
         )
-        status_code = int(getattr(response, "status_code", 0) or 0)
-        if 300 <= status_code < 400:
-            raise _DanbooruApiRequestError(
-                f"Danbooru API 返回了未接受的重定向 (HTTP {status_code})",
-                status_code=status_code,
-            )
-        if status_code >= 400:
-            body = str(getattr(response, "text", "") or "")[:4000]
-            challenge = _is_cloudflare_challenge(status_code, body)
-            retryable = challenge or status_code in {408, 425, 429} or status_code >= 500
-            raise _DanbooruApiRequestError(
-                (
-                    f"Danbooru API 遇到 Cloudflare 检查 (HTTP {status_code})"
-                    if challenge
-                    else f"Danbooru API 返回 HTTP {status_code}"
-                ),
-                status_code=status_code,
-                retryable=retryable,
-                proxy_fault=challenge or status_code == 429,
-            )
-        try:
-            return response.json()
-        except Exception as exc:
-            body = str(getattr(response, "text", "") or "")[:4000]
-            challenge = _is_cloudflare_challenge(status_code, body)
-            raise _DanbooruApiRequestError(
-                "Danbooru API 返回了无效 JSON",
-                status_code=status_code,
-                retryable=challenge,
-                proxy_fault=challenge,
-            ) from exc
-    finally:
-        session.close()
-
-
-class _StaticNetworkTargetValidator:
-    """仅供直接构造 DiscoveryService 的测试桩使用；生产必须显式注入。"""
-
-    @staticmethod
-    def validate_static(url: str) -> Any:
-        return validate_network_target_syntax(url, False)
-
-    def validate_direct(self, url: str) -> tuple[str, ...]:
-        self.validate_static(url)
-        return ()
-
-    def validate_proxy(
-        self,
-        url: str,
-        lease: ProxyLease,
-    ) -> tuple[str, ...]:
-        self.validate_static(url)
-        raise EncryptedDNSError(
-            "encrypted_dns_unavailable",
-            "代理搜索缺少加密 DNS 校验器，已拒绝连接",
-            retryable=False,
-            proxy_fault=False,
+    status_code = response.status_code
+    if 300 <= status_code < 400:
+        raise _DanbooruApiRequestError(
+            f"Danbooru API 返回了未接受的重定向 (HTTP {status_code})",
+            status_code=status_code,
         )
+    if status_code >= 400:
+        challenge = _is_cloudflare_challenge(status_code, response.text)
+        retryable = challenge or status_code in {408, 425, 429} or status_code >= 500
+        raise _DanbooruApiRequestError(
+            (
+                f"Danbooru API 遇到 Cloudflare 检查 (HTTP {status_code})"
+                if challenge
+                else f"Danbooru API 返回 HTTP {status_code}"
+            ),
+            status_code=status_code,
+            retryable=retryable,
+            proxy_fault=challenge or status_code == 429,
+        )
+    if response.json_error is not None:
+        challenge = _is_cloudflare_challenge(status_code, response.text)
+        raise _DanbooruApiRequestError(
+            "Danbooru API 返回了无效 JSON",
+            status_code=status_code,
+            retryable=challenge,
+            proxy_fault=challenge,
+        ) from response.json_error
+    return response.payload
 
 
 class DiscoveryService:
@@ -178,42 +144,26 @@ class DiscoveryService:
         network_validator: NetworkTargetValidator | None = None,
         auth_failure_callback: Callable[[str, str | None, str], Awaitable[bool]] | None = None,
     ) -> None:
-        self.gallery = gallery
-        self.proxy = proxy
-        self.runtime_dir = Path(os.path.abspath(os.fspath(runtime_dir / "discovery")))
-        ensure_private_directory(self.runtime_dir)
-        self.network_validator = network_validator or _StaticNetworkTargetValidator()
-        self.auth_failure_callback = auth_failure_callback
+        self.transport = DiscoveryTransport(
+            gallery,
+            proxy,
+            runtime_dir,
+            network_validator=network_validator,
+            auth_failure_callback=auth_failure_callback,
+            requests_session_factory=lambda: requests.Session(),
+            curl_session_factory=lambda: curl_requests.Session(trust_env=False),
+        )
+        # Compatibility attributes remain aliases of the injected transport;
+        # adapters receive the transport itself and never reconstruct them.
+        self.gallery = self.transport.gallery
+        self.proxy = self.transport.proxy
+        self.runtime_dir = self.transport.runtime_dir
+        self.network_validator = self.transport.network_validator
+        self.auth_failure_callback = self.transport.auth_failure_callback
 
     @staticmethod
     def _proxy_metadata(mode: ProxyMode, lease: ProxyLease | None) -> dict[str, Any]:
-        if lease is None:
-            return {
-                "mode": mode,
-                "used": False,
-                "node_id": None,
-                "node_name": None,
-                "protocol": None,
-            }
-        endpoint = str(lease.endpoint or "")
-        parsed = urlsplit(endpoint)
-        secrets = tuple(
-            value
-            for value in (
-                endpoint,
-                parsed.netloc,
-                parsed.hostname,
-                str(parsed.port) if parsed.port is not None else "",
-            )
-            if value
-        )
-        return {
-            "mode": mode,
-            "used": True,
-            "node_id": redact_text(lease.node_id, secrets=secrets, limit=128),
-            "node_name": redact_text(lease.name, secrets=secrets, limit=200),
-            "protocol": redact_text(lease.protocol, secrets=secrets, limit=50),
-        }
+        return DiscoveryTransport.proxy_metadata(mode, lease)
 
     def _network_error(
         self,
@@ -223,50 +173,22 @@ class DiscoveryService:
         lease: ProxyLease | None,
         attempts: int,
     ) -> DiscoveryError:
-        return DiscoveryError(
-            error.code,
-            error.message,
-            details={
-                "attempts": attempts,
-                "proxy": self._proxy_metadata(mode, lease),
-            },
+        return self.transport.network_error(
+            error,
+            mode=mode,
+            lease=lease,
+            attempts=attempts,
         )
 
     async def validate_direct(self, url: str) -> tuple[str, ...]:
-        try:
-            result = await asyncio.to_thread(
-                self.network_validator.validate_direct,
-                url,
-            )
-        except EncryptedDNSError as exc:
-            raise self._network_error(
-                exc,
-                mode="direct",
-                lease=None,
-                attempts=0,
-            ) from exc
-        except ValueError as exc:
-            raise DiscoveryError(
-                "invalid_network_target",
-                redact_text(exc, limit=500),
-                details={
-                    "attempts": 0,
-                    "proxy": self._proxy_metadata("direct", None),
-                },
-            ) from exc
-        return tuple(result or ())
+        return await self.transport.validate_direct(url)
 
     async def validate_proxy(
         self,
         url: str,
         lease: ProxyLease,
     ) -> tuple[str, ...]:
-        result = await asyncio.to_thread(
-            self.network_validator.validate_proxy,
-            url,
-            lease,
-        )
-        return tuple(result or ())
+        return await self.transport.validate_proxy(url, lease)
 
     def _danbooru_node_tags(self, policy: SitePolicy) -> list[str]:
         if policy.node_tags:
