@@ -24,13 +24,19 @@ from . import __version__
 from .api_routes import (
     create_auth_router,
     create_diagnostics_router,
+    create_ordered_task_enqueuer,
     create_proxy_router,
+    create_scheduler_router,
+    create_tasks_router,
 )
 from .api_routes.body_limits import enforce_policy_body_limit
 from .api_routes.dependencies import get_service
 from .api_routes.errors import ApiError
+from .api_routes.request_inputs import (
+    allowed_request_files as _allowed_request_files,
+    managed_request_credentials as _managed_request_credentials,
+)
 from .api_routes.validation import (
-    canonical_site_name as _canonical_site_name,
     range_argument_present as _range_argument_present,
     validate_idempotency_key as _validate_idempotency_key,
     validate_network_target as _validate_network_target,
@@ -39,14 +45,12 @@ from .api_routes.validation import (
 )
 from .auth import AuthManager
 from .config import AppSettings
-from .crawl import CrawlPlanError, CrawlPlanner
+from .crawl import CrawlPlanner
 from .database import (
     CrawlReviewGroupLimitExceeded,
     Database,
     MAX_CRAWL_REVIEW_GROUPS,
-    TERMINAL_STATUSES,
 )
-from .diagnostics import diagnostics_scheduler_snapshot
 from .discovery import (
     DiscoveryError,
     DiscoveryService,
@@ -62,7 +66,7 @@ from .discovery import (
 from .encrypted_dns import EncryptedDNSResolver, NetworkTargetValidator
 from .gallery import GalleryRunner
 from .log_writer import TaskLogWriter
-from .ordered_crawl import EnqueueBatchCancelled, OrderedCrawlManager
+from .ordered_crawl import OrderedCrawlManager
 from .policy_view import (
     POLICY_RESPONSE_PROFILE,
     PolicyViewValidationError,
@@ -83,12 +87,10 @@ from .schemas import (
     ReviewDecisions,
     SearchRequest,
     SitePolicy,
-    TaskCreate,
-    TaskPolicy,
     build_runtime_site_policy,
 )
 from .site_policy import EDITABLE_SITE_POLICY_FIELDS, EditableSitePolicy
-from .site import SiteInfo, SiteResolver
+from .site import SiteResolver
 
 # How long an EH/Pawchive search waits for the shared Danbooru artist-directory
 # lookup before proceeding without alias expansion.  The lookup keeps running
@@ -99,7 +101,6 @@ _BACKGROUND_LOOP_WARNING_INTERVAL_SECONDS = 60.0
 logger = logging.getLogger(__name__)
 _search_logger = logging.getLogger("gdl_backend.search")
 PolicyResponseView = Literal["legacy", "policy"]
-DiagnosticsResponseView = Literal["legacy", "diagnostics"]
 
 class ServiceContainer:
     def __init__(self, settings: AppSettings) -> None:
@@ -319,31 +320,6 @@ class ServiceContainer:
                 continue
 
 
-def _task_files(task: dict[str, Any], limit: int = 2000) -> list[dict[str, Any]]:
-    root = Path(task["output_dir"]).resolve()
-    if not root.is_dir():
-        return []
-    files: list[dict[str, Any]] = []
-    for path in root.rglob("*"):
-        if len(files) >= limit:
-            break
-        try:
-            if path.is_symlink():
-                continue
-            if path.is_file():
-                stat = path.stat()
-                files.append(
-                    {
-                        "path": path.relative_to(root).as_posix(),
-                        "size": stat.st_size,
-                        "modified_at": stat.st_mtime,
-                    }
-                )
-        except OSError:
-            continue
-    return files
-
-
 def create_app(
     settings: AppSettings | None = None,
     *,
@@ -522,239 +498,11 @@ def create_app(
 
     app.include_router(create_diagnostics_router(settings))
     app.include_router(create_auth_router())
+    service.ordered_crawls.set_enqueue(create_ordered_task_enqueuer(service))
+    app.include_router(create_tasks_router())
     app.include_router(create_proxy_router())
+    app.include_router(create_scheduler_router())
     api = APIRouter(prefix="/api/v1")
-
-    def _allowed_request_files(
-        container: ServiceContainer,
-        *,
-        cookies_file: str | None,
-        config_file: str | None,
-    ) -> tuple[Path | None, Path | None]:
-        cookies = container.settings.allowed_file(
-            cookies_file,
-            container.settings.allowed_cookie_roots,
-            "cookies_file",
-        )
-        config = container.settings.allowed_file(
-            config_file,
-            container.settings.allowed_config_roots,
-            "config_file",
-        )
-        return cookies, config
-
-    def _managed_request_credentials(
-        container: ServiceContainer,
-        site: str,
-        *,
-        credentials_ref: str | None,
-        cookies_file: str | None,
-        config_file: str | None,
-    ) -> tuple[str | None, str | None, str | None]:
-        managed = container.auth.credentials_for(site)
-        return (
-            credentials_ref or managed.get("credentials_ref"),
-            cookies_file or managed.get("cookies_file"),
-            config_file or managed.get("config_file"),
-        )
-
-    def _build_task_row(
-        body: TaskCreate,
-        site_info: SiteInfo,
-        container: ServiceContainer,
-        *,
-        concurrency_override: int | None = None,
-    ) -> dict[str, Any]:
-        if body.site:
-            site = _canonical_site_name(body.site)
-            if site_info.supported:
-                _validate_site_match(site, site_info.site)
-        else:
-            site = site_info.site
-        policy = body._policy_override or container.policy_for(site)
-        if body.eh_download is not None:
-            if site != "exhentai":
-                raise ValueError("eh_download 仅适用于 EH/EHX 任务")
-            policy = TaskPolicy.model_validate(
-                {
-                    **policy.model_dump(),
-                    "eh_download": body.eh_download.model_dump(),
-                }
-            )
-        if concurrency_override is not None:
-            effective = min(
-                int(concurrency_override),
-                container.settings.scheduler.max_concurrent_tasks,
-            )
-            policy = policy.model_copy(update={"max_concurrency": max(1, effective)})
-        task_id = str(uuid.uuid4())
-        output_dir = container.settings.task_output_dir(body.output_dir, task_id)
-        if body._skip_managed_credentials:
-            credentials_ref = body.credentials_ref
-            cookies_value = body.cookies_file
-            config_value = body.config_file
-        else:
-            credentials_ref, cookies_value, config_value = _managed_request_credentials(
-                container,
-                site,
-                credentials_ref=body.credentials_ref,
-                cookies_file=body.cookies_file,
-                config_file=body.config_file,
-            )
-        cookies, config_file = _allowed_request_files(
-            container,
-            cookies_file=cookies_value,
-            config_file=config_value,
-        )
-        container.gallery.validate_args([*policy.extra_args, *body.extra_args])
-        return {
-            "id": task_id,
-            "url": body.url,
-            "site": site,
-            "subcategory": site_info.subcategory,
-            "extractor": site_info.extractor,
-            "priority": body.priority,
-            "output_dir": str(output_dir),
-            "proxy_mode": body.proxy_mode or policy.proxy_mode,
-            "max_attempts": body.max_attempts or (policy.retry_limit + 1),
-            "cookies_file": str(cookies) if cookies else None,
-            "config_file": str(config_file) if config_file else None,
-            "credentials_ref": credentials_ref,
-            "extra_args": body.extra_args,
-            "policy": policy.model_dump(),
-        }
-
-    async def _enqueue_task(
-        body: TaskCreate,
-        *,
-        idempotency_key: str | None,
-        container: ServiceContainer,
-        concurrency_override: int | None = None,
-        network_validated: bool = False,
-        notify: bool = True,
-    ) -> tuple[dict[str, Any], bool]:
-        key = _validate_idempotency_key(idempotency_key)
-        if key is not None:
-            existing = container.db.get_task_by_idempotency(key)
-            if existing is not None:
-                return existing, False
-        try:
-            if not network_validated:
-                await asyncio.to_thread(
-                    _validate_network_target,
-                    body.url,
-                    container.settings.server.allow_private_targets,
-                    strict=container.settings.server.strict_target_dns,
-                )
-            site_info = await asyncio.to_thread(container.resolver.resolve, body.url)
-            task_row = _build_task_row(
-                body,
-                site_info,
-                container,
-                concurrency_override=concurrency_override,
-            )
-        except ValueError as exc:
-            raise ApiError(422, "invalid_task", str(exc)) from exc
-        task, created = container.db.create_task(
-            task_row,
-            idempotency_key=key,
-        )
-        if notify:
-            container.scheduler.notify()
-        return task, created
-
-    async def _enqueue_ordered_tasks(
-        bodies: list[TaskCreate],
-        idempotency_keys: list[str],
-        concurrency: int,
-    ) -> list[dict]:
-        if len(bodies) != len(idempotency_keys):
-            raise RuntimeError("批量任务与幂等键数量不一致")
-        if not bodies:
-            return []
-
-        keys: list[str] = []
-        metadata = []
-        for body, raw_key in zip(bodies, idempotency_keys):
-            key = _validate_idempotency_key(raw_key)
-            if key is None:
-                raise RuntimeError("顺序爬取任务缺少幂等键")
-            link = body._crawl_link
-            if link is None:
-                raise RuntimeError("顺序爬取任务缺少地址链接元数据")
-            keys.append(key)
-            metadata.append(link)
-        address_id = metadata[0].address_id
-        if any(link.address_id != address_id for link in metadata):
-            raise RuntimeError("同一入队块包含多个地址")
-
-        def _build_task_rows() -> list[dict[str, Any]]:
-            return [
-                _build_task_row(
-                    body,
-                    service.resolver.resolve(body.url),
-                    service,
-                    concurrency_override=concurrency,
-                )
-                for body in bodies
-            ]
-
-        try:
-            task_rows = await asyncio.to_thread(_build_task_rows)
-        except ValueError as exc:
-            raise ApiError(422, "invalid_task", str(exc)) from exc
-
-        items = [
-            {
-                "task": task_row,
-                "idempotency_key": key,
-                "sequence_no": link.sequence_no,
-                "source_key": link.source_key,
-                "source_url": link.source_url,
-            }
-            for task_row, key, link in zip(task_rows, keys, metadata)
-        ]
-        # shield 只覆盖已提交的 SQLite worker；取消若在提交竞态中到达，必须先
-        # 收回结果，再由顺序管理器把这些已链接任务纳入原有取消排空分支。
-        write_task = asyncio.create_task(
-            asyncio.to_thread(
-                service.db.create_crawl_media_tasks,
-                address_id,
-                items,
-            ),
-            name="ordered-crawl-media-write",
-        )
-        try:
-            return await asyncio.shield(write_task)
-        except asyncio.CancelledError as cancelled:
-            while not write_task.done():
-                try:
-                    await asyncio.shield(write_task)
-                except asyncio.CancelledError:
-                    continue
-            if write_task.cancelled():
-                raise
-            try:
-                results = write_task.result()
-            except Exception as exc:
-                raise EnqueueBatchCancelled([]) from exc
-            raise EnqueueBatchCancelled(results) from cancelled
-
-    service.ordered_crawls.set_enqueue(_enqueue_ordered_tasks)
-
-    @api.post("/tasks")
-    async def create_task(
-        body: TaskCreate,
-        request: Request,
-        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        task, created = await _enqueue_task(
-            body,
-            idempotency_key=idempotency_key,
-            container=container,
-        )
-        return JSONResponse(status_code=202 if created else 200, content=task)
 
     def _effective_search_options(body: SearchRequest, site: str) -> dict[str, Any]:
         canonical_options: dict[str, Any] = {}
@@ -1833,99 +1581,6 @@ def create_app(
             "batch": container.db.get_crawl_batch(batch_id),
         }
 
-    @api.get("/tasks")
-    async def list_tasks(
-        status: str | None = None,
-        site: str | None = None,
-        limit: int = Query(default=50, ge=1, le=500),
-        offset: int = Query(default=0, ge=0),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        items = container.db.list_tasks(status=status, site=site, limit=limit, offset=offset)
-        return {"items": items, "limit": limit, "offset": offset}
-
-    @api.get("/tasks/{task_id}")
-    async def get_task(task_id: str, container: ServiceContainer = Depends(get_service)):
-        task = container.db.get_task(task_id)
-        if task is None:
-            raise ApiError(404, "task_not_found", "任务不存在")
-        return task
-
-    @api.post("/tasks/{task_id}/cancel")
-    async def cancel_task(task_id: str, container: ServiceContainer = Depends(get_service)):
-        task = await container.scheduler.cancel(task_id)
-        if task is None:
-            raise ApiError(404, "task_not_found", "任务不存在")
-        return task
-
-    @api.post("/tasks/{task_id}/retry", status_code=202)
-    async def retry_task(task_id: str, body: RetryRequest, container: ServiceContainer = Depends(get_service)):
-        # A crawl media task retried in isolation would rerun into the batch's output_dir
-        # without ever refreshing the owning address/batch counters (they only settle via
-        # the crawl-level retry/finish paths), leaving the batch stuck showing a failed
-        # task forever. Route these back through /crawls/{id}/retry.
-        crawl_batch_id = container.db.task_crawl_batch_id(task_id)
-        if crawl_batch_id is not None:
-            raise ApiError(
-                409,
-                "task_belongs_to_crawl",
-                f"该任务属于爬取批次，请通过 /crawls/{crawl_batch_id}/retry 重试以保持批次统计一致",
-            )
-        try:
-            task = container.scheduler.retry(task_id, body.additional_attempts)
-        except RuntimeError as exc:
-            raise ApiError(409, "task_state_conflict", str(exc)) from exc
-        if task is None:
-            raise ApiError(404, "task_not_found", "任务不存在")
-        return task
-
-    @api.get("/tasks/{task_id}/logs")
-    async def task_logs(
-        task_id: str,
-        since: int = Query(default=0, ge=0),
-        tail: int | None = Query(default=None, ge=1, le=5000),
-        limit: int = Query(default=1000, ge=1, le=5000),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        if container.db.get_task(task_id) is None:
-            raise ApiError(404, "task_not_found", "任务不存在")
-        return {"items": container.db.get_logs(task_id, since=since, tail=tail, limit=limit)}
-
-    @api.get("/tasks/{task_id}/events")
-    async def task_events(
-        task_id: str,
-        since: int = Query(default=0, ge=0),
-        limit: int = Query(default=1000, ge=1, le=5000),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        if container.db.get_task(task_id) is None:
-            raise ApiError(404, "task_not_found", "任务不存在")
-        return {"items": container.db.get_events(task_id, since=since, limit=limit)}
-
-    @api.get("/tasks/{task_id}/files")
-    async def list_task_files(task_id: str, container: ServiceContainer = Depends(get_service)):
-        task = container.db.get_task(task_id)
-        if task is None:
-            raise ApiError(404, "task_not_found", "任务不存在")
-        return {"items": await asyncio.to_thread(_task_files, task)}
-
-    @api.get("/tasks/{task_id}/files/{relative_path:path}")
-    async def download_task_file(task_id: str, relative_path: str, container: ServiceContainer = Depends(get_service)):
-        task = container.db.get_task(task_id)
-        if task is None:
-            raise ApiError(404, "task_not_found", "任务不存在")
-        root_dir = Path(task["output_dir"]).resolve()
-        unresolved = root_dir / relative_path
-        cursor = root_dir
-        for part in Path(relative_path).parts:
-            cursor = cursor / part
-            if cursor.is_symlink():
-                raise ApiError(404, "file_not_found", "任务文件不存在")
-        target = unresolved.resolve()
-        if not (target == root_dir or target.is_relative_to(root_dir)) or not target.is_file():
-            raise ApiError(404, "file_not_found", "任务文件不存在")
-        return FileResponse(target)
-
     def _require_policy_site(name: str) -> None:
         if not is_policy_site(name):
             raise ApiError(
@@ -2065,20 +1720,6 @@ def create_app(
                 "site": name,
             }
         return {"deleted": True, "site": name}
-
-    @api.get("/scheduler/status")
-    async def scheduler_status(
-        view: DiagnosticsResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        tasks = container.scheduler.active_summary()
-        ordered_crawls = container.ordered_crawls.status()
-        if view == "diagnostics":
-            return diagnostics_scheduler_snapshot(tasks, ordered_crawls)
-        return {
-            "tasks": tasks,
-            "ordered_crawls": ordered_crawls,
-        }
 
     app.include_router(api)
     return app
