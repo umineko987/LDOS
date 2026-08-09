@@ -156,6 +156,136 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.03)
         self.fail("task did not reach terminal state")
 
+    async def test_dispatch_loop_records_rate_limited_failures_and_recovery(self):
+        interval = 0.03
+        self.settings.scheduler.poll_interval_seconds = interval
+        first_failure = asyncio.Event()
+        third_failure = asyncio.Event()
+        recovered = asyncio.Event()
+        call_times: list[float] = []
+        sensitive_error = (
+            "token=dispatch-token-29077 Cookie=dispatch-cookie-29077 "
+            "proxy=http://proxy-user-29077:proxy-pass-29077@127.0.0.1:29077 "
+            f"path={self.root / 'private' / 'credentials.json'} "
+            "task=https://tasks.example.invalid/gallery/29077 "
+            "subscription=https://subscription.example.invalid/raw/29077 "
+            "response=<html>third-party-raw-29077</html>"
+        )
+
+        def flaky_queued_tasks(*, limit=200, exclude_sites=None):
+            del limit, exclude_sites
+            call_times.append(time.monotonic())
+            attempt = len(call_times)
+            if attempt <= 3:
+                if attempt == 1:
+                    first_failure.set()
+                if attempt == 3:
+                    third_failure.set()
+                raise RuntimeError(sensitive_error)
+            recovered.set()
+            return []
+
+        self.db.queued_tasks = flaky_queued_tasks
+        scheduler = TaskScheduler(
+            self.db,
+            FakeGallery([]),
+            FakeProxy(),
+            self.settings.scheduler,
+            self.log_writer,
+        )
+
+        with self.assertLogs("gdl_backend.scheduler", level="INFO") as captured:
+            await scheduler.start()
+            try:
+                await asyncio.wait_for(first_failure.wait(), timeout=1.0)
+                first = scheduler.active_summary()["dispatch_loop"]
+                self.assertEqual(first["state"], "degraded")
+                self.assertTrue(first["running"])
+                self.assertTrue(first["operational"])
+                self.assertEqual(first["consecutive_failures"], 1)
+                self.assertEqual(first["last_error_category"], "runtime_error")
+                self.assertIsNotNone(first["last_error_at"])
+
+                await asyncio.wait_for(third_failure.wait(), timeout=1.0)
+                repeated = scheduler.active_summary()["dispatch_loop"]
+                self.assertEqual(repeated["consecutive_failures"], 3)
+
+                await asyncio.wait_for(recovered.wait(), timeout=1.0)
+                restored = scheduler.active_summary()["dispatch_loop"]
+                self.assertEqual(restored["state"], "running")
+                self.assertEqual(restored["consecutive_failures"], 0)
+                self.assertEqual(restored["last_error_category"], "runtime_error")
+                self.assertIsNotNone(restored["last_error_at"])
+                self.assertIsNotNone(restored["last_success_at"])
+                self.assertIsNotNone(restored["last_recovery_at"])
+            finally:
+                await scheduler.stop()
+
+        self.assertGreaterEqual(call_times[1] - call_times[0], interval * 0.8)
+        self.assertGreaterEqual(call_times[2] - call_times[1], interval * 0.8)
+        warnings = [line for line in captured.output if ":WARNING:" in line]
+        recoveries = [line for line in captured.output if ":INFO:" in line]
+        self.assertEqual(len(warnings), 1, captured.output)
+        self.assertEqual(len(recoveries), 1, captured.output)
+        serialized_logs = "\n".join(captured.output)
+        for forbidden in (
+            "dispatch-token-29077",
+            "dispatch-cookie-29077",
+            "proxy-user-29077",
+            "proxy-pass-29077",
+            str(self.root),
+            "tasks.example.invalid",
+            "subscription.example.invalid",
+            "third-party-raw-29077",
+        ):
+            self.assertNotIn(forbidden, serialized_logs)
+
+    async def test_dispatch_loop_normal_stop_does_not_record_failure(self):
+        scheduler = TaskScheduler(
+            self.db,
+            FakeGallery([]),
+            FakeProxy(),
+            self.settings.scheduler,
+            self.log_writer,
+        )
+
+        with self.assertNoLogs("gdl_backend.scheduler", level="WARNING"):
+            await scheduler.start()
+            await asyncio.sleep(0)
+            await scheduler.stop()
+
+        loop = scheduler.active_summary()["dispatch_loop"]
+        self.assertEqual(loop["state"], "stopped")
+        self.assertFalse(loop["running"])
+        self.assertTrue(loop["operational"])
+        self.assertEqual(loop["consecutive_failures"], 0)
+        self.assertIsNone(loop["last_error_category"])
+        self.assertIsNone(loop["last_error_at"])
+        self.assertIsNone(loop["last_recovery_at"])
+
+    async def test_unexpected_dispatch_task_cancellation_is_not_a_loop_failure(self):
+        scheduler = TaskScheduler(
+            self.db,
+            FakeGallery([]),
+            FakeProxy(),
+            self.settings.scheduler,
+            self.log_writer,
+        )
+        await scheduler.start()
+        dispatch_task = scheduler._loop_task
+        self.assertIsNotNone(dispatch_task)
+        dispatch_task.cancel()
+        await asyncio.gather(dispatch_task, return_exceptions=True)
+
+        loop = scheduler.active_summary()["dispatch_loop"]
+        self.assertEqual(loop["state"], "unexpected_exit")
+        self.assertFalse(loop["running"])
+        self.assertFalse(loop["operational"])
+        self.assertEqual(loop["consecutive_failures"], 0)
+        self.assertIsNone(loop["last_error_category"])
+        self.assertIsNone(loop["last_error_at"])
+        await scheduler.stop()
+
     async def test_direct_success(self):
         self.db.create_task(values(self.root, proxy_mode="direct", attempts=1))
         gallery = FakeGallery([GalleryRunResult(0, "saved file", False, "m", 101)])

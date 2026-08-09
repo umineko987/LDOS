@@ -323,9 +323,255 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(safe_scheduler.json()["secrets_exposed"])
         self.assertEqual(
             set(safe_scheduler.json()["tasks"]),
-            {"running", "active", "max_concurrent", "active_site_count"},
+            {
+                "running",
+                "active",
+                "max_concurrent",
+                "active_site_count",
+                "dispatch_loop",
+            },
         )
         self.assertNotIn("sites", safe_scheduler.json()["tasks"])
+        self.assertEqual(
+            set(safe_scheduler.json()["tasks"]["dispatch_loop"]),
+            {
+                "state",
+                "running",
+                "operational",
+                "consecutive_failures",
+                "last_error_category",
+                "last_error_at",
+                "last_success_at",
+                "last_recovery_at",
+            },
+        )
+
+    def test_scheduler_loop_diagnostics_whitelist_fault_and_recovery_facts(self):
+        sensitive = (
+            "token=scheduler-diag-token-29080 Cookie=scheduler-diag-cookie-29080 "
+            "proxy=http://proxy-user-29080:proxy-pass-29080@127.0.0.1:29080 "
+            f"path={Path(self.temp.name) / 'private' / 'scheduler.json'} "
+            "task=https://tasks.example.invalid/gallery/29080 "
+            "subscription=https://subscription.example.invalid/raw/29080 "
+            "response=<html>third-party-raw-29080</html>"
+        )
+        summary = {
+            "running": True,
+            "active": 2,
+            "max_concurrent": 20,
+            "sites": {"example.com": 2},
+            "dispatch_loop": {
+                "state": "running",
+                "running": True,
+                "operational": True,
+                "consecutive_failures": 0,
+                "last_error_category": "runtime_error",
+                "last_error_at": 10.25,
+                "last_success_at": 11.5,
+                "last_recovery_at": 11.5,
+                "raw_exception": sensitive,
+            },
+            "raw_exception": sensitive,
+        }
+
+        with patch.object(
+            self.container.scheduler,
+            "active_summary",
+            return_value=summary,
+        ):
+            response = self.client.get(
+                "/api/v1/scheduler/status?view=diagnostics"
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        loop = response.json()["tasks"]["dispatch_loop"]
+        self.assertEqual(loop["state"], "running")
+        self.assertTrue(loop["running"])
+        self.assertTrue(loop["operational"])
+        self.assertEqual(loop["consecutive_failures"], 0)
+        self.assertEqual(loop["last_error_category"], "runtime_error")
+        self.assertEqual(loop["last_error_at"], 10.25)
+        self.assertEqual(loop["last_success_at"], 11.5)
+        self.assertEqual(loop["last_recovery_at"], 11.5)
+        self.assertNotIn("raw_exception", loop)
+        safe_strings = tuple(_json_strings(response.json()))
+        for forbidden in (
+            "scheduler-diag-token-29080",
+            "scheduler-diag-cookie-29080",
+            "proxy-user-29080",
+            "proxy-pass-29080",
+            str(Path(self.temp.name)),
+            "tasks.example.invalid",
+            "subscription.example.invalid",
+            "third-party-raw-29080",
+        ):
+            self.assertFalse(any(forbidden in value for value in safe_strings))
+
+    def test_scheduler_readiness_only_fails_after_unexpected_loop_exit(self):
+        def summary(
+            state: str,
+            *,
+            operational: bool,
+            consecutive_failures: int,
+            recovered: bool = False,
+        ) -> dict:
+            return {
+                "running": state in {"running", "degraded"},
+                "active": 0,
+                "max_concurrent": 20,
+                "sites": {},
+                "dispatch_loop": {
+                    "state": state,
+                    "running": state in {"running", "degraded"},
+                    "operational": operational,
+                    "consecutive_failures": consecutive_failures,
+                    "last_error_category": "runtime_error",
+                    "last_error_at": 10.0,
+                    "last_success_at": 11.0 if recovered else None,
+                    "last_recovery_at": 11.0 if recovered else None,
+                },
+            }
+
+        cases = (
+            ("degraded", summary("degraded", operational=True, consecutive_failures=1), 200),
+            (
+                "recovered",
+                summary(
+                    "running",
+                    operational=True,
+                    consecutive_failures=0,
+                    recovered=True,
+                ),
+                200,
+            ),
+            (
+                "unexpected_exit",
+                summary(
+                    "unexpected_exit",
+                    operational=False,
+                    consecutive_failures=0,
+                ),
+                503,
+            ),
+        )
+        for label, scheduler_summary, expected_status in cases:
+            with self.subTest(label=label), patch.object(
+                self.container.scheduler,
+                "active_summary",
+                return_value=scheduler_summary,
+            ):
+                response = self.client.get("/readyz")
+            self.assertEqual(response.status_code, expected_status, response.text)
+            self.assertEqual(
+                response.json()["components"]["scheduler"]["status"],
+                "error" if expected_status == 503 else "ok",
+            )
+
+    def test_proxy_health_diagnostics_are_safe_and_only_exit_breaks_readiness(self):
+        self.settings.proxy.enabled = True
+        self.settings.proxy.auto_start = False
+        self.settings.proxy.transport_core_enabled = False
+        self.settings.proxy.inline_nodes = [
+            "http://proxy-user-29081:proxy-pass-29081@127.0.0.1:29081"
+        ]
+        sensitive = (
+            "token=proxy-diag-token-29081 Cookie=proxy-diag-cookie-29081 "
+            f"path={Path(self.temp.name) / 'private' / 'proxy.json'} "
+            "task=https://tasks.example.invalid/gallery/29081 "
+            "subscription=https://subscription.example.invalid/raw/29081 "
+            "response=<html>third-party-raw-29081</html>"
+        )
+        normal_scheduler = {
+            "running": True,
+            "active": 0,
+            "max_concurrent": 20,
+            "sites": {},
+            "dispatch_loop": {
+                "state": "running",
+                "running": True,
+                "operational": True,
+                "consecutive_failures": 0,
+                "last_error_category": None,
+                "last_error_at": None,
+                "last_success_at": 12.0,
+                "last_recovery_at": None,
+            },
+        }
+        degraded_health = {
+            "state": "degraded",
+            "running": True,
+            "operational": True,
+            "consecutive_failures": 2,
+            "last_error_category": "runtime_error",
+            "last_error_at": 10.0,
+            "last_success_at": 9.0,
+            "last_recovery_at": None,
+            "raw_exception": sensitive,
+        }
+        self.container.proxy.status = Mock(
+            return_value={"running": False, "healthy": 0}
+        )
+
+        with (
+            patch.object(
+                self.container.scheduler,
+                "active_summary",
+                return_value=normal_scheduler,
+            ),
+            patch.object(
+                self.container,
+                "proxy_health_summary",
+                return_value=degraded_health,
+            ),
+        ):
+            degraded = self.client.get("/readyz")
+
+        self.assertEqual(degraded.status_code, 200, degraded.text)
+        proxy_component = degraded.json()["components"]["project_proxy"]
+        self.assertEqual(proxy_component["status"], "ok")
+        health_loop = proxy_component["health_loop"]
+        self.assertEqual(health_loop["state"], "degraded")
+        self.assertEqual(health_loop["consecutive_failures"], 2)
+        self.assertEqual(health_loop["last_error_category"], "runtime_error")
+        self.assertNotIn("raw_exception", health_loop)
+        safe_strings = tuple(_json_strings(degraded.json()))
+        for forbidden in (
+            "proxy-diag-token-29081",
+            "proxy-diag-cookie-29081",
+            "proxy-user-29081",
+            "proxy-pass-29081",
+            str(Path(self.temp.name)),
+            "tasks.example.invalid",
+            "subscription.example.invalid",
+            "third-party-raw-29081",
+        ):
+            self.assertFalse(any(forbidden in value for value in safe_strings))
+
+        unexpected_health = {
+            **degraded_health,
+            "state": "unexpected_exit",
+            "running": False,
+            "operational": False,
+            "consecutive_failures": 0,
+        }
+        with (
+            patch.object(
+                self.container.scheduler,
+                "active_summary",
+                return_value=normal_scheduler,
+            ),
+            patch.object(
+                self.container,
+                "proxy_health_summary",
+                return_value=unexpected_health,
+            ),
+        ):
+            unavailable = self.client.get("/readyz")
+        self.assertEqual(unavailable.status_code, 503, unavailable.text)
+        self.assertEqual(
+            unavailable.json()["components"]["project_proxy"]["status"],
+            "error",
+        )
 
     def test_ready_fails_when_enabled_dedup_python_is_missing(self):
         self.settings.dedup.enabled = True
