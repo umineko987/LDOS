@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import time
 from collections import Counter
@@ -14,11 +15,14 @@ from .gallery import GalleryRunner
 from .log_writer import TaskLogWriter
 from .process_control import terminate_stale_process
 from .proxy import ProxyLease, ProxyPoolAdapter, ProxyPoolUnavailable
-from .redaction import redact_text
+from .redaction import redact_text, safe_exception_category
 from .schemas import TaskPolicy
 
 
 _DISPATCH_REFILL_ROUNDS = 2
+_LOOP_WARNING_INTERVAL_SECONDS = 60.0
+
+logger = logging.getLogger(__name__)
 
 
 class TaskScheduler:
@@ -45,6 +49,12 @@ class TaskScheduler:
         self._credential_blocked: set[str] = set()
         self._wake = asyncio.Event()
         self._stopping = False
+        self._dispatch_consecutive_failures = 0
+        self._dispatch_last_error_at: float | None = None
+        self._dispatch_last_error_category: str | None = None
+        self._dispatch_last_success_at: float | None = None
+        self._dispatch_last_recovery_at: float | None = None
+        self._dispatch_last_warning_at: float | None = None
 
     async def start(self) -> None:
         if self._loop_task is not None:
@@ -97,6 +107,39 @@ class TaskScheduler:
             return None
         probe = self.db.get_crawl_address_proxy_probe(policy.proxy_probe_scope)
         return set(probe["node_ids"]) if probe is not None else set()
+
+    def _record_dispatch_failure(self, exc: Exception) -> None:
+        category = safe_exception_category(exc)
+        self._dispatch_consecutive_failures += 1
+        self._dispatch_last_error_at = time.time()
+        self._dispatch_last_error_category = category
+        now = time.monotonic()
+        if (
+            self._dispatch_last_warning_at is None
+            or now - self._dispatch_last_warning_at >= _LOOP_WARNING_INTERVAL_SECONDS
+        ):
+            self._dispatch_last_warning_at = now
+            logger.warning(
+                "scheduler dispatch loop failure; category=%s consecutive_failures=%d",
+                category,
+                self._dispatch_consecutive_failures,
+            )
+
+    def _record_dispatch_success(self) -> None:
+        now = time.time()
+        self._dispatch_last_success_at = now
+        if self._dispatch_consecutive_failures <= 0:
+            return
+        failures = self._dispatch_consecutive_failures
+        category = self._dispatch_last_error_category or "unexpected_error"
+        self._dispatch_consecutive_failures = 0
+        self._dispatch_last_recovery_at = now
+        self._dispatch_last_warning_at = None
+        logger.info(
+            "scheduler dispatch loop recovered; category=%s previous_failures=%d",
+            redact_text(category, limit=32),
+            failures,
+        )
 
     async def _dispatch_loop(self) -> None:
         while not self._stopping:
@@ -160,13 +203,15 @@ class TaskScheduler:
                             )
                         if capacity <= 0 or not hit_site_limit:
                             break
+                self._record_dispatch_success()
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=self.settings.poll_interval_seconds)
                 except asyncio.TimeoutError:
                     pass
             except asyncio.CancelledError:
                 break
-            except Exception:
+            except Exception as exc:
+                self._record_dispatch_failure(exc)
                 await asyncio.sleep(self.settings.poll_interval_seconds)
 
     def _worker_done(self, task_id: str) -> None:
@@ -192,14 +237,39 @@ class TaskScheduler:
         self._wake.set()
         return task
 
+    def _dispatch_loop_summary(self) -> dict[str, Any]:
+        task = self._loop_task
+        running = task is not None and not task.done()
+        unexpected_exit = task is not None and task.done() and not self._stopping
+        if unexpected_exit:
+            state = "unexpected_exit"
+        elif self._stopping:
+            state = "stopping" if running else "stopped"
+        elif running:
+            state = "degraded" if self._dispatch_consecutive_failures else "running"
+        else:
+            state = "not_started"
+        return {
+            "state": state,
+            "running": running and not self._stopping,
+            "operational": not unexpected_exit,
+            "consecutive_failures": self._dispatch_consecutive_failures,
+            "last_error_category": self._dispatch_last_error_category,
+            "last_error_at": self._dispatch_last_error_at,
+            "last_success_at": self._dispatch_last_success_at,
+            "last_recovery_at": self._dispatch_last_recovery_at,
+        }
+
     def active_summary(self) -> dict[str, Any]:
         active = list(self._active.values())
         sites = Counter(site for _, site in active)
+        dispatch_loop = self._dispatch_loop_summary()
         return {
-            "running": not self._stopping and self._loop_task is not None,
+            "running": dispatch_loop["running"],
             "active": len(active),
             "max_concurrent": self.settings.max_concurrent_tasks,
             "sites": dict(sites),
+            "dispatch_loop": dispatch_loop,
         }
 
     @staticmethod

@@ -38,6 +38,28 @@ def redact_text(value: object, *, secrets: Iterable[str] = (), limit: int | None
     return text
 
 
+def safe_exception_category(exc: BaseException) -> str:
+    """Map an exception to a fixed diagnostic category without exposing its text."""
+
+    if type(exc).__module__ == "sqlite3":
+        category = "database_error"
+    elif isinstance(exc, TimeoutError):
+        category = "timeout_error"
+    elif isinstance(exc, ConnectionError):
+        category = "connection_error"
+    elif isinstance(exc, PermissionError):
+        category = "permission_error"
+    elif isinstance(exc, OSError):
+        category = "io_error"
+    elif isinstance(exc, (TypeError, ValueError)):
+        category = "value_error"
+    elif isinstance(exc, RuntimeError):
+        category = "runtime_error"
+    else:
+        category = "unexpected_error"
+    return redact_text(category, limit=32)
+
+
 def redact_data(value: Any) -> Any:
     if isinstance(value, dict):
         result: dict[str, Any] = {}

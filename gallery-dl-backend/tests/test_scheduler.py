@@ -223,8 +223,8 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertGreaterEqual(call_times[1] - call_times[0], interval * 0.8)
         self.assertGreaterEqual(call_times[2] - call_times[1], interval * 0.8)
-        warnings = [line for line in captured.output if ":WARNING:" in line]
-        recoveries = [line for line in captured.output if ":INFO:" in line]
+        warnings = [line for line in captured.output if line.startswith("WARNING:")]
+        recoveries = [line for line in captured.output if line.startswith("INFO:")]
         self.assertEqual(len(warnings), 1, captured.output)
         self.assertEqual(len(recoveries), 1, captured.output)
         serialized_logs = "\n".join(captured.output)

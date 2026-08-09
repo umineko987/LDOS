@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -28,6 +30,30 @@ _DEDUP_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, dict[str, Any]]]] = {
 _DEDUP_CACHE_LOCK = threading.Lock()
 _DEDUP_CACHE_FRESH_SECONDS = 120.0
 _DEDUP_REFRESH_INFLIGHT: set[str] = set()
+_BACKGROUND_LOOP_STATES = frozenset(
+    {
+        "not_started",
+        "running",
+        "degraded",
+        "stopping",
+        "stopped",
+        "unexpected_exit",
+        "unknown",
+    }
+)
+_BACKGROUND_ERROR_CATEGORIES = frozenset(
+    {
+        "database_error",
+        "timeout_error",
+        "connection_error",
+        "permission_error",
+        "io_error",
+        "value_error",
+        "runtime_error",
+        "unexpected_error",
+    }
+)
+_MAX_DIAGNOSTIC_TIMESTAMP = 253_402_300_799.0
 
 
 def _component(
@@ -49,6 +75,68 @@ def _component(
 def _safe_error(value: Any) -> str:
     text = redact_text(value, limit=240)
     return " ".join(text.split()) or "未知错误"
+
+
+def _bounded_count(value: Any, *, maximum: int = 1_000_000_000) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return max(0, min(number, maximum))
+
+
+def _bounded_timestamp(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number) or not 0.0 <= number <= _MAX_DIAGNOSTIC_TIMESTAMP:
+        return None
+    return number
+
+
+def _background_loop_snapshot(value: Any) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    state = redact_text(raw.get("state") or "unknown", limit=32)
+    if state not in _BACKGROUND_LOOP_STATES:
+        state = "unknown"
+    raw_category = redact_text(raw.get("last_error_category") or "", limit=32)
+    if raw_category:
+        category = (
+            raw_category
+            if raw_category in _BACKGROUND_ERROR_CATEGORIES
+            else "unexpected_error"
+        )
+    else:
+        category = None
+    running = raw.get("running") is True and state in {"running", "degraded"}
+    operational = raw.get("operational") is True and state != "unexpected_exit"
+    return {
+        "state": state,
+        "running": running,
+        "operational": operational,
+        "consecutive_failures": _bounded_count(
+            raw.get("consecutive_failures"), maximum=1_000_000
+        ),
+        "last_error_category": category,
+        "last_error_at": _bounded_timestamp(raw.get("last_error_at")),
+        "last_success_at": _bounded_timestamp(raw.get("last_success_at")),
+        "last_recovery_at": _bounded_timestamp(raw.get("last_recovery_at")),
+    }
+
+
+def _safe_site_counts(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, int] = {}
+    for raw_site, count in list(value.items())[:10_000]:
+        site = redact_text(raw_site, limit=128)
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._:-]{0,127}", site, re.I):
+            continue
+        result[site] = _bounded_count(count, maximum=100_000)
+    return result
 
 
 def _path_signature(path: Path) -> tuple[int, int] | None:
@@ -498,13 +586,6 @@ def diagnostics_scheduler_snapshot(
 ) -> dict[str, Any]:
     """投影调度摘要；只保留计数和受控枚举，不返回任务或批次载荷。"""
 
-    def bounded_count(value: Any) -> int:
-        try:
-            number = int(value)
-        except (TypeError, ValueError, OverflowError):
-            return 0
-        return max(0, min(number, 1_000_000_000))
-
     execution_order = str(ordered_crawls.get("execution_order") or "unknown")
     if execution_order not in {"source_then_address", "unknown"}:
         execution_order = "unknown"
@@ -516,13 +597,16 @@ def diagnostics_scheduler_snapshot(
         "secrets_exposed": False,
         "tasks": {
             "running": bool(scheduler.get("running")),
-            "active": bounded_count(scheduler.get("active")),
-            "max_concurrent": bounded_count(scheduler.get("max_concurrent")),
-            "active_site_count": len(scheduler.get("sites") or {}),
+            "active": _bounded_count(scheduler.get("active")),
+            "max_concurrent": _bounded_count(scheduler.get("max_concurrent")),
+            "active_site_count": len(_safe_site_counts(scheduler.get("sites"))),
+            "dispatch_loop": _background_loop_snapshot(
+                scheduler.get("dispatch_loop")
+            ),
         },
         "ordered_crawls": {
             "running": bool(ordered_crawls.get("running")),
-            "active_batches": bounded_count(ordered_crawls.get("active_batches")),
+            "active_batches": _bounded_count(ordered_crawls.get("active_batches")),
             "execution_order": execution_order,
             "address_parallelism": address_parallelism,
         },
@@ -538,6 +622,18 @@ def readiness_snapshot(
     ordered_crawls: dict[str, Any],
 ) -> dict[str, Any]:
     gallery_ok = (settings.gallery.repo_path / "gallery_dl" / "__init__.py").is_file()
+    scheduler_loop = _background_loop_snapshot(scheduler.get("dispatch_loop"))
+    scheduler_unavailable = scheduler_loop["state"] == "unexpected_exit" or (
+        scheduler_loop["state"] in {"running", "degraded"}
+        and not scheduler_loop["operational"]
+    )
+    scheduler_details = {
+        "running": bool(scheduler.get("running")),
+        "active": _bounded_count(scheduler.get("active")),
+        "max_concurrent": _bounded_count(scheduler.get("max_concurrent")),
+        "sites": _safe_site_counts(scheduler.get("sites")),
+        "dispatch_loop": scheduler_loop,
+    }
     components: dict[str, dict[str, Any]] = {
         "process": _component("ok", "后端进程正在响应"),
         "database": _component(
@@ -550,7 +646,11 @@ def readiness_snapshot(
         ),
         "project_proxy": project_proxy_component(settings, live_proxy_status),
         "mihomo": mihomo_component(settings),
-        "scheduler": _component("ok", "任务调度器可用", details=scheduler),
+        "scheduler": _component(
+            "error" if scheduler_unavailable else "ok",
+            "任务调度循环意外结束" if scheduler_unavailable else "任务调度器可用",
+            details=scheduler_details,
+        ),
         "ordered_crawls": _component("ok", "顺序批次管理器可用", details=ordered_crawls),
     }
     components.update(dedup_components(settings))
