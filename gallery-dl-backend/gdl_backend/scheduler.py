@@ -8,26 +8,22 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from .classifier import FailureDecision, classify_result
+from ._scheduler_artifacts import ArtifactCatalog, LocalArtifactCatalog
+from ._scheduler_attempt import AttemptExecutor
+from ._scheduler_decisions import (
+    decide_task_transition,
+    parse_task_policy,
+    retry_delay_seconds,
+    updated_tried_proxy_ids,
+)
 from .config import SchedulerSettings
 from .database import Database, TERMINAL_STATUSES
 from .gallery import GalleryRunner
 from .log_writer import TaskLogWriter
 from .process_control import terminate_stale_process
-from .proxy import ProxyLease, ProxyPoolAdapter, ProxyPoolUnavailable
+from .proxy import ProxyPoolAdapter
 from .redaction import redact_text, safe_exception_category
 from .schemas import TaskPolicy
-from ._scheduler_artifacts import ArtifactCatalog, LocalArtifactCatalog
-from ._scheduler_decisions import (
-    attempt_status,
-    decide_task_transition,
-    parse_task_policy,
-    proxy_failure_plan,
-    resolve_allowed_proxy_ids,
-    retry_delay_seconds,
-    updated_tried_proxy_ids,
-    upgrade_partial_artifact_failure,
-)
 
 
 _DISPATCH_REFILL_ROUNDS = 2
@@ -48,6 +44,9 @@ class TaskScheduler:
         credential_validator: Callable[[str, str | None], bool] | None = None,
         auth_failure_callback: Callable[[str, str | None, str], Awaitable[bool]] | None = None,
         artifact_catalog: ArtifactCatalog | None = None,
+        wall_clock: Callable[[], float] | None = None,
+        monotonic_clock: Callable[[], float] | None = None,
+        jitter: Callable[[float, float], float] | None = None,
     ) -> None:
         self.db = database
         self.gallery = gallery
@@ -57,6 +56,9 @@ class TaskScheduler:
         self.credential_validator = credential_validator
         self.auth_failure_callback = auth_failure_callback
         self._artifact_catalog = artifact_catalog or LocalArtifactCatalog()
+        self._wall_clock = wall_clock or time.time
+        self._monotonic_clock = monotonic_clock or time.monotonic
+        self._jitter = jitter or random.uniform
         self._loop_task: asyncio.Task | None = None
         self._active: dict[str, tuple[asyncio.Task, str]] = {}
         self._credential_blocked: set[str] = set()
@@ -68,6 +70,16 @@ class TaskScheduler:
         self._dispatch_last_success_at: float | None = None
         self._dispatch_last_recovery_at: float | None = None
         self._dispatch_last_warning_at: float | None = None
+        self._attempt_executor = AttemptExecutor(
+            database,
+            gallery,
+            proxy,
+            log_writer,
+            artifact_catalog=self._artifact_catalog,
+            auth_failure_callback=auth_failure_callback,
+            is_stopping=lambda: self._stopping,
+            monotonic_clock=self._monotonic_clock,
+        )
 
     async def start(self) -> None:
         if self._loop_task is not None:
@@ -113,19 +125,12 @@ class TaskScheduler:
     def _policy(self, task: dict[str, Any]) -> TaskPolicy:
         return parse_task_policy(task)
 
-    def _allowed_proxy_ids(self, policy: TaskPolicy) -> set[str] | None:
-        probe_node_ids: list[str] | None = None
-        if policy.allowed_proxy_ids is None and policy.proxy_probe_scope:
-            probe = self.db.get_crawl_address_proxy_probe(policy.proxy_probe_scope)
-            probe_node_ids = probe["node_ids"] if probe is not None else None
-        return resolve_allowed_proxy_ids(policy, probe_node_ids)
-
     def _record_dispatch_failure(self, exc: Exception) -> None:
         category = safe_exception_category(exc)
         self._dispatch_consecutive_failures += 1
-        self._dispatch_last_error_at = time.time()
+        self._dispatch_last_error_at = self._wall_clock()
         self._dispatch_last_error_category = category
-        now = time.monotonic()
+        now = self._monotonic_clock()
         if (
             self._dispatch_last_warning_at is None
             or now - self._dispatch_last_warning_at >= _LOOP_WARNING_INTERVAL_SECONDS
@@ -138,7 +143,7 @@ class TaskScheduler:
             )
 
     def _record_dispatch_success(self) -> None:
-        now = time.time()
+        now = self._wall_clock()
         self._dispatch_last_success_at = now
         if self._dispatch_consecutive_failures <= 0:
             return
@@ -301,224 +306,23 @@ class TaskScheduler:
         return LocalArtifactCatalog().size(path)
 
     async def _execute(self, task_id: str) -> None:
-        attempt_id = ""
-        attempt_no = 0
-        lease: ProxyLease | None = None
-        decision = FailureDecision("backend_error", False, False, "后端任务初始化失败")
-        exit_code: int | None = None
-        task: dict[str, Any] | None = None
-        policy: TaskPolicy | None = None
-        auth_failure_context = ""
-        task_artifacts: set[Path] = set()
-        artifact_progress = {"count": 0, "bytes": 0, "last_write": 0.0}
-        try:
-            attempt = self.db.begin_attempt(task_id)
-            attempt_id = attempt["id"]
-            attempt_no = int(attempt["attempt_no"])
-            task = attempt["task"]
-            policy = self._policy(task)
-            async def log(stream: str, line: str) -> None:
-                self.log_writer.push(task_id, attempt_id, stream, line)
-                if stream == "stdout" and task is not None:
-                    artifact = self._artifact_catalog.from_output(line, task["output_dir"])
-                    if artifact is not None and artifact not in task_artifacts:
-                        task_artifacts.add(artifact)
-                        # Stat only the newly seen file and accumulate, instead of
-                        # re-stat'ing the whole set on every output line (that was
-                        # O(N²) stats + N DB writes for a multi-file task). Throttle
-                        # the DB write to ~1/s; the finally block recomputes the exact
-                        # total once at the end.
-                        size = await asyncio.to_thread(self._artifact_catalog.size, artifact)
-                        if size is not None:
-                            artifact_progress["count"] += 1
-                            artifact_progress["bytes"] += size
-                            now = time.monotonic()
-                            if now - artifact_progress["last_write"] >= 1.0:
-                                artifact_progress["last_write"] = now
-                                await asyncio.to_thread(
-                                    self.db.update_artifacts,
-                                    task_id,
-                                    artifact_progress["count"],
-                                    artifact_progress["bytes"],
-                                )
-
-            async def started(pid: int, marker: str) -> None:
-                self.db.set_process(task_id, attempt_id, pid, marker)
-
-            proxy_mode = task["proxy_mode"]
-            if proxy_mode != "direct":
-                tried = set(task.get("tried_proxy_ids") or [])
-                allowed_proxy_ids = self._allowed_proxy_ids(policy)
-                try:
-                    lease = await asyncio.to_thread(
-                        self.proxy.acquire,
-                        task_id,
-                        node_tags=policy.node_tags,
-                        exclude_ids=tried,
-                        allowed_ids=allowed_proxy_ids,
-                        probe_before_use=policy.probe_before_use,
-                        probe_url=policy.probe_url,
-                    )
-                except ProxyPoolUnavailable as exc:
-                    # mihomo core startup failure must never degrade to a direct
-                    # connection, not even in prefer mode: remind and terminate
-                    # the task (non-retryable) until the core is fixed and the
-                    # pool restarted. Other acquire errors keep the branch below.
-                    plan = proxy_failure_plan(proxy_mode, "pool_unavailable")
-                    decision = FailureDecision(
-                        "proxy_unavailable",
-                        plan.retryable,
-                        plan.proxy_fault,
-                        f"代理不可用，任务已终止（不会回退直连）：{redact_text(exc, limit=500)}",
-                    )
-                    await log("backend", decision.message)
-                    raise _ExecutionFinished
-                except Exception as exc:
-                    plan = proxy_failure_plan(proxy_mode, "acquire_error")
-                    if plan.action == "fail":
-                        decision = FailureDecision(
-                            "proxy_unavailable",
-                            plan.retryable,
-                            plan.proxy_fault,
-                            "required 模式下代理租约获取失败："
-                            f"{redact_text(exc, limit=500)}",
-                        )
-                        await log("backend", decision.message)
-                        raise _ExecutionFinished
-                    await log("backend", f"代理池降级，本次任务使用直连：{redact_text(exc, limit=500)}")
-                    lease = None
-                if lease is not None:
-                    public_endpoint = redact_text(lease.endpoint, limit=500)
-                    self.db.set_lease(task_id, attempt_id, lease.node_id, public_endpoint, task["site"])
-                    await log("backend", f"已分配代理节点 {lease.name} ({lease.protocol}) -> {public_endpoint}")
-                else:
-                    plan = proxy_failure_plan(proxy_mode, "empty")
-                    if plan.action == "fail":
-                        decision = FailureDecision(
-                            "proxy_unavailable",
-                            plan.retryable,
-                            plan.proxy_fault,
-                            "当前没有符合站点策略的健康代理节点",
-                        )
-                        await log("backend", decision.message)
-                        raise _ExecutionFinished
-                    await log("backend", "代理池当前无可租用节点，本次任务使用直连")
-
-            current = self.db.get_task(task_id)
-            if current and current.get("cancel_requested"):
-                decision = FailureDecision("cancelled", False, False, "任务已取消")
-                raise _ExecutionFinished
-
-            extra_args = [*policy.extra_args, *(task.get("extra_args") or [])]
-            result = await self.gallery.run(
-                task_id,
-                url=task["url"],
-                output_dir=task["output_dir"],
-                proxy_url=lease.endpoint if lease else None,
-                http_timeout=policy.http_timeout,
-                gallery_retries=policy.gallery_retries,
-                task_timeout=policy.task_timeout_seconds,
-                stall_timeout=(
-                    policy.download_stall_timeout_seconds
-                    if task["site"] == "exhentai"
-                    else 0.0
-                ),
-                cookies_file=task.get("cookies_file"),
-                config_file=task.get("config_file"),
-                credentials_ref=task.get("credentials_ref"),
-                extra_args=extra_args,
-                on_line=log,
-                on_started=started,
-                site=task["site"],
-                eh_download=policy.eh_download,
-            )
-            exit_code = result.exit_code
-            auth_failure_context = result.output_tail
-            latest = self.db.get_task(task_id)
-            cancelled = bool(latest and latest.get("cancel_requested"))
-            if self._stopping and not cancelled:
-                decision = FailureDecision("backend_shutdown", True, False, "后端停止，任务将重新排队")
-            else:
-                decision = classify_result(
-                    result.exit_code,
-                    result.output_tail,
-                    cancelled=cancelled,
-                    timed_out=result.timed_out,
-                )
-                # gallery-dl's exit status is an OR-accumulated bitmask, so a multi-file
-                # task that saved most files but failed on one still exits with bit 4 set
-                # and classifies as a non-retryable extraction_error — silently dropping
-                # the missing files. A non-empty task_artifacts (parsed from stdout during
-                # the run) means some files did land = partial success, so upgrade to a
-                # bounded retry (capped by max_attempts): gallery-dl skips already-saved
-                # files and re-fetches only what is missing. Zero artifacts = a pure
-                # extraction failure that downloaded nothing, which stays terminal.
-                decision = upgrade_partial_artifact_failure(
-                    decision,
-                    len(task_artifacts),
-                )
-        except _ExecutionFinished:
-            pass
-        except asyncio.CancelledError:
-            decision = FailureDecision("backend_shutdown", True, False, "后端停止，任务将重新排队")
-        except FileNotFoundError as exc:
-            decision = FailureDecision("backend_configuration", False, False, redact_text(exc, limit=1000))
-        except ValueError as exc:
-            decision = FailureDecision("backend_configuration", False, False, redact_text(exc, limit=1000))
-        except Exception as exc:
-            decision = FailureDecision("backend_error", True, False, redact_text(exc, limit=1000))
-        finally:
-            try:
-                if lease is not None:
-                    await asyncio.to_thread(
-                        self.proxy.release,
-                        task_id,
-                        proxy_fault=decision.proxy_fault,
-                        reason=decision.message,
-                    )
-            except Exception as exc:
-                if attempt_id:
-                    self.log_writer.push(
-                        task_id,
-                        attempt_id,
-                        "backend",
-                        f"释放代理租约异常：{redact_text(exc, limit=500)}",
-                    )
-            finally:
-                if attempt_id:
-                    self.db.clear_lease(task_id, attempt_id)
-
-        if (
-            decision.error_class == "authentication"
-            and task is not None
-            and self.auth_failure_callback is not None
-        ):
-            try:
-                invalidated = await self.auth_failure_callback(
-                    task["site"],
-                    task.get("cookies_file"),
-                    auth_failure_context or decision.message,
-                )
-                if invalidated and attempt_id:
-                    self.log_writer.push(
-                        task_id,
-                        attempt_id,
-                        "backend",
-                        "托管登录凭证已标记失效；后续排队任务等待重新授权。",
-                    )
-            except Exception as exc:
-                if attempt_id:
-                    self.log_writer.push(
-                        task_id,
-                        attempt_id,
-                        "backend",
-                        f"更新托管授权状态失败：{redact_text(exc, limit=500)}",
-                    )
+        result = await self._attempt_executor.execute(task_id)
+        decision = result.decision
+        attempt_id = result.attempt_id
+        task = result.task
 
         if not attempt_id:
             current = self.db.get_task(task_id)
-            if current and (current.get("cancel_requested") or current.get("status") == "cancelling"):
-                self.db.complete_task(task_id, "cancelled", error_class="cancelled", error_message="任务已取消")
+            if current and (
+                current.get("cancel_requested")
+                or current.get("status") == "cancelling"
+            ):
+                self.db.complete_task(
+                    task_id,
+                    "cancelled",
+                    error_class="cancelled",
+                    error_message="任务已取消",
+                )
             elif current and current.get("status") not in TERMINAL_STATUSES:
                 self.db.complete_task(
                     task_id,
@@ -527,67 +331,66 @@ class TaskScheduler:
                     error_message=decision.message,
                 )
             return
-        await self.log_writer.flush()
-        self.db.finish_attempt(
-            attempt_id,
-            exit_code=exit_code,
-            status=attempt_status(decision),
-            error_class=decision.error_class,
-            error_message=decision.message,
-            retryable=decision.retryable,
-            proxy_node_id=lease.node_id if lease else None,
-            proxy_endpoint=redact_text(lease.endpoint, limit=500) if lease else None,
-        )
-        if task is not None and task_artifacts:
-            count, total = await asyncio.to_thread(self._artifact_catalog.totals, task_artifacts)
-            self.db.update_artifacts(task_id, count, total)
 
         latest = self.db.get_task(task_id)
         max_attempts = int((latest or task or {}).get("max_attempts", 1))
         transition = decide_task_transition(
             decision,
-            cancel_requested=bool(latest and latest.get("cancel_requested")),
-            attempt_no=attempt_no,
+            cancel_requested=bool(
+                latest and latest.get("cancel_requested")
+            ),
+            attempt_no=result.attempt_no,
             max_attempts=max_attempts,
         )
         if transition == "cancelled":
             self.db.complete_task(
                 task_id,
                 "cancelled",
-                exit_code=exit_code,
+                exit_code=result.exit_code,
                 error_class="cancelled",
                 error_message="任务已取消",
                 expected_attempt_id=attempt_id,
             )
             return
         if transition == "succeeded":
-            self.db.complete_task(task_id, "succeeded", exit_code=exit_code, expected_attempt_id=attempt_id)
+            self.db.complete_task(
+                task_id,
+                "succeeded",
+                exit_code=result.exit_code,
+                expected_attempt_id=attempt_id,
+            )
             return
 
         tried = updated_tried_proxy_ids(
             (latest or task or {}).get("tried_proxy_ids") or [],
-            proxy_node_id=lease.node_id if lease is not None else None,
+            proxy_node_id=result.proxy_node_id,
             proxy_fault=decision.proxy_fault,
         )
         if transition == "requeue":
-            base = policy.backoff_base_seconds if policy else 2.0
-            # A manual retry round pins backoff_anchor_attempt to the attempt_count it
-            # inherited, so this round's exponent restarts at 0 instead of compounding
-            # the task's whole history. Automatic requeues leave the anchor untouched,
-            # so retries within a single round keep escalating. The exponential term is
-            # then capped so a deep sequence can never schedule an absurd delay.
-            anchor = int((latest or task or {}).get("backoff_anchor_attempt", 0) or 0)
+            base = (
+                result.policy.backoff_base_seconds
+                if result.policy is not None
+                else 2.0
+            )
+            # Manual retry pins the anchor to inherited attempt_count, so the
+            # new round restarts at exponent zero. Automatic retries preserve it.
+            anchor = int(
+                (latest or task or {}).get("backoff_anchor_attempt", 0) or 0
+            )
             delay = retry_delay_seconds(
                 base_seconds=base,
-                attempt_no=attempt_no,
+                attempt_no=result.attempt_no,
                 backoff_anchor_attempt=anchor,
                 cap_seconds=self.settings.retry_backoff_cap_seconds,
-                jitter_seconds=random.uniform(0.0, self.settings.retry_jitter_seconds),
+                jitter_seconds=self._jitter(
+                    0.0,
+                    self.settings.retry_jitter_seconds,
+                ),
             )
             self.db.requeue_task(
                 task_id,
-                next_run_at=time.time() + delay,
-                exit_code=exit_code,
+                next_run_at=self._wall_clock() + delay,
+                exit_code=result.exit_code,
                 error_class=decision.error_class,
                 error_message=decision.message,
                 tried_proxy_ids=tried,
@@ -598,12 +401,8 @@ class TaskScheduler:
         self.db.complete_task(
             task_id,
             "failed",
-            exit_code=exit_code,
+            exit_code=result.exit_code,
             error_class=decision.error_class,
             error_message=decision.message,
             expected_attempt_id=attempt_id,
         )
-
-
-class _ExecutionFinished(Exception):
-    pass
