@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ._scheduler_artifacts import ArtifactCatalog, LocalArtifactCatalog
-from ._scheduler_attempt import AttemptExecutor
+from ._scheduler_attempt import AttemptExecutor, AttemptResult
 from ._scheduler_decisions import (
     decide_task_transition,
     parse_task_policy,
@@ -289,6 +289,9 @@ class TaskScheduler:
             "dispatch_loop": dispatch_loop,
         }
 
+    # Compatibility facades retained for scheduler fixtures that exercised the
+    # pre-split private artifact seams. Production attempts use the injected
+    # ArtifactCatalog directly.
     @staticmethod
     def _scan_artifacts(output_dir: str) -> tuple[int, int]:
         return LocalArtifactCatalog().scan(output_dir)
@@ -306,7 +309,16 @@ class TaskScheduler:
         return LocalArtifactCatalog().size(path)
 
     async def _execute(self, task_id: str) -> None:
+        # Compatibility seam: dispatch tests patch _execute to hold workers.
+        # Keep it thin while TaskScheduler remains the final-state owner.
         result = await self._attempt_executor.execute(task_id)
+        self._commit_attempt_result(task_id, result)
+
+    def _commit_attempt_result(
+        self,
+        task_id: str,
+        result: AttemptResult,
+    ) -> None:
         decision = result.decision
         attempt_id = result.attempt_id
         task = result.task
