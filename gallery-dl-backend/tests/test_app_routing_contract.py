@@ -7,7 +7,12 @@ from types import SimpleNamespace
 
 from fastapi.routing import APIRoute
 
+from gdl_backend.api_routes.discovery import (
+    _aggregate_search_result,
+    _build_search_plan,
+)
 from gdl_backend.app import ServiceContainer, create_app
+from gdl_backend.schemas import SearchRequest
 from tests.helpers import local_test_client, make_settings
 
 
@@ -145,6 +150,69 @@ class AppRoutingContractTests(unittest.TestCase):
             app=SimpleNamespace(state=SimpleNamespace(container=self.container))
         )
         self.assertIs(dependency(request), self.container)
+
+    def test_search_input_plan_and_result_aggregation_are_pure(self):
+        body = SearchRequest.model_validate(
+            {
+                "keyword": "fixture artist",
+                "sites": ["twitter", "pixiv"],
+                "proxy_mode": "prefer",
+                "source_options": {
+                    "twitter": {
+                        "proxy_mode": "required",
+                        "search_extra_args": ["--range", "1-3"],
+                    }
+                },
+            }
+        )
+        original = body.model_dump()
+
+        plan = _build_search_plan(body)
+
+        self.assertEqual(
+            plan.execution_sites,
+            ("danbooru", "twitter", "pixiv"),
+        )
+        self.assertTrue(plan.implicit_danbooru)
+        self.assertTrue(plan.needs_artist_directory)
+        self.assertEqual(plan.options["danbooru"]["proxy_mode"], "prefer")
+        self.assertEqual(plan.options["twitter"]["proxy_mode"], "required")
+        self.assertEqual(
+            plan.options["twitter"]["search_extra_args"],
+            ["--range", "1-3"],
+        )
+        self.assertEqual(body.model_dump(), original)
+
+        sources = [
+            {
+                "site": "twitter",
+                "addresses": [{"url": "https://x.com/fixture"}],
+                "weak_evidence": [],
+            }
+        ]
+        result = _aggregate_search_result(
+            keyword=body.keyword,
+            sources=sources,
+            related_profiles=[],
+            enrichment_errors=[],
+        )
+        self.assertEqual(
+            set(result),
+            {
+                "keyword",
+                "source_count",
+                "address_count",
+                "weak_evidence_count",
+                "sources",
+                "related_profiles",
+                "enrichment_errors",
+                "selection_contract",
+                "tag_filter_contract",
+            },
+        )
+        self.assertEqual(result["source_count"], 1)
+        self.assertEqual(result["address_count"], 1)
+        self.assertIs(result["sources"], sources)
 
     def test_error_envelope_codes_statuses_and_request_id_are_stable(self):
         cases = (
