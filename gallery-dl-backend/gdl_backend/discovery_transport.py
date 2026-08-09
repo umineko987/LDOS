@@ -164,11 +164,13 @@ class AttemptsExhausted(RuntimeError):
         failure: AttemptFailure,
         *,
         attempts: int,
+        attempt_count: int,
         proxy: dict[str, Any],
     ) -> None:
         super().__init__(failure.message)
         self.failure = failure
         self.attempts = attempts
+        self.attempt_count = attempt_count
         self.proxy = proxy
 
 
@@ -553,5 +555,6 @@ class DiscoveryTransport:
         raise AttemptsExhausted(
             last_failure,
             attempts=attempts,
+            attempt_count=attempt_number,
             proxy=last_proxy,
         )

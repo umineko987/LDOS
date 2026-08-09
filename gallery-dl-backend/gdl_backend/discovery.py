@@ -1,22 +1,20 @@
 from __future__ import annotations
 
-import asyncio
-import shutil
-import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable
-from urllib.parse import urlsplit
-
 import requests
 from curl_cffi import requests as curl_requests
 
-from .classifier import FailureDecision, classify_result
 from .discovery_adapters.danbooru import (
     DanbooruApiRequestError,
     DanbooruDiscoveryAdapter,
     is_cloudflare_challenge,
 )
 from .discovery_adapters.exhentai import ExHentaiDiscoveryAdapter
+from .discovery_adapters.gallery_dl import (
+    GalleryDlDiscoveryAdapter,
+    PawchiveDiscoveryAdapter,
+)
 from .discovery_contracts import DiscoveryError
 from .discovery_transport import DiscoveryHttpSession, DiscoveryTransport
 from .discovery_transforms import (
@@ -45,8 +43,7 @@ from .discovery_transforms import (
 )
 from .encrypted_dns import EncryptedDNSError, NetworkTargetValidator
 from .gallery import GalleryRunner
-from .proxy import ProxyLease, ProxyPoolAdapter, ProxyPoolUnavailable
-from .redaction import redact_text
+from .proxy import ProxyLease, ProxyPoolAdapter
 from .schemas import ProxyMode, SitePolicy
 
 
@@ -144,6 +141,10 @@ class DiscoveryService:
         self.runtime_dir = self.transport.runtime_dir
         self.network_validator = self.transport.network_validator
         self.auth_failure_callback = self.transport.auth_failure_callback
+        self._gallery_dl_adapter = GalleryDlDiscoveryAdapter(self.transport)
+        self._pawchive_adapter = PawchiveDiscoveryAdapter(
+            self._gallery_dl_adapter
+        )
         self._danbooru_adapter = DanbooruDiscoveryAdapter(
             self.transport,
             gallery_discover=self._discover_gallery_url,
@@ -278,12 +279,22 @@ class DiscoveryService:
                 extra_args=extra_args,
                 timeout_seconds=timeout_seconds,
             )
-        return await self._discover_gallery_url(
+        if spec.site == "pawchive":
+            return await self._pawchive_adapter.search(
+                keyword=keyword,
+                limit=limit,
+                policy=policy,
+                proxy_mode=proxy_mode,
+                credentials_ref=credentials_ref,
+                cookies_file=cookies_file,
+                config_file=config_file,
+                extra_args=extra_args,
+                timeout_seconds=timeout_seconds,
+            )
+        return await self._gallery_dl_adapter.search(
             site=spec.site,
-            url=spec.search_url(keyword),
             keyword=keyword,
             limit=limit,
-            range_kind=spec.search_range,
             policy=policy,
             proxy_mode=proxy_mode,
             credentials_ref=credentials_ref,
@@ -434,6 +445,20 @@ class DiscoveryService:
                 extra_args=extra_args,
                 timeout_seconds=timeout_seconds,
             )
+        if spec.site == "pawchive":
+            return await self._pawchive_adapter.discover_url(
+                url=url,
+                keyword=keyword,
+                limit=limit,
+                range_kind=range_kind,
+                policy=policy,
+                proxy_mode=proxy_mode,
+                credentials_ref=credentials_ref,
+                cookies_file=cookies_file,
+                config_file=config_file,
+                extra_args=extra_args,
+                timeout_seconds=timeout_seconds,
+            )
         return await self._discover_gallery_url(
             site=spec.site,
             url=url,
@@ -465,241 +490,19 @@ class DiscoveryService:
         extra_args: list[str],
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        spec = search_site(site)
-        values = validate_discovery_args(extra_args)
-        if spec.site == "pixiv":
-            values = _pixiv_first_media_args(values)
-        if range_kind is None:
-            if spec.site == "pawchive" and not urlsplit(url).path.startswith(
-                "/artists"
-            ):
-                # Creator/post/listing addresses enumerate one Directory per
-                # post; only the /artists creator search yields Queue children.
-                range_kind = "post"
-            else:
-                range_kind = spec.search_range
-        range_option = {
-            "file": "--range",
-            "post": "--post-range",
-            "child": "--child-range",
-        }[range_kind]
-        range_limit = limit
-        if spec.site == "pawchive" and range_kind == "child":
-            # The creator directory is ~80% kemono-synced stubs that rank high
-            # on the shared favorited sort but 404 locally; the parser drops
-            # them (ever_imported=false), so widen the enumeration window to
-            # keep `limit` real candidates reachable. Queue messages are pure
-            # in-process output — no extra site requests.
-            range_limit = limit * 10
-        protocol_args = ["--dump-json", range_option, f"1-{range_limit}", *values]
-        mode: ProxyMode = proxy_mode or policy.proxy_mode
-        secure_search = keyword is not None
-        attempts = max(1, policy.retry_limit + 1)
-        attempt_count = 0
-        tried: set[str] = set()
-        last_message = "搜索任务没有返回结果"
-        last_auth_context = ""
-        last_decision = FailureDecision("backend_error", False, False, last_message)
-        last_proxy = self._proxy_metadata(mode, None)
-        last_dns_error: EncryptedDNSError | None = None
-
-        if secure_search and mode == "direct":
-            await self.validate_direct(url)
-
-        for attempt in range(1, attempts + 1):
-            operation_id = f"discover-{uuid.uuid4().hex}"
-            last_dns_error = None
-            operation_dir = self.runtime_dir / operation_id
-            lease: ProxyLease | None = None
-            decision = FailureDecision("backend_error", False, False, last_message)
-            dns_error: EncryptedDNSError | None = None
-            try:
-                if mode != "direct":
-                    try:
-                        lease = await asyncio.to_thread(
-                            self.proxy.acquire,
-                            operation_id,
-                            node_tags=policy.node_tags,
-                            exclude_ids=tried,
-                            allowed_ids=getattr(policy, "allowed_proxy_ids", None),
-                            probe_before_use=policy.probe_before_use,
-                            probe_url=policy.probe_url,
-                        )
-                    except ProxyPoolUnavailable as exc:
-                        raise DiscoveryError(
-                            "proxy_unavailable",
-                            "代理不可用，已终止（不会回退直连）",
-                            details={"attempts": attempt, "proxy": last_proxy},
-                        ) from exc
-                    except Exception as exc:
-                        if secure_search or mode == "required":
-                            raise DiscoveryError(
-                                "proxy_unavailable",
-                                "代理租约获取失败，已拒绝回退直连",
-                                details={"attempts": attempt, "proxy": last_proxy},
-                            ) from exc
-                    if lease is None and secure_search:
-                        raise DiscoveryError(
-                            "proxy_dns_failed",
-                            "当前没有可用于代理 DNS 校验的健康节点，已拒绝回退直连",
-                            details={"attempts": attempt, "proxy": last_proxy},
-                        )
-                    if lease is None and mode == "required":
-                        raise DiscoveryError(
-                            "proxy_unavailable",
-                            "当前没有符合站点策略的健康代理节点",
-                            details={"attempts": attempt, "proxy": last_proxy},
-                        )
-
-                last_proxy = self._proxy_metadata(mode, lease)
-                attempt_count += 1
-                if secure_search and lease is not None:
-                    await self.validate_proxy(url, lease)
-                result = await self.gallery.capture(
-                    operation_id,
-                    url=url,
-                    output_dir=str(operation_dir),
-                    proxy_url=lease.endpoint if lease else None,
-                    http_timeout=policy.http_timeout,
-                    gallery_retries=policy.gallery_retries,
-                    task_timeout=timeout_seconds,
-                    cookies_file=cookies_file,
-                    config_file=config_file,
-                    credentials_ref=credentials_ref,
-                    extra_args=protocol_args,
-                )
-                decision = classify_result(
-                    result.exit_code,
-                    result.stderr,
-                    cancelled=False,
-                    timed_out=result.timed_out,
-                )
-                last_auth_context = result.stderr
-                if decision.error_class == "success":
-                    try:
-                        candidates, authors = parse_discovery_output(
-                            spec.site,
-                            result.stdout,
-                            source_url=url,
-                            limit=limit,
-                        )
-                    except DiscoveryError as exc:
-                        safe_message = redact_text(exc.message, limit=1000)
-                        decision = classify_result(1, f"{result.stderr}\n{safe_message}")
-                        last_message = safe_message
-                        if not decision.retryable:
-                            details = {
-                                "attempts": attempt_count,
-                                "message": safe_message,
-                                "proxy": last_proxy,
-                            }
-                            if isinstance(exc.details, dict):
-                                errors = exc.details.get("errors")
-                                if isinstance(errors, list):
-                                    details["errors"] = [
-                                        redact_text(item, limit=500) for item in errors[:5]
-                                    ]
-                            raise DiscoveryError(
-                                exc.code,
-                                safe_message,
-                                details=details,
-                            ) from exc
-                    else:
-                        return {
-                            "site": spec.site,
-                            "keyword": keyword,
-                            "search_url": url,
-                            "candidate_count": len(candidates),
-                            "author_count": len(authors),
-                            "candidates": candidates,
-                            "authors": authors,
-                            "proxy": last_proxy,
-                            "attempts": attempt_count,
-                        }
-                else:
-                    last_message = decision.message
-            except EncryptedDNSError as exc:
-                dns_error = last_dns_error = exc
-                last_message = exc.message
-                decision = FailureDecision(
-                    "proxy_error" if exc.proxy_fault else "network_target",
-                    exc.retryable,
-                    bool(lease is not None and exc.proxy_fault),
-                    exc.message,
-                )
-                if not decision.proxy_fault:
-                    raise self._network_error(
-                        exc,
-                        mode=mode,
-                        lease=lease,
-                        attempts=attempt_count,
-                    ) from exc
-            except DiscoveryError:
-                raise
-            except (FileNotFoundError, ValueError) as exc:
-                raise DiscoveryError(
-                    "discovery_configuration",
-                    redact_text(exc, limit=1000),
-                ) from exc
-            except Exception as exc:
-                last_message = redact_text(exc, limit=1000)
-                decision = classify_result(1, last_message)
-            finally:
-                if lease is not None:
-                    if decision.proxy_fault:
-                        tried.add(lease.node_id)
-                    try:
-                        await asyncio.to_thread(
-                            self.proxy.release,
-                            operation_id,
-                            proxy_fault=decision.proxy_fault,
-                            reason=decision.message,
-                        )
-                    except Exception:
-                        pass
-                if (
-                    operation_dir.parent == self.runtime_dir
-                    and operation_dir.name.startswith("discover-")
-                ):
-                    shutil.rmtree(operation_dir, ignore_errors=True)
-
-            last_decision = decision
-            if not decision.retryable or attempt >= attempts:
-                if dns_error is not None:
-                    raise self._network_error(
-                        dns_error,
-                        mode=mode,
-                        lease=lease,
-                        attempts=attempt_count,
-                    ) from dns_error
-                break
-            delay = policy.backoff_base_seconds * (2 ** max(0, attempt - 1))
-            if delay:
-                await asyncio.sleep(min(delay, 10.0))
-
-        if last_dns_error is not None:
-            raise self._network_error(
-                last_dns_error,
-                mode=mode,
-                lease=None,
-                attempts=attempt_count,
-            ) from last_dns_error
-        if decision.error_class == "authentication" and self.auth_failure_callback is not None:
-            try:
-                await self.auth_failure_callback(
-                    spec.site,
-                    cookies_file,
-                    last_auth_context or last_message,
-                )
-            except Exception:
-                pass
-        safe_message = redact_text(last_message, limit=1000)
-        raise DiscoveryError(
-            "authentication" if decision.error_class == "authentication" else "discovery_failed",
-            safe_message,
-            details={
-                "attempts": attempt_count,
-                "message": safe_message,
-                "proxy": last_proxy,
-            },
+        """Private compatibility seam for source adapters and focused tests."""
+        return await self._gallery_dl_adapter.discover_url(
+            site=site,
+            url=url,
+            keyword=keyword,
+            limit=limit,
+            range_kind=range_kind,
+            range_limit=None,
+            policy=policy,
+            proxy_mode=proxy_mode,
+            credentials_ref=credentials_ref,
+            cookies_file=cookies_file,
+            config_file=config_file,
+            extra_args=extra_args,
+            timeout_seconds=timeout_seconds,
         )
