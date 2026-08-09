@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import logging
 import os
 import re
@@ -13,7 +12,6 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
@@ -23,6 +21,17 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .api_routes import create_diagnostics_router
+from .api_routes.dependencies import get_service
+from .api_routes.errors import ApiError
+from .api_routes.validation import (
+    canonical_site_name as _canonical_site_name,
+    range_argument_present as _range_argument_present,
+    validate_idempotency_key as _validate_idempotency_key,
+    validate_network_target as _validate_network_target,
+    validate_site_match as _validate_site_match,
+    validate_site_name as _validate_site_name,
+)
 from .auth import (
     MAX_AUTH_PROXY_REQUEST_BYTES,
     AuthError,
@@ -42,10 +51,8 @@ from .database import (
     TERMINAL_STATUSES,
 )
 from .diagnostics import (
-    diagnostics_config_snapshot,
     diagnostics_proxy_health_snapshot,
     diagnostics_scheduler_snapshot,
-    readiness_snapshot,
 )
 from .discovery import (
     DiscoveryError,
@@ -147,15 +154,6 @@ _VAULT_SAFE_AUTH_ERROR_CODES = frozenset(
         "auth_cache_clear_failed",
     }
 )
-
-
-class ApiError(RuntimeError):
-    def __init__(self, status_code: int, code: str, message: str, details: Any = None) -> None:
-        super().__init__(message)
-        self.status_code = status_code
-        self.code = code
-        self.message = message
-        self.details = details
 
 
 class ServiceContainer:
@@ -376,31 +374,6 @@ class ServiceContainer:
                 continue
 
 
-def _validate_site_name(site: str) -> str:
-    value = site.strip().lower()
-    if not re.fullmatch(r"[a-z0-9][a-z0-9._:-]{0,127}", value):
-        raise ApiError(422, "invalid_site", "site 格式无效")
-    return value
-
-
-def _canonical_site_name(site: str) -> str:
-    value = _validate_site_name(site)
-    try:
-        return search_site(value).site
-    except ValueError:
-        return value
-
-
-def _validate_site_match(explicit_site: str, resolved_site: str) -> None:
-    try:
-        explicit = search_site(explicit_site).site
-        resolved = search_site(resolved_site).site
-    except ValueError:
-        return
-    if explicit != resolved:
-        raise ValueError(f"site={explicit} 与 URL 提取器站点 {resolved} 不一致")
-
-
 def _task_files(task: dict[str, Any], limit: int = 2000) -> list[dict[str, Any]]:
     root = Path(task["output_dir"]).resolve()
     if not root.is_dir():
@@ -424,54 +397,6 @@ def _task_files(task: dict[str, Any], limit: int = 2000) -> list[dict[str, Any]]
         except OSError:
             continue
     return files
-
-
-def _validate_network_target(
-    url: str,
-    allow_private: bool,
-    *,
-    strict: bool = True,
-) -> None:
-    if allow_private:
-        return
-    text = url.strip()
-    lower = text.lower()
-    starts = [pos for pos in (lower.find("http://"), lower.find("https://")) if pos >= 0]
-    if starts:
-        text = text[min(starts) :]
-    parsed = urlsplit(text)
-    host = (parsed.hostname or "").strip().lower()
-    if not host:
-        raise ValueError("目标 URL 缺少主机名")
-    if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
-        raise ValueError("目标 URL 指向本机或私有网络")
-    try:
-        addresses = socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
-    except OSError as exc:
-        raise ValueError("目标主机 DNS 解析失败") from exc
-    resolved_count = 0
-    has_global = False
-    for entry in addresses:
-        address = entry[4][0].split("%", 1)[0]
-        try:
-            ip = ipaddress.ip_address(address)
-        except ValueError as exc:
-            if strict:
-                raise ValueError("目标主机解析出无法识别的地址") from exc
-            continue
-        if strict and not ip.is_global:
-            raise ValueError(
-                f"目标 URL 解析到非公网地址（IPv{ip.version}: {ip}），已拒绝"
-            )
-        if ip.is_global:
-            has_global = True
-        resolved_count += 1
-    if strict:
-        if not resolved_count:
-            raise ValueError("目标主机 DNS 未返回任何地址")
-        return
-    if not has_global:
-        raise ValueError("目标 URL 指向本机或私有网络")
 
 
 def create_app(
@@ -650,9 +575,6 @@ def create_app(
             },
         )
 
-    def get_service(request: Request) -> ServiceContainer:
-        return request.app.state.container
-
     def _content_length(request: Request) -> int | None:
         raw_length = request.headers.get("content-length")
         if raw_length is None:
@@ -700,58 +622,8 @@ def create_app(
                 "站点策略请求体超过大小上限",
             )
 
+    app.include_router(create_diagnostics_router(settings))
     api = APIRouter(prefix="/api/v1")
-
-    @app.get("/")
-    async def root():
-        return {
-            "service": "gallery-dl-backend",
-            "version": __version__,
-            "ui": "/ui/",
-            "docs": "/docs",
-        }
-
-    @app.get("/healthz")
-    async def healthz():
-        database_ok = service.db.ping()
-        payload = {
-            "ok": database_ok,
-            "components": {
-                "process": {"status": "ok"},
-                "database": {"status": "ok" if database_ok else "error"},
-            },
-            "time": time.time(),
-        }
-        return JSONResponse(status_code=200 if database_ok else 503, content=payload)
-
-    @app.get("/readyz")
-    async def readyz():
-        # 事件循环拥有的可变状态必须在循环上取快照，不能带进工作线程。
-        scheduler_summary = service.scheduler.active_summary()
-        ordered_summary = service.ordered_crawls.status()
-        proxy_health = service.proxy_health_summary()
-
-        def snapshot() -> dict[str, Any]:
-            return readiness_snapshot(
-                settings,
-                database_ok=service.db.ping(),
-                live_proxy_status=service.proxy.status(),
-                proxy_health=proxy_health,
-                scheduler=scheduler_summary,
-                ordered_crawls=ordered_summary,
-            )
-
-        payload = await asyncio.to_thread(snapshot)
-        return JSONResponse(status_code=200 if payload["ready"] else 503, content=payload)
-
-    @api.get("/config")
-    async def public_config(
-        view: DiagnosticsResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        if view == "diagnostics":
-            return diagnostics_config_snapshot(container.settings)
-        return container.settings.public_dict()
 
     def _raise_auth_error(
         exc: AuthError,
@@ -931,16 +803,6 @@ def create_app(
             return vault_safe_status(result) if view == "vault" else result
         except AuthError as exc:
             _raise_auth_error(exc, view)
-
-    def _validate_idempotency_key(value: str | None) -> str | None:
-        if value is None:
-            return None
-        if len(value) > 200:
-            raise ApiError(422, "invalid_idempotency_key", "Idempotency-Key 过长")
-        result = value.strip()
-        if not result:
-            raise ApiError(422, "invalid_idempotency_key", "Idempotency-Key 为空")
-        return result
 
     def _allowed_request_files(
         container: ServiceContainer,
@@ -1809,17 +1671,6 @@ def create_app(
         container: ServiceContainer = Depends(get_service),
     ):
         return await _perform_search(body, container)
-
-    def _range_argument_present(args: list[str]) -> bool:
-        managed = {
-            "--range",
-            "--file-range",
-            "--image-range",
-            "--post-range",
-            "--child-range",
-            "--chapter-range",
-        }
-        return any(str(value).split("=", 1)[0] in managed for value in args)
 
     async def _perform_crawl(
         body: CrawlRequest,
