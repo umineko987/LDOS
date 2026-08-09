@@ -8,12 +8,16 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, build_opener
 
 import websocket
 
 from .file_security import ensure_private_directory, write_private_text
+from .pixiv_oauth_protocol import (
+    pixiv_login_url_is_valid,
+    pixiv_oauth_callback_is_valid,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,22 +204,9 @@ def cdp_request(
 
 
 def _is_pixiv_oauth_callback(url: str) -> bool:
-    try:
-        parsed = urlsplit(str(url or ""))
-        query = parse_qs(parsed.query, keep_blank_values=True)
-        codes = query.get("code", ())
-        states = query.get("state", ())
-        return (
-            parsed.scheme == "https"
-            and (parsed.hostname or "").lower() == "app-api.pixiv.net"
-            and parsed.path == "/web/v1/users/auth/pixiv/callback"
-            and len(codes) == 1
-            and bool(codes[0].strip())
-            and len(states) == 1
-            and bool(states[0].strip())
-        )
-    except ValueError:
-        return False
+    """Compatibility seam retained for existing managed-browser tests/callers."""
+
+    return pixiv_oauth_callback_is_valid(url)
 
 
 def capture_pixiv_oauth_callback(
@@ -227,12 +218,7 @@ def capture_pixiv_oauth_callback(
 ) -> str:
     """Navigate a dedicated Chrome page and return its Pixiv OAuth callback URL."""
 
-    login = urlsplit(str(login_url or ""))
-    if (
-        login.scheme != "https"
-        or (login.hostname or "").lower() != "app-api.pixiv.net"
-        or login.path != "/web/v1/login"
-    ):
+    if not pixiv_login_url_is_valid(login_url):
         raise ValueError("Pixiv OAuth login URL is invalid")
 
     page_websocket_url = _page_websocket(browser_websocket_url, target_id)

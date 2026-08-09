@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 import os
-import pickle
-import pickletools
-import re
 import shutil
 import sqlite3
 import subprocess
@@ -18,9 +14,19 @@ from dataclasses import dataclass, field
 from http.cookiejar import MozillaCookieJar
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import urlsplit
 
-from .config import AUTH_PROXY_SCHEMES, AppSettings, normalize_authorization_proxy
+from .auth_projection import (
+    SUPPORTED_AUTH_SITES,
+    VAULT_RESPONSE_PROFILE,
+    chrome_proxy_server,
+    vault_safe_browser_profile,
+    vault_safe_proxy_status,
+    vault_safe_session,
+    vault_safe_status,
+    vault_safe_statuses,
+)
+from .config import AppSettings, normalize_authorization_proxy
 from .file_security import (
     ensure_private_directory,
     reject_symlink_path,
@@ -41,11 +47,18 @@ from .managed_browser import (
     read_browser_websocket,
     write_netscape_cookies,
 )
+from .pixiv_oauth_protocol import (
+    MAX_PIXIV_CACHE_VALUE_BYTES as _MAX_PIXIV_CACHE_VALUE_BYTES,
+    PIXIV_LOGIN_URL_RE,
+    PixivCacheTokenUnpickler as _PixivCacheTokenUnpickler,
+    decode_pixiv_cache_token as _decode_pixiv_cache_token,
+    extract_pixiv_oauth_code,
+    find_pixiv_login_url,
+)
 from .process_control import terminate_process
 from .proxy_runtime import mask_proxy
 
 
-SUPPORTED_AUTH_SITES = ("danbooru", "twitter", "pixiv", "exhentai", "pawchive")
 COOKIE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "twitter": ("auth_token", "ct0"),
     "exhentai": ("ipb_member_id", "ipb_pass_hash"),
@@ -54,266 +67,9 @@ COOKIE_LABELS = {
     "twitter": "X 导出凭证",
     "exhentai": "EH 导出凭证",
 }
-PIXIV_LOGIN_URL_RE = re.compile(r"https://app-api\.pixiv\.net/web/v1/login\?[^\s]+")
 # auth-metadata.json 以站点名为键；下划线前缀保证与 SUPPORTED_AUTH_SITES 永不冲突。
 AUTH_PROXY_METADATA_KEY = "_authorization_proxy"
-VAULT_RESPONSE_PROFILE = "vault"
 MAX_AUTH_PROXY_REQUEST_BYTES = 1_024
-# Pixiv refresh tokens and the existing fixtures are tens of bytes (the upstream
-# gallery-dl example is 43 ASCII bytes). 1 KiB leaves ample compatibility
-# headroom while bounding work before any cache BLOB is deserialized.
-_MAX_PIXIV_CACHE_VALUE_BYTES = 1_024
-_VAULT_SESSION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-_VAULT_SESSION_STATES = {
-    "starting",
-    "starting_browser",
-    "awaiting_login",
-    "awaiting_code",
-    "exchanging",
-    "authorized",
-    "cancelled",
-    "timed_out",
-    "failed",
-    "token_ready",
-}
-_VAULT_SITE_METHODS = {
-    "danbooru": ("Danbooru", "anonymous", ()),
-    "twitter": ("X / Twitter", "managed_browser", ("managed_browser_login", "clear")),
-    "pixiv": ("Pixiv", "oauth", ("oauth", "clear")),
-    "exhentai": ("EH", "managed_browser", ("managed_browser_login", "clear")),
-    "pawchive": ("Pawchive", "anonymous", ()),
-}
-
-
-def _vault_timestamp(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    numeric = float(value)
-    return numeric if numeric == numeric and 0 <= numeric <= 4_102_444_800 else None
-
-
-def vault_safe_session(value: Any, *, site: str | None = None) -> dict[str, Any] | None:
-    """投影桌面 WebUI 轮询所需的会话字段，排除 URL、错误原文与凭证材料。"""
-
-    if not isinstance(value, dict):
-        return None
-    session_id = str(value.get("session_id") or "")
-    state = str(value.get("state") or "")
-    if not _VAULT_SESSION_ID_RE.fullmatch(session_id) or state not in _VAULT_SESSION_STATES:
-        return None
-    result: dict[str, Any] = {
-        "session_id": session_id,
-        "state": state,
-        "created_at": _vault_timestamp(value.get("created_at")),
-        "expires_at": _vault_timestamp(value.get("expires_at")),
-    }
-    if site in _VAULT_SITE_METHODS:
-        result["site"] = site
-    if site in MANAGED_BROWSER_SITES:
-        count = value.get("cookie_count")
-        result["cookie_count"] = (
-            min(int(count), 100_000)
-            if isinstance(count, int) and not isinstance(count, bool) and count >= 0
-            else 0
-        )
-    return result
-
-
-def _vault_summary(site: str, state: str, authorized: bool, invalidated: bool) -> str:
-    if site in {"danbooru", "pawchive"}:
-        return "后端声明此目标使用公开访问，不需要登录材料。"
-    if state == "authorizing":
-        return "共享授权浏览器流程正在进行。"
-    if invalidated:
-        return "后端已在实际访问中判定现有授权材料失效。"
-    if authorized:
-        return "后端检测到托管授权材料；此状态不代表远端验证成功。"
-    return "后端当前没有可供任务使用的托管授权材料。"
-
-
-def vault_safe_status(value: Any) -> dict[str, Any]:
-    """严格白名单投影单站状态，保持默认旧响应不变。"""
-
-    if not isinstance(value, dict):
-        raise ValueError("授权状态不是对象")
-    site = str(value.get("site") or "")
-    definition = _VAULT_SITE_METHODS.get(site)
-    if definition is None:
-        raise ValueError("授权状态包含未知目标")
-    label, method, actions = definition
-    state = str(value.get("state") or "required")
-    if state not in {"ready", "authorized", "authorizing", "required"}:
-        state = "required"
-    authorized = value.get("authorized") is True
-    invalidated_at = _vault_timestamp(value.get("invalidated_at"))
-    result: dict[str, Any] = {
-        "site": site,
-        "label": label,
-        "method": method,
-        "state": state,
-        "authorized": authorized,
-        "summary": _vault_summary(site, state, authorized, invalidated_at is not None),
-        "updated_at": _vault_timestamp(value.get("updated_at")),
-        "invalidated_at": invalidated_at,
-        "actions": list(actions),
-    }
-    if method == "managed_browser":
-        cookie = value.get("cookies") if isinstance(value.get("cookies"), dict) else {}
-        count = cookie.get("cookie_count")
-        result.update({"browser": "project_chrome", "profile": "shared"})
-        result["cookies"] = {
-            "present": cookie.get("present") is True,
-            "valid": cookie.get("valid") is True,
-            "cookie_count": (
-                min(int(count), 100_000)
-                if isinstance(count, int) and not isinstance(count, bool) and count >= 0
-                else 0
-            ),
-            "updated_at": _vault_timestamp(cookie.get("updated_at")),
-        }
-        result["login"] = vault_safe_session(value.get("login"), site=site)
-    elif method == "oauth":
-        result.update({"browser": "project_chrome", "profile": "shared"})
-        result["oauth"] = vault_safe_session(value.get("oauth"), site=site)
-    return result
-
-
-def _vault_masked_proxy(value: Any) -> str | None:
-    if not isinstance(value, str) or not value or len(value) > 300:
-        return None
-    try:
-        parsed = urlsplit(value)
-        scheme = (parsed.scheme or "").lower()
-        hostname = parsed.hostname
-        port = parsed.port
-    except ValueError:
-        return None
-    if (
-        scheme not in AUTH_PROXY_SCHEMES
-        or not hostname
-        or port is None
-        or parsed.path not in ("", "/")
-        or parsed.query
-        or parsed.fragment
-        or any(ord(char) <= 32 or ord(char) == 127 for char in value)
-    ):
-        return None
-    host = f"[{hostname}]" if ":" in hostname else hostname
-    credentials = "***@" if parsed.username is not None or parsed.password is not None else ""
-    return f"{scheme}://{credentials}{host}:{port}"
-
-
-def vault_safe_proxy_status(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError("授权代理状态不是对象")
-    source = value.get("source") if value.get("source") in {"runtime", "config", "none"} else "none"
-    return {
-        "proxy_url": _vault_masked_proxy(value.get("proxy_url")),
-        "source": source,
-        "credentials_redacted": value.get("credentials_redacted") is True,
-        "browser_running": value.get("browser_running") is True,
-        "restart_pending": value.get("restart_pending") is True,
-        "updated_at": _vault_timestamp(value.get("updated_at")),
-    }
-
-
-def vault_safe_browser_profile(value: Any) -> dict[str, Any]:
-    profile = value if isinstance(value, dict) else {}
-    return {
-        "shared": profile.get("shared") is True,
-        "present": profile.get("present") is True,
-        "running": profile.get("running") is True,
-        "resetting": profile.get("resetting") is True,
-        "sites": ["twitter", "pixiv", "exhentai"],
-    }
-
-
-def vault_safe_statuses(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError("授权状态快照不是对象")
-    raw_items = value.get("items") if isinstance(value.get("items"), list) else []
-    by_site: dict[str, dict[str, Any]] = {}
-    for item in raw_items[: len(SUPPORTED_AUTH_SITES) * 2]:
-        try:
-            projected = vault_safe_status(item)
-        except ValueError:
-            continue
-        by_site.setdefault(projected["site"], projected)
-    return {
-        "items": [by_site[site] for site in SUPPORTED_AUTH_SITES if site in by_site],
-        "browser_profile": vault_safe_browser_profile(value.get("browser_profile")),
-        "authorization_proxy": vault_safe_proxy_status(value.get("authorization_proxy")),
-        "managed": value.get("managed") is True,
-        "secrets_exposed": False,
-        "response_profile": VAULT_RESPONSE_PROFILE,
-    }
-
-
-def chrome_proxy_server(proxy_url: str) -> str:
-    """把授权代理地址转成 Chrome --proxy-server 参数值。
-
-    Chrome 的该参数不接受内嵌账号密码（HTTP 代理会改走 407 弹窗），也不认识
-    socks5h/socks4a 方案名，这里剥掉 userinfo 并归一 scheme。
-    """
-    parsed = urlsplit(proxy_url)
-    scheme = (parsed.scheme or "").lower()
-    scheme = {"socks5h": "socks5", "socks4a": "socks4"}.get(scheme, scheme)
-    hostname = parsed.hostname or ""
-    host = f"[{hostname}]" if ":" in hostname else hostname
-    port = parsed.port
-    return f"{scheme}://{host}:{port}" if port is not None else f"{scheme}://{host}"
-
-
-class _PixivCacheTokenUnpickler(pickle.Unpickler):
-    def find_class(self, module: str, name: str) -> Any:
-        raise pickle.UnpicklingError("Pixiv cache globals are disabled")
-
-    def persistent_load(self, pid: object) -> Any:
-        raise pickle.UnpicklingError("Pixiv cache persistent IDs are disabled")
-
-
-def _decode_pixiv_cache_token(value: object) -> str | None:
-    """Decode only the token forms written by gallery-dl's Pixiv cache."""
-
-    if isinstance(value, str):
-        if len(value) > _MAX_PIXIV_CACHE_VALUE_BYTES:
-            return None
-        try:
-            encoded_size = len(value.encode("utf-8", "strict"))
-        except UnicodeError:
-            return None
-        return value if encoded_size <= _MAX_PIXIV_CACHE_VALUE_BYTES else None
-
-    if not isinstance(value, (bytes, bytearray)):
-        return None
-    if len(value) > _MAX_PIXIV_CACHE_VALUE_BYTES:
-        return None
-
-    payload = bytes(value)
-    try:
-        stop_position = next(
-            position
-            for opcode, _argument, position in pickletools.genops(payload)
-            if opcode.name == "STOP"
-        )
-        if stop_position != len(payload) - 1:
-            return None
-
-        # Unpickler can prefetch a complete FRAME past STOP, so checking the
-        # underlying stream alone is not sufficient for framed Pickles.
-        stream = io.BytesIO(payload)
-        token = _PixivCacheTokenUnpickler(stream).load()
-        if stream.read(1):
-            return None
-        if token is None:
-            return None
-        if not isinstance(token, str) or len(token) > _MAX_PIXIV_CACHE_VALUE_BYTES:
-            return None
-        if len(token.encode("utf-8", "strict")) > _MAX_PIXIV_CACHE_VALUE_BYTES:
-            return None
-        return token
-    except Exception:
-        return None
 
 
 class AuthError(RuntimeError):
@@ -1191,9 +947,9 @@ class AuthManager:
                 text = chunk.decode("utf-8", "replace")
                 if not session.authorization_url:
                     pending = (pending + text)[-16384:]
-                    match = PIXIV_LOGIN_URL_RE.search(pending)
-                    if match:
-                        session.authorization_url = match.group(0)
+                    authorization_url = find_pixiv_login_url(pending)
+                    if authorization_url:
+                        session.authorization_url = authorization_url
                         session.state = "awaiting_code"
                         session.message = "正在打开共享授权浏览器。"
                         session.ready.set()
@@ -1388,20 +1144,9 @@ class AuthManager:
 
     @staticmethod
     def _extract_oauth_code(value: str) -> str:
-        text = value.strip()
-        if not text:
-            return ""
-        try:
-            parsed = urlsplit(text)
-            values = parse_qs(parsed.query).get("code")
-            if values:
-                return values[0].strip()
-        except ValueError:
-            pass
-        match = re.search(r"(?:^|[?&])code=([^&\s]+)", text)
-        if match:
-            return unquote(match.group(1)).strip()
-        return text.rpartition("=")[2].strip() if "=" in text else text
+        """Compatibility seam for callers that exercised the former private parser."""
+
+        return extract_pixiv_oauth_code(value)
 
     async def _complete_pixiv_oauth(
         self,
