@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import logging
+import pickle
 import sqlite3
 import tempfile
 import time
 import unittest
-from contextlib import closing
+from contextlib import closing, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import ANY, AsyncMock, patch
 
+from gdl_backend import auth as auth_module
 from gdl_backend.auth import (
     AuthError,
     AuthManager,
@@ -31,6 +35,11 @@ def write_cookies(path: Path, rows: list[tuple[str, str, str]]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _create_pixiv_cache_payload_marker(path: str) -> str:
+    Path(path).touch()
+    return "payload-result"
+
+
 class AuthManagerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -40,6 +49,25 @@ class AuthManagerTests(unittest.TestCase):
     def tearDown(self):
         asyncio.run(self.auth.stop())
         self.temp.cleanup()
+
+    def _replace_pixiv_cache_values(self, values: list[object]) -> None:
+        rows = [
+            (
+                f"gallery_dl.extractor.pixiv._refresh_token_cache-test-{index:02d}",
+                value,
+                0,
+            )
+            for index, value in enumerate(values)
+        ]
+        with closing(sqlite3.connect(self.auth.cache_file)) as db:
+            db.execute(
+                "DELETE FROM data WHERE key LIKE 'gallery_dl.extractor.pixiv.%'"
+            )
+            db.executemany(
+                "INSERT INTO data (key, value, expires) VALUES (?, ?, ?)",
+                rows,
+            )
+            db.commit()
 
     def test_public_statuses_do_not_expose_secrets(self):
         payload = self.auth.statuses()
@@ -52,6 +80,104 @@ class AuthManagerTests(unittest.TestCase):
         serialized = json.dumps(payload)
         self.assertNotIn("refresh_token", serialized)
         self.assertNotIn("cookies_file", serialized)
+
+    def test_pixiv_cache_accepts_upstream_pickles_and_legacy_text(self):
+        token = "pixiv-test-token-0123456789abcdef"
+        cases = (
+            ("pickled none", pickle.dumps(None), False),
+            ("protocol zero token", pickle.dumps(token, protocol=0), True),
+            ("default protocol token", pickle.dumps(token), True),
+            ("legacy text token", token, True),
+        )
+        for label, value, expected in cases:
+            with self.subTest(label=label):
+                self._replace_pixiv_cache_values([value])
+                self.assertEqual(self.auth._pixiv_token_cached(), expected)
+
+    def test_pixiv_cache_decoder_accepts_bytearray_pickles(self):
+        token = "pixiv-bytearray-test-token"
+        encoded = bytearray(pickle.dumps(token))
+        self.assertEqual(auth_module._decode_pixiv_cache_token(encoded), token)
+
+    def test_pixiv_cache_rejects_empty_unsupported_and_malformed_values(self):
+        token = "pixiv-malformed-test-token"
+        cases = (
+            ("empty text", ""),
+            ("whitespace text", " \t"),
+            ("pickled empty text", pickle.dumps("")),
+            ("pickled mapping", pickle.dumps({"token": token})),
+            ("pickled bytes", pickle.dumps(token.encode("ascii"))),
+            ("trailing data", pickle.dumps(token) + b"trailing-data"),
+            ("utf8 blob is not legacy text", b"legacy-blob-token"),
+            ("malformed binary", b"\x80\x05broken"),
+        )
+        for label, value in cases:
+            with self.subTest(label=label):
+                self._replace_pixiv_cache_values([value])
+                status = self.auth.status("pixiv")
+                self.assertFalse(status["authorized"])
+                self.assertEqual(status["state"], "required")
+
+    def test_pixiv_cache_rejects_values_over_byte_limit(self):
+        oversized_values = (
+            "x" * 1025,
+            pickle.dumps("x" * 1024),
+        )
+        self.assertGreater(len(oversized_values[1]), 1024)
+        for value in oversized_values:
+            with self.subTest(value_type=type(value).__name__):
+                self._replace_pixiv_cache_values([value])
+                self.assertFalse(self.auth._pixiv_token_cached())
+
+    def test_pixiv_cache_blocks_reduce_payload_without_side_effects(self):
+        marker = Path(self.temp.name) / "pixiv-cache-payload-marker"
+
+        class Payload:
+            def __reduce__(self):
+                return (_create_pixiv_cache_payload_marker, (str(marker),))
+
+        self._replace_pixiv_cache_values([pickle.dumps(Payload())])
+        status = self.auth.status("pixiv")
+        self.assertFalse(marker.exists())
+        self.assertFalse(status["authorized"])
+        self.assertEqual(status["state"], "required")
+
+    def test_pixiv_cache_skips_invalid_rows_without_rewriting_cache(self):
+        token = "pixiv-later-valid-test-token"
+        self._replace_pixiv_cache_values([b"\x80\x05broken", pickle.dumps(token)])
+        with closing(sqlite3.connect(self.auth.cache_file)) as db:
+            before = db.execute(
+                "SELECT key, value, expires FROM data ORDER BY key"
+            ).fetchall()
+
+        self.assertTrue(self.auth._pixiv_token_cached())
+
+        with closing(sqlite3.connect(self.auth.cache_file)) as db:
+            after = db.execute(
+                "SELECT key, value, expires FROM data ORDER BY key"
+            ).fetchall()
+        self.assertEqual(after, before)
+
+    def test_pixiv_cache_does_not_expose_values_in_status_or_logs(self):
+        secret = "PIXIV_CACHE_TEST_SECRET_9c23f1"
+        value = pickle.dumps(secret) + b"-trailing-" + secret.encode("ascii")
+        self._replace_pixiv_cache_values([value])
+        captured = io.StringIO()
+        handler = logging.StreamHandler(captured)
+        root_logger = logging.getLogger()
+        previous_level = root_logger.level
+        root_logger.setLevel(logging.DEBUG)
+        root_logger.addHandler(handler)
+        try:
+            with redirect_stdout(captured), redirect_stderr(captured):
+                status = self.auth.status("pixiv")
+        finally:
+            root_logger.removeHandler(handler)
+            root_logger.setLevel(previous_level)
+
+        self.assertFalse(status["authorized"])
+        self.assertNotIn(secret, json.dumps(status))
+        self.assertNotIn(secret, captured.getvalue())
 
     def test_vault_safe_projection_drops_authorization_url_and_raw_diagnostics(self):
         secret = "VAULT_AUTH_SECRET_9ad31f"
