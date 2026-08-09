@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
@@ -28,6 +28,7 @@ from .api_routes import (
     create_discovery_router,
     create_ordered_task_enqueuer,
     create_proxy_router,
+    create_review_router,
     create_scheduler_router,
     create_tasks_router,
 )
@@ -41,11 +42,7 @@ from .api_routes.validation import (
 from .auth import AuthManager
 from .config import AppSettings
 from .crawl import CrawlPlanner
-from .database import (
-    CrawlReviewGroupLimitExceeded,
-    Database,
-    MAX_CRAWL_REVIEW_GROUPS,
-)
+from .database import Database
 from .discovery import DiscoveryService
 from .encrypted_dns import EncryptedDNSResolver, NetworkTargetValidator
 from .gallery import GalleryRunner
@@ -62,10 +59,9 @@ from .policy_view import (
 from .proxy import ProxyPoolAdapter
 from .proxy_source_store import ManagedProxySourceStore
 from .redaction import redact_text, safe_exception_category
-from .review import DedupReviewManager, resolve_review_file
+from .review import DedupReviewManager
 from .scheduler import TaskScheduler
 from .schemas import (
-    ReviewDecisions,
     SitePolicy,
     build_runtime_site_policy,
 )
@@ -477,150 +473,10 @@ def create_app(
     app.include_router(create_tasks_router())
     app.include_router(create_discovery_router())
     app.include_router(create_crawls_router())
+    app.include_router(create_review_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
     api = APIRouter(prefix="/api/v1")
-
-    @api.get("/crawls/{batch_id}/review")
-    async def get_crawl_review(
-        batch_id: str,
-        kind: str | None = Query(default=None, pattern="^(duplicate|single|unreadable)$"),
-        limit: int = Query(default=12, ge=1, le=50),
-        offset: int = Query(default=0, ge=0),
-        all_groups: bool = Query(default=False, alias="all"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        batch = container.db.get_crawl_batch(batch_id)
-        if batch is None:
-            raise ApiError(404, "crawl_not_found", "爬取批次不存在")
-        if batch["status"] not in {"succeeded", "completed_with_errors", "cancelled"}:
-            raise ApiError(409, "crawl_not_finished", "爬取批次结束后才会进入图片审核")
-        response_offset = 0 if all_groups else offset
-        response_limit = 0 if all_groups else limit
-        review = container.db.get_crawl_review(batch_id)
-        if review is None:
-            status = "not_started" if container.settings.dedup.enabled else "disabled"
-            return {
-                "batch_id": batch_id,
-                "status": status,
-                "groups": {
-                    "items": [],
-                    "total": 0,
-                    "limit": response_limit,
-                    "offset": response_offset,
-                },
-            }
-        page = {
-            "items": [],
-            "total": 0,
-            "limit": response_limit,
-            "offset": response_offset,
-        }
-        if review["status"] in {"ready", "applying", "applied", "apply_failed"}:
-            try:
-                page = container.db.list_crawl_review_groups(
-                    batch_id,
-                    kind=kind,
-                    limit=limit,
-                    offset=offset,
-                    all_groups=all_groups,
-                )
-            except CrawlReviewGroupLimitExceeded as exc:
-                raise ApiError(
-                    413,
-                    "review_groups_too_large",
-                    f"全量审核组超过 {MAX_CRAWL_REVIEW_GROUPS} 组上限",
-                ) from exc
-            for group in page["items"]:
-                for image in group["images"]:
-                    image["url"] = (
-                        f"/api/v1/crawls/{batch_id}/review/images/{image['id']}"
-                    )
-        return {**review, "groups": page}
-
-    @api.post("/crawls/{batch_id}/review/start", status_code=202)
-    async def start_crawl_review(
-        batch_id: str,
-        container: ServiceContainer = Depends(get_service),
-    ):
-        if not container.settings.dedup.enabled:
-            raise ApiError(409, "dedup_disabled", "去重功能未启用")
-        try:
-            return container.reviews.start_analysis(batch_id)
-        except KeyError as exc:
-            raise ApiError(404, "crawl_not_found", "爬取批次不存在") from exc
-        except RuntimeError as exc:
-            raise ApiError(409, "review_state_conflict", str(exc)) from exc
-
-    @api.put("/crawls/{batch_id}/review/decisions")
-    async def update_crawl_review_decisions(
-        batch_id: str,
-        body: ReviewDecisions,
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            container.db.update_crawl_review_decisions(
-                batch_id,
-                [group.model_dump() for group in body.groups],
-            )
-        except KeyError as exc:
-            raise ApiError(404, "review_not_found", "审核批次或分组不存在") from exc
-        except (RuntimeError, ValueError) as exc:
-            raise ApiError(409, "review_state_conflict", str(exc)) from exc
-        review = container.db.get_crawl_review(batch_id)
-        if review is None:
-            raise ApiError(404, "review_not_found", "审核批次不存在")
-        return review
-
-    @api.post("/crawls/{batch_id}/review/apply")
-    async def apply_crawl_review(
-        batch_id: str,
-        container: ServiceContainer = Depends(get_service),
-    ):
-        if container.db.get_crawl_batch(batch_id) is None:
-            raise ApiError(404, "crawl_not_found", "爬取批次不存在")
-        try:
-            return await asyncio.to_thread(container.reviews.apply, batch_id)
-        except KeyError as exc:
-            raise ApiError(404, "review_not_found", "审核批次不存在") from exc
-        except RuntimeError as exc:
-            raise ApiError(409, "review_state_conflict", str(exc)) from exc
-
-    @api.post("/crawls/{batch_id}/review/retry", status_code=202)
-    async def retry_crawl_review(
-        batch_id: str,
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            retried = container.reviews.retry_analysis(batch_id)
-        except RuntimeError as exc:
-            raise ApiError(409, "review_state_conflict", str(exc)) from exc
-        if not retried:
-            raise ApiError(404, "review_not_found", "审核批次不存在")
-        return container.db.get_crawl_review(batch_id)
-
-    @api.get("/crawls/{batch_id}/review/images/{image_id}")
-    async def get_crawl_review_image(
-        batch_id: str,
-        image_id: str,
-        container: ServiceContainer = Depends(get_service),
-    ):
-        image = container.db.get_crawl_review_image(batch_id, image_id)
-        if image is None:
-            raise ApiError(404, "review_image_not_found", "审核图片不存在")
-        root = Path(image["output_dir"]).resolve()
-        candidates = []
-        if image.get("final_relative_path"):
-            candidates.append(str(image["final_relative_path"]))
-        candidates.append(str(image["relative_path"]))
-        for relative_path in candidates:
-            try:
-                target = resolve_review_file(root, relative_path)
-            except ValueError:
-                continue
-            if target.is_file():
-                return FileResponse(target)
-        raise ApiError(404, "review_image_not_found", "审核图片文件不存在")
 
     def _require_policy_site(name: str) -> None:
         if not is_policy_site(name):
