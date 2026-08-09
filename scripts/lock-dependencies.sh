@@ -139,6 +139,16 @@ compile_lock \
     "" \
     "$backend_pyproject"
 compile_lock \
+    test \
+    "$root_dir/gallery-dl-backend/requirements-test.txt" \
+    "" \
+    --group "$backend_pyproject:test"
+compile_lock \
+    proxy-pool \
+    "$root_dir/Proxy_pool/requirements.txt" \
+    "" \
+    --group "$backend_pyproject:proxy-pool"
+compile_lock \
     dedup-common \
     "$root_dir/requirements-dedup-common.txt" \
     "" \
@@ -165,5 +175,5 @@ if grep -Eiq '^[[:space:]]*opencv-python([=[:space:]]|$)' \
     exit 1
 fi
 
-printf '依赖锁%s完成：Python 3.11–3.14，CPU/CUDA 路径独立。\n' \
+printf '依赖锁%s完成：Python 3.11–3.14，测试/Proxy_pool/CPU/CUDA 路径独立。\n' \
     "$([[ "$mode" == "check" ]] && printf '检查' || printf '更新')"
