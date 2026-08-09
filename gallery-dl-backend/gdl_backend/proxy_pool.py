@@ -1,0 +1,838 @@
+from __future__ import annotations
+
+import hashlib
+import os
+import threading
+from collections.abc import Collection, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+
+from .config import ProxySettings
+from .file_security import ensure_private_directory
+from .proxy_adapters import ProxyRuntimeAdapter
+from .proxy_core import TunnelTransportCore
+from .proxy_errors import ProxyPoolConflict, ProxyPoolError, ProxyPoolUnavailable
+from .proxy_policy import (
+    ProbeTargetViolation,
+    ProxyLease,
+    ProxyNodeRecord as _NodeRecord,
+    cached_probe_projection,
+    mark_cached_node_unhealthy,
+    mask_proxy,
+    merge_single_probe_projection,
+    node_tags,
+    probe_cache_key,
+    probe_parts,
+    project_node_row,
+    project_pool_status,
+    project_probe_result,
+    public_probe_target,
+    safe_source_warning,
+    select_lease_candidates,
+    stored_probe_projection,
+)
+from .proxy_runtime import LocalHTTPForwarder, NativeProxyPool
+from .proxy_source_store import (
+    ProxySourcePathForbidden,
+    ProxySourceProviderLike,
+    ProxySourceSnapshot,
+    ProxySourceStoreError,
+    ProxySourceValidationError,
+    safe_proxy_node_name,
+)
+from .proxy_sources import ParsedProxyNode
+from .redaction import redact_text
+
+
+class ProxyPoolCoordinator:
+    """后端内置代理池；每次生命周期操作只消费一份不可变源快照。"""
+
+    def __init__(
+        self,
+        settings: ProxySettings,
+        runtime_dir: Path,
+        source_provider: ProxySourceProviderLike | None,
+        *,
+        runtime_adapter: ProxyRuntimeAdapter,
+        wall_time: Callable[[], float],
+        monotonic_time: Callable[[], float],
+    ) -> None:
+        self.settings = settings
+        self._source_provider = source_provider
+        self.runtime_dir = Path(os.path.abspath(os.fspath(runtime_dir / "proxy")))
+        ensure_private_directory(self.runtime_dir)
+        self._runtime_adapter = runtime_adapter
+        self._wall_time = wall_time
+        self._monotonic_time = monotonic_time
+        self._lock = threading.RLock()
+        self._lifecycle_lock = threading.RLock()
+        self._pool: NativeProxyPool | None = None
+        self._transport_core: TunnelTransportCore | None = None
+        self._core_candidates: list[ParsedProxyNode] = []
+        self._forwarders: dict[str, LocalHTTPForwarder] = {}
+        self._records: list[_NodeRecord] = []
+        self._record_by_endpoint: dict[str, _NodeRecord] = {}
+        self._record_by_id: dict[str, _NodeRecord] = {}
+        self._node_meta: dict[str, dict[str, Any]] = {}
+        self._leases: dict[str, ProxyLease] = {}
+        self._pending_acquires: dict[str, threading.Event] = {}
+        self._probe_cache: dict[
+            tuple[str, str, int], tuple[float, dict[str, Any]]
+        ] = {}
+        self._generation = 0
+        self._running = False
+        self._active_revision: str | None = None
+        self._last_error = ""
+        self._core_start_error = ""
+        self._source_summary: dict[str, Any] = {
+            "subscriptions": 0,
+            "source_nodes": 0,
+            "pool_nodes": 0,
+            "skipped_nodes": 0,
+            "scheme_counts": {},
+            "warnings": [],
+        }
+
+    def _source_snapshot(self) -> ProxySourceSnapshot:
+        snapshot = self._runtime_adapter.source_snapshot(
+            self.settings,
+            self._source_provider,
+        )
+        if not isinstance(snapshot, ProxySourceSnapshot):
+            raise ProxyPoolError("代理源提供器返回了无效快照")
+        return snapshot
+
+    def _set_records(self, records: list[_NodeRecord]) -> None:
+        with self._lock:
+            self._probe_cache.clear()
+            self._records = records
+            self._record_by_endpoint = {record.endpoint: record for record in records}
+            self._record_by_id = {record.id: record for record in records}
+            self._node_meta = {
+                record.id: {
+                    "id": record.id,
+                    "name": record.name,
+                    "protocol": record.protocol,
+                    "tags": list(record.tags),
+                }
+                for record in records
+            }
+
+    @staticmethod
+    def _node_tags(name: str, protocol: str, host: str) -> list[str]:
+        """Compatibility facade for the pure node-label policy."""
+
+        return node_tags(name, protocol, host)
+
+    @staticmethod
+    def _probe_cache_key(url: str) -> tuple[str, str, int]:
+        try:
+            return probe_cache_key(url)
+        except ValueError as exc:
+            raise ProxyPoolError(str(exc)) from exc
+
+    @staticmethod
+    def _probe_parts(url: str) -> tuple[str, int]:
+        try:
+            return probe_parts(url)
+        except ProbeTargetViolation as exc:
+            raise ProxyPoolError(str(exc)) from exc
+
+    @staticmethod
+    def _public_probe_target(url: str) -> str:
+        return public_probe_target(url)
+
+    def _cached_probe_result(
+        self,
+        key: tuple[str, str, int],
+    ) -> dict[str, Any] | None:
+        ttl = float(self.settings.probe_cache_ttl_seconds)
+        if ttl <= 0:
+            return None
+        with self._lock:
+            cached = self._probe_cache.get(key)
+            if cached is None:
+                return None
+            result = cached_probe_projection(
+                cached,
+                now=self._monotonic_time(),
+                ttl_seconds=ttl,
+            )
+            if result is None:
+                self._probe_cache.pop(key, None)
+            return result
+
+    def _store_probe_cache_result(
+        self,
+        target_url: str,
+        probe_result: dict[str, Any],
+    ) -> None:
+        ttl = float(self.settings.probe_cache_ttl_seconds)
+        key = self._probe_cache_key(target_url)
+        with self._lock:
+            if ttl <= 0:
+                self._probe_cache.clear()
+                return
+            self._probe_cache[key] = (
+                self._monotonic_time(),
+                stored_probe_projection(probe_result),
+            )
+
+    def _merge_single_probe_cache_result(
+        self,
+        target_url: str,
+        node_id: str,
+        node_result: dict[str, Any],
+    ) -> None:
+        """把单节点真探结果并入已有完整项；没有完整项时保持缓存失效。"""
+
+        ttl = float(self.settings.probe_cache_ttl_seconds)
+        key = self._probe_cache_key(target_url)
+        with self._lock:
+            if ttl <= 0:
+                self._probe_cache.clear()
+                return
+            cached = self._probe_cache.get(key)
+            if cached is None:
+                return
+            timestamp, probe_result = cached
+            merged = merge_single_probe_projection(
+                probe_result,
+                node_id=node_id,
+                node_result=node_result,
+            )
+            if merged is None:
+                # A missing node or zero-healthy allowlist must force a full re-probe.
+                self._probe_cache.pop(key, None)
+                return
+            self._probe_cache[key] = (timestamp, merged)
+
+    def _mark_probe_cache_node_unhealthy_locked(self, node_id: str) -> None:
+        """在持有 ``_lock`` 时降级所有目标缓存中的指定节点。"""
+
+        for key, (timestamp, probe_result) in list(self._probe_cache.items()):
+            updated = mark_cached_node_unhealthy(
+                probe_result,
+                node_id=node_id,
+            )
+            if updated is None:
+                self._probe_cache.pop(key, None)
+            else:
+                self._probe_cache[key] = (timestamp, updated)
+
+    def _safe_warning(self, warning: object, snapshot: ProxySourceSnapshot) -> str:
+        return safe_source_warning(warning, snapshot.subscription_urls)
+
+    def _collect_nodes(
+        self,
+        *,
+        force_refresh: bool,
+        snapshot: ProxySourceSnapshot | None = None,
+    ) -> tuple[list[_NodeRecord], dict[str, Any]]:
+        del force_refresh  # 拉取始终显式执行，不存在隐藏的外部缓存。
+        sources = snapshot or self._source_snapshot()
+        try:
+            parsed_nodes, warnings = self._runtime_adapter.load_source_nodes(
+                sources,
+                subscription_timeout_seconds=self.settings.subscription_timeout_seconds,
+                warning_projector=lambda warning: self._safe_warning(warning, sources),
+            )
+        except (
+            ProxySourcePathForbidden,
+            ProxySourceStoreError,
+            ProxySourceValidationError,
+        ) as exc:
+            raise ProxyPoolError("节点文件不可用或未通过安全校验") from exc
+
+        records: list[_NodeRecord] = []
+        core_candidates: list[ParsedProxyNode] = []
+        seen: set[str] = set()
+        scheme_counts: dict[str, int] = {}
+        skipped = 0
+        for node in parsed_nodes:
+            scheme = str(node.scheme or "unknown").lower()
+            scheme_counts[scheme] = scheme_counts.get(scheme, 0) + 1
+            if not node.usable or not node.endpoint:
+                if self.settings.transport_core_enabled and node.core_config:
+                    core_candidates.append(node)
+                    continue
+                skipped += 1
+                continue
+            if scheme.startswith("socks") and not self.settings.allow_socks:
+                skipped += 1
+                continue
+            if node.endpoint in seen:
+                continue
+            seen.add(node.endpoint)
+            name = safe_proxy_node_name(node.name) or f"{scheme}-{node.host}"
+            node_id = hashlib.sha256(node.endpoint.encode("utf-8")).hexdigest()[:20]
+            records.append(
+                _NodeRecord(
+                    id=node_id,
+                    name=name,
+                    protocol=scheme,
+                    endpoint=node.endpoint,
+                    tags=self._node_tags(name, scheme, node.host),
+                )
+            )
+
+        self._set_records(records)
+        with self._lock:
+            self._core_candidates = list(core_candidates)
+        summary = {
+            "subscriptions": len(sources.subscription_urls),
+            "source_nodes": len(parsed_nodes),
+            "pool_nodes": len(records),
+            "core_candidates": len(core_candidates),
+            "core_nodes": 0,
+            "skipped_nodes": skipped,
+            "scheme_counts": scheme_counts,
+            "warnings": [self._safe_warning(item, sources) for item in warnings[:20]],
+        }
+        return records, summary
+
+    def start(
+        self,
+        *,
+        force_refresh: bool = True,
+        probe_url: str | None = None,
+        _source_snapshot: ProxySourceSnapshot | None = None,
+    ) -> dict[str, Any]:
+        with self._lifecycle_lock:
+            with self._lock:
+                self._probe_cache.clear()
+            if not self.settings.enabled:
+                raise ProxyPoolError("代理池配置为停用状态")
+            source_snapshot = _source_snapshot or self._source_snapshot()
+            with self._lock:
+                if self._leases or self._pending_acquires:
+                    raise ProxyPoolConflict("仍有任务正在申请或持有代理租约")
+                old_pool = self._pool
+                old_core = self._transport_core
+                self._pool = None
+                self._transport_core = None
+                self._running = False
+                self._generation += 1
+                # Each start attempt owns the marker: it only survives (and only
+                # hard-fails acquire) while the LAST attempt died on core startup.
+                self._core_start_error = ""
+            if old_pool is not None:
+                old_pool.close()
+            if old_core is not None:
+                old_core.stop()
+            new_core: TunnelTransportCore | None = None
+            try:
+                records, summary = self._collect_nodes(
+                    force_refresh=force_refresh,
+                    snapshot=source_snapshot,
+                )
+                with self._lock:
+                    core_candidates = list(self._core_candidates)
+                if core_candidates:
+                    new_core = self._runtime_adapter.create_transport_core(
+                        binary_path=self.settings.transport_core_binary,
+                        expected_sha256=self.settings.transport_core_sha256,
+                        runtime_dir=self.runtime_dir / "transport-core",
+                        base_port=self.settings.transport_core_base_port,
+                        start_timeout_seconds=self.settings.transport_core_start_timeout_seconds,
+                    )
+                    try:
+                        core_endpoints = new_core.start(core_candidates)
+                    except Exception as exc:
+                        # Tunnel nodes were selected, so mihomo is mandatory: a
+                        # core startup failure fails the whole pool start instead
+                        # of silently dropping the tunnel nodes and continuing.
+                        # The marker survives until the next start() attempt so
+                        # acquire() hard-fails (callers remind + terminate tasks
+                        # rather than falling back to direct connections).
+                        with self._lock:
+                            self._core_start_error = redact_text(
+                                f"隧道核心启动失败：{exc}", limit=500
+                            )
+                        raise
+                    else:
+                        for endpoint in core_endpoints:
+                            safe_name = safe_proxy_node_name(endpoint.name) or (
+                                f"{endpoint.source_protocol}-{endpoint.source_host}"
+                            )
+                            tags = set(
+                                self._node_tags(
+                                    safe_name,
+                                    endpoint.source_protocol,
+                                    endpoint.source_host,
+                                )
+                            )
+                            tags.update({"http", "transport-core", endpoint.source_protocol})
+                            records.append(
+                                _NodeRecord(
+                                    id=endpoint.id,
+                                    name=safe_name,
+                                    protocol="http",
+                                    endpoint=endpoint.local_http,
+                                    tags=sorted(tags),
+                                )
+                            )
+                        summary["core_nodes"] = len(core_endpoints)
+                        summary["pool_nodes"] = len(records)
+                        summary["skipped_nodes"] += max(0, len(core_candidates) - len(core_endpoints))
+                if not records:
+                    raise ProxyPoolError("节点源中未解析出可直接使用的 HTTP/HTTPS/SOCKS 代理")
+                self._set_records(records)
+                native_pool = self._runtime_adapter.create_native_pool(
+                    record.endpoint for record in records
+                )
+                with self._lock:
+                    self._pool = native_pool
+                    self._transport_core = new_core
+                    self._source_summary = summary
+                    self._running = True
+                    self._generation += 1
+                probed = self.probe(target_url=probe_url or self.settings.probe_url)
+                with self._lock:
+                    self._active_revision = source_snapshot.configured_revision
+                    self._last_error = "" if probed.get("healthy") else "全部代理节点探活未通过"
+                return {
+                    "start": {"engine": self.settings.engine, "nodes": len(records)},
+                    "probe": probed,
+                    "status": self.status(_configured_snapshot=source_snapshot),
+                }
+            except Exception as exc:
+                with self._lock:
+                    failed_pool = self._pool
+                    failed_core = self._transport_core or new_core
+                    self._pool = None
+                    self._transport_core = None
+                    self._running = False
+                    self._generation += 1
+                if failed_pool is not None:
+                    failed_pool.close()
+                if failed_core is not None:
+                    failed_core.stop()
+                self._last_error = redact_text(exc, limit=1000)
+                raise
+
+    def reload(self, *, force_refresh: bool = True, probe_url: str | None = None) -> dict[str, Any]:
+        with self._lifecycle_lock:
+            with self._lock:
+                self._probe_cache.clear()
+            source_snapshot = self._source_snapshot()
+            with self._lock:
+                if self._leases or self._pending_acquires:
+                    raise ProxyPoolConflict("仍有任务正在申请或持有代理租约")
+            self.stop(force=False, _configured_snapshot=source_snapshot)
+            return self.start(
+                force_refresh=force_refresh,
+                probe_url=probe_url,
+                _source_snapshot=source_snapshot,
+            )
+
+    def stop(
+        self,
+        *,
+        force: bool = False,
+        _configured_snapshot: ProxySourceSnapshot | None = None,
+    ) -> dict[str, Any]:
+        with self._lifecycle_lock:
+            with self._lock:
+                self._probe_cache.clear()
+                active_task_ids = list(self._leases)
+                has_pending = bool(self._pending_acquires)
+                if (active_task_ids or has_pending) and not force:
+                    raise ProxyPoolConflict("仍有任务正在申请或持有代理租约")
+                self._running = False
+                self._generation += 1
+            if force:
+                for task_id in active_task_ids:
+                    self.release(task_id, proxy_fault=False, reason="代理池停止")
+            with self._lock:
+                forwarders = list(self._forwarders.values())
+                self._forwarders.clear()
+                pool = self._pool
+                transport_core = self._transport_core
+                self._pool = None
+                self._transport_core = None
+                self._running = False
+            for forwarder in forwarders:
+                forwarder.stop()
+            if pool is not None:
+                pool.close()
+            if transport_core is not None:
+                transport_core.stop()
+            return self.status(_configured_snapshot=_configured_snapshot)
+
+    def _node_rows(self) -> list[dict[str, Any]]:
+        with self._lock:
+            records = list(self._records)
+            running = self._running
+            pool_status = self._pool.status() if self._pool is not None else {}
+            now = self._wall_time()
+            return [
+                project_node_row(
+                    record,
+                    pool_status=pool_status.get(record.endpoint, {}),
+                    running=running,
+                    now=now,
+                )
+                for record in records
+            ]
+
+    def status(
+        self,
+        *,
+        _configured_snapshot: ProxySourceSnapshot | None = None,
+    ) -> dict[str, Any]:
+        configured = _configured_snapshot or self._source_snapshot()
+        nodes = self._node_rows()
+        with self._lock:
+            transport_core = self._transport_core
+            core_start_error = self._core_start_error
+            active_revision = self._active_revision
+            running = bool(self._running and self._pool is not None)
+            lease_count = len(self._leases)
+            last_error = self._last_error
+            source_summary = dict(self._source_summary)
+            probe_cache_entries = len(self._probe_cache)
+        core_status = (
+            transport_core.status()
+            if transport_core is not None
+            else {
+                "enabled": self.settings.transport_core_enabled,
+                "running": False,
+                "listeners": 0,
+                "last_error": core_start_error,
+            }
+        )
+        return project_pool_status(
+            enabled=self.settings.enabled,
+            engine=self.settings.engine,
+            auto_start=self.settings.auto_start,
+            running=running,
+            configured_revision=configured.configured_revision,
+            active_revision=active_revision,
+            nodes=nodes,
+            lease_count=lease_count,
+            last_error=last_error,
+            transport_core=core_status,
+            source_summary=source_summary,
+            probe_cache_entries=probe_cache_entries,
+            probe_cache_ttl_seconds=self.settings.probe_cache_ttl_seconds,
+        )
+
+    def _probe_endpoint(
+        self,
+        node_id: str,
+        endpoint: str,
+        target_url: str,
+        *,
+        update_pool: bool = True,
+    ) -> dict[str, Any]:
+        self._probe_parts(target_url)
+        started = self._wall_time()
+        healthy = False
+        error = ""
+        try:
+            status_code = self._runtime_adapter.probe_http_status(
+                target_url,
+                endpoint=endpoint,
+                timeout_seconds=self.settings.probe_timeout_seconds,
+            )
+            healthy = status_code < 500 and status_code != 407
+            if not healthy:
+                error = f"代理探活返回 HTTP {status_code}"
+        except Exception as exc:
+            error = redact_text(exc, limit=300)
+        latency = (self._wall_time() - started) * 1000.0
+        with self._lock:
+            record = self._record_by_id.get(node_id)
+            if record is not None:
+                record.healthy = healthy
+                record.last_latency_ms = latency if healthy else record.last_latency_ms
+                record.last_error = "" if healthy else error
+                record.cooldown_until = (
+                    0.0
+                    if healthy
+                    else self._wall_time() + self.settings.fail_cooldown_seconds
+                )
+                if update_pool:
+                    if healthy:
+                        record.success_count += 1
+                    else:
+                        record.fail_count += 1
+            if update_pool and self._pool is not None:
+                self._pool.mark(
+                    endpoint,
+                    success=healthy,
+                    cooldown_seconds=self.settings.fail_cooldown_seconds,
+                )
+            if not healthy:
+                self._mark_probe_cache_node_unhealthy_locked(node_id)
+        return project_probe_result(
+            node_id=node_id,
+            healthy=healthy,
+            latency_ms=latency,
+            error=error,
+            endpoint=endpoint,
+            target_url=target_url,
+        )
+
+    def probe(self, *, target_url: str | None = None, node_id: str | None = None) -> dict[str, Any]:
+        with self._lifecycle_lock:
+            if not self._running or self._pool is None:
+                raise ProxyPoolError("代理池尚未加载")
+            target = target_url or self.settings.probe_url
+            self._probe_parts(target)
+            with self._lock:
+                records = [record for record in self._records if node_id is None or record.id == node_id]
+            if node_id and not records:
+                raise ProxyPoolError("节点不存在")
+            results: list[dict[str, Any]] = []
+            workers = max(1, min(self.settings.probe_workers, len(records), 64))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(self._probe_endpoint, record.id, record.endpoint, target): record
+                    for record in records
+                }
+                for future in as_completed(futures):
+                    record = futures[future]
+                    try:
+                        results.append(future.result())
+                    except Exception as exc:
+                        error = redact_text(exc, limit=300)
+                        with self._lock:
+                            record.healthy = False
+                            record.fail_count += 1
+                            record.last_error = error
+                            record.cooldown_until = (
+                                self._wall_time() + self.settings.fail_cooldown_seconds
+                            )
+                            if self._pool is not None:
+                                self._pool.mark(
+                                    record.endpoint,
+                                    success=False,
+                                    cooldown_seconds=self.settings.fail_cooldown_seconds,
+                                )
+                            self._mark_probe_cache_node_unhealthy_locked(record.id)
+                        results.append({"id": record.id, "healthy": False, "error": error})
+            healthy = sum(1 for item in results if item.get("healthy"))
+            with self._lock:
+                self._last_error = (
+                    ""
+                    if healthy
+                    else f"探活目标 {self._public_probe_target(target)} 无健康节点"
+                )
+            result = {
+                "total": len(results),
+                "healthy": healthy,
+                "results": results,
+                "target": self._public_probe_target(target),
+                "cached": False,
+            }
+            if node_id is None:
+                self._store_probe_cache_result(target, result)
+            elif results:
+                # 单节点手动探活只能合并已有完整快照；不能覆盖成单节点 allowlist。
+                self._merge_single_probe_cache_result(target, node_id, results[0])
+            return result
+
+    def probe_for_target(self, target_url: str) -> dict[str, Any]:
+        """按目标主机复用全量探活结果，缓存 miss 时执行生命周期单飞。"""
+
+        self._probe_parts(target_url)
+        key = self._probe_cache_key(target_url)
+        cached = self._cached_probe_result(key)
+        if cached is not None:
+            return cached
+
+        # 首次查询不持有 _lock 再等待生命周期锁，保持统一的锁顺序；进入后
+        # 再查一次，避免排队期间另一调用已经完成同目标探活。
+        with self._lifecycle_lock:
+            cached = self._cached_probe_result(key)
+            if cached is not None:
+                return cached
+            result = dict(self.probe(target_url=target_url))
+            result["cached"] = False
+            result.pop("age_seconds", None)
+            self._store_probe_cache_result(target_url, result)
+            return stored_probe_projection(result)
+
+    def acquire(
+        self,
+        task_id: str,
+        *,
+        node_tags: list[str] | None = None,
+        exclude_ids: set[str] | None = None,
+        allowed_ids: Collection[str] | None = None,
+        probe_before_use: bool = False,
+        probe_url: str | None = None,
+    ) -> ProxyLease | None:
+        wait_event: threading.Event | None = None
+        with self._lock:
+            if task_id in self._leases:
+                return self._leases[task_id]
+            wait_event = self._pending_acquires.get(task_id)
+            if wait_event is not None:
+                pool = None
+                generation = -1
+                allowed_records: list[_NodeRecord] = []
+            else:
+                if not self._running or self._pool is None:
+                    # Only a mihomo core startup failure hard-fails here: callers
+                    # must remind and terminate instead of silently going direct.
+                    # Every other not-running state (never started / stopped /
+                    # other start failure) keeps the original contract — return
+                    # None so prefer degrades to direct and required retries.
+                    if self._core_start_error:
+                        raise ProxyPoolUnavailable(
+                            f"代理池未启动：{self._core_start_error}；"
+                            "请修复传输核心后在 WebUI 重新启动代理池"
+                        )
+                    return None
+                pool = self._pool
+                generation = self._generation
+                allowed_records = select_lease_candidates(
+                    self._records,
+                    node_tags_filter=node_tags,
+                    exclude_ids=exclude_ids,
+                    allowed_ids=allowed_ids,
+                    probe_before_use=probe_before_use,
+                )
+                self._pending_acquires[task_id] = threading.Event()
+        if wait_event is not None:
+            wait_event.wait()
+            with self._lock:
+                return self._leases.get(task_id)
+
+        records_by_endpoint = {record.endpoint: record for record in allowed_records}
+        remaining = set(records_by_endpoint)
+        try:
+            while remaining:
+                pool_lease = pool.acquire(owner=task_id, allowed=remaining)
+                if pool_lease is None:
+                    return None
+                record = records_by_endpoint.get(pool_lease.endpoint)
+                if record is None:
+                    pool.release(pool_lease.token)
+                    remaining.discard(pool_lease.endpoint)
+                    continue
+                with self._lock:
+                    healthy = record.healthy
+                if not probe_before_use and not healthy:
+                    pool.release(pool_lease.token)
+                    remaining.discard(record.endpoint)
+                    continue
+                if probe_before_use:
+                    result = self._probe_endpoint(
+                        record.id,
+                        record.endpoint,
+                        probe_url or self.settings.probe_url,
+                        update_pool=False,
+                    )
+                    if not result.get("healthy"):
+                        with self._lock:
+                            record.fail_count += 1
+                        pool.release(
+                            pool_lease.token,
+                            success=False,
+                            cooldown_seconds=self.settings.fail_cooldown_seconds,
+                        )
+                        remaining.discard(record.endpoint)
+                        continue
+                    with self._lock:
+                        record.healthy = True
+                        record.last_error = ""
+                        record.cooldown_until = 0.0
+                endpoint = record.endpoint
+                forwarder: LocalHTTPForwarder | None = None
+                parsed = urlsplit(record.endpoint)
+                if record.protocol in {"http", "https"} and (parsed.username or parsed.password):
+                    try:
+                        forwarder = self._runtime_adapter.create_forwarder(record.endpoint)
+                        endpoint = forwarder.start()
+                    except Exception as exc:
+                        if forwarder is not None:
+                            forwarder.stop()
+                        with self._lock:
+                            record.fail_count += 1
+                            record.last_error = redact_text(exc, limit=300)
+                        pool.release(
+                            pool_lease.token,
+                            success=False,
+                            cooldown_seconds=self.settings.fail_cooldown_seconds,
+                        )
+                        remaining.discard(record.endpoint)
+                        continue
+                lease = ProxyLease(
+                    task_id=task_id,
+                    node_id=record.id,
+                    endpoint=endpoint,
+                    name=record.name,
+                    protocol=record.protocol,
+                    tags=list(record.tags),
+                    acquired_at=self._wall_time(),
+                    pool_endpoint=record.endpoint,
+                    pool_token=pool_lease.token,
+                    forwarder_key=task_id if forwarder is not None else "",
+                )
+                with self._lock:
+                    existing = self._leases.get(task_id)
+                    current = bool(
+                        self._running
+                        and self._pool is pool
+                        and self._generation == generation
+                    )
+                    if existing is None and current:
+                        self._leases[task_id] = lease
+                        if forwarder is not None:
+                            self._forwarders[task_id] = forwarder
+                        return lease
+                if forwarder is not None:
+                    forwarder.stop()
+                pool.release(pool_lease.token)
+                return existing
+            return None
+        finally:
+            with self._lock:
+                pending = self._pending_acquires.pop(task_id, None)
+                if pending is not None:
+                    pending.set()
+
+    def release(self, task_id: str, *, proxy_fault: bool, reason: str = "") -> None:
+        with self._lock:
+            lease = self._leases.pop(task_id, None)
+            if lease is None:
+                return
+            forwarder = self._forwarders.pop(lease.forwarder_key, None) if lease.forwarder_key else None
+            record = self._record_by_endpoint.get(lease.pool_endpoint)
+            if record is not None:
+                if proxy_fault:
+                    record.fail_count += 1
+                    record.healthy = False
+                    record.last_error = redact_text(reason, limit=300)
+                    record.cooldown_until = (
+                        self._wall_time() + self.settings.fail_cooldown_seconds
+                    )
+                else:
+                    record.success_count += 1
+            if proxy_fault:
+                self._mark_probe_cache_node_unhealthy_locked(lease.node_id)
+            pool = self._pool
+        if forwarder is not None:
+            forwarder.stop()
+        if pool is not None and lease.pool_token:
+            pool.release(
+                lease.pool_token,
+                success=not proxy_fault,
+                cooldown_seconds=self.settings.fail_cooldown_seconds if proxy_fault else 0.0,
+            )
+
+    @property
+    def active_revision(self) -> str | None:
+        with self._lock:
+            return self._active_revision
+
+    @property
+    def active_leases(self) -> int:
+        with self._lock:
+            return len(self._leases)

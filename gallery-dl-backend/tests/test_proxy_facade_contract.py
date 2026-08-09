@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 from gdl_backend import proxy as proxy_module
 from gdl_backend.proxy import ProxyLease, ProxyPoolAdapter
+from gdl_backend.proxy_pool import ProxyPoolCoordinator
 from gdl_backend.proxy_runtime import NativeProxyPool
 from gdl_backend.proxy_source_store import snapshot_from_settings
 
@@ -55,6 +56,25 @@ class ProxyFacadeContractTests(unittest.TestCase):
         except Exception:
             pass
         self.temporary.cleanup()
+
+    def test_facade_is_thin_and_runtime_dependencies_are_instance_scoped(self):
+        self.assertIs(ProxyPoolAdapter.__mro__[1], ProxyPoolCoordinator)
+        public_implementations = {
+            name
+            for name, value in ProxyPoolAdapter.__dict__.items()
+            if not name.startswith("_") and callable(value)
+        }
+        self.assertEqual(public_implementations, set())
+        second = ProxyPoolAdapter(self.settings.proxy, self.settings.runtime_dir)
+        try:
+            self.assertIsNot(
+                self.adapter._runtime_adapter,
+                second._runtime_adapter,
+            )
+            self.assertIsNot(self.adapter._lock, second._lock)
+            self.assertIsNot(self.adapter._lifecycle_lock, second._lifecycle_lock)
+        finally:
+            second.stop(force=True)
 
     def test_public_imports_signatures_and_lease_dto_are_stable(self):
         positional = inspect.Parameter.POSITIONAL_OR_KEYWORD
