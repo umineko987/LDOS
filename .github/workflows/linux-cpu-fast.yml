@@ -25,14 +25,38 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-          cache-dependency-path: gallery-dl-backend/requirements.txt
+          cache-dependency-path: |
+            gallery-dl-backend/requirements.txt
+            gallery-dl-backend/requirements-test.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.13.0"
       - name: 安装后端锁定依赖
         run: >-
           ./scripts/setup-linux.sh --device cpu
           --skip-dedup-deps --skip-models --skip-mihomo
+      - name: 安装锁定测试工具
+        run: >-
+          ./gallery-dl-backend/.venv/bin/python -m pip install
+          --disable-pip-version-check --no-input --require-hashes --only-binary=:all:
+          -r gallery-dl-backend/requirements-test.txt
       - name: 后端完整测试
+        if: matrix.python == '3.11'
         working-directory: gallery-dl-backend
         run: ./.venv/bin/python -m unittest discover -s tests -v
+      - name: 后端 branch coverage 门槛
+        if: matrix.python == '3.14'
+        run: >-
+          ./gallery-dl-backend/.venv/bin/python scripts/run-python-coverage.py
+          backend --output artifacts/coverage/backend
+      - name: 保存后端 coverage 报告
+        if: always() && matrix.python == '3.14'
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage-linux-py314
+          path: artifacts/coverage/backend
+          include-hidden-files: true
+          if-no-files-found: error
 
   linux-cpu:
     name: Linux CPU 安装、根测试与服务 smoke
@@ -48,6 +72,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             gallery-dl-backend/requirements.txt
+            gallery-dl-backend/requirements-test.txt
             requirements-dedup-cpu.txt
       - name: Shell 语法与依赖漂移
         run: |
@@ -55,12 +80,53 @@ jobs:
           ./scripts/lock-dependencies.sh --check
       - name: 干净 CPU 锁定安装（不下载模型）
         run: ./scripts/setup-linux.sh --device cpu --skip-models --skip-mihomo
-      - name: CPU 纯净性与根测试
+      - name: 安装锁定测试工具
+        run: >-
+          ./.venv/bin/python -m pip install
+          --disable-pip-version-check --no-input --require-hashes --only-binary=:all:
+          -r gallery-dl-backend/requirements-test.txt
+      - name: CPU 纯净性与根 dedup branch coverage 门槛
         run: |
           ./.venv/bin/python ./scripts/check-cpu-environment.py
-          ./.venv/bin/python -m unittest discover -s tests -v
+          ./.venv/bin/python scripts/run-python-coverage.py dedup --output artifacts/coverage/dedup
+      - name: 保存根 dedup coverage 报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dedup-coverage-linux-py314
+          path: artifacts/coverage/dedup
+          include-hidden-files: true
+          if-no-files-found: error
       - name: healthz / readyz 语义
         run: ./scripts/smoke-linux-service.sh
+      - name: 工作区与差异格式
+        run: |
+          git diff --check
+          test -z "$(git status --short --untracked-files=no)"
+
+  webui-coverage:
+    name: WebUI Node 24.13.0 行为覆盖率
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.13.0"
+      - name: Node 内建 line / branch / function coverage 门槛
+        run: >-
+          python scripts/run-webui-coverage.py --node node
+          --output artifacts/coverage/webui
+      - name: 保存 WebUI coverage 报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: webui-coverage-node-24.13.0
+          path: artifacts/coverage/webui
+          if-no-files-found: error
       - name: 工作区与差异格式
         run: |
           git diff --check

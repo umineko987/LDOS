@@ -1,0 +1,77 @@
+name: Proxy_pool 独立门槛
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proxy-pool:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        python: ["3.11", "3.14"]
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            Proxy_pool/requirements.txt
+            gallery-dl-backend/requirements-test.txt
+      - name: 建立 Proxy_pool 独立哈希锁环境
+        run: |
+          python -m venv Proxy_pool/.venv
+          if ($LASTEXITCODE -ne 0) { throw "创建 Proxy_pool 独立环境失败。" }
+          $venvPython = if ($IsWindows) {
+            "Proxy_pool/.venv/Scripts/python.exe"
+          } else {
+            "Proxy_pool/.venv/bin/python"
+          }
+          & $venvPython -m pip install `
+            --disable-pip-version-check --no-input --require-hashes --only-binary=:all: `
+            -r Proxy_pool/requirements.txt `
+            -r gallery-dl-backend/requirements-test.txt
+          if ($LASTEXITCODE -ne 0) { throw "安装 Proxy_pool 哈希锁依赖失败。" }
+      - name: 独立单元测试与 branch coverage 门槛
+        run: |
+          $venvPython = if ($IsWindows) {
+            "Proxy_pool/.venv/Scripts/python.exe"
+          } else {
+            "Proxy_pool/.venv/bin/python"
+          }
+          & $venvPython scripts/run-python-coverage.py proxy `
+            --output artifacts/coverage/proxy
+          if ($LASTEXITCODE -ne 0) { throw "Proxy_pool coverage 门槛失败。" }
+      - name: 保存 Proxy_pool coverage 与 skip 摘要
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: proxy-coverage-${{ runner.os }}-py${{ matrix.python }}
+          path: artifacts/coverage/proxy
+          include-hidden-files: true
+          if-no-files-found: error
+      - name: 工作区与差异格式
+        run: |
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw "git diff --check 失败。" }
+          $status = git status --short --untracked-files=no
+          if ($LASTEXITCODE -ne 0) { throw "git status 失败。" }
+          if ($status) {
+            $status | Write-Host
+            throw "Proxy_pool 测试修改了已跟踪文件。"
+          }

@@ -42,6 +42,15 @@ jobs:
         run: |
           & .\.venv\Scripts\python.exe .\scripts\check-cpu-environment.py
           if ($LASTEXITCODE -ne 0) { throw "Windows CPU 纯净性检查失败。" }
+      - name: 可重复变体夹具固定模型分类（禁止 skip）
+        env:
+          IMAGEWEAVE_REAL_MODELS: "1"
+        run: |
+          & .\.venv\Scripts\python.exe -m unittest tests.test_real_variant_pairs -v
+          if ($LASTEXITCODE -ne 0) { throw "Windows 真实变体分类失败。" }
+          & .\.venv\Scripts\python.exe tests\fixtures\real_variant_pairs\refresh_embeddings.py `
+            --model-dir .models --check
+          if ($LASTEXITCODE -ne 0) { throw "Windows 真实变体夹具校验失败。" }
       - name: 程序生成样本真实 worker 闭环
         run: |
           & .\.venv\Scripts\python.exe .\scripts\run-real-model-smoke.py --base-images 4

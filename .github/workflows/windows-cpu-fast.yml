@@ -30,6 +30,9 @@ jobs:
           cache-dependency-path: |
             gallery-dl-backend/requirements.txt
             requirements-dedup-cpu.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.13.0"
       - name: PowerShell 语法检查
         run: |
           $failed = $false

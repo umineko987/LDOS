@@ -36,5 +36,12 @@ jobs:
         run: ./scripts/setup-linux.sh --device cpu --skip-mihomo
       - name: CPU 纯净性
         run: ./.venv/bin/python ./scripts/check-cpu-environment.py
+      - name: 可重复变体夹具固定模型分类（禁止 skip）
+        env:
+          IMAGEWEAVE_REAL_MODELS: "1"
+        run: |
+          ./.venv/bin/python -m unittest tests.test_real_variant_pairs -v
+          ./.venv/bin/python tests/fixtures/real_variant_pairs/refresh_embeddings.py \
+            --model-dir .models --check
       - name: 程序生成样本真实 worker 闭环
         run: ./.venv/bin/python ./scripts/run-real-model-smoke.py --base-images 4
