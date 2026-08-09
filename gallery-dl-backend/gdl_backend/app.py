@@ -21,7 +21,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api_routes import create_diagnostics_router
+from .api_routes import create_auth_router, create_diagnostics_router
+from .api_routes.body_limits import (
+    enforce_policy_body_limit,
+    enforce_proxy_source_body_limit,
+)
 from .api_routes.dependencies import get_service
 from .api_routes.errors import ApiError
 from .api_routes.validation import (
@@ -32,16 +36,7 @@ from .api_routes.validation import (
     validate_site_match as _validate_site_match,
     validate_site_name as _validate_site_name,
 )
-from .auth import (
-    MAX_AUTH_PROXY_REQUEST_BYTES,
-    AuthError,
-    AuthManager,
-    vault_safe_browser_profile,
-    vault_safe_proxy_status,
-    vault_safe_session,
-    vault_safe_status,
-    vault_safe_statuses,
-)
+from .auth import AuthManager
 from .config import AppSettings
 from .crawl import CrawlPlanError, CrawlPlanner
 from .database import (
@@ -71,7 +66,6 @@ from .gallery import GalleryRunner
 from .log_writer import TaskLogWriter
 from .ordered_crawl import EnqueueBatchCancelled, OrderedCrawlManager
 from .policy_view import (
-    MAX_POLICY_REQUEST_BYTES,
     POLICY_RESPONSE_PROFILE,
     PolicyViewValidationError,
     is_policy_site,
@@ -81,7 +75,6 @@ from .policy_view import (
 )
 from .proxy import ProxyPoolAdapter, ProxyPoolConflict, ProxyPoolError
 from .proxy_source_store import (
-    MAX_PROXY_SOURCE_REQUEST_BYTES,
     ManagedProxySourceStore,
     ProxySourceNotFound,
     ProxySourcePathForbidden,
@@ -95,7 +88,6 @@ from .redaction import redact_text, safe_exception_category
 from .review import DedupReviewManager, resolve_review_file
 from .scheduler import TaskScheduler
 from .schemas import (
-    AuthProxyUpdate,
     CrawlRerunRequest,
     CrawlRequest,
     ProxyInlineNodesCreate,
@@ -124,37 +116,8 @@ _BACKGROUND_LOOP_WARNING_INTERVAL_SECONDS = 60.0
 
 logger = logging.getLogger(__name__)
 _search_logger = logging.getLogger("gdl_backend.search")
-AuthResponseView = Literal["legacy", "vault"]
 PolicyResponseView = Literal["legacy", "policy"]
 DiagnosticsResponseView = Literal["legacy", "diagnostics"]
-
-# VAULT profile 可以保留后端定义的受控错误码，但绝不透传任意错误码、消息或 details。
-_VAULT_SAFE_AUTH_ERROR_CODES = frozenset(
-    {
-        "unsupported_auth_site",
-        "managed_browser_unsupported",
-        "browser_login_session_not_found",
-        "browser_login_start_failed",
-        "shared_browser_busy",
-        "pixiv_oauth_start_failed",
-        "pixiv_oauth_start_timeout",
-        "pixiv_oauth_session_not_found",
-        "pixiv_oauth_session_expired",
-        "pixiv_oauth_exchange_active",
-        "pixiv_oauth_process_ended",
-        "pixiv_oauth_exchange_timeout",
-        "pixiv_oauth_exchange_failed",
-        "invalid_pixiv_oauth_code",
-        "pixiv_oauth_cache_failed",
-        "invalid_authorization_proxy",
-        "browser_profile_reset_active",
-        "browser_profile_busy",
-        "invalid_browser_profile_path",
-        "chrome_not_found",
-        "auth_cache_clear_failed",
-    }
-)
-
 
 class ServiceContainer:
     def __init__(self, settings: AppSettings) -> None:
@@ -575,234 +538,9 @@ def create_app(
             },
         )
 
-    def _content_length(request: Request) -> int | None:
-        raw_length = request.headers.get("content-length")
-        if raw_length is None:
-            return None
-        try:
-            length = int(raw_length)
-        except ValueError as exc:
-            raise ApiError(400, "invalid_content_length", "Content-Length 无效") from exc
-        if length < 0:
-            raise ApiError(400, "invalid_content_length", "Content-Length 无效")
-        return length
-
-    async def enforce_proxy_source_body_limit(request: Request) -> None:
-        length = _content_length(request)
-        if length is not None and length > MAX_PROXY_SOURCE_REQUEST_BYTES:
-            raise ApiError(
-                413,
-                "proxy_sources_request_too_large",
-                "代理源请求体超过大小上限",
-            )
-
-    async def enforce_auth_proxy_body_limit(request: Request) -> None:
-        length = _content_length(request)
-        if length is not None and length > MAX_AUTH_PROXY_REQUEST_BYTES:
-            raise ApiError(
-                413,
-                "auth_request_too_large",
-                "授权代理请求体超过大小上限",
-            )
-
-    async def enforce_policy_body_limit(request: Request) -> None:
-        # 四字段写接口无论使用哪种响应形状，都采用同一请求体上限。
-        length = _content_length(request)
-        if length is not None and length > MAX_POLICY_REQUEST_BYTES:
-            raise ApiError(
-                413,
-                "policy_request_too_large",
-                "站点策略请求体超过大小上限",
-            )
-        # 不能信任客户端声明；FastAPI 已缓存请求体，这里再核对实际字节数。
-        if len(await request.body()) > MAX_POLICY_REQUEST_BYTES:
-            raise ApiError(
-                413,
-                "policy_request_too_large",
-                "站点策略请求体超过大小上限",
-            )
-
     app.include_router(create_diagnostics_router(settings))
+    app.include_router(create_auth_router())
     api = APIRouter(prefix="/api/v1")
-
-    def _raise_auth_error(
-        exc: AuthError,
-        view: AuthResponseView = "legacy",
-    ) -> None:
-        if exc.code in {
-            "unsupported_auth_site",
-            "pixiv_oauth_session_not_found",
-            "browser_login_session_not_found",
-        }:
-            status_code = 404
-        elif exc.code.startswith("invalid_"):
-            status_code = 422
-        else:
-            status_code = 409
-        if view == "vault":
-            code = (
-                exc.code
-                if exc.code in _VAULT_SAFE_AUTH_ERROR_CODES
-                else "authorization_operation_failed"
-            )
-            if status_code == 404:
-                message = "授权目标或会话不存在"
-            elif status_code == 422:
-                message = "授权请求不符合安全约束"
-            else:
-                message = "授权状态冲突或操作暂时不可用"
-            raise ApiError(status_code, code, message) from exc
-        raise ApiError(status_code, exc.code, exc.message, exc.details) from exc
-
-    def _auth_browser_result(result: dict[str, Any], view: AuthResponseView) -> dict[str, Any]:
-        if view == "legacy":
-            return result
-        status = vault_safe_status(result.get("status"))
-        return {
-            "session": vault_safe_session(result.get("session"), site=status["site"]),
-            "status": status,
-        }
-
-    @api.get("/auth")
-    async def auth_statuses(
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        result = container.auth.statuses()
-        return vault_safe_statuses(result) if view == "vault" else result
-
-    # 注意：/auth/proxy 必须先于 /auth/{site} 注册，否则会被当成站点名匹配。
-    @api.get("/auth/proxy")
-    async def auth_proxy_status(
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        result = container.auth.proxy_status()
-        return vault_safe_proxy_status(result) if view == "vault" else result
-
-    @api.put("/auth/proxy")
-    async def auth_set_proxy(
-        payload: AuthProxyUpdate,
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-        _body_limit: None = Depends(enforce_auth_proxy_body_limit),
-    ):
-        try:
-            result = await container.auth.set_authorization_proxy(payload.proxy_url)
-            return vault_safe_proxy_status(result) if view == "vault" else result
-        except AuthError as exc:
-            _raise_auth_error(exc, view)
-
-    @api.delete("/auth/proxy")
-    async def auth_reset_proxy(
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            result = await container.auth.clear_authorization_proxy()
-            return vault_safe_proxy_status(result) if view == "vault" else result
-        except AuthError as exc:
-            _raise_auth_error(exc, view)
-
-    @api.get("/auth/{site}")
-    async def auth_status(
-        site: str,
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            result = container.auth.status(site)
-            return vault_safe_status(result) if view == "vault" else result
-        except AuthError as exc:
-            _raise_auth_error(exc, view)
-
-    @api.post("/auth/{site}/login/start", status_code=202)
-    async def auth_start_browser_login(
-        site: str,
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            result = await container.auth.start_browser_login(site)
-            return _auth_browser_result(result, view)
-        except AuthError as exc:
-            _raise_auth_error(exc, view)
-
-    @api.get("/auth/{site}/login/{session_id}")
-    async def auth_browser_login_session(
-        site: str,
-        session_id: str,
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            result = container.auth.browser_login_session(site, session_id)
-            return _auth_browser_result(result, view)
-        except AuthError as exc:
-            _raise_auth_error(exc, view)
-
-    @api.delete("/auth/{site}/login/{session_id}")
-    async def auth_cancel_browser_login(
-        site: str,
-        session_id: str,
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            result = await container.auth.cancel_browser_login(site, session_id)
-            return _auth_browser_result(result, view)
-        except AuthError as exc:
-            _raise_auth_error(exc, view)
-
-    @api.post("/auth/pixiv/oauth/start")
-    async def auth_start_pixiv(
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            result = await container.auth.start_pixiv_oauth()
-            return vault_safe_session(result, site="pixiv") if view == "vault" else result
-        except AuthError as exc:
-            _raise_auth_error(exc, view)
-
-    @api.delete("/auth/pixiv/oauth/session")
-    async def auth_cancel_pixiv(
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            result = await container.auth.cancel_pixiv_oauth()
-            return vault_safe_status(result) if view == "vault" else result
-        except AuthError as exc:
-            _raise_auth_error(exc, view)
-
-    @api.delete("/auth/browser-profile")
-    async def auth_clear_browser_profile(
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            result = await container.auth.clear_browser_profile()
-            if view == "legacy":
-                return result
-            return {
-                "browser_profile": vault_safe_browser_profile(result.get("browser_profile")),
-                "auth": vault_safe_statuses(result.get("auth")),
-            }
-        except AuthError as exc:
-            _raise_auth_error(exc, view)
-
-    @api.delete("/auth/{site}")
-    async def auth_clear(
-        site: str,
-        view: AuthResponseView = Query("legacy"),
-        container: ServiceContainer = Depends(get_service),
-    ):
-        try:
-            result = await container.auth.clear(site)
-            return vault_safe_status(result) if view == "vault" else result
-        except AuthError as exc:
-            _raise_auth_error(exc, view)
 
     def _allowed_request_files(
         container: ServiceContainer,
