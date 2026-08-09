@@ -17,6 +17,7 @@ from .process_control import terminate_stale_process
 from .proxy import ProxyLease, ProxyPoolAdapter, ProxyPoolUnavailable
 from .redaction import redact_text, safe_exception_category
 from .schemas import TaskPolicy
+from ._scheduler_artifacts import ArtifactCatalog, LocalArtifactCatalog
 from ._scheduler_decisions import (
     attempt_status,
     decide_task_transition,
@@ -46,6 +47,7 @@ class TaskScheduler:
         *,
         credential_validator: Callable[[str, str | None], bool] | None = None,
         auth_failure_callback: Callable[[str, str | None, str], Awaitable[bool]] | None = None,
+        artifact_catalog: ArtifactCatalog | None = None,
     ) -> None:
         self.db = database
         self.gallery = gallery
@@ -54,6 +56,7 @@ class TaskScheduler:
         self.log_writer = log_writer
         self.credential_validator = credential_validator
         self.auth_failure_callback = auth_failure_callback
+        self._artifact_catalog = artifact_catalog or LocalArtifactCatalog()
         self._loop_task: asyncio.Task | None = None
         self._active: dict[str, tuple[asyncio.Task, str]] = {}
         self._credential_blocked: set[str] = set()
@@ -283,62 +286,19 @@ class TaskScheduler:
 
     @staticmethod
     def _scan_artifacts(output_dir: str) -> tuple[int, int]:
-        root = Path(output_dir)
-        if not root.is_dir():
-            return 0, 0
-        count = 0
-        total = 0
-        for path in root.rglob("*"):
-            try:
-                if path.is_file() and not path.name.lower().endswith(".part") and not path.name.startswith(".gdl-activity-"):
-                    count += 1
-                    total += path.stat().st_size
-            except OSError:
-                continue
-        return count, total
+        return LocalArtifactCatalog().scan(output_dir)
 
     @staticmethod
     def _artifact_from_output(line: str, output_dir: str) -> Path | None:
-        value = str(line or "").strip()
-        if value.startswith("# "):
-            value = value[2:].strip()
-        if not value:
-            return None
-        path = Path(value)
-        if not path.is_absolute():
-            return None
-        try:
-            resolved = path.resolve()
-            root = Path(output_dir).resolve()
-            if not resolved.is_relative_to(root) or not resolved.is_file():
-                return None
-        except (OSError, ValueError):
-            return None
-        if resolved.name.lower().endswith(".part") or resolved.name.startswith(".gdl-activity-"):
-            return None
-        return resolved
+        return LocalArtifactCatalog().from_output(line, output_dir)
 
     @staticmethod
     def _artifact_totals(paths: set[Path]) -> tuple[int, int]:
-        count = 0
-        total = 0
-        for path in paths:
-            try:
-                if path.is_file():
-                    count += 1
-                    total += path.stat().st_size
-            except OSError:
-                continue
-        return count, total
+        return LocalArtifactCatalog().totals(paths)
 
     @staticmethod
     def _artifact_size(path: Path) -> int | None:
-        try:
-            if path.is_file():
-                return int(path.stat().st_size)
-        except OSError:
-            return None
-        return None
+        return LocalArtifactCatalog().size(path)
 
     async def _execute(self, task_id: str) -> None:
         attempt_id = ""
@@ -360,7 +320,7 @@ class TaskScheduler:
             async def log(stream: str, line: str) -> None:
                 self.log_writer.push(task_id, attempt_id, stream, line)
                 if stream == "stdout" and task is not None:
-                    artifact = self._artifact_from_output(line, task["output_dir"])
+                    artifact = self._artifact_catalog.from_output(line, task["output_dir"])
                     if artifact is not None and artifact not in task_artifacts:
                         task_artifacts.add(artifact)
                         # Stat only the newly seen file and accumulate, instead of
@@ -368,7 +328,7 @@ class TaskScheduler:
                         # O(N²) stats + N DB writes for a multi-file task). Throttle
                         # the DB write to ~1/s; the finally block recomputes the exact
                         # total once at the end.
-                        size = await asyncio.to_thread(self._artifact_size, artifact)
+                        size = await asyncio.to_thread(self._artifact_catalog.size, artifact)
                         if size is not None:
                             artifact_progress["count"] += 1
                             artifact_progress["bytes"] += size
@@ -579,7 +539,7 @@ class TaskScheduler:
             proxy_endpoint=redact_text(lease.endpoint, limit=500) if lease else None,
         )
         if task is not None and task_artifacts:
-            count, total = await asyncio.to_thread(self._artifact_totals, task_artifacts)
+            count, total = await asyncio.to_thread(self._artifact_catalog.totals, task_artifacts)
             self.db.update_artifacts(task_id, count, total)
 
         latest = self.db.get_task(task_id)
