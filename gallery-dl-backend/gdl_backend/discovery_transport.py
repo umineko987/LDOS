@@ -35,6 +35,7 @@ class HttpJsonResponse:
     text: str
     payload: Any
     json_error: Exception | None
+    raw_response: Any
 
 
 class DiscoveryHttpSession:
@@ -78,6 +79,7 @@ class DiscoveryHttpSession:
         timeout: float,
         text_limit: int = 4000,
         default_status_code: int = 200,
+        parse_json: bool = True,
     ) -> HttpJsonResponse:
         if self._session is None:
             raise RuntimeError("HTTP session is not active")
@@ -106,13 +108,23 @@ class DiscoveryHttpSession:
             getattr(response, "status_code", default_status_code) or 0
         )
         text = str(getattr(response, "text", "") or "")[: max(0, int(text_limit))]
-        try:
-            payload = response.json()
-            json_error = None
-        except Exception as exc:
+        if parse_json:
+            try:
+                payload = response.json()
+                json_error = None
+            except Exception as exc:
+                payload = None
+                json_error = exc
+        else:
             payload = None
-            json_error = exc
-        return HttpJsonResponse(status_code, text, payload, json_error)
+            json_error = None
+        return HttpJsonResponse(
+            status_code,
+            text,
+            payload,
+            json_error,
+            response,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +147,7 @@ class AttemptFailure(RuntimeError):
         retryable: bool = False,
         proxy_fault: bool = False,
         auth_context: str = "",
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -142,6 +155,7 @@ class AttemptFailure(RuntimeError):
         self.retryable = retryable
         self.proxy_fault = proxy_fault
         self.auth_context = auth_context
+        self.details = dict(details or {})
 
 
 class AttemptsExhausted(RuntimeError):
