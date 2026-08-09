@@ -185,7 +185,7 @@ def create_ordered_task_enqueuer(service: Any) -> OrderedTaskEnqueuer:
         if any(link.address_id != address_id for link in metadata):
             raise RuntimeError("同一入队块包含多个地址")
 
-        def build_task_rows() -> list[dict[str, Any]]:
+        def _build_task_rows() -> list[dict[str, Any]]:
             return [
                 build_task_row(
                     body,
@@ -197,7 +197,7 @@ def create_ordered_task_enqueuer(service: Any) -> OrderedTaskEnqueuer:
             ]
 
         try:
-            task_rows = await asyncio.to_thread(build_task_rows)
+            task_rows = await asyncio.to_thread(_build_task_rows)
         except ValueError as exc:
             raise ApiError(422, "invalid_task", str(exc)) from exc
 
