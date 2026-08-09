@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import copy
 import hashlib
 import os
-import re
 import threading
 import time
 from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -18,7 +15,26 @@ import requests
 from .config import ProxySettings
 from .file_security import ensure_private_directory
 from .proxy_core import TunnelTransportCore
-from .proxy_runtime import LocalHTTPForwarder, NativeProxyPool, mask_proxy
+from .proxy_policy import (
+    ProbeTargetViolation,
+    ProxyLease,
+    ProxyNodeRecord as _NodeRecord,
+    cached_probe_projection,
+    mark_cached_node_unhealthy,
+    mask_proxy,
+    merge_single_probe_projection,
+    node_tags,
+    probe_cache_key,
+    probe_parts,
+    project_node_row,
+    project_pool_status,
+    project_probe_result,
+    public_probe_target,
+    safe_source_warning,
+    select_lease_candidates,
+    stored_probe_projection,
+)
+from .proxy_runtime import LocalHTTPForwarder, NativeProxyPool
 from .proxy_source_store import (
     ProxySourcePathForbidden,
     ProxySourceProviderLike,
@@ -49,50 +65,6 @@ class ProxyPoolUnavailable(ProxyPoolError):
     back to a direct connection. Every other not-running state keeps the
     original acquire() contract (return None: prefer degrades to direct,
     required retries)."""
-
-
-@dataclass(slots=True)
-class ProxyLease:
-    task_id: str
-    node_id: str
-    endpoint: str
-    name: str
-    protocol: str
-    tags: list[str]
-    acquired_at: float
-    pool_endpoint: str = field(default="", repr=False)
-    pool_token: str = field(default="", repr=False)
-    forwarder_key: str = field(default="", repr=False)
-
-
-@dataclass(slots=True)
-class _NodeRecord:
-    id: str
-    name: str
-    protocol: str
-    endpoint: str = field(repr=False)
-    tags: list[str] = field(default_factory=list)
-    healthy: bool = False
-    success_count: int = 0
-    fail_count: int = 0
-    last_latency_ms: float | None = None
-    cooldown_until: float = 0.0
-    last_error: str = ""
-
-
-_REGIONS: dict[str, tuple[str, ...]] = {
-    "jp": ("jp", "japan", "日本", "东京", "大阪", "🇯🇵"),
-    "hk": ("hk", "hong kong", "香港", "🇭🇰"),
-    "tw": ("tw", "taiwan", "台湾", "台北", "🇹🇼"),
-    "sg": ("sg", "singapore", "新加坡", "狮城", "🇸🇬"),
-    "us": ("us", "usa", "united states", "美国", "洛杉矶", "圣何塞", "🇺🇸"),
-    "kr": ("kr", "korea", "韩国", "首尔", "🇰🇷"),
-    "de": ("de", "germany", "德国", "🇩🇪"),
-    "gb": ("gb", "uk", "united kingdom", "英国", "🇬🇧"),
-    "fr": ("fr", "france", "法国", "🇫🇷"),
-    "ca": ("ca", "canada", "加拿大", "🇨🇦"),
-    "au": ("au", "australia", "澳大利亚", "澳洲", "🇦🇺"),
-}
 
 
 class ProxyPoolAdapter:
@@ -164,65 +136,27 @@ class ProxyPoolAdapter:
 
     @staticmethod
     def _node_tags(name: str, protocol: str, host: str) -> list[str]:
-        combined = " ".join([name, protocol, host]).lower()
-        tokens = set(re.findall(r"[a-z][a-z0-9_-]{1,20}", combined))
-        tags: set[str] = {protocol.lower(), *tokens}
-        for canonical, aliases in _REGIONS.items():
-            matched = False
-            for alias in aliases:
-                value = alias.lower()
-                if re.fullmatch(r"[a-z][a-z0-9_-]*", value):
-                    matched = value in tokens
-                else:
-                    matched = value in combined
-                if matched:
-                    break
-            if matched:
-                tags.add(canonical)
-        return sorted(tags)
+        """Compatibility facade for the pure node-label policy."""
+
+        return node_tags(name, protocol, host)
 
     @staticmethod
     def _probe_cache_key(url: str) -> tuple[str, str, int]:
         try:
-            parsed = urlsplit(url)
-            port = parsed.port
-        except (TypeError, ValueError) as exc:
-            raise ProxyPoolError("探活地址无法解析") from exc
-        scheme = (parsed.scheme or "").lower()
-        hostname = parsed.hostname
-        if not scheme or not hostname:
-            raise ProxyPoolError("探活地址必须包含协议和主机名")
-        if port is None:
-            if scheme == "https":
-                port = 443
-            elif scheme == "http":
-                port = 80
-            else:
-                raise ProxyPoolError("探活地址需要显式端口")
-        if not 1 <= port <= 65535:
-            raise ProxyPoolError("探活端口超出范围")
-        return scheme, hostname.lower(), port
+            return probe_cache_key(url)
+        except ValueError as exc:
+            raise ProxyPoolError(str(exc)) from exc
 
     @staticmethod
     def _probe_parts(url: str) -> tuple[str, int]:
-        parsed = urlsplit(url)
-        if parsed.scheme.lower() != "https" or not parsed.hostname:
-            raise ProxyPoolError("探活地址必须是带主机名的 https:// URL")
-        if parsed.username or parsed.password:
-            raise ProxyPoolError("探活地址不接受 URL 凭据")
-        port = int(parsed.port or 443)
-        if not 1 <= port <= 65535:
-            raise ProxyPoolError("探活端口超出范围")
-        return parsed.hostname, port
+        try:
+            return probe_parts(url)
+        except ProbeTargetViolation as exc:
+            raise ProxyPoolError(str(exc)) from exc
 
     @staticmethod
     def _public_probe_target(url: str) -> str:
-        parsed = urlsplit(url)
-        host = parsed.hostname or ""
-        if ":" in host:
-            host = f"[{host}]"
-        port = f":{parsed.port}" if parsed.port and parsed.port != 443 else ""
-        return f"https://{host}{port}{parsed.path or '/'}"
+        return public_probe_target(url)
 
     def _cached_probe_result(
         self,
@@ -235,14 +169,13 @@ class ProxyPoolAdapter:
             cached = self._probe_cache.get(key)
             if cached is None:
                 return None
-            timestamp, probe_result = cached
-            age = max(0.0, time.monotonic() - timestamp)
-            if age >= ttl:
+            result = cached_probe_projection(
+                cached,
+                now=time.monotonic(),
+                ttl_seconds=ttl,
+            )
+            if result is None:
                 self._probe_cache.pop(key, None)
-                return None
-            result = copy.deepcopy(probe_result)
-            result["cached"] = True
-            result["age_seconds"] = age
             return result
 
     def _store_probe_cache_result(
@@ -256,10 +189,10 @@ class ProxyPoolAdapter:
             if ttl <= 0:
                 self._probe_cache.clear()
                 return
-            stored = copy.deepcopy(probe_result)
-            stored["cached"] = False
-            stored.pop("age_seconds", None)
-            self._probe_cache[key] = (time.monotonic(), stored)
+            self._probe_cache[key] = (
+                time.monotonic(),
+                stored_probe_projection(probe_result),
+            )
 
     def _merge_single_probe_cache_result(
         self,
@@ -279,58 +212,32 @@ class ProxyPoolAdapter:
             if cached is None:
                 return
             timestamp, probe_result = cached
-            merged = copy.deepcopy(probe_result)
-            results = merged.get("results")
-            if not isinstance(results, list):
-                self._probe_cache.pop(key, None)
-                return
-            matched = False
-            for index, item in enumerate(results):
-                if isinstance(item, dict) and str(item.get("id") or "") == node_id:
-                    results[index] = copy.deepcopy(node_result)
-                    matched = True
-            if not matched:
-                # 节点集合与缓存快照不一致时宁可重探，也不能制造不完整 allowlist。
-                self._probe_cache.pop(key, None)
-                return
-            merged["total"] = len(results)
-            merged["healthy"] = sum(
-                1 for item in results if isinstance(item, dict) and item.get("healthy")
+            merged = merge_single_probe_projection(
+                probe_result,
+                node_id=node_id,
+                node_result=node_result,
             )
-            if not merged["healthy"]:
+            if merged is None:
+                # A missing node or zero-healthy allowlist must force a full re-probe.
                 self._probe_cache.pop(key, None)
                 return
-            merged["cached"] = False
-            merged.pop("age_seconds", None)
             self._probe_cache[key] = (timestamp, merged)
 
     def _mark_probe_cache_node_unhealthy_locked(self, node_id: str) -> None:
         """在持有 ``_lock`` 时降级所有目标缓存中的指定节点。"""
 
         for key, (timestamp, probe_result) in list(self._probe_cache.items()):
-            results = probe_result.get("results")
-            if not isinstance(results, list):
-                continue
-            matched = False
-            for item in results:
-                if isinstance(item, dict) and str(item.get("id") or "") == node_id:
-                    item["healthy"] = False
-                    matched = True
-            if not matched:
-                continue
-            probe_result["healthy"] = sum(
-                1 for item in results if isinstance(item, dict) and item.get("healthy")
+            updated = mark_cached_node_unhealthy(
+                probe_result,
+                node_id=node_id,
             )
-            if not probe_result["healthy"]:
+            if updated is None:
                 self._probe_cache.pop(key, None)
             else:
-                self._probe_cache[key] = (timestamp, probe_result)
+                self._probe_cache[key] = (timestamp, updated)
 
     def _safe_warning(self, warning: object, snapshot: ProxySourceSnapshot) -> str:
-        text = str(warning or "")
-        for index, url in enumerate(snapshot.subscription_urls, start=1):
-            text = text.replace(url, f"SUBSCRIPTION_URL_{index}")
-        return redact_text(text, limit=500)
+        return safe_source_warning(warning, snapshot.subscription_urls)
 
     def _collect_nodes(
         self,
@@ -589,34 +496,15 @@ class ProxyPoolAdapter:
             running = self._running
             pool_status = self._pool.status() if self._pool is not None else {}
             now = time.time()
-            rows: list[dict[str, Any]] = []
-            for record in records:
-                status = pool_status.get(record.endpoint, {})
-                cooldown_left = float(status.get("cooldown_left") or 0.0)
-                eligible = bool(
-                    running
-                    and record.healthy
-                    and cooldown_left <= 0
-                    and not status.get("leased")
+            return [
+                project_node_row(
+                    record,
+                    pool_status=pool_status.get(record.endpoint, {}),
+                    running=running,
+                    now=now,
                 )
-                rows.append(
-                    {
-                        "id": record.id,
-                        "name": record.name,
-                        "protocol": record.protocol,
-                        "endpoint": mask_proxy(record.endpoint),
-                        "healthy": bool(running and record.healthy),
-                        "retry_eligible": eligible,
-                        "ref_count": 1 if status.get("leased") else 0,
-                        "success_count": record.success_count,
-                        "fail_count": record.fail_count,
-                        "last_latency_ms": record.last_latency_ms,
-                        "cooldown_until": now + cooldown_left,
-                        "last_error": redact_text(record.last_error, limit=300),
-                        "tags": list(record.tags),
-                    }
-                )
-            return rows
+                for record in records
+            ]
 
     def status(
         self,
@@ -629,10 +517,11 @@ class ProxyPoolAdapter:
             transport_core = self._transport_core
             core_start_error = self._core_start_error
             active_revision = self._active_revision
-            probe_cache = {
-                "entries": len(self._probe_cache),
-                "ttl_seconds": float(self.settings.probe_cache_ttl_seconds),
-            }
+            running = bool(self._running and self._pool is not None)
+            lease_count = len(self._leases)
+            last_error = self._last_error
+            source_summary = dict(self._source_summary)
+            probe_cache_entries = len(self._probe_cache)
         core_status = (
             transport_core.status()
             if transport_core is not None
@@ -643,26 +532,21 @@ class ProxyPoolAdapter:
                 "last_error": core_start_error,
             }
         )
-        return {
-            "enabled": self.settings.enabled,
-            "engine": self.settings.engine,
-            "managed_by_backend": True,
-            "auto_start": self.settings.auto_start,
-            "executable_required": False,
-            "running": bool(self._running and self._pool is not None),
-            "configured_revision": configured.configured_revision,
-            "active_revision": active_revision,
-            "reload_required": configured.configured_revision != active_revision,
-            "total": len(nodes),
-            "healthy": sum(1 for node in nodes if node["healthy"]),
-            "retry_eligible": sum(1 for node in nodes if node["retry_eligible"]),
-            "leases": len(self._leases),
-            "last_error": self._last_error,
-            "transport_core": core_status,
-            "sources": dict(self._source_summary),
-            "probe_cache": probe_cache,
-            "nodes": nodes,
-        }
+        return project_pool_status(
+            enabled=self.settings.enabled,
+            engine=self.settings.engine,
+            auto_start=self.settings.auto_start,
+            running=running,
+            configured_revision=configured.configured_revision,
+            active_revision=active_revision,
+            nodes=nodes,
+            lease_count=lease_count,
+            last_error=last_error,
+            transport_core=core_status,
+            source_summary=source_summary,
+            probe_cache_entries=probe_cache_entries,
+            probe_cache_ttl_seconds=self.settings.probe_cache_ttl_seconds,
+        )
 
     def _probe_endpoint(
         self,
@@ -715,14 +599,14 @@ class ProxyPoolAdapter:
                 )
             if not healthy:
                 self._mark_probe_cache_node_unhealthy_locked(node_id)
-        return {
-            "id": node_id,
-            "healthy": healthy,
-            "latency_ms": latency if healthy else None,
-            "error": error,
-            "endpoint": mask_proxy(endpoint),
-            "target": self._public_probe_target(target_url),
-        }
+        return project_probe_result(
+            node_id=node_id,
+            healthy=healthy,
+            latency_ms=latency,
+            error=error,
+            endpoint=endpoint,
+            target_url=target_url,
+        )
 
     def probe(self, *, target_url: str | None = None, node_id: str | None = None) -> dict[str, Any]:
         with self._lifecycle_lock:
@@ -800,7 +684,7 @@ class ProxyPoolAdapter:
             result["cached"] = False
             result.pop("age_seconds", None)
             self._store_probe_cache_result(target_url, result)
-            return copy.deepcopy(result)
+            return stored_probe_projection(result)
 
     def acquire(
         self,
@@ -836,21 +720,13 @@ class ProxyPoolAdapter:
                     return None
                 pool = self._pool
                 generation = self._generation
-                excluded = set(exclude_ids or set())
-                allowed_node_ids = (
-                    None
-                    if allowed_ids is None
-                    else {str(node_id) for node_id in allowed_ids}
+                allowed_records = select_lease_candidates(
+                    self._records,
+                    node_tags_filter=node_tags,
+                    exclude_ids=exclude_ids,
+                    allowed_ids=allowed_ids,
+                    probe_before_use=probe_before_use,
                 )
-                wanted = {str(tag).strip().lower() for tag in (node_tags or []) if str(tag).strip()}
-                allowed_records = [
-                    record
-                    for record in self._records
-                    if record.id not in excluded
-                    and (allowed_node_ids is None or record.id in allowed_node_ids)
-                    and (not wanted or wanted.intersection(record.tags))
-                    and (probe_before_use or record.healthy)
-                ]
                 self._pending_acquires[task_id] = threading.Event()
         if wait_event is not None:
             wait_event.wait()

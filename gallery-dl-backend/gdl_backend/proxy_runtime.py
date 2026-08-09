@@ -12,18 +12,7 @@ from dataclasses import dataclass
 from typing import Iterable
 from urllib.parse import unquote, urlsplit
 
-
-def mask_proxy(endpoint: str) -> str:
-    try:
-        parsed = urlsplit(endpoint)
-        host = parsed.hostname or ""
-        if ":" in host:
-            host = f"[{host}]"
-        port = f":{parsed.port}" if parsed.port else ""
-        auth = "***@" if parsed.username or parsed.password else ""
-        return f"{parsed.scheme}://{auth}{host}{port}"
-    except Exception:
-        return "[REDACTED_PROXY]"
+from .proxy_policy import mask_proxy
 
 
 @dataclass(frozen=True, slots=True)
