@@ -112,6 +112,21 @@ class CredentialProxy(FakeProxy):
         return lease
 
 
+class CallbackGallery(FakeGallery):
+    def __init__(self, results: list[GalleryRunResult], before_return):
+        super().__init__(results)
+        self.before_return = before_return
+
+    async def run(self, task_id: str, **kwargs):
+        self.calls.append({"task_id": task_id, **kwargs})
+        await kwargs["on_started"](100 + len(self.results), f"marker-{task_id}")
+        result = self.results.pop(0)
+        self.before_return(task_id)
+        if result.output_tail:
+            await kwargs["on_line"]("stderr", result.output_tail)
+        return result
+
+
 def values(root: Path, *, proxy_mode: str, attempts: int) -> dict:
     policy = SitePolicy(
         max_concurrency=1,
@@ -285,6 +300,265 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(loop["last_error_category"])
         self.assertIsNone(loop["last_error_at"])
         await scheduler.stop()
+
+    async def test_attempt_side_effect_order_is_stable(self):
+        events: list[str] = []
+        output = self.root / "out"
+        output.mkdir()
+        artifact = output / "image.jpg"
+        artifact.write_bytes(b"artifact")
+        self.db.create_task(values(self.root, proxy_mode="required", attempts=1))
+        self.assertTrue(self.db.claim_task("task-1"))
+
+        class OrderedGallery(ArtifactGallery):
+            async def run(inner_self, task_id: str, **kwargs):
+                events.append("gallery.run")
+                return await super().run(task_id, **kwargs)
+
+        class OrderedProxy(FakeProxy):
+            def acquire(inner_self, task_id: str, **kwargs):
+                events.append("proxy.acquire")
+                return super().acquire(task_id, **kwargs)
+
+            def release(inner_self, task_id: str, *, proxy_fault: bool, reason: str = ""):
+                events.append("proxy.release")
+                return super().release(task_id, proxy_fault=proxy_fault, reason=reason)
+
+        for method_name in (
+            "begin_attempt",
+            "set_process",
+            "set_lease",
+            "clear_lease",
+            "update_artifacts",
+            "finish_attempt",
+            "complete_task",
+        ):
+            original = getattr(self.db, method_name)
+
+            def recorded(*args, _name=method_name, _original=original, **kwargs):
+                events.append(f"db.{_name}")
+                return _original(*args, **kwargs)
+
+            setattr(self.db, method_name, recorded)
+
+        original_push = self.log_writer.push
+
+        def recorded_push(task_id, attempt_id, stream, line):
+            events.append(f"log.push.{stream}")
+            return original_push(task_id, attempt_id, stream, line)
+
+        self.log_writer.push = recorded_push
+        original_flush = self.log_writer.flush
+
+        async def recorded_flush():
+            events.append("log.flush")
+            await original_flush()
+
+        self.log_writer.flush = recorded_flush
+        scheduler = TaskScheduler(
+            self.db,
+            OrderedGallery(
+                [GalleryRunResult(0, "", False, "m", 101)],
+                stdout_paths=[artifact],
+            ),
+            OrderedProxy(with_nodes=True),
+            self.settings.scheduler,
+            self.log_writer,
+        )
+
+        await scheduler._execute("task-1")
+
+        first_artifact_update = events.index("db.update_artifacts")
+        final_artifact_update = len(events) - 1 - events[::-1].index("db.update_artifacts")
+        ordered_boundaries = [
+            events.index("db.begin_attempt"),
+            events.index("proxy.acquire"),
+            events.index("db.set_lease"),
+            events.index("log.push.backend"),
+            events.index("gallery.run"),
+            events.index("db.set_process"),
+            events.index("log.push.stdout"),
+            first_artifact_update,
+            events.index("proxy.release"),
+            events.index("db.clear_lease"),
+            events.index("log.flush"),
+            events.index("db.finish_attempt"),
+            final_artifact_update,
+            events.index("db.complete_task"),
+        ]
+        self.assertEqual(ordered_boundaries, sorted(ordered_boundaries), events)
+        task = self.db.get_task("task-1")
+        self.assertEqual(task["status"], "succeeded")
+        self.assertEqual(task["artifact_count"], 1)
+        self.assertEqual(task["artifact_bytes"], len(b"artifact"))
+
+    async def test_success_failure_and_retry_transition_characterization(self):
+        cases = (
+            ("success", GalleryRunResult(0, "done", False, "m", 101), 1, "succeeded", "success", False),
+            (
+                "failure",
+                GalleryRunResult(4, "ExtractionError: invalid page", False, "m", 102),
+                2,
+                "failed",
+                "extraction_error",
+                False,
+            ),
+            (
+                "retry",
+                GalleryRunResult(128, "download failed", False, "m", 103),
+                2,
+                "queued",
+                "download_error",
+                True,
+            ),
+        )
+        for name, result, attempts, status, error_class, retryable in cases:
+            with self.subTest(name=name):
+                task_id = f"task-{name}"
+                task_values = values(self.root, proxy_mode="direct", attempts=attempts)
+                task_values["id"] = task_id
+                self.db.create_task(task_values)
+                self.assertTrue(self.db.claim_task(task_id))
+                scheduler = TaskScheduler(
+                    self.db,
+                    FakeGallery([result]),
+                    FakeProxy(),
+                    self.settings.scheduler,
+                    self.log_writer,
+                )
+
+                await scheduler._execute(task_id)
+
+                task = self.db.get_task(task_id)
+                self.assertEqual(task["status"], status)
+                self.assertEqual(task["last_error_class"], "" if status == "succeeded" else error_class)
+                self.assertEqual(task["latest_attempt"]["status"], "succeeded" if status == "succeeded" else "failed")
+                self.assertEqual(task["latest_attempt"]["error_class"], error_class)
+                self.assertEqual(task["latest_attempt"]["retryable"], retryable)
+                if status == "queued":
+                    self.assertGreater(task["next_run_at"], 0)
+
+    async def test_cancel_and_shutdown_transitions_remain_recoverable(self):
+        cancelled_values = values(self.root, proxy_mode="direct", attempts=2)
+        cancelled_values["id"] = "task-cancelled"
+        self.db.create_task(cancelled_values)
+        self.assertTrue(self.db.claim_task("task-cancelled"))
+        cancelling_gallery = CallbackGallery(
+            [GalleryRunResult(0, "done", False, "m", 101)],
+            lambda task_id: self.db.request_cancel(task_id),
+        )
+        scheduler = TaskScheduler(
+            self.db,
+            cancelling_gallery,
+            FakeProxy(),
+            self.settings.scheduler,
+            self.log_writer,
+        )
+
+        await scheduler._execute("task-cancelled")
+
+        cancelled = self.db.get_task("task-cancelled")
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(cancelled["last_error_class"], "cancelled")
+        self.assertEqual(cancelled["latest_attempt"]["status"], "cancelled")
+        self.assertFalse(cancelled["latest_attempt"]["retryable"])
+
+        shutdown_values = values(self.root, proxy_mode="direct", attempts=2)
+        shutdown_values["id"] = "task-shutdown"
+        self.db.create_task(shutdown_values)
+        self.assertTrue(self.db.claim_task("task-shutdown"))
+        shutdown_scheduler = TaskScheduler(
+            self.db,
+            FakeGallery([GalleryRunResult(0, "done", False, "m", 102)]),
+            FakeProxy(),
+            self.settings.scheduler,
+            self.log_writer,
+        )
+        shutdown_scheduler._stopping = True
+
+        await shutdown_scheduler._execute("task-shutdown")
+
+        shutdown = self.db.get_task("task-shutdown")
+        self.assertEqual(shutdown["status"], "queued")
+        self.assertEqual(shutdown["last_error_class"], "backend_shutdown")
+        self.assertEqual(shutdown["latest_attempt"]["status"], "failed")
+        self.assertTrue(shutdown["latest_attempt"]["retryable"])
+
+    async def test_prefer_acquire_error_falls_back_but_required_never_does(self):
+        prefer_values = values(self.root, proxy_mode="prefer", attempts=1)
+        prefer_values["id"] = "task-prefer-error"
+        self.db.create_task(prefer_values)
+        self.assertTrue(self.db.claim_task("task-prefer-error"))
+        prefer_gallery = FakeGallery([GalleryRunResult(0, "done", False, "m", 101)])
+        prefer_scheduler = TaskScheduler(
+            self.db,
+            prefer_gallery,
+            AcquireFailingProxy(),
+            self.settings.scheduler,
+            self.log_writer,
+        )
+
+        await prefer_scheduler._execute("task-prefer-error")
+
+        prefer = self.db.get_task("task-prefer-error")
+        self.assertEqual(prefer["status"], "succeeded")
+        self.assertIsNone(prefer_gallery.calls[0]["proxy_url"])
+
+        required_values = values(self.root, proxy_mode="required", attempts=2)
+        required_values["id"] = "task-required-error"
+        self.db.create_task(required_values)
+        self.assertTrue(self.db.claim_task("task-required-error"))
+        required_gallery = FakeGallery([])
+        required_scheduler = TaskScheduler(
+            self.db,
+            required_gallery,
+            AcquireFailingProxy(),
+            self.settings.scheduler,
+            self.log_writer,
+        )
+
+        await required_scheduler._execute("task-required-error")
+
+        required = self.db.get_task("task-required-error")
+        self.assertEqual(required["status"], "queued")
+        self.assertEqual(required["last_error_class"], "proxy_unavailable")
+        self.assertEqual(required_gallery.calls, [])
+
+    async def test_partial_artifact_retry_is_bounded_by_max_attempts(self):
+        output = self.root / "out"
+        output.mkdir()
+        artifact = output / "image.jpg"
+        artifact.write_bytes(b"partial")
+        self.db.create_task(values(self.root, proxy_mode="direct", attempts=2))
+        gallery = ArtifactGallery(
+            [
+                GalleryRunResult(4, "ExtractionError: one file failed", False, "m1", 101),
+                GalleryRunResult(4, "ExtractionError: one file failed", False, "m2", 102),
+            ],
+            stdout_paths=[artifact],
+        )
+        scheduler = TaskScheduler(
+            self.db,
+            gallery,
+            FakeProxy(),
+            self.settings.scheduler,
+            self.log_writer,
+        )
+
+        self.assertTrue(self.db.claim_task("task-1"))
+        await scheduler._execute("task-1")
+        first = self.db.get_task("task-1")
+        self.assertEqual(first["status"], "queued")
+        self.assertEqual(first["last_error_class"], "extraction_partial")
+        self.assertTrue(first["latest_attempt"]["retryable"])
+
+        self.assertTrue(self.db.claim_task("task-1"))
+        await scheduler._execute("task-1")
+        exhausted = self.db.get_task("task-1")
+        self.assertEqual(exhausted["status"], "failed")
+        self.assertEqual(exhausted["attempt_count"], 2)
+        self.assertEqual(exhausted["last_error_class"], "extraction_partial")
+        self.assertTrue(exhausted["latest_attempt"]["retryable"])
 
     async def test_direct_success(self):
         self.db.create_task(values(self.root, proxy_mode="direct", attempts=1))
