@@ -10,6 +10,7 @@ from typing import Any
 
 from gdl_backend import (
     _database_crawl_repository,
+    _database_review_repository,
     _database_schema,
     _database_task_repository,
 )
@@ -275,6 +276,62 @@ class DatabaseTransactionBoundaryTests(unittest.TestCase):
         self.assertIs(repository._read.__self__, self.db)
         self.assertIs(repository._transaction.__self__, self.db)
         self.assertIs(repository._add_event.__self__, self.db._task_repository)
+
+    def test_review_repository_uses_database_owned_boundaries(self) -> None:
+        source = inspect.getsource(_database_review_repository)
+        self.assertNotIn("sqlite3.connect(", source)
+        self.assertNotIn('execute("BEGIN', source)
+        self.assertNotIn('execute("COMMIT', source)
+        self.assertNotIn('execute("ROLLBACK', source)
+        repository = self.db._review_repository
+        self.assertIs(repository._read.__self__, self.db)
+        self.assertIs(repository._transaction.__self__, self.db)
+
+    def test_manifest_steps_are_independently_projectable(self) -> None:
+        normalized = _database_review_repository.normalize_crawl_review_manifest(
+            manifest(("step-1", "step-2"))
+        )
+        self.assertEqual(normalized["image_count"], 2)
+        self.assertEqual(normalized["manual_group_count"], 1)
+        self.assertEqual(
+            [image["id"] for image in normalized["groups"][0]["images"]],
+            ["step-1", "step-2"],
+        )
+        self.assertEqual(
+            _database_review_repository.project_crawl_review_manifest_result(
+                normalized
+            ),
+            {
+                "status": "ready",
+                "total_image_count": 2,
+                "total_group_count": 1,
+                "duplicate_group_count": 1,
+                "unreadable_image_count": 0,
+                "automatic_group_count": 0,
+                "automatic_rejected_image_count": 0,
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "重复的图片 ID"):
+            _database_review_repository.normalize_crawl_review_manifest(
+                manifest(("duplicate", "duplicate"))
+            )
+
+    def test_manifest_state_read_and_final_write_share_one_transaction(self) -> None:
+        batch_id = "batch-one-manifest-transaction"
+        self._create_analyzing_review(batch_id)
+        with self.db._read() as connection:
+            state = _database_review_repository.read_crawl_review_manifest_state(
+                connection, batch_id
+            )
+        self.assertEqual(state, {"status": "analyzing"})
+
+        proxy = _FailFirstBeginConnection(self.db._conn)
+        proxy._fail_begin = False
+        self.db._conn = proxy  # type: ignore[assignment]
+        self.db.replace_crawl_review_manifest(batch_id, manifest())
+
+        self.assertEqual(proxy.control_statements, ["BEGIN IMMEDIATE", "COMMIT"])
+        self.assertEqual(self.db.get_crawl_review(batch_id)["status"], "ready")
 
     def test_failed_begin_immediate_does_not_poison_shared_connection(self) -> None:
         proxy = _FailFirstBeginConnection(self.db._conn)
