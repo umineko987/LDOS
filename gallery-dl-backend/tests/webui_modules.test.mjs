@@ -214,6 +214,7 @@ import {
   describeTaskbarWindows,
 } from "../gdl_backend/webui/js/components/taskbar-windows.js";
 import { toSafeErrorViewModel } from "../gdl_backend/webui/js/components/error-view.js";
+import { createDialogController } from "../gdl_backend/webui/js/components/dialog.js";
 import { createSourceErrorWarning } from "../gdl_backend/webui/js/components/crawl-view.js";
 import {
   createPersonalizationView,
@@ -1293,6 +1294,13 @@ test("registry 按 ID 合并并拒绝重复、缺失、多余控制器及不完�
       new RegExp(`crawl 缺少生命周期方法：${hook}`),
     );
   }
+});
+
+test("DIALOG 控制器拒绝缺失的 DOM 行为依赖", () => {
+  assert.throws(
+    () => createDialogController({ documentObject: null }),
+    /对话框需要可用的 document/,
+  );
 });
 
 test("API 请求构造只在存在请求体时发送 JSON Content-Type", () => {

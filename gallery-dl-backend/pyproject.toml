@@ -67,3 +67,18 @@ gdl_backend = [
   "webui/js/components/*.js",
   "webui/js/apps/*.js",
 ]
+
+# scripts/run-python-coverage.py supplies the narrow source boundary for each
+# component.  Branch mode is shared and no production package is globally
+# omitted here.
+[tool.coverage.run]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+precision = 6
+show_missing = true
+skip_empty = false
+
+[tool.coverage.json]
+pretty_print = true

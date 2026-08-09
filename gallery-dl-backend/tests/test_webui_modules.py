@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -1458,36 +1459,18 @@ class WebUiModuleTests(unittest.TestCase):
         if not node:
             self.skipTest("未安装 Node.js；生产运行不依赖 Node.js")
 
-        backend_root = Path(__file__).resolve().parents[1]
-        source_webui = backend_root / "gdl_backend" / "webui"
-        source_test = backend_root / "tests" / "webui_modules.test.mjs"
-        with tempfile.TemporaryDirectory() as temporary:
-            test_root = Path(temporary)
-            shutil.copytree(
-                source_webui / "js",
-                test_root / "gdl_backend" / "webui" / "js",
-            )
-            shutil.copytree(
-                source_webui / "styles",
-                test_root / "gdl_backend" / "webui" / "styles",
-            )
-            (test_root / "tests").mkdir()
-            shutil.copy2(source_test, test_root / "tests" / source_test.name)
-            # ESM 标记仅存在于临时测试目录，不进入 wheel 或最终运行环境。
-            (test_root / "package.json").write_text(
-                '{"type":"module","private":true}\n',
-                encoding="utf-8",
-            )
-            completed = subprocess.run(
-                [node, "--test", str(test_root / "tests" / source_test.name)],
-                cwd=test_root,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=45,
-                check=False,
-            )
+        repository_root = Path(__file__).resolve().parents[2]
+        runner = repository_root / "scripts" / "run-webui-coverage.py"
+        completed = subprocess.run(
+            [sys.executable, str(runner), "--node", node, "--test-only"],
+            cwd=repository_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            check=False,
+        )
 
         if completed.returncode != 0:
             self.fail(
