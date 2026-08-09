@@ -457,11 +457,7 @@ class AuthManager:
     ) -> None:
         session.state = state
         session.message = "Pixiv 登录窗口已关闭。"
-        task = session.browser_task
-        if task and task is not asyncio.current_task() and not task.done():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        await self._close_pixiv_target(session)
+        await self._browser_orchestrator.dispose_pixiv_browser(session)
         await self._stop_pixiv_process(session)
         self._cleanup_oauth_cache(session.cache_file)
         await self._release_authorization(session.id)
@@ -687,95 +683,50 @@ class AuthManager:
         *,
         state: str = "cancelled",
     ) -> None:
-        session.state = state
-        session.message = "登录窗口已关闭。"
-        task = session.monitor_task
-        if task and task is not asyncio.current_task() and not task.done():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        await self._close_browser_target(session)
-        await self._release_authorization(session.id)
+        """Compatibility facade; the orchestrator disposes the CDP session."""
+
+        await self._browser_orchestrator.dispose_managed_session(
+            session,
+            state=state,
+            release_authorization=self._release_authorization,
+        )
+
+    async def _persist_browser_credentials(
+        self,
+        session: ManagedBrowserLoginSession,
+        cookies: list[dict[str, Any]],
+        recommended_missing: list[str],
+    ) -> bool:
+        """AuthManager retains credential-vault and metadata write ownership."""
+
+        async with self._lock:
+            if session.state == "cancelled":
+                return False
+            self._update_metadata(
+                session.site,
+                {
+                    "method": "managed_browser",
+                    "browser": "shared_project_chrome",
+                    "updated_at": time.time(),
+                    "cookie_count": len(cookies),
+                    "recommended_missing": recommended_missing,
+                },
+            )
+        return True
 
     async def _monitor_browser_login(self, session: ManagedBrowserLoginSession) -> None:
-        spec = MANAGED_BROWSER_SITES[session.site]
-        poll = max(0.1, self.settings.auth.browser_poll_interval_seconds)
-        try:
-            async with self._authorization_lock:
-                host = await self._ensure_browser_host()
-                if session.state == "cancelled":
-                    return
-                session.websocket_url = host.websocket_url
-                session.target_id = await self._browser_orchestrator.open_target(
-                    host.websocket_url,
-                    spec.login_url,
-                )
-                session.state = "awaiting_login"
-                session.message = f"请在共享授权浏览器中完成 {spec.label} 登录。"
+        """Compatibility task entry; BrowserOrchestrator owns monitoring/disposal."""
 
-                while time.time() < session.expires_at:
-                    if session.state == "cancelled":
-                        return
-                    if host.process.returncode is not None:
-                        raise RuntimeError("共享授权浏览器已关闭")
-                    cookies = await self._browser_orchestrator.site_cookies(
-                        session.websocket_url,
-                        spec,
-                    )
-                    names = {str(cookie.get("name") or "") for cookie in cookies}
-                    cookies_ready = set(spec.required).issubset(names)
-                    page_ready = bool(
-                        cookies_ready
-                        and await self._browser_orchestrator.login_ready(
-                            session.websocket_url,
-                            spec,
-                            session.target_id,
-                        )
-                    )
-                    if time.time() < session.expires_at and page_ready:
-                        recommended_missing = sorted(set(spec.recommended) - names)
-                        await self._browser_orchestrator.write_cookies(
-                            self._cookie_path(session.site),
-                            cookies,
-                        )
-                        async with self._lock:
-                            if session.state == "cancelled":
-                                return
-                            self._update_metadata(
-                                session.site,
-                                {
-                                    "method": "managed_browser",
-                                    "browser": "shared_project_chrome",
-                                    "updated_at": time.time(),
-                                    "cookie_count": len(cookies),
-                                    "recommended_missing": recommended_missing,
-                                },
-                            )
-                        session.cookie_count = len(cookies)
-                        session.recommended_missing = recommended_missing
-                        session.state = "authorized"
-                        session.message = "登录成功，导出凭证已保存。"
-                        return
-                    await asyncio.sleep(poll)
-
-            session.state = "timed_out"
-            session.error = "登录等待超时，请重新打开授权标签页。"
-            session.message = session.error
-        except asyncio.CancelledError:
-            if session.state != "cancelled":
-                session.state = "cancelled"
-                session.message = "登录窗口已关闭。"
-            raise
-        except Exception as exc:
-            if session.state != "cancelled":
-                session.state = "failed"
-                session.error = str(exc)[:500] or "共享授权浏览器登录失败"
-                session.message = session.error
-        finally:
-            await self._close_browser_target(session)
-            # 会话终结即关闭共享浏览器窗口，不留 about:blank 空壳；登录状态保留在
-            # 磁盘 Profile。此时授权占用尚未释放，start_* 均被拒，宿主无并发使用者。
-            await self._stop_browser_host()
-            await self._release_authorization(session.id)
+        await self._browser_orchestrator.monitor_managed_session(
+            session,
+            spec=MANAGED_BROWSER_SITES[session.site],
+            poll_seconds=self.settings.auth.browser_poll_interval_seconds,
+            authorization_lock=self._authorization_lock,
+            ensure_host=self._ensure_browser_host,
+            cookie_path=self._cookie_path(session.site),
+            persist_credentials=self._persist_browser_credentials,
+            release_authorization=self._release_authorization,
+        )
 
     async def start_browser_login(self, site: str) -> dict[str, Any]:
         site = self._normalize_site(site)
@@ -920,64 +871,22 @@ class AuthManager:
         )
 
     async def _monitor_pixiv_browser(self, session: PixivOAuthSession) -> None:
-        try:
-            async with self._authorization_lock:
-                host = await self._ensure_browser_host()
-                if session.state == "cancelled":
-                    return
-                deadline = min(
-                    session.created_at + 600,
-                    session.created_at + self.settings.auth.browser_login_timeout_seconds,
-                )
-                session.browser_websocket_url = host.websocket_url
-                session.browser_target_id = await self._browser_orchestrator.open_target(
-                    host.websocket_url,
-                    "about:blank",
-                )
-                session.state = "awaiting_login"
-                session.message = "请在共享授权浏览器中完成 Pixiv 登录；回调会自动捕获。"
-                remaining = max(1.0, deadline - time.time())
-                callback = await self._browser_orchestrator.capture_pixiv_callback(
-                    session.browser_websocket_url,
-                    session.browser_target_id,
-                    session.authorization_url,
-                    timeout=remaining,
-                )
-                if session.state == "cancelled" or self._pixiv_session is not session:
-                    return
-                session.message = "已捕获 Pixiv 回调，正在交换并保存登录状态。"
-                await self._complete_pixiv_oauth(session, callback)
-        except asyncio.CancelledError:
-            if session.state not in {"authorized", "cancelled", "exchanging"}:
-                session.state = "cancelled"
-                session.message = "Pixiv 授权标签页已关闭。"
-            raise
-        except TimeoutError as exc:
-            if session.state != "cancelled":
-                session.state = "timed_out"
-                session.error = str(exc)[:500] or "Pixiv 登录等待超时"
-                session.message = session.error
-                await self._stop_pixiv_process(session)
-                self._cleanup_oauth_cache(session.cache_file)
-        except AuthError as exc:
-            if session.state != "cancelled":
-                session.state = "failed"
-                session.error = exc.message
-                session.message = session.error
-                await self._stop_pixiv_process(session)
-                self._cleanup_oauth_cache(session.cache_file)
-        except Exception as exc:
-            if session.state != "cancelled":
-                session.state = "failed"
-                session.error = str(exc)[:500] or "Pixiv 共享浏览器授权失败"
-                session.message = session.error
-                await self._stop_pixiv_process(session)
-                self._cleanup_oauth_cache(session.cache_file)
-        finally:
-            await self._close_pixiv_target(session)
-            # 与 X/EH 流程一致：会话终结即关闭共享浏览器窗口，Profile 保留。
-            await self._stop_browser_host()
-            await self._release_authorization(session.id)
+        """Compatibility task entry; BrowserOrchestrator owns CDP monitoring."""
+
+        await self._browser_orchestrator.monitor_pixiv_session(
+            session,
+            login_timeout_seconds=self.settings.auth.browser_login_timeout_seconds,
+            authorization_lock=self._authorization_lock,
+            ensure_host=self._ensure_browser_host,
+            is_current=lambda current: self._pixiv_session is current,
+            complete_oauth=self._complete_pixiv_oauth,
+            stop_oauth_process=self._stop_pixiv_process,
+            cleanup_oauth_cache=self._cleanup_oauth_cache,
+            controlled_error_message=lambda exc: (
+                exc.message if isinstance(exc, AuthError) else None
+            ),
+            release_authorization=self._release_authorization,
+        )
 
     async def start_pixiv_oauth(self) -> dict[str, Any]:
         session_id = uuid.uuid4().hex

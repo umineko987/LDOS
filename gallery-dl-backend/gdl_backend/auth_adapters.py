@@ -265,6 +265,192 @@ class BrowserOrchestrator:
             timeout=timeout,
         )
 
+    async def _close_managed_target(self, session: Any) -> None:
+        websocket_url = session.websocket_url
+        target_id = session.target_id
+        session.websocket_url = ""
+        session.target_id = ""
+        await self.close_target(websocket_url, target_id)
+
+    async def _close_pixiv_target(self, session: Any) -> None:
+        websocket_url = session.browser_websocket_url
+        target_id = session.browser_target_id
+        session.browser_websocket_url = ""
+        session.browser_target_id = ""
+        await self.close_target(websocket_url, target_id)
+
+    async def dispose_managed_session(
+        self,
+        session: Any,
+        *,
+        state: str,
+        release_authorization: Callable[[str], Awaitable[None]],
+    ) -> None:
+        session.state = state
+        session.message = "登录窗口已关闭。"
+        task = session.monitor_task
+        if task and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await self._close_managed_target(session)
+        await release_authorization(session.id)
+
+    async def dispose_pixiv_browser(self, session: Any) -> None:
+        task = session.browser_task
+        if task and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await self._close_pixiv_target(session)
+
+    async def monitor_managed_session(
+        self,
+        session: Any,
+        *,
+        spec: Any,
+        poll_seconds: float,
+        authorization_lock: asyncio.Lock,
+        ensure_host: Callable[[], Awaitable[BrowserHost]],
+        cookie_path: Path,
+        persist_credentials: Callable[
+            [Any, list[dict[str, Any]], list[str]],
+            Awaitable[bool],
+        ],
+        release_authorization: Callable[[str], Awaitable[None]],
+    ) -> None:
+        poll = max(0.1, float(poll_seconds))
+        try:
+            async with authorization_lock:
+                host = await ensure_host()
+                if session.state == "cancelled":
+                    return
+                session.websocket_url = host.websocket_url
+                session.target_id = await self.open_target(
+                    host.websocket_url,
+                    spec.login_url,
+                )
+                session.state = "awaiting_login"
+                session.message = f"请在共享授权浏览器中完成 {spec.label} 登录。"
+
+                while time.time() < session.expires_at:
+                    if session.state == "cancelled":
+                        return
+                    if host.process.returncode is not None:
+                        raise RuntimeError("共享授权浏览器已关闭")
+                    cookies = await self.site_cookies(session.websocket_url, spec)
+                    names = {str(cookie.get("name") or "") for cookie in cookies}
+                    cookies_ready = set(spec.required).issubset(names)
+                    page_ready = bool(
+                        cookies_ready
+                        and await self.login_ready(
+                            session.websocket_url,
+                            spec,
+                            session.target_id,
+                        )
+                    )
+                    if time.time() < session.expires_at and page_ready:
+                        recommended_missing = sorted(set(spec.recommended) - names)
+                        await self.write_cookies(cookie_path, cookies)
+                        if not await persist_credentials(
+                            session,
+                            cookies,
+                            recommended_missing,
+                        ):
+                            return
+                        session.cookie_count = len(cookies)
+                        session.recommended_missing = recommended_missing
+                        session.state = "authorized"
+                        session.message = "登录成功，导出凭证已保存。"
+                        return
+                    await asyncio.sleep(poll)
+
+            session.state = "timed_out"
+            session.error = "登录等待超时，请重新打开授权标签页。"
+            session.message = session.error
+        except asyncio.CancelledError:
+            if session.state != "cancelled":
+                session.state = "cancelled"
+                session.message = "登录窗口已关闭。"
+            raise
+        except Exception as exc:
+            if session.state != "cancelled":
+                session.state = "failed"
+                session.error = str(exc)[:500] or "共享授权浏览器登录失败"
+                session.message = session.error
+        finally:
+            await self._close_managed_target(session)
+            # Profile data stays on disk, but no about:blank Chromium shell remains.
+            await self.stop()
+            await release_authorization(session.id)
+
+    async def monitor_pixiv_session(
+        self,
+        session: Any,
+        *,
+        login_timeout_seconds: float,
+        authorization_lock: asyncio.Lock,
+        ensure_host: Callable[[], Awaitable[BrowserHost]],
+        is_current: Callable[[Any], bool],
+        complete_oauth: Callable[[Any, str], Awaitable[Any]],
+        stop_oauth_process: Callable[[Any], Awaitable[None]],
+        cleanup_oauth_cache: Callable[[Path], None],
+        controlled_error_message: Callable[[Exception], str | None],
+        release_authorization: Callable[[str], Awaitable[None]],
+    ) -> None:
+        try:
+            async with authorization_lock:
+                host = await ensure_host()
+                if session.state == "cancelled":
+                    return
+                deadline = min(
+                    session.created_at + 600,
+                    session.created_at + float(login_timeout_seconds),
+                )
+                session.browser_websocket_url = host.websocket_url
+                session.browser_target_id = await self.open_target(
+                    host.websocket_url,
+                    "about:blank",
+                )
+                session.state = "awaiting_login"
+                session.message = "请在共享授权浏览器中完成 Pixiv 登录；回调会自动捕获。"
+                remaining = max(1.0, deadline - time.time())
+                callback = await self.capture_pixiv_callback(
+                    session.browser_websocket_url,
+                    session.browser_target_id,
+                    session.authorization_url,
+                    timeout=remaining,
+                )
+                if session.state == "cancelled" or not is_current(session):
+                    return
+                session.message = "已捕获 Pixiv 回调，正在交换并保存登录状态。"
+                await complete_oauth(session, callback)
+        except asyncio.CancelledError:
+            if session.state not in {"authorized", "cancelled", "exchanging"}:
+                session.state = "cancelled"
+                session.message = "Pixiv 授权标签页已关闭。"
+            raise
+        except TimeoutError as exc:
+            if session.state != "cancelled":
+                session.state = "timed_out"
+                session.error = str(exc)[:500] or "Pixiv 登录等待超时"
+                session.message = session.error
+                await stop_oauth_process(session)
+                cleanup_oauth_cache(session.cache_file)
+        except Exception as exc:
+            if session.state != "cancelled":
+                session.state = "failed"
+                session.error = (
+                    controlled_error_message(exc)
+                    or str(exc)[:500]
+                    or "Pixiv 共享浏览器授权失败"
+                )
+                session.message = session.error
+                await stop_oauth_process(session)
+                cleanup_oauth_cache(session.cache_file)
+        finally:
+            await self._close_pixiv_target(session)
+            await self.stop()
+            await release_authorization(session.id)
+
 
 class GalleryDlPixivOAuthAdapter:
     """Own gallery-dl OAuth argv/environment, pipes and process termination."""

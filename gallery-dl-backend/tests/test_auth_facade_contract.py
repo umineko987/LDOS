@@ -365,6 +365,49 @@ class AuthFacadeContractTests(unittest.TestCase):
         self.assertEqual(events, ["session.dispose", "metadata.clear"])
         self.assertFalse(cookie_path.exists())
 
+    def test_facade_delegates_monitoring_but_retains_vault_metadata_ownership(self):
+        session = ManagedBrowserLoginSession(
+            id="facade-monitor-contract",
+            site="twitter",
+            created_at=time.time(),
+            expires_at=time.time() + 60,
+        )
+        monitor = AsyncMock()
+
+        async def run() -> None:
+            with patch.object(
+                self.auth._browser_orchestrator,
+                "monitor_managed_session",
+                new=monitor,
+            ):
+                await self.auth._monitor_browser_login(session)
+            kwargs = monitor.await_args.kwargs
+            self.assertIs(kwargs["authorization_lock"], self.auth._authorization_lock)
+            self.assertEqual(kwargs["cookie_path"], self.auth._cookie_path("twitter"))
+            self.assertEqual(kwargs["ensure_host"], self.auth._ensure_browser_host)
+            self.assertEqual(
+                kwargs["release_authorization"],
+                self.auth._release_authorization,
+            )
+            self.assertEqual(
+                kwargs["persist_credentials"],
+                self.auth._persist_browser_credentials,
+            )
+
+            saved = await kwargs["persist_credentials"](
+                session,
+                [{"name": "auth_token"}, {"name": "ct0"}],
+                [],
+            )
+            self.assertTrue(saved)
+
+        asyncio.run(run())
+        metadata = self.auth._site_metadata("twitter")
+        self.assertEqual(metadata["method"], "managed_browser")
+        self.assertEqual(metadata["cookie_count"], 2)
+        self.assertNotIn("auth_token", str(metadata))
+        self.assertNotIn("ct0", str(metadata))
+
 
 if __name__ == "__main__":
     unittest.main()
