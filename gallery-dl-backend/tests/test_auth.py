@@ -101,13 +101,24 @@ class AuthManagerTests(unittest.TestCase):
 
     def test_pixiv_cache_rejects_empty_unsupported_and_malformed_values(self):
         token = "pixiv-malformed-test-token"
+        framed = pickle.dumps(token, protocol=4)
+        self.assertEqual(framed[:3], b"\x80\x04\x95")
+        trailing = b"trailing-data"
+        frame_size = int.from_bytes(framed[3:11], "little")
+        framed_with_trailing = (
+            framed[:3]
+            + (frame_size + len(trailing)).to_bytes(8, "little")
+            + framed[11:]
+            + trailing
+        )
         cases = (
             ("empty text", ""),
             ("whitespace text", " \t"),
             ("pickled empty text", pickle.dumps("")),
             ("pickled mapping", pickle.dumps({"token": token})),
             ("pickled bytes", pickle.dumps(token.encode("ascii"))),
-            ("trailing data", pickle.dumps(token) + b"trailing-data"),
+            ("trailing data", pickle.dumps(token) + trailing),
+            ("trailing data inside frame", framed_with_trailing),
             ("utf8 blob is not legacy text", b"legacy-blob-token"),
             ("malformed binary", b"\x80\x05broken"),
         )
