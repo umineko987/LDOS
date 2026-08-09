@@ -10,6 +10,7 @@ from typing import Any
 
 from gdl_backend import (
     _database_crawl_repository,
+    _database_policy_repository,
     _database_proxy_repository,
     _database_review_repository,
     _database_schema,
@@ -383,6 +384,25 @@ class DatabaseTransactionBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(replacement["target_url"], "https://example.com/replacement")
         self.assertEqual(replacement["node_ids"], ["healthy-node"])
+
+    def test_site_policy_repository_and_facade_are_converged(self) -> None:
+        source = inspect.getsource(_database_policy_repository)
+        self.assertNotIn("sqlite3.connect(", source)
+        self.assertNotIn('execute("BEGIN', source)
+        self.assertNotIn('execute("COMMIT', source)
+        self.assertNotIn('execute("ROLLBACK', source)
+        repository = self.db._site_policy_repository
+        self.assertIs(repository._read.__self__, self.db)
+        self.assertIs(repository._transaction.__self__, self.db)
+
+        for method_name in sorted(PUBLIC_DATABASE_SIGNATURES):
+            if method_name in {"close", "ping"}:
+                continue
+            with self.subTest(method=method_name):
+                self.assertIn(
+                    "_repository",
+                    inspect.getsource(getattr(Database, method_name)),
+                )
 
     def test_failed_begin_immediate_does_not_poison_shared_connection(self) -> None:
         proxy = _FailFirstBeginConnection(self.db._conn)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 import threading
@@ -14,6 +13,7 @@ from ._database_crawl_repository import (
     CrawlRepository,
     refresh_crawl_batch_counts,
 )
+from ._database_policy_repository import SitePolicyRepository
 from ._database_proxy_repository import ProxyProbeRepository
 from ._database_repository import (
     ACTIVE_STATUSES,
@@ -38,8 +38,6 @@ from ._database_schema import (
 )
 from ._database_task_repository import TaskRepository
 from .file_security import ensure_private_directory, secure_sqlite_files
-from .redaction import redact_data, redact_text
-from .site_policy import EditableSitePolicy
 
 
 MAX_CRAWL_REVIEW_GROUPS = 10_000
@@ -100,6 +98,11 @@ class Database:
             transaction=self._transaction,
             clock=lambda: time.time(),
             get_probe=lambda address_id: self.get_crawl_address_proxy_probe(address_id),
+        )
+        self._site_policy_repository = SitePolicyRepository(
+            read=self._read,
+            transaction=self._transaction,
+            clock=lambda: time.time(),
         )
         secure_sqlite_files(self.path)
 
@@ -696,37 +699,17 @@ class Database:
 
     # 站点策略 upsert 属于写路径，必须保留单一写事务。
     def put_site_policy(self, site: str, policy: dict[str, Any]) -> dict[str, Any]:
-        normalized = EditableSitePolicy.model_validate(policy).model_dump()
-        now = time.time()
-        with self._transaction() as conn:
-            conn.execute(
-                """
-                INSERT INTO site_policies(site, policy_json, updated_at) VALUES (?, ?, ?)
-                ON CONFLICT(site) DO UPDATE SET policy_json=excluded.policy_json, updated_at=excluded.updated_at
-                """,
-                (site, json.dumps(normalized, ensure_ascii=False), now),
-            )
-        return {"site": site, "policy": normalized, "updated_at": now}
+        return self._site_policy_repository.put_site_policy(site, policy)
 
     def get_site_policy(self, site: str) -> dict[str, Any] | None:
-        with self._read() as conn:
-            row = conn.execute("SELECT * FROM site_policies WHERE site=?", (site,)).fetchone()
-            if row is None:
-                return None
-            return {"site": row["site"], "policy": json.loads(row["policy_json"]), "updated_at": row["updated_at"]}
+        return self._site_policy_repository.get_site_policy(site)
 
     def list_site_policies(self) -> list[dict[str, Any]]:
-        with self._read() as conn:
-            rows = conn.execute("SELECT * FROM site_policies ORDER BY site").fetchall()
-            return [
-                {"site": row["site"], "policy": json.loads(row["policy_json"]), "updated_at": row["updated_at"]}
-                for row in rows
-            ]
+        return self._site_policy_repository.list_site_policies()
 
     # 站点策略删除属于写路径，必须保留单一写事务。
     def delete_site_policy(self, site: str) -> bool:
-        with self._transaction() as conn:
-            return bool(conn.execute("DELETE FROM site_policies WHERE site=?", (site,)).rowcount)
+        return self._site_policy_repository.delete_site_policy(site)
 
     def incomplete_processes(self) -> list[dict[str, Any]]:
         return self._task_repository.incomplete_processes()
