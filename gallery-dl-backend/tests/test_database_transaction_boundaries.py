@@ -8,7 +8,11 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from gdl_backend import _database_schema, _database_task_repository
+from gdl_backend import (
+    _database_crawl_repository,
+    _database_schema,
+    _database_task_repository,
+)
 from gdl_backend.database import (
     CURRENT_SCHEMA_VERSION,
     SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION,
@@ -260,6 +264,17 @@ class DatabaseTransactionBoundaryTests(unittest.TestCase):
         self.assertIs(repository._read.__self__, self.db)
         self.assertIs(repository._transaction.__self__, self.db)
         self.assertIs(repository._lock, self.db._lock)
+
+    def test_crawl_repository_uses_database_owned_boundaries(self) -> None:
+        source = inspect.getsource(_database_crawl_repository)
+        self.assertNotIn("sqlite3.connect(", source)
+        self.assertNotIn('execute("BEGIN', source)
+        self.assertNotIn('execute("COMMIT', source)
+        self.assertNotIn('execute("ROLLBACK', source)
+        repository = self.db._crawl_repository
+        self.assertIs(repository._read.__self__, self.db)
+        self.assertIs(repository._transaction.__self__, self.db)
+        self.assertIs(repository._add_event.__self__, self.db._task_repository)
 
     def test_failed_begin_immediate_does_not_poison_shared_connection(self) -> None:
         proxy = _FailFirstBeginConnection(self.db._conn)
