@@ -213,6 +213,10 @@ import {
   nextRectForDrag,
   nextRectForResize,
 } from "../gdl_backend/webui/js/core/window-geometry.js";
+import {
+  applyWindowRect,
+  createWindowDomLifecycle,
+} from "../gdl_backend/webui/js/core/window-dom-lifecycle.js";
 import { createWindowHideController } from "../gdl_backend/webui/js/core/window-hide-controller.js";
 import { createWindowInteractionController } from "../gdl_backend/webui/js/core/window-interaction.js";
 import {
@@ -2374,6 +2378,65 @@ test("窗口指针收尾在交互样式内同步最终矩形且重复结束幂�
     assert.deepEqual([beginCount, endCount], [3, 3]);
   } finally {
     manager?.destroy();
+    fixture.restore();
+  }
+});
+
+test("window DOM lifecycle collaborator 独立保持 mount/visibility/unmount 顺序与 z 投影", () => {
+  const fixture = installWindowManagerDomFixture();
+  const events = [];
+  let lifecycle = null;
+  try {
+    lifecycle = createWindowDomLifecycle({
+      bindInstanceEvents(instance) {
+        events.push(["bind", instance.appId]);
+        instance.cleanupEvents = () => events.push(["cleanup", instance.appId]);
+      },
+      displayedRect: (record) => ({ ...record.rect }),
+      forcedMobileMaximized: () => false,
+      onBeforeRemove: (appId) => events.push(["beforeRemove", appId]),
+      onMount: (app) => events.push(["mount", app.id]),
+      onRemoved: (appId) => events.push(["removed", appId]),
+      onUnmount: (app) => events.push(["unmount", app.id]),
+      onVisibilityChange: (visible, app) => events.push(["visibility", app.id, visible]),
+      queueNormalRectRepair: (record, rect) => events.push(["repair", record.appId, rect.x]),
+      windowLayer: fixture.windowLayer,
+      windowTemplate: fixture.windowTemplate,
+    });
+    const instance = lifecycle.create("crawl");
+    const record = windowRecord("crawl");
+    const [view] = deriveWindowViews([record], "crawl", false);
+    lifecycle.sync(instance, record, view, 4, "crawl");
+    assert.equal(instance.element.style.zIndex, "4");
+    assert.equal(instance.element.style.left, `${record.rect.x}px`);
+    assert.equal(instance.visible, true);
+    assert.equal(lifecycle.focusBody("crawl"), true);
+    assert.equal(lifecycle.bodyFor("crawl"), instance.bodyEl);
+    assert.equal(lifecycle.remove("crawl"), true);
+    assert.equal(lifecycle.remove("crawl"), false);
+    assert.equal(fixture.windowLayer.children.length, 0);
+    assert.deepEqual(events, [
+      ["bind", "crawl"],
+      ["mount", "crawl"],
+      ["repair", "crawl", record.rect.x],
+      ["visibility", "crawl", true],
+      ["beforeRemove", "crawl"],
+      ["visibility", "crawl", false],
+      ["unmount", "crawl"],
+      ["cleanup", "crawl"],
+      ["removed", "crawl"],
+    ]);
+
+    const element = new FakeDomHtmlElement("section");
+    applyWindowRect(element, { x: 1, y: 2, w: 3, h: 4 });
+    assert.deepEqual({
+      left: element.style.left,
+      top: element.style.top,
+      width: element.style.width,
+      height: element.style.height,
+    }, { left: "1px", top: "2px", width: "3px", height: "4px" });
+  } finally {
+    for (const appId of [...(lifecycle?.keys() || [])]) lifecycle.remove(appId);
     fixture.restore();
   }
 });

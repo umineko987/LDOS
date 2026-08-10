@@ -1208,6 +1208,9 @@ class WebUiModuleTests(unittest.TestCase):
         manager = (webui / "js" / "core" / "window-manager.js").read_text(
             encoding="utf-8"
         )
+        window_dom = (
+            webui / "js" / "core" / "window-dom-lifecycle.js"
+        ).read_text(encoding="utf-8")
         window_policy = (
             webui / "js" / "core" / "window-policy.js"
         ).read_text(encoding="utf-8")
@@ -1289,12 +1292,12 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertNotIn('id="app-content"', index)
         self.assertIn('role="group"', index)
 
-        self.assertNotIn('role="dialog"', manager)
-        self.assertIn("const windows = new Map()", manager)
-        self.assertIn("windowTemplate.content.cloneNode(true)", manager)
-        self.assertIn("onMount?.(app, bodyEl)", manager)
-        self.assertIn("onUnmount?.(app, instance.bodyEl)", manager)
-        self.assertIn("instance.element.style.zIndex = String(index)", manager)
+        self.assertNotIn('role="dialog"', manager + window_dom)
+        self.assertIn("const instances = new Map()", window_dom)
+        self.assertIn("windowTemplate.content.cloneNode(true)", window_dom)
+        self.assertIn("onMount?.(app, bodyEl)", window_dom)
+        self.assertIn("onUnmount?.(app, instance.bodyEl)", window_dom)
+        self.assertIn("instance.element.style.zIndex = String(zIndex)", window_dom)
         self.assertIn("setPointerCapture", window_interaction)
         self.assertIn("releasePointerCapture", window_interaction)
         self.assertIn('event.target.closest("button")', manager)
@@ -1325,8 +1328,8 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn("mountApplication(app, bodyElement)", desktop)
         self.assertIn("unmountApplication(app)", desktop)
         self.assertIn("windowManager.focusBody()", desktop)
-        self.assertIn("`window-title-${app.id}`", manager)
-        self.assertIn("`app-content-${app.id}`", manager)
+        self.assertIn("`window-title-${app.id}`", window_dom)
+        self.assertIn("`app-content-${app.id}`", window_dom)
 
         self.assertIn(
             'windowLayer: document.querySelector("[data-window-layer]")',
@@ -1358,6 +1361,9 @@ class WebUiModuleTests(unittest.TestCase):
         manager = (webui / "js" / "core" / "window-manager.js").read_text(
             encoding="utf-8"
         )
+        window_dom = (
+            webui / "js" / "core" / "window-dom-lifecycle.js"
+        ).read_text(encoding="utf-8")
         window_policy = (
             webui / "js" / "core" / "window-policy.js"
         ).read_text(encoding="utf-8")
@@ -1427,13 +1433,13 @@ class WebUiModuleTests(unittest.TestCase):
         )
         self.assertNotIn("actions.", view_projection)
         self.assertNotIn("record.rect =", view_projection)
-        self.assertIn("instance.element.hidden = !view.visible", manager)
-        self.assertIn("handle.hidden = forced", manager)
-        self.assertIn("handle.tabIndex = forced ? -1 : 0", manager)
-        self.assertIn("instance.visible !== view.open", manager)
-        self.assertIn("只有真实 minimized 才停用应用", manager)
-        self.assertNotIn('record?.appId === "review"', manager)
-        self.assertIn("if (view.open && !view.maximized)", manager)
+        self.assertIn("instance.element.hidden = !view.visible", window_dom)
+        self.assertIn("handle.hidden = forced", window_dom)
+        self.assertIn("handle.tabIndex = forced ? -1 : 0", window_dom)
+        self.assertIn("instance.visible !== view.open", window_dom)
+        self.assertIn("只有真实 minimized 才停用应用", window_dom)
+        self.assertNotIn('record?.appId === "review"', manager + window_dom)
+        self.assertIn("if (view.open && !view.maximized)", window_dom)
 
         viewport_listener = re.search(
             r'mobileViewport\.addEventListener\("change",\s*([A-Za-z_$][\w$]*)\)',

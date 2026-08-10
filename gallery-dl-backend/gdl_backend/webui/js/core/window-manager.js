@@ -1,4 +1,5 @@
 import { getApplicationById } from "./app-registry.js";
+import { applyWindowRect, createWindowDomLifecycle } from "./window-dom-lifecycle.js";
 import {
   WINDOW_MIN_HEIGHT,
   WINDOW_MIN_WIDTH,
@@ -18,21 +19,12 @@ import {
 import { selectors } from "./store.js";
 
 export { deriveWindowViews };
-import { createIcon } from "../components/icons.js";
 import {
   activateTaskbarWindow,
   createTaskbarWindowList,
 } from "../components/taskbar-windows.js";
 
 const MOBILE_QUERY = "(max-width: 767px)";
-
-function requireCloneElement(root, selector, Constructor = HTMLElement) {
-  const element = root.querySelector(selector);
-  if (!(element instanceof Constructor)) {
-    throw new Error(`窗口模板缺少元素：${selector}`);
-  }
-  return element;
-}
 
 export function createWindowManager({
   windowLayer,
@@ -47,8 +39,8 @@ export function createWindowManager({
   onBeforeHide,
 }) {
   const mobileViewport = window.matchMedia(MOBILE_QUERY);
-  const windows = new Map();
   const pendingRectRepairs = new Map();
+  let windows = null;
   let currentStack = selectors.windowStack(store.getState());
   let currentView = selectors.windowView(store.getState());
   let taskbarWindows = null;
@@ -129,34 +121,13 @@ export function createWindowManager({
     );
   };
 
-  const applyRect = (element, rect) => {
-    element.style.transform = "none";
-    element.style.left = `${rect.x}px`;
-    element.style.top = `${rect.y}px`;
-    element.style.width = `${rect.w}px`;
-    element.style.height = `${rect.h}px`;
-  };
-
-  const notifyVisibility = (visible, app) => {
-    if (!app || typeof onVisibilityChange !== "function") return;
-    try {
-      onVisibilityChange(visible, app);
-    } catch {
-      console.error("ImageWeave 应用生命周期执行失败");
-    }
-  };
-
-  const focusBody = (appId = selectors.focusedAppId(store.getState())) => {
-    if (appId === null) return false;
-    const instance = windows.get(appId);
-    if (!instance || instance.element.hidden) return false;
-    instance.bodyEl.focus({ preventScroll: true });
-    return true;
-  };
+  const focusBody = (appId = selectors.focusedAppId(store.getState())) => (
+    appId === null ? false : windows.focusBody(appId)
+  );
 
   const interactionController = createWindowInteractionController({
     actions,
-    applyRect,
+    applyRect: applyWindowRect,
     displayedRect,
     effectivelyMaximized,
     getRecord: recordFor,
@@ -262,132 +233,27 @@ export function createWindowManager({
     };
   };
 
-  const createInstance = (appId) => {
-    const app = getApplicationById(appId);
-    if (!app) throw new TypeError("窗口应用 ID 无效");
-    const fragment = windowTemplate.content.cloneNode(true);
-    const element = requireCloneElement(fragment, "[data-application-window]");
-    const titlebarEl = requireCloneElement(element, "[data-window-titlebar]");
-    const titleEl = requireCloneElement(element, "[data-window-title]");
-    const bodyEl = requireCloneElement(element, "[data-window-body]");
-    const minimize = requireCloneElement(element, "[data-window-minimize]", HTMLButtonElement);
-    const maximize = requireCloneElement(element, "[data-window-maximize]", HTMLButtonElement);
-    const close = requireCloneElement(element, "[data-window-close]", HTMLButtonElement);
-    const resize = new Map();
-    for (const direction of ["right", "bottom", "corner"]) {
-      resize.set(direction, requireCloneElement(
-        element,
-        `[data-window-resize="${direction}"]`,
-        HTMLButtonElement,
-      ));
-    }
-
-    const titleId = `window-title-${app.id}`;
-    const bodyId = `app-content-${app.id}`;
-    element.dataset.appId = app.id;
-    element.setAttribute("aria-labelledby", titleId);
-    titleEl.id = titleId;
-    titleEl.textContent = app.windowTitle;
-    titleEl.title = app.windowTitle;
-    bodyEl.id = bodyId;
-    minimize.replaceChildren(createIcon("minus", { size: 17, strokeWidth: 2 }));
-    close.replaceChildren(createIcon("close", { size: 17, strokeWidth: 2 }));
-
-    const instance = {
-      appId: app.id,
-      element,
-      titlebarEl,
-      titleEl,
-      bodyEl,
-      buttons: { minimize, maximize, close, resize },
-      visible: false,
-      interaction: null,
-      cleanupEvents: () => {},
-    };
-    bindInstanceEvents(instance);
-    windowLayer.append(fragment);
-    try {
-      onMount?.(app, bodyEl);
-    } catch (error) {
-      instance.cleanupEvents();
-      element.remove();
-      throw error;
-    }
-    windows.set(app.id, instance);
-    return instance;
-  };
-
-  const removeInstance = (appId) => {
-    const instance = windows.get(appId);
-    if (!instance) return;
-    hideController.invalidate(appId);
-    finishPointerInteraction(instance, null, { commit: false });
-    const app = getApplicationById(appId);
-    if (instance.visible) {
-      instance.visible = false;
-      notifyVisibility(false, app);
-    }
-    try {
-      onUnmount?.(app, instance.bodyEl);
-    } catch {
-      console.error("ImageWeave 应用卸载失败");
-    }
-    instance.cleanupEvents();
-    instance.element.remove();
-    windows.delete(appId);
-    pendingRectRepairs.delete(appId);
-  };
-
-  const syncInstance = (instance, record, view, index, focusedAppId) => {
-    const app = getApplicationById(record.appId);
-    const forced = forcedMobileMaximized(record);
-    instance.element.hidden = !view.visible;
-    instance.element.dataset.windowVisibility = view.open ? "open" : "minimized";
-    instance.element.dataset.windowState = record.windowState;
-    instance.element.toggleAttribute("data-maximized", view.maximized);
-    instance.element.toggleAttribute("data-window-focused", record.appId === focusedAppId);
-    instance.element.toggleAttribute(
-      "data-mobile-suppressed",
-      forced && view.open && !view.visible,
-    );
-    // 数组就是 z 序的唯一事实源；zIndex 只投影到 DOM。
-    instance.element.style.zIndex = String(index);
-    if (!instance.interaction) {
-      const rect = displayedRect(record, view.maximized);
-      applyRect(instance.element, rect);
-      if (view.open && !view.maximized) queueNormalRectRepair(record, rect);
-    }
-
-    instance.buttons.maximize.disabled = !app || forced;
-    instance.buttons.maximize.setAttribute(
-      "aria-disabled",
-      String(instance.buttons.maximize.disabled),
-    );
-    instance.buttons.maximize.setAttribute("aria-pressed", String(view.maximized));
-    instance.buttons.maximize.setAttribute(
-      "aria-label",
-      view.maximized ? "还原窗口" : "最大化窗口",
-    );
-    instance.buttons.maximize.title = forced
-      ? "手机端所有窗口始终最大化"
-      : view.maximized
-        ? "还原"
-        : "最大化";
-    instance.buttons.maximize.replaceChildren(
-      createIcon(view.maximized ? "restore" : "square", { size: 15, strokeWidth: 2 }),
-    );
-    for (const handle of instance.buttons.resize.values()) {
-      handle.hidden = forced;
-      handle.disabled = view.maximized;
-      handle.tabIndex = forced ? -1 : 0;
-    }
-
-    // 移动端的展示抑制不等同于最小化；只有真实 minimized 才停用应用。
-    if (instance.visible !== view.open) {
-      instance.visible = view.open;
-      notifyVisibility(view.open, app);
-    }
-  };
+  windows = createWindowDomLifecycle({
+    bindInstanceEvents,
+    displayedRect,
+    forcedMobileMaximized,
+    onBeforeRemove(appId, instance) {
+      hideController.invalidate(appId);
+      finishPointerInteraction(instance, null, { commit: false });
+    },
+    onMount,
+    onRemoved(appId) {
+      pendingRectRepairs.delete(appId);
+    },
+    onUnmount,
+    onVisibilityChange,
+    queueNormalRectRepair,
+    windowLayer,
+    windowTemplate,
+  });
+  const createInstance = windows.create;
+  const removeInstance = windows.remove;
+  const syncInstance = windows.sync;
 
   const renderStack = (stack) => {
     if (destroying || destroyed) return;
@@ -467,7 +333,7 @@ export function createWindowManager({
     },
     getFocusedBody() {
       const appId = selectors.focusedAppId(store.getState());
-      return appId === null ? null : windows.get(appId)?.bodyEl || null;
+      return appId === null ? null : windows.bodyFor(appId);
     },
     focusBody,
     destroy() {
