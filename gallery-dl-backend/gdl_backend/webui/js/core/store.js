@@ -1,5 +1,13 @@
 import { getApplicationDefinitionById } from "./app-definitions.js";
 import {
+  cloneInput,
+  isPlainObject,
+  shallowEqual,
+} from "./store-data.js";
+import { createStoreRuntime } from "./store-runtime.js";
+
+export { shallowEqual };
+import {
   crawlCandidateVisible,
   projectCrawlSearchResponse,
   validateCrawlSnapshot,
@@ -64,9 +72,6 @@ export const ACTION_TYPES = Object.freeze({
 const UI_STATUSES = new Set(["ready", "running", "warning", "error", "disabled"]);
 const WINDOW_STATES = new Set(["normal", "maximized", "minimized"]);
 export const DEFAULT_WINDOW_RECT = Object.freeze({ x: 160, y: 64, w: 800, h: 560 });
-const IMMUTABLE_VALUES = new WeakSet();
-const READONLY_MAPS = new WeakSet();
-const DANGEROUS_OBJECT_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 export class UnknownActionError extends Error {
   constructor(type) {
@@ -141,95 +146,6 @@ export function createInitialState({ windows = [] } = {}) {
       startMenuOpen: false,
     },
   };
-}
-
-function isPlainObject(value) {
-  if (!value || typeof value !== "object") return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-function cloneInput(value, seen = new WeakSet()) {
-  if (value === null || ["string", "number", "boolean", "undefined"].includes(typeof value)) {
-    return value;
-  }
-  if (typeof value !== "object") throw new TypeError("状态 payload 只能包含可复制数据");
-  if (seen.has(value)) throw new TypeError("状态 payload 不得包含循环引用");
-  seen.add(value);
-  try {
-    if (Array.isArray(value)) return value.map((item) => cloneInput(item, seen));
-    if (value instanceof Map) {
-      const result = new Map();
-      for (const [key, item] of value) {
-        result.set(cloneInput(key, seen), cloneInput(item, seen));
-      }
-      return result;
-    }
-    if (!isPlainObject(value)) throw new TypeError("状态 payload 包含不支持的对象类型");
-    const result = {};
-    for (const [key, item] of Object.entries(value)) {
-      if (DANGEROUS_OBJECT_KEYS.has(key)) {
-        throw new TypeError("状态 payload 包含危险对象键");
-      }
-      result[key] = cloneInput(item, seen);
-    }
-    return result;
-  } finally {
-    seen.delete(value);
-  }
-}
-
-function readonlyMutation() {
-  throw new TypeError("中央状态只允许通过 action 修改");
-}
-
-function readonlyMap(source, seen) {
-  const target = new Map();
-  let proxy;
-  proxy = new Proxy(target, {
-    get(map, property) {
-      if (property === "set" || property === "delete" || property === "clear") {
-        return readonlyMutation;
-      }
-      if (property === "size") return map.size;
-      if (property === "forEach") {
-        return (callback, thisArg) => {
-          map.forEach((value, key) => callback.call(thisArg, value, key, proxy));
-        };
-      }
-      const value = Reflect.get(map, property, map);
-      return typeof value === "function" ? value.bind(map) : value;
-    },
-  });
-  seen.set(source, proxy);
-  for (const [key, value] of source) {
-    target.set(makeImmutable(key, seen), makeImmutable(value, seen));
-  }
-  Object.freeze(target);
-  READONLY_MAPS.add(proxy);
-  IMMUTABLE_VALUES.add(proxy);
-  return proxy;
-}
-
-function makeImmutable(value, seen = new WeakMap()) {
-  if (value === null || typeof value !== "object") return value;
-  if (IMMUTABLE_VALUES.has(value) || READONLY_MAPS.has(value)) return value;
-  if (seen.has(value)) return seen.get(value);
-  if (value instanceof Map) return readonlyMap(value, seen);
-
-  const target = Array.isArray(value) ? [] : {};
-  seen.set(value, target);
-  if (Array.isArray(value)) {
-    for (const item of value) target.push(makeImmutable(item, seen));
-  } else {
-    if (!isPlainObject(value)) throw new TypeError("中央状态包含不支持的对象类型");
-    for (const [key, item] of Object.entries(value)) {
-      target[key] = makeImmutable(item, seen);
-    }
-  }
-  Object.freeze(target);
-  IMMUTABLE_VALUES.add(target);
-  return target;
 }
 
 function requireBoolean(value, label) {
@@ -789,122 +705,28 @@ function normalizeAction(input) {
   };
 }
 
-function reportSubscriberFailure(reportError) {
-  try {
-    reportError(Object.freeze({ kind: "subscriber_error" }));
-  } catch {
-    // 错误报告器不得中断其余订阅者。
-  }
-}
-
 export function createStore({
   initialState = createInitialState(),
   reducer = rootReducer,
   reportError = () => console.error("ImageWeave 状态订阅者执行失败"),
 } = {}) {
-  if (typeof reducer !== "function") throw new TypeError("reducer 必须是函数");
-  if (typeof reportError !== "function") throw new TypeError("错误报告器必须是函数");
-  const clonedInitialState = cloneInput(initialState);
-  if (isPlainObject(clonedInitialState.ui) && Array.isArray(clonedInitialState.ui.windows)) {
-    const windows = normalizeWindowStack(clonedInitialState.ui.windows);
-    clonedInitialState.ui = {
-      ...clonedInitialState.ui,
-      windows,
-      focusedAppId: deriveFocusedAppId(windows),
-    };
-  }
-  let state = makeImmutable(clonedInitialState);
-  let phase = "idle";
-  const subscribers = new Set();
-
-  const dispatch = (input) => {
-    if (phase !== "idle") throw new Error("状态通知期间不得嵌套 dispatch");
-    const normalized = normalizeAction(input);
-    let nextState;
-    phase = "reducing";
-    try {
-      nextState = reducer(state, normalized);
-      if (nextState === undefined) throw new TypeError("reducer 必须返回状态");
-      nextState = makeImmutable(nextState);
-    } finally {
-      phase = "idle";
-    }
-    if (nextState === state) return Object.freeze({ type: normalized.type });
-
-    state = nextState;
-    phase = "notifying";
-    try {
-      for (const subscription of [...subscribers]) {
-        if (!subscribers.has(subscription)) continue;
-        let selected;
-        try {
-          selected = subscription.selector(state);
-          if (subscription.equality(selected, subscription.selected)) continue;
-          const previous = subscription.selected;
-          subscription.selected = selected;
-          subscription.listener(
-            selected,
-            previous,
-            Object.freeze({ type: normalized.type }),
-          );
-        } catch {
-          reportSubscriberFailure(reportError);
-        }
+  return createStoreRuntime({
+    initialState,
+    reducer,
+    normalizeAction,
+    reportError,
+    prepareInitialState(clonedInitialState) {
+      if (isPlainObject(clonedInitialState.ui) && Array.isArray(clonedInitialState.ui.windows)) {
+        const windows = normalizeWindowStack(clonedInitialState.ui.windows);
+        clonedInitialState.ui = {
+          ...clonedInitialState.ui,
+          windows,
+          focusedAppId: deriveFocusedAppId(windows),
+        };
       }
-    } finally {
-      phase = "idle";
-    }
-    return Object.freeze({ type: normalized.type });
-  };
-
-  const subscribe = (selector, listener, options = {}) => {
-    if (typeof listener !== "function") {
-      listener = selector;
-      selector = (current) => current;
-    }
-    if (typeof selector !== "function" || typeof listener !== "function") {
-      throw new TypeError("subscribe 需要 selector 与 listener 函数");
-    }
-    const equality = options.equality || Object.is;
-    if (typeof equality !== "function") throw new TypeError("订阅比较器必须是函数");
-    const subscription = {
-      selector,
-      listener,
-      equality,
-      selected: selector(state),
-    };
-    subscribers.add(subscription);
-    if (options.fireImmediately) {
-      const previousPhase = phase;
-      phase = "notifying";
-      try {
-        listener(subscription.selected, undefined, Object.freeze({ type: "store/initial" }));
-      } catch {
-        reportSubscriberFailure(reportError);
-      } finally {
-        phase = previousPhase;
-      }
-    }
-    return () => subscribers.delete(subscription);
-  };
-
-  return Object.freeze({
-    getState() {
-      return state;
+      return clonedInitialState;
     },
-    dispatch,
-    subscribe,
   });
-}
-
-export function shallowEqual(left, right) {
-  if (Object.is(left, right)) return true;
-  if (!isPlainObject(left) || !isPlainObject(right)) return false;
-  const leftKeys = Object.keys(left);
-  const rightKeys = Object.keys(right);
-  return leftKeys.length === rightKeys.length &&
-    leftKeys.every((key) => Object.prototype.hasOwnProperty.call(right, key) &&
-      Object.is(left[key], right[key]));
 }
 
 export const selectors = Object.freeze({

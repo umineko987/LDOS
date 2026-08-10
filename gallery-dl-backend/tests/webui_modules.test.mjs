@@ -128,6 +128,11 @@ import {
   parseHashRoute,
   resolveNavigationTarget,
 } from "../gdl_backend/webui/js/core/router.js";
+import {
+  cloneInput,
+  makeImmutable,
+} from "../gdl_backend/webui/js/core/store-data.js";
+import { createStoreRuntime } from "../gdl_backend/webui/js/core/store-runtime.js";
 import * as storeFacade from "../gdl_backend/webui/js/core/store.js";
 import {
   ACTION_TYPES,
@@ -1634,6 +1639,43 @@ test("root reducer 是纯转移并统一维护窗口去重、z 序和焦点回�
   const closed = rootReducer(opened, actionCreators.windowClosed("crawl"));
   assert.equal(closed.ui.focusedAppId, "tasks");
   assert.throws(() => rootReducer(closed, { type: "unknown/action" }), UnknownActionError);
+});
+
+test("store data 与 runtime 可脱离 root transition 单独导入和纯执行", () => {
+  const source = { nested: [{ count: 1 }], map: new Map([["key", { safe: true }]]) };
+  const cloned = cloneInput(source);
+  assert.notEqual(cloned, source);
+  assert.notEqual(cloned.nested, source.nested);
+  assert.notEqual(cloned.map, source.map);
+  source.nested[0].count = 99;
+  source.map.get("key").safe = false;
+  assert.deepEqual(cloned.nested, [{ count: 1 }]);
+  assert.deepEqual(cloned.map.get("key"), { safe: true });
+
+  const immutable = makeImmutable(cloned);
+  assert.equal(Object.isFrozen(immutable), true);
+  assert.equal(Object.isFrozen(immutable.nested[0]), true);
+  assert.throws(() => immutable.map.clear(), TypeError);
+
+  const notifications = [];
+  const runtime = createStoreRuntime({
+    initialState: { count: 0 },
+    normalizeAction(input) {
+      if (input?.type !== "fixture/increment") throw new TypeError("fixture action invalid");
+      return { type: input.type, payload: cloneInput(input.payload) };
+    },
+    reducer(state, action) {
+      return { count: state.count + action.payload.amount };
+    },
+    reportError: () => {},
+  });
+  runtime.subscribe((state) => state.count, (value, previous, action) => {
+    notifications.push([value, previous, action.type]);
+  });
+  runtime.dispatch({ type: "fixture/increment", payload: { amount: 2 } });
+  assert.equal(runtime.getState().count, 2);
+  assert.deepEqual(notifications, [[2, 0, "fixture/increment"]]);
+  assert.throws(() => runtime.dispatch({ type: "fixture/unknown" }), TypeError);
 });
 
 test("store runtime 拒绝危险键、循环与不支持对象，并深度只读 Map", () => {
