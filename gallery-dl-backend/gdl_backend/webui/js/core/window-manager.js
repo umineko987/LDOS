@@ -3,6 +3,8 @@ import {
   WINDOW_MIN_HEIGHT,
   WINDOW_MIN_WIDTH,
 } from "./window-geometry.js";
+import { createWindowHideController } from "./window-hide-controller.js";
+import { createWindowInteractionController } from "./window-interaction.js";
 import {
   deriveWindowManagerSnapshot,
   deriveWindowRenderPlan,
@@ -10,8 +12,6 @@ import {
   displayedWindowRect,
   isEffectivelyMaximized,
   isForcedMobileMaximized,
-  nextKeyboardResizeRect,
-  nextPointerInteractionRect,
   normalWindowRect,
   sameWindowRect,
 } from "./window-policy.js";
@@ -48,7 +48,6 @@ export function createWindowManager({
 }) {
   const mobileViewport = window.matchMedia(MOBILE_QUERY);
   const windows = new Map();
-  const hideRequests = new Map();
   const pendingRectRepairs = new Map();
   let currentStack = selectors.windowStack(store.getState());
   let currentView = selectors.windowView(store.getState());
@@ -155,161 +154,34 @@ export function createWindowManager({
     return true;
   };
 
-  const finishPointerInteraction = (instance, event = null, { commit = true } = {}) => {
-    const interaction = instance.interaction;
-    if (!interaction) return false;
-    if (event && event.pointerId !== interaction.pointerId) return false;
-    // 先清空交互对象，releasePointerCapture 紧随触发的 lostpointercapture 才会幂等退出。
-    instance.interaction = null;
-    try {
-      if (interaction.control.hasPointerCapture?.(interaction.pointerId)) {
-        interaction.control.releasePointerCapture(interaction.pointerId);
-      }
-    } catch {
-      // 指针可能已由浏览器释放；最终矩形仍按同一收尾路径处理。
-    }
+  const interactionController = createWindowInteractionController({
+    actions,
+    applyRect,
+    displayedRect,
+    effectivelyMaximized,
+    getRecord: recordFor,
+    getViewport: viewportSnapshot,
+    getGeometryOptions: geometryOptions,
+    isMobileViewport: () => mobileViewport.matches,
+    isUnavailable: () => destroying || destroyed,
+    isDestroying: () => destroying,
+    normalRect,
+  });
+  const {
+    finish: finishPointerInteraction,
+    move: movePointerInteraction,
+    resizeFromKeyboard,
+    start: startPointerInteraction,
+  } = interactionController;
 
-    const record = recordFor(instance.appId);
-    try {
-      if (
-        commit
-        && record
-        && record.windowState !== "minimized"
-        && !effectivelyMaximized(record)
-        && !sameWindowRect(interaction.rect, record.rect)
-      ) {
-        // 保持交互样式直至同步渲染完成，避免最终矩形参与恢复后的 transition。
-        actions.moveWindow(instance.appId, interaction.rect);
-      } else if (record && !destroying) {
-        applyRect(instance.element, displayedRect(record));
-      }
-    } finally {
-      instance.element.removeAttribute("data-window-interacting");
-      actions.endWindowInteraction?.();
-    }
-    return true;
-  };
-
-  const startPointerInteraction = (instance, event, type, resizeDirection = "") => {
-    const record = recordFor(instance.appId);
-    if (
-      destroying
-      || destroyed
-      || instance.interaction
-      || event.button !== 0
-      || event.isPrimary === false
-      || !record
-      || record.windowState === "minimized"
-      || effectivelyMaximized(record)
-    ) return;
-
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      return;
-    }
-    actions.beginWindowInteraction?.();
-    const rect = normalRect(record);
-    instance.interaction = {
-      type,
-      resizeDirection,
-      pointerId: event.pointerId,
-      control: event.currentTarget,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      startRect: rect,
-      rect,
-    };
-    instance.element.setAttribute("data-window-interacting", type);
-  };
-
-  const movePointerInteraction = (instance, event) => {
-    const interaction = instance.interaction;
-    if (!interaction || event.pointerId !== interaction.pointerId) return;
-    if (mobileViewport.matches) {
-      finishPointerInteraction(instance, event, { commit: false });
-      return;
-    }
-    const viewport = viewportSnapshot();
-    interaction.rect = nextPointerInteractionRect(
-      interaction,
-      event,
-      viewport,
-      geometryOptions(viewport),
-    );
-    // 高频路径只触碰当前实例的样式；store 与 storage 留到统一收尾。
-    applyRect(instance.element, interaction.rect);
-  };
-
-  const resizeFromKeyboard = (instance, direction, event) => {
-    const record = recordFor(instance.appId);
-    if (!record || record.windowState === "minimized" || effectivelyMaximized(record)) return;
-    const viewport = viewportSnapshot();
-    const rect = nextKeyboardResizeRect(
-      record,
-      direction,
-      event.key,
-      viewport,
-      geometryOptions(viewport),
-    );
-    if (!rect) return;
-    event.preventDefault();
-    if (!sameWindowRect(rect, record.rect)) actions.moveWindow(instance.appId, rect);
-  };
-
-  const hideStateFor = (appId) => {
-    if (!hideRequests.has(appId)) {
-      hideRequests.set(appId, { sequence: 0, pending: false });
-    }
-    return hideRequests.get(appId);
-  };
-
-  const requestHide = (instance, visibility, commit) => {
-    const record = recordFor(instance.appId);
-    const requestState = hideStateFor(instance.appId);
-    if (
-      destroying
-      || destroyed
-      || requestState.pending
-      || !record
-      || record.windowState === "minimized"
-    ) return;
-    const app = getApplicationById(instance.appId);
-    let decision = true;
-    try {
-      decision = typeof onBeforeHide === "function"
-        ? onBeforeHide(app, visibility)
-        : true;
-    } catch {
-      decision = false;
-    }
-
-    if (typeof decision?.then !== "function") {
-      if (decision === true && !destroyed) commit(app);
-      return;
-    }
-
-    requestState.pending = true;
-    const request = ++requestState.sequence;
-    void Promise.resolve(decision)
-      .then((allowed) => {
-        const current = recordFor(instance.appId);
-        if (
-          allowed !== true
-          || destroying
-          || destroyed
-          || request !== requestState.sequence
-          || windows.get(instance.appId) !== instance
-          || !current
-          || current.windowState === "minimized"
-        ) return;
-        commit(app);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (request === requestState.sequence) requestState.pending = false;
-      });
-  };
+  const hideController = createWindowHideController({
+    getApplication: getApplicationById,
+    getInstance: (appId) => windows.get(appId),
+    getRecord: recordFor,
+    isUnavailable: () => destroying || destroyed,
+    onBeforeHide,
+  });
+  const requestHide = hideController.request;
 
   const bindInstanceEvents = (instance) => {
     const {
@@ -448,11 +320,7 @@ export function createWindowManager({
   const removeInstance = (appId) => {
     const instance = windows.get(appId);
     if (!instance) return;
-    const hideState = hideRequests.get(appId);
-    if (hideState) {
-      hideState.sequence += 1;
-      hideState.pending = false;
-    }
+    hideController.invalidate(appId);
     finishPointerInteraction(instance, null, { commit: false });
     const app = getApplicationById(appId);
     if (instance.visible) {
@@ -467,7 +335,6 @@ export function createWindowManager({
     instance.cleanupEvents();
     instance.element.remove();
     windows.delete(appId);
-    hideRequests.delete(appId);
     pendingRectRepairs.delete(appId);
   };
 
@@ -611,6 +478,7 @@ export function createWindowManager({
       mobileViewport.removeEventListener("change", onViewportChange);
       window.removeEventListener("resize", onViewportChange);
       for (const appId of [...windows.keys()]) removeInstance(appId);
+      hideController.destroy();
       taskbarWindows?.destroy();
       pendingRectRepairs.clear();
       currentStack = [];

@@ -1211,6 +1211,9 @@ class WebUiModuleTests(unittest.TestCase):
         window_policy = (
             webui / "js" / "core" / "window-policy.js"
         ).read_text(encoding="utf-8")
+        window_interaction = (
+            webui / "js" / "core" / "window-interaction.js"
+        ).read_text(encoding="utf-8")
         desktop = (webui / "js" / "core" / "desktop.js").read_text(
             encoding="utf-8"
         )
@@ -1292,8 +1295,8 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn("onMount?.(app, bodyEl)", manager)
         self.assertIn("onUnmount?.(app, instance.bodyEl)", manager)
         self.assertIn("instance.element.style.zIndex = String(index)", manager)
-        self.assertIn("setPointerCapture", manager)
-        self.assertIn("releasePointerCapture", manager)
+        self.assertIn("setPointerCapture", window_interaction)
+        self.assertIn("releasePointerCapture", window_interaction)
         self.assertIn('event.target.closest("button")', manager)
         self.assertIn('{ capture: true }', manager)
         self.assertNotIn('"mousemove"', manager)
@@ -1304,9 +1307,9 @@ class WebUiModuleTests(unittest.TestCase):
         ]
         self.assertIn("actions.focusWindow(instance.appId)", pointer_focus)
         self.assertNotIn("preventDefault", pointer_focus)
-        pointer_move = manager[
-            manager.index("const movePointerInteraction") :
-            manager.index("const resizeFromKeyboard")
+        pointer_move = window_interaction[
+            window_interaction.index("const move =") :
+            window_interaction.index("const resizeFromKeyboard")
         ]
         self.assertIn("applyRect(instance.element, interaction.rect)", pointer_move)
         self.assertNotIn("actions.", pointer_move)

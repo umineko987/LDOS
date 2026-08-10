@@ -213,6 +213,8 @@ import {
   nextRectForDrag,
   nextRectForResize,
 } from "../gdl_backend/webui/js/core/window-geometry.js";
+import { createWindowHideController } from "../gdl_backend/webui/js/core/window-hide-controller.js";
+import { createWindowInteractionController } from "../gdl_backend/webui/js/core/window-interaction.js";
 import {
   deriveWindowManagerSnapshot,
   deriveWindowRenderPlan,
@@ -2374,6 +2376,99 @@ test("窗口指针收尾在交互样式内同步最终矩形且重复结束幂�
     manager?.destroy();
     fixture.restore();
   }
+});
+
+test("window interaction collaborator 独立保持 pointermove 零提交与统一单次收尾", () => {
+  let record = windowRecord("crawl", "normal", windowRect());
+  const calls = [];
+  const element = new FakeDomHtmlElement("section");
+  const control = new FakeDomHtmlElement("header");
+  const instance = { appId: "crawl", element, interaction: null };
+  const controller = createWindowInteractionController({
+    actions: {
+      beginWindowInteraction: () => calls.push(["begin"]),
+      endWindowInteraction: () => calls.push(["end"]),
+      moveWindow(appId, rect) {
+        calls.push(["move", appId, { ...rect }]);
+        record = { ...record, rect: { ...rect } };
+      },
+    },
+    applyRect(target, rect) {
+      calls.push(["apply", { ...rect }]);
+      target.style.left = `${rect.x}px`;
+    },
+    displayedRect: (value) => ({ ...value.rect }),
+    effectivelyMaximized: (value) => value.windowState === "maximized",
+    getRecord: () => record,
+    getViewport: () => ({ width: 1200, height: 800 }),
+    getGeometryOptions: () => ({ minW: 360, minH: 240, taskbarHeight: 40 }),
+    isMobileViewport: () => false,
+    isUnavailable: () => false,
+    isDestroying: () => false,
+    normalRect: (value) => ({ ...value.rect }),
+  });
+  const startEvent = {
+    button: 0,
+    isPrimary: true,
+    pointerId: 31,
+    clientX: 100,
+    clientY: 100,
+    currentTarget: control,
+  };
+  controller.start(instance, startEvent, "drag");
+  assert.equal(instance.interaction.type, "drag");
+  controller.move(instance, { pointerId: 31, clientX: 140, clientY: 125 });
+  assert.equal(calls.filter(([name]) => name === "move").length, 0);
+  assert.equal(element.style.left, "88px");
+  assert.equal(controller.finish(instance, { pointerId: 31 }), true);
+  assert.equal(controller.finish(instance, { pointerId: 31 }), false);
+  assert.deepEqual(calls.filter(([name]) => name === "move"), [[
+    "move", "crawl", { x: 88, y: 61, w: 720, h: 480 },
+  ]]);
+  assert.deepEqual(calls.filter(([name]) => name === "begin" || name === "end"), [
+    ["begin"], ["end"],
+  ]);
+});
+
+test("window hide collaborator 独立去重 async 请求并淘汰失效实例", async () => {
+  const instance = { appId: "crawl" };
+  let currentInstance = instance;
+  let record = windowRecord("crawl");
+  let unavailable = false;
+  let beforeHideCount = 0;
+  const pending = [];
+  const commits = [];
+  const controller = createWindowHideController({
+    getApplication: (appId) => ({ id: appId }),
+    getInstance: () => currentInstance,
+    getRecord: () => record,
+    isUnavailable: () => unavailable,
+    onBeforeHide() {
+      beforeHideCount += 1;
+      return new Promise((resolve) => pending.push(resolve));
+    },
+  });
+  controller.request(instance, "minimized", (app) => commits.push(app.id));
+  controller.request(instance, "minimized", (app) => commits.push(`duplicate:${app.id}`));
+  assert.equal(beforeHideCount, 1);
+  pending.shift()(true);
+  await flushPromises();
+  assert.deepEqual(commits, ["crawl"]);
+
+  controller.request(instance, "closed", (app) => commits.push(`stale:${app.id}`));
+  assert.equal(beforeHideCount, 2);
+  currentInstance = null;
+  controller.invalidate("crawl");
+  pending.shift()(true);
+  await flushPromises();
+  assert.deepEqual(commits, ["crawl"]);
+
+  currentInstance = instance;
+  unavailable = true;
+  controller.request(instance, "closed", () => commits.push("unavailable"));
+  assert.equal(beforeHideCount, 2);
+  record = null;
+  controller.destroy();
 });
 
 test("window manager 保持快照、z 序投影和生命周期/关闭回退顺序", () => {

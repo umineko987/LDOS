@@ -788,6 +788,8 @@ class ApiTests(unittest.TestCase):
             "/ui/js/core/storage-preferences.js",
             "/ui/js/core/storage-service.js",
             "/ui/js/core/storage-snapshot.js",
+            "/ui/js/core/window-hide-controller.js",
+            "/ui/js/core/window-interaction.js",
             "/ui/js/core/window-manager.js",
             "/ui/js/core/window-policy.js",
             "/ui/js/components/dialog.js",
@@ -920,6 +922,8 @@ class ApiTests(unittest.TestCase):
             "/ui/js/core/store-state.js",
             "/ui/js/core/store-transition.js",
             "/ui/js/core/store-window-transition.js",
+            "/ui/js/core/window-hide-controller.js",
+            "/ui/js/core/window-interaction.js",
             "/ui/js/core/window-manager.js",
             "/ui/js/core/window-policy.js",
         ]
