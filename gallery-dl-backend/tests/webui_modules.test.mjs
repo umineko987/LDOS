@@ -128,11 +128,16 @@ import {
   parseHashRoute,
   resolveNavigationTarget,
 } from "../gdl_backend/webui/js/core/router.js";
+import * as storeFacade from "../gdl_backend/webui/js/core/store.js";
 import {
+  ACTION_TYPES,
   actionCreators,
   createInitialState,
   createStore,
+  DEFAULT_WINDOW_RECT,
+  rootReducer,
   selectors,
+  shallowEqual,
   UnknownActionError,
 } from "../gdl_backend/webui/js/core/store.js";
 import {
@@ -187,11 +192,15 @@ import {
   nextRectForResize,
 } from "../gdl_backend/webui/js/core/window-geometry.js";
 import { describeApplicationLaunchers } from "../gdl_backend/webui/js/core/desktop.js";
+import * as windowManagerFacade from "../gdl_backend/webui/js/core/window-manager.js";
 import {
   createWindowManager,
   deriveWindowViews,
 } from "../gdl_backend/webui/js/core/window-manager.js";
+import * as storageFacade from "../gdl_backend/webui/js/core/storage.js";
 import {
+  clampWindowRect,
+  createDefaultWindowLayout,
   createStorageService,
   isValidBatchId,
   STORAGE_KEYS,
@@ -727,6 +736,9 @@ function installWindowManagerDomFixture() {
   }));
 
   return Object.freeze({
+    documentObject,
+    mobileViewport,
+    windowObject,
     windowLayer,
     taskList,
     windowTemplate,
@@ -737,6 +749,51 @@ function installWindowManagerDomFixture() {
       }
     },
   });
+}
+
+function windowElementFor(layer, appId) {
+  return layer.children.find((element) => element.dataset?.appId === appId) || null;
+}
+
+function createManagerActions(store, calls = []) {
+  const dispatch = (name, action) => {
+    const previous = selectors.windowStack(store.getState());
+    calls.push([name, action.payload?.appId ?? null]);
+    store.dispatch(action);
+    return selectors.windowStack(store.getState()) !== previous;
+  };
+  return {
+    beginWindowInteraction() {
+      calls.push(["begin", null]);
+      return true;
+    },
+    endWindowInteraction() {
+      calls.push(["end", null]);
+      return true;
+    },
+    focusWindow(appId) {
+      return dispatch("focus", actionCreators.windowFocused(appId));
+    },
+    minimizeWindow(appId) {
+      return dispatch("minimize", actionCreators.windowStateChanged(appId, "minimized"));
+    },
+    restoreWindow(appId) {
+      return dispatch("restore", actionCreators.windowOpened(appId));
+    },
+    closeWindow(appId) {
+      return dispatch("close", actionCreators.windowClosed(appId));
+    },
+    toggleWindowMaximized(appId) {
+      const record = selectors.windowStack(store.getState())
+        .find((candidate) => candidate.appId === appId);
+      if (!record) return false;
+      const next = record.windowState === "maximized" ? "normal" : "maximized";
+      return dispatch("maximize", actionCreators.windowStateChanged(appId, next));
+    },
+    moveWindow(appId, rect) {
+      return dispatch("move", actionCreators.windowMoved(appId, rect));
+    },
+  };
 }
 
 class FakeRootElement {
@@ -1415,6 +1472,257 @@ test("幂等键优先使用 randomUUID，回退值不含业务数据", () => {
   assert.equal(headers.get("Idempotency-Key"), fallback);
 });
 
+test("store/storage/window-manager 兼容入口保持精确 export shape", () => {
+  assert.deepEqual(Object.keys(storeFacade), [
+    "ACTION_TYPES",
+    "DEFAULT_WINDOW_RECT",
+    "UnknownActionError",
+    "actionCreators",
+    "createInitialState",
+    "createStore",
+    "rootReducer",
+    "selectors",
+    "shallowEqual",
+  ]);
+  assert.deepEqual(Object.keys(storageFacade), [
+    "STORAGE_KEYS",
+    "clampWindowRect",
+    "createDefaultWindowLayout",
+    "createStorageService",
+    "isValidBatchId",
+  ]);
+  assert.deepEqual(Object.keys(windowManagerFacade), [
+    "createWindowManager",
+    "deriveWindowViews",
+  ]);
+});
+
+test("store action 字符串、creator/selector shape 与初始 snapshot 保持兼容", () => {
+  assert.deepEqual(ACTION_TYPES, {
+    SYSTEM_SHELL_SUMMARY_UPDATED: "system/shellSummaryUpdated",
+    DIAGNOSTICS_RECEIVED: "diagnostics/received",
+    PROXY_STATUS_RECEIVED: "proxy/statusReceived",
+    PROXY_SOURCES_RECEIVED: "proxy/sourcesReceived",
+    POLICY_CONFIG_RECEIVED: "policy/configReceived",
+    AUTH_STATUS_RECEIVED: "auth/statusReceived",
+    AUTH_SITE_STATUS_RECEIVED: "auth/siteStatusReceived",
+    CRAWL_SEARCH_RECEIVED: "crawl/searchReceived",
+    CRAWL_CANDIDATE_SELECTION_CHANGED: "crawl/candidateSelectionChanged",
+    CRAWL_VISIBLE_SELECTION_CHANGED: "crawl/visibleSelectionChanged",
+    CRAWL_SOURCE_MOVED: "crawl/sourceMoved",
+    CRAWL_CANDIDATE_MOVED: "crawl/candidateMoved",
+    CRAWL_WEAK_VISIBILITY_CHANGED: "crawl/weakVisibilityChanged",
+    CRAWL_EH_FILTER_CHANGED: "crawl/ehFilterChanged",
+    CRAWL_EH_FILTER_CLEARED: "crawl/ehFilterCleared",
+    BATCH_ACTIVE_ID_CHANGED: "batches/activeIdChanged",
+    BATCH_RECENT_RECEIVED: "batches/recentReceived",
+    BATCH_SNAPSHOT_RECEIVED: "batches/snapshotReceived",
+    BATCH_SNAPSHOT_CLEARED: "batches/snapshotCleared",
+    REVIEW_WORKSPACE_RECEIVED: "review/workspaceReceived",
+    REVIEW_SUMMARY_RECEIVED: "review/summaryReceived",
+    REVIEW_IMAGE_SELECTION_CHANGED: "review/imageSelectionChanged",
+    REVIEW_GROUP_CONFIRMED: "review/groupConfirmed",
+    REVIEW_PAGE_SAVED: "review/pageSaved",
+    REVIEW_CLEARED: "review/cleared",
+    UI_WINDOW_OPENED: "ui/windowOpened",
+    UI_WINDOW_CLOSED: "ui/windowClosed",
+    UI_WINDOW_FOCUSED: "ui/windowFocused",
+    UI_WINDOW_MOVED: "ui/windowMoved",
+    UI_WINDOW_STATE_CHANGED: "ui/windowStateChanged",
+    UI_START_MENU_CHANGED: "ui/startMenuChanged",
+  });
+  assert.equal(Object.isFrozen(ACTION_TYPES), true);
+  assert.deepEqual(Object.keys(actionCreators), [
+    "shellSummaryUpdated", "diagnosticsReceived", "proxyStatusReceived",
+    "proxySourcesReceived", "policyConfigReceived", "authStatusReceived",
+    "authSiteStatusReceived", "crawlSearchReceived",
+    "crawlCandidateSelectionChanged", "crawlVisibleSelectionChanged",
+    "crawlSourceMoved", "crawlCandidateMoved", "crawlWeakVisibilityChanged",
+    "crawlEhFilterChanged", "crawlEhFilterCleared", "activeBatchIdChanged",
+    "recentBatchesReceived", "batchSnapshotReceived", "batchSnapshotCleared",
+    "reviewWorkspaceReceived", "reviewSummaryReceived",
+    "reviewImageSelectionChanged", "reviewGroupConfirmed", "reviewPageSaved",
+    "reviewCleared", "windowOpened", "windowClosed", "windowFocused",
+    "windowMoved", "windowStateChanged", "startMenuChanged",
+  ]);
+  assert.deepEqual(Object.keys(selectors), [
+    "focusedAppId", "startMenuOpen", "taskbarSummary", "diagnostics",
+    "proxyStatus", "proxySources", "policyConfig", "authSites",
+    "authBrowserProfile", "authAuthorizationProxy", "crawl", "activeBatchId",
+    "activeBatch", "batchTasks", "recentBatches", "review", "windowStack",
+    "windowView",
+  ]);
+  assert.deepEqual(DEFAULT_WINDOW_RECT, { x: 160, y: 64, w: 800, h: 560 });
+  assert.deepEqual(createInitialState(), {
+    system: {
+      health: null,
+      readiness: null,
+      apiConnected: false,
+      summary: {
+        api: { status: "disabled", label: "服务检查中" },
+        proxy: { status: "disabled", label: "代理检查中" },
+        dedup: { status: "disabled", label: "去重检查中" },
+      },
+      errors: { health: null, readiness: null },
+      lastCheckedAt: null,
+    },
+    diagnostics: { snapshot: null },
+    proxy: { status: null, sources: null },
+    auth: { bySite: new Map(), browserProfile: null, authorizationProxy: null },
+    policy: { config: null },
+    crawl: {
+      sources: [],
+      relatedProfiles: [],
+      addressCount: 0,
+      weakEvidenceCount: 0,
+      showWeakEvidence: false,
+      ehTagFilter: new Map(),
+    },
+    batches: { activeId: "", active: null, tasks: [], recent: [] },
+    review: {
+      batchId: "",
+      summary: null,
+      groups: [],
+      filter: "",
+      offset: 0,
+      limit: 0,
+      total: 0,
+      dirty: false,
+      dirtyGroupIds: [],
+    },
+    ui: { windows: [], focusedAppId: null, startMenuOpen: false },
+  });
+
+  const rect = windowRect({ x: 7, y: 8, w: 640, h: 360 });
+  assert.deepEqual(actionCreators.windowOpened("crawl"), {
+    type: ACTION_TYPES.UI_WINDOW_OPENED,
+    payload: { appId: "crawl" },
+  });
+  assert.deepEqual(actionCreators.windowMoved("crawl", rect), {
+    type: ACTION_TYPES.UI_WINDOW_MOVED,
+    payload: { appId: "crawl", rect },
+  });
+  assert.deepEqual(actionCreators.startMenuChanged(true), {
+    type: ACTION_TYPES.UI_START_MENU_CHANGED,
+    payload: { open: true },
+  });
+  assert.equal(shallowEqual({ value: 1 }, { value: 1 }), true);
+  assert.equal(shallowEqual({ value: {} }, { value: {} }), false);
+});
+
+test("root reducer 是纯转移并统一维护窗口去重、z 序和焦点回退", () => {
+  const initial = createInitialState({
+    windows: [
+      windowRecord("crawl", "normal", windowRect({ x: 1 })),
+      windowRecord("tasks", "normal", windowRect({ x: 2 })),
+      windowRecord("crawl", "minimized", windowRect({ x: 3 })),
+    ],
+  });
+  assert.deepEqual(initial.ui.windows.map((record) => [record.appId, record.rect.x]), [
+    ["tasks", 2], ["crawl", 3],
+  ]);
+  assert.equal(initial.ui.focusedAppId, "tasks");
+
+  const opened = rootReducer(initial, actionCreators.windowOpened("crawl"));
+  assert.notEqual(opened, initial);
+  assert.deepEqual(opened.ui.windows.map((record) => [record.appId, record.windowState]), [
+    ["tasks", "normal"], ["crawl", "normal"],
+  ]);
+  assert.equal(opened.ui.focusedAppId, "crawl");
+  assert.deepEqual(initial.ui.windows.map((record) => record.windowState), ["normal", "minimized"]);
+
+  const closed = rootReducer(opened, actionCreators.windowClosed("crawl"));
+  assert.equal(closed.ui.focusedAppId, "tasks");
+  assert.throws(() => rootReducer(closed, { type: "unknown/action" }), UnknownActionError);
+});
+
+test("store runtime 拒绝危险键、循环与不支持对象，并深度只读 Map", () => {
+  const store = createStore({
+    initialState: { payload: null },
+    reducer: (_state, action) => ({ payload: action.payload }),
+    reportError: () => {},
+  });
+  const safeType = ACTION_TYPES.UI_START_MENU_CHANGED;
+  for (const key of ["__proto__", "prototype", "constructor"]) {
+    const payload = JSON.parse(`{"${key}":{"polluted":true}}`);
+    assert.throws(() => store.dispatch({ type: safeType, payload }), TypeError);
+  }
+  assert.equal({}.polluted, undefined);
+
+  const cyclic = { value: 1 };
+  cyclic.self = cyclic;
+  assert.throws(() => store.dispatch({ type: safeType, payload: cyclic }), TypeError);
+  for (const payload of [new Date(), new Set(), /fixture/u, () => true, 1n]) {
+    assert.throws(() => store.dispatch({ type: safeType, payload }), TypeError);
+  }
+
+  const source = new Map([["entry", { nested: [1, 2] }]]);
+  store.dispatch({ type: safeType, payload: source });
+  source.get("entry").nested.push(3);
+  const stored = store.getState().payload;
+  assert.deepEqual(stored.get("entry").nested, [1, 2]);
+  assert.throws(() => stored.set("other", {}), TypeError);
+  assert.throws(() => stored.get("entry").nested.push(3), TypeError);
+  let callbackMap = null;
+  stored.forEach((_value, _key, map) => { callbackMap = map; });
+  assert.equal(callbackMap, stored);
+
+  store.dispatch({ type: safeType, payload: { recovered: true } });
+  assert.deepEqual(store.getState().payload, { recovered: true });
+});
+
+test("store 订阅快照、比较器、退订和 reducing/notifying 嵌套边界保持稳定", () => {
+  const reports = [];
+  const store = createStore({ reportError: (event) => reports.push(event) });
+  const events = [];
+  let unsubscribeSecond = () => {};
+  let installedLate = false;
+  store.subscribe(selectors.startMenuOpen, (selected, previous, action) => {
+    events.push(["first", selected, previous, action.type, Object.isFrozen(action)]);
+    unsubscribeSecond();
+    if (!installedLate) {
+      installedLate = true;
+      store.subscribe(selectors.startMenuOpen, (value) => events.push(["late", value]));
+    }
+  });
+  unsubscribeSecond = store.subscribe(
+    selectors.startMenuOpen,
+    (value) => events.push(["second", value]),
+  );
+  store.subscribe(selectors.startMenuOpen, () => events.push(["equal-never"]), {
+    equality: () => true,
+  });
+
+  const receipt = store.dispatch(actionCreators.startMenuChanged(true));
+  assert.deepEqual(receipt, { type: ACTION_TYPES.UI_START_MENU_CHANGED });
+  assert.equal(Object.isFrozen(receipt), true);
+  assert.deepEqual(events, [[
+    "first", true, false, ACTION_TYPES.UI_START_MENU_CHANGED, true,
+  ]]);
+  store.dispatch(actionCreators.startMenuChanged(false));
+  assert.deepEqual(events.at(-1), ["late", false]);
+  assert.equal(events.some(([name]) => name === "second" || name === "equal-never"), false);
+
+  let reducingStore;
+  let nestedError = null;
+  reducingStore = createStore({
+    initialState: { count: 0 },
+    reducer(state, action) {
+      try {
+        reducingStore.dispatch(actionCreators.startMenuChanged(false));
+      } catch (error) {
+        nestedError = error;
+      }
+      return { count: state.count + (action.payload?.open === true ? 1 : 0) };
+    },
+    reportError: (event) => reports.push(event),
+  });
+  reducingStore.dispatch(actionCreators.startMenuChanged(true));
+  assert.match(nestedError.message, /不得嵌套 dispatch/);
+  assert.equal(reducingStore.getState().count, 1);
+  assert.deepEqual(reports, []);
+});
+
 test("store 初始化完整状态并阻止外部修改数组、对象和 Map", () => {
   const initial = createInitialState();
   initial.crawl.sources.push({ site: "fixture" });
@@ -1936,6 +2244,247 @@ test("窗口指针收尾在交互样式内同步最终矩形且重复结束幂�
     manager?.destroy();
     fixture.restore();
   }
+});
+
+test("window manager 保持快照、z 序投影和生命周期/关闭回退顺序", () => {
+  const fixture = installWindowManagerDomFixture();
+  const store = createStore({
+    initialState: createInitialState({
+      windows: [windowRecord("crawl"), windowRecord("tasks")],
+    }),
+    reportError: () => {},
+  });
+  const actionCalls = [];
+  const lifecycle = [];
+  const actions = createManagerActions(store, actionCalls);
+  let manager = null;
+  try {
+    manager = createWindowManager({
+      windowLayer: fixture.windowLayer,
+      windowTemplate: fixture.windowTemplate,
+      taskList: fixture.taskList,
+      store,
+      actions,
+      onMount: (app) => lifecycle.push(["mount", app.id]),
+      onVisibilityChange: (visible, app) => lifecycle.push(["visibility", app.id, visible]),
+      onBeforeHide: (app, visibility) => {
+        lifecycle.push(["beforeHide", app.id, visibility]);
+        return true;
+      },
+      onUnmount: (app) => lifecycle.push(["unmount", app.id]),
+      onCloseFocus: (app) => lifecycle.push(["closeFocus", app.id]),
+    });
+    assert.deepEqual(manager.getSnapshot(), {
+      appId: "tasks",
+      visibility: "open",
+      maximized: false,
+      preferredWindowState: "normal",
+    });
+    assert.deepEqual(Object.keys(manager.getSnapshot()), [
+      "appId", "visibility", "maximized", "preferredWindowState",
+    ]);
+    const crawlWindow = windowElementFor(fixture.windowLayer, "crawl");
+    const tasksWindow = windowElementFor(fixture.windowLayer, "tasks");
+    assert.equal(crawlWindow.style.zIndex, "0");
+    assert.equal(tasksWindow.style.zIndex, "1");
+    assert.equal(selectors.windowStack(store.getState()).some((record) => "zIndex" in record), false);
+
+    crawlWindow.emit("pointerdown");
+    assert.deepEqual(selectors.windowStack(store.getState()).map((record) => record.appId), [
+      "tasks", "crawl",
+    ]);
+    assert.equal(tasksWindow.style.zIndex, "0");
+    assert.equal(crawlWindow.style.zIndex, "1");
+
+    const close = crawlWindow.querySelector("[data-window-close]");
+    close.emit("click");
+    assert.equal(selectors.focusedAppId(store.getState()), "tasks");
+    assert.equal(windowElementFor(fixture.windowLayer, "crawl"), null);
+    assert.deepEqual(lifecycle.slice(-4), [
+      ["beforeHide", "crawl", "closed"],
+      ["visibility", "crawl", false],
+      ["unmount", "crawl"],
+      ["closeFocus", "crawl"],
+    ]);
+  } finally {
+    manager?.destroy();
+    manager?.destroy();
+    fixture.restore();
+  }
+  assert.equal(lifecycle.filter(([event]) => event === "unmount").length, 2);
+});
+
+test("window manager 对 async beforeHide 去重并淘汰 stale request", async () => {
+  const fixture = installWindowManagerDomFixture();
+  const store = createStore({
+    initialState: createInitialState({ windows: [windowRecord("crawl")] }),
+    reportError: () => {},
+  });
+  const calls = [];
+  const actions = createManagerActions(store, calls);
+  const pending = [];
+  let beforeHideCount = 0;
+  let manager = null;
+  try {
+    manager = createWindowManager({
+      windowLayer: fixture.windowLayer,
+      windowTemplate: fixture.windowTemplate,
+      taskList: fixture.taskList,
+      store,
+      actions,
+      onBeforeHide() {
+        beforeHideCount += 1;
+        return new Promise((resolve) => pending.push(resolve));
+      },
+    });
+    const element = windowElementFor(fixture.windowLayer, "crawl");
+    const minimize = element.querySelector("[data-window-minimize]");
+    minimize.emit("click");
+    minimize.emit("click");
+    assert.equal(beforeHideCount, 1);
+    assert.equal(selectors.windowStack(store.getState())[0].windowState, "normal");
+    pending.shift()(true);
+    await flushPromises();
+    assert.equal(selectors.windowStack(store.getState())[0].windowState, "minimized");
+    assert.equal(calls.filter(([name]) => name === "minimize").length, 1);
+
+    actions.restoreWindow("crawl");
+    const close = element.querySelector("[data-window-close]");
+    close.emit("click");
+    assert.equal(beforeHideCount, 2);
+    actions.closeWindow("crawl");
+    pending.shift()(true);
+    await flushPromises();
+    assert.equal(calls.filter(([name]) => name === "close").length, 1);
+    assert.deepEqual(selectors.windowStack(store.getState()), []);
+  } finally {
+    manager?.destroy();
+    fixture.restore();
+  }
+});
+
+test("window manager 移动断点取消交互且 normal rect 只异步修复一次", async () => {
+  const fixture = installWindowManagerDomFixture();
+  const originalRect = windowRect({ x: 5_000, y: 5_000 });
+  const store = createStore({
+    initialState: createInitialState({ windows: [windowRecord("crawl", "normal", originalRect)] }),
+    reportError: () => {},
+  });
+  const calls = [];
+  const actions = createManagerActions(store, calls);
+  let manager = null;
+  try {
+    manager = createWindowManager({
+      windowLayer: fixture.windowLayer,
+      windowTemplate: fixture.windowTemplate,
+      taskList: fixture.taskList,
+      store,
+      actions,
+    });
+    await flushPromises();
+    assert.deepEqual(selectors.windowStack(store.getState())[0].rect, {
+      x: 1168, y: 280, w: 720, h: 480,
+    });
+    assert.equal(calls.filter(([name]) => name === "move").length, 1);
+
+    const element = windowElementFor(fixture.windowLayer, "crawl");
+    const titlebar = element.querySelector("[data-window-titlebar]");
+    titlebar.emit("pointerdown", { pointerId: 21, clientX: 100, clientY: 100 });
+    titlebar.emit("pointermove", { pointerId: 21, clientX: 140, clientY: 120 });
+    const beforeMobile = { ...selectors.windowStack(store.getState())[0].rect };
+    fixture.mobileViewport.setMatches(true);
+    assert.equal(element.hasAttribute("data-window-interacting"), false);
+    assert.equal(calls.filter(([name]) => name === "move").length, 1);
+    assert.deepEqual(selectors.windowStack(store.getState())[0].rect, beforeMobile);
+    assert.equal(element.hasAttribute("data-maximized"), true);
+    assert.deepEqual(manager.getSnapshot(), {
+      appId: "crawl",
+      visibility: "open",
+      maximized: true,
+      preferredWindowState: "normal",
+    });
+    fixture.mobileViewport.setMatches(false);
+    assert.equal(element.hasAttribute("data-maximized"), false);
+  } finally {
+    manager?.destroy();
+    fixture.restore();
+  }
+});
+
+test("window manager 任务栏激活执行最小化恢复，destroy 生命周期错误隔离且幂等", () => {
+  const fixture = installWindowManagerDomFixture();
+  const store = createStore({
+    initialState: createInitialState({ windows: [windowRecord("crawl")] }),
+    reportError: () => {},
+  });
+  const calls = [];
+  const errors = [];
+  const originalConsoleError = console.error;
+  console.error = (message) => errors.push(message);
+  let manager = null;
+  try {
+    manager = createWindowManager({
+      windowLayer: fixture.windowLayer,
+      windowTemplate: fixture.windowTemplate,
+      taskList: fixture.taskList,
+      store,
+      actions: createManagerActions(store, calls),
+      onVisibilityChange() {
+        throw new Error("private lifecycle detail");
+      },
+      onUnmount() {
+        throw new Error("private unmount detail");
+      },
+    });
+    const taskButton = fixture.taskList.children[0]?.children[0] || null;
+    assert(taskButton instanceof HTMLButtonElement);
+    // Fake DOM 的 dataset 是普通对象；补齐浏览器会自动反射的属性。
+    taskButton.setAttribute("data-task-window", "crawl");
+    fixture.taskList.emit("click", { target: taskButton });
+    assert.equal(selectors.windowStack(store.getState())[0].windowState, "minimized");
+    fixture.taskList.emit("click", { target: taskButton });
+    assert.equal(selectors.windowStack(store.getState())[0].windowState, "normal");
+    assert.equal(selectors.focusedAppId(store.getState()), "crawl");
+    manager.destroy();
+    manager.destroy();
+    assert.equal(fixture.windowLayer.children.length, 0);
+    assert.equal(fixture.taskList.children.length, 0);
+    assert.deepEqual(errors, [
+      "ImageWeave 应用生命周期执行失败",
+      "ImageWeave 应用生命周期执行失败",
+      "ImageWeave 应用生命周期执行失败",
+      "ImageWeave 应用生命周期执行失败",
+      "ImageWeave 应用卸载失败",
+    ]);
+    assert.equal(errors.some((message) => message.includes("private")), false);
+  } finally {
+    manager?.destroy();
+    console.error = originalConsoleError;
+    fixture.restore();
+  }
+});
+
+test("window manager mount 失败会清理 DOM、任务栏和宿主监听", () => {
+  const fixture = installWindowManagerDomFixture();
+  const store = createStore({
+    initialState: createInitialState({ windows: [windowRecord("crawl")] }),
+    reportError: () => {},
+  });
+  assert.throws(() => createWindowManager({
+    windowLayer: fixture.windowLayer,
+    windowTemplate: fixture.windowTemplate,
+    taskList: fixture.taskList,
+    store,
+    actions: createManagerActions(store),
+    onMount() {
+      throw new Error("mount failed");
+    },
+  }), /mount failed/);
+  assert.equal(fixture.windowLayer.children.length, 0);
+  assert.equal(fixture.taskList.children.length, 0);
+  assert.equal(fixture.mobileViewport.listeners.size, 0);
+  assert.equal(fixture.windowObject.listeners.get("resize")?.size || 0, 0);
+  fixture.restore();
 });
 
 test("布局防抖在交互期间不写 storage，destroy 会落定最终 rect", () => {
@@ -4286,6 +4835,84 @@ test("壁纸仓库固定 schema、归一化错误且关闭后不泄漏连接行�
     error instanceof WallpaperStorageError
     && error.code === "storage_closed"
   ));
+});
+
+test("Storage facade、service shape、keys 与序列化 snapshot 保持精确兼容", () => {
+  assert.deepEqual(STORAGE_KEYS, {
+    currentApp: "imageweave.ui:current-app",
+    activeBatch: "imageweave.ui:active-batch",
+    windowLayout: "imageweave.window-layout.v1",
+    uiPreferences: "imageweave.ui:ui-preferences",
+  });
+  assert.equal(Object.isFrozen(STORAGE_KEYS), true);
+  const local = new MemoryStorage();
+  const session = new MemoryStorage();
+  const storage = createStorageService({ localStorage: local, sessionStorage: session });
+  assert.deepEqual(Object.keys(storage), [
+    "readCurrentApp", "writeCurrentApp", "readActiveBatchId", "writeActiveBatchId",
+    "clearActiveBatchId", "readWindowLayout", "writeWindowLayout",
+    "readUiPreferences", "writeUiPreferences", "writePersonalizationPreferences",
+  ]);
+  assert.equal(Object.isFrozen(storage), true);
+
+  const layout = [windowRecord("crawl", "normal", windowRect())];
+  storage.writeWindowLayout(layout);
+  assert.equal(
+    local.values.get(STORAGE_KEYS.windowLayout),
+    '{"windows":[{"appId":"crawl","windowState":"normal","rect":{"x":48,"y":36,"w":720,"h":480}}]}',
+  );
+  storage.writeUiPreferences(PERSONALIZATION_DEFAULTS);
+  assert.equal(
+    local.values.get(STORAGE_KEYS.uiPreferences),
+    JSON.stringify(PERSONALIZATION_DEFAULTS),
+  );
+  assert.deepEqual(createDefaultWindowLayout({ width: 800, height: 600 }), [
+    windowRecord("crawl", "normal", { x: 160, y: 40, w: 800, h: 560 }),
+  ]);
+  assert.deepEqual(
+    clampWindowRect(windowRect({ x: 9_999, y: -9_999 }), { width: 800, height: 600 }),
+    { x: 768, y: -448, w: 720, h: 480 },
+  );
+});
+
+test("Storage 危险键与访问器不能污染 snapshot，损坏值仍安全自愈", () => {
+  const local = new MemoryStorage();
+  const session = new MemoryStorage();
+  local.values.set(
+    STORAGE_KEYS.windowLayout,
+    '{"windows":[],"__proto__":{"storagePolluted":true}}',
+  );
+  local.values.set(
+    STORAGE_KEYS.uiPreferences,
+    '{"animations":"off","constructor":{"prototype":{"storagePolluted":true}}}',
+  );
+  const storage = createStorageService({ localStorage: local, sessionStorage: session });
+  assert.deepEqual(storage.readWindowLayout({ width: 800, height: 600 }), [
+    windowRecord("crawl", "normal", { x: 160, y: 40, w: 800, h: 560 }),
+  ]);
+  assert.deepEqual(storage.readUiPreferences(), {
+    ...PERSONALIZATION_DEFAULTS,
+    animations: "off",
+  });
+  assert.equal({}.storagePolluted, undefined);
+  assert.equal(local.values.get(STORAGE_KEYS.windowLayout).includes("__proto__"), false);
+  assert.equal(local.values.get(STORAGE_KEYS.uiPreferences).includes("constructor"), false);
+
+  const accessorLayout = windowRecord("crawl");
+  let getterCalled = false;
+  Object.defineProperty(accessorLayout, "rect", {
+    enumerable: true,
+    get() {
+      getterCalled = true;
+      return windowRect();
+    },
+  });
+  assert.throws(() => storage.writeWindowLayout([accessorLayout]), TypeError);
+  assert.equal(getterCalled, false);
+  for (const key of ["__proto__", "prototype", "constructor"]) {
+    const unsafe = JSON.parse(`{"appId":"crawl","windowState":"normal","rect":{"x":48,"y":36,"w":720,"h":480},"${key}":{}}`);
+    assert.throws(() => storage.writeWindowLayout([unsafe]), TypeError);
+  }
 });
 
 test("Storage 只写固定命名空间白名单并区分 session/local", () => {
