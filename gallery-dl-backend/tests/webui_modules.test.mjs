@@ -260,6 +260,7 @@ import {
   isValidBatchId,
   STORAGE_KEYS,
 } from "../gdl_backend/webui/js/core/storage.js";
+import { createIcon } from "../gdl_backend/webui/js/components/icons.js";
 import {
   normalizeStatus,
   resolveStatusPresentation,
@@ -1405,6 +1406,22 @@ test("registry 按 ID 合并并拒绝重复、缺失、多余控制器及不完�
       ]),
       new RegExp(`crawl 缺少生命周期方法：${hook}`),
     );
+  }
+});
+
+test("图标工厂覆盖未知名称、class 投影与 SVG 宿主失败", () => {
+  assert.throws(() => createIcon("unknown"), /未知图标/);
+  const fixture = installWindowManagerDomFixture();
+  const OriginalSvgElement = globalThis.SVGElement;
+  try {
+    const icon = createIcon("minus", { size: 16, strokeWidth: 2, className: "fixture-icon" });
+    assert(icon instanceof SVGElement);
+    assert.equal(icon.getAttribute("class"), "fixture-icon");
+    globalThis.SVGElement = class IncompatibleSvgElement {};
+    assert.throws(() => createIcon("minus"), /图标创建失败/);
+  } finally {
+    globalThis.SVGElement = OriginalSvgElement;
+    fixture.restore();
   }
 });
 
