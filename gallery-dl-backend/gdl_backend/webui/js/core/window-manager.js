@@ -1,46 +1,30 @@
 import { getApplicationById } from "./app-registry.js";
 import {
-  clampRect,
-  maximizedRect,
-  nextRectForDrag,
-  nextRectForResize,
   WINDOW_MIN_HEIGHT,
   WINDOW_MIN_WIDTH,
 } from "./window-geometry.js";
+import {
+  deriveWindowManagerSnapshot,
+  deriveWindowRenderPlan,
+  deriveWindowViews,
+  displayedWindowRect,
+  isEffectivelyMaximized,
+  isForcedMobileMaximized,
+  nextKeyboardResizeRect,
+  nextPointerInteractionRect,
+  normalWindowRect,
+  sameWindowRect,
+} from "./window-policy.js";
 import { selectors } from "./store.js";
+
+export { deriveWindowViews };
 import { createIcon } from "../components/icons.js";
 import {
   activateTaskbarWindow,
   createTaskbarWindowList,
 } from "../components/taskbar-windows.js";
 
-const KEYBOARD_RESIZE_STEP = 16;
 const MOBILE_QUERY = "(max-width: 767px)";
-
-export function deriveWindowViews(windowStack, focusedAppId, mobileViewport = false) {
-  if (!Array.isArray(windowStack)) throw new TypeError("窗口视图来源必须是数组");
-  const mobile = mobileViewport === true;
-  return Object.freeze(windowStack.map((record) => {
-    const minimized = record.windowState === "minimized";
-    const open = !minimized;
-    return Object.freeze({
-      appId: record.appId,
-      open,
-      minimized,
-      maximized: mobile || record.windowState === "maximized",
-      visible: open && (!mobile || record.appId === focusedAppId),
-      rect: Object.freeze({ ...record.rect }),
-    });
-  }));
-}
-
-function sameRect(left, right) {
-  return Boolean(left && right)
-    && left.x === right.x
-    && left.y === right.y
-    && left.w === right.w
-    && left.h === right.h;
-}
 
 function requireCloneElement(root, selector, Constructor = HTMLElement) {
   const element = root.querySelector(selector);
@@ -98,19 +82,21 @@ export function createWindowManager({
     selectors.windowStack(store.getState()).find((record) => record.appId === appId) || null
   );
 
-  const isForcedMobileMaximized = (record) => Boolean(record && mobileViewport.matches);
+  const forcedMobileMaximized = (record) => (
+    isForcedMobileMaximized(record, mobileViewport.matches)
+  );
 
-  const isEffectivelyMaximized = (record) => Boolean(
-    record && (record.windowState === "maximized" || isForcedMobileMaximized(record))
+  const effectivelyMaximized = (record) => (
+    isEffectivelyMaximized(record, mobileViewport.matches)
   );
 
   const normalRect = (record) => {
     const viewport = viewportSnapshot();
-    return clampRect(record.rect, viewport, geometryOptions(viewport));
+    return normalWindowRect(record, viewport, geometryOptions(viewport));
   };
 
   const queueNormalRectRepair = (record, rect) => {
-    if (sameRect(record.rect, rect)) return;
+    if (sameWindowRect(record.rect, rect)) return;
     const repair = { rect };
     pendingRectRepairs.set(record.appId, repair);
     queueMicrotask(() => {
@@ -126,18 +112,22 @@ export function createWindowManager({
         !current
         || instance?.interaction
         || current.windowState !== "normal"
-        || isEffectivelyMaximized(current)
+        || effectivelyMaximized(current)
       ) return;
       const normalized = normalRect(current);
-      if (!sameRect(current.rect, normalized)) actions.moveWindow(current.appId, normalized);
+      if (!sameWindowRect(current.rect, normalized)) actions.moveWindow(current.appId, normalized);
     });
   };
 
-  const displayedRect = (record, maximized = isEffectivelyMaximized(record)) => {
+  const displayedRect = (record, maximized = effectivelyMaximized(record)) => {
     const viewport = viewportSnapshot();
-    return maximized
-      ? maximizedRect(viewport, geometryOptions(viewport))
-      : clampRect(record.rect, viewport, geometryOptions(viewport));
+    return displayedWindowRect(
+      record,
+      viewport,
+      geometryOptions(viewport),
+      mobileViewport.matches,
+      maximized,
+    );
   };
 
   const applyRect = (element, rect) => {
@@ -185,8 +175,8 @@ export function createWindowManager({
         commit
         && record
         && record.windowState !== "minimized"
-        && !isEffectivelyMaximized(record)
-        && !sameRect(interaction.rect, record.rect)
+        && !effectivelyMaximized(record)
+        && !sameWindowRect(interaction.rect, record.rect)
       ) {
         // 保持交互样式直至同步渲染完成，避免最终矩形参与恢复后的 transition。
         actions.moveWindow(instance.appId, interaction.rect);
@@ -210,7 +200,7 @@ export function createWindowManager({
       || event.isPrimary === false
       || !record
       || record.windowState === "minimized"
-      || isEffectivelyMaximized(record)
+      || effectivelyMaximized(record)
     ) return;
 
     try {
@@ -241,52 +231,30 @@ export function createWindowManager({
       return;
     }
     const viewport = viewportSnapshot();
-    const options = geometryOptions(viewport);
-    const pointerDelta = {
-      x: event.clientX - interaction.startClientX,
-      y: event.clientY - interaction.startClientY,
-    };
-    if (interaction.type === "drag") {
-      interaction.rect = nextRectForDrag(
-        interaction.startRect,
-        pointerDelta,
-        viewport,
-        options,
-      );
-    } else {
-      interaction.rect = nextRectForResize(
-        interaction.startRect,
-        {
-          x: interaction.resizeDirection === "bottom" ? 0 : pointerDelta.x,
-          y: interaction.resizeDirection === "right" ? 0 : pointerDelta.y,
-        },
-        viewport,
-        options,
-      );
-    }
+    interaction.rect = nextPointerInteractionRect(
+      interaction,
+      event,
+      viewport,
+      geometryOptions(viewport),
+    );
     // 高频路径只触碰当前实例的样式；store 与 storage 留到统一收尾。
     applyRect(instance.element, interaction.rect);
   };
 
   const resizeFromKeyboard = (instance, direction, event) => {
-    const deltas = {
-      ArrowLeft: { x: -KEYBOARD_RESIZE_STEP, y: 0 },
-      ArrowRight: { x: KEYBOARD_RESIZE_STEP, y: 0 },
-      ArrowUp: { x: 0, y: -KEYBOARD_RESIZE_STEP },
-      ArrowDown: { x: 0, y: KEYBOARD_RESIZE_STEP },
-    };
-    const delta = deltas[event.key];
-    if (!delta) return;
-    if (
-      (direction === "right" && delta.y !== 0)
-      || (direction === "bottom" && delta.x !== 0)
-    ) return;
     const record = recordFor(instance.appId);
-    if (!record || record.windowState === "minimized" || isEffectivelyMaximized(record)) return;
-    event.preventDefault();
+    if (!record || record.windowState === "minimized" || effectivelyMaximized(record)) return;
     const viewport = viewportSnapshot();
-    const rect = nextRectForResize(record.rect, delta, viewport, geometryOptions(viewport));
-    if (!sameRect(rect, record.rect)) actions.moveWindow(instance.appId, rect);
+    const rect = nextKeyboardResizeRect(
+      record,
+      direction,
+      event.key,
+      viewport,
+      geometryOptions(viewport),
+    );
+    if (!rect) return;
+    event.preventDefault();
+    if (!sameWindowRect(rect, record.rect)) actions.moveWindow(instance.appId, rect);
   };
 
   const hideStateFor = (appId) => {
@@ -366,7 +334,7 @@ export function createWindowManager({
     });
     const onMaximize = (event) => {
       const record = recordFor(instance.appId);
-      if (!record || isForcedMobileMaximized(record)) return;
+      if (!record || forcedMobileMaximized(record)) return;
       actions.toggleWindowMaximized(instance.appId);
       if (event.detail === 0) focusBody(instance.appId);
     };
@@ -505,7 +473,7 @@ export function createWindowManager({
 
   const syncInstance = (instance, record, view, index, focusedAppId) => {
     const app = getApplicationById(record.appId);
-    const forced = isForcedMobileMaximized(record);
+    const forced = forcedMobileMaximized(record);
     instance.element.hidden = !view.visible;
     instance.element.dataset.windowVisibility = view.open ? "open" : "minimized";
     instance.element.dataset.windowState = record.windowState;
@@ -566,10 +534,10 @@ export function createWindowManager({
       if (!windows.has(record.appId)) createInstance(record.appId);
     }
     const focusedAppId = selectors.focusedAppId(store.getState());
-    const views = deriveWindowViews(stack, focusedAppId, mobileViewport.matches);
-    stack.forEach((record, index) => {
-      syncInstance(windows.get(record.appId), record, views[index], index, focusedAppId);
-    });
+    const renderPlan = deriveWindowRenderPlan(stack, focusedAppId, mobileViewport.matches);
+    for (const { record, view, zIndex } of renderPlan) {
+      syncInstance(windows.get(record.appId), record, view, zIndex, focusedAppId);
+    }
     taskbarWindows?.render(stack, focusedAppId);
   };
 
@@ -624,14 +592,11 @@ export function createWindowManager({
 
   return Object.freeze({
     getSnapshot() {
-      return Object.freeze({
-        appId: currentView.appId,
-        visibility: currentView.visibility,
-        maximized: currentView.appId === null
-          ? false
-          : isEffectivelyMaximized(recordFor(currentView.appId)),
-        preferredWindowState: currentView.windowState,
-      });
+      return deriveWindowManagerSnapshot(
+        currentView,
+        recordFor(currentView.appId),
+        mobileViewport.matches,
+      );
     },
     getFocusedBody() {
       const appId = selectors.focusedAppId(store.getState());

@@ -213,6 +213,14 @@ import {
   nextRectForDrag,
   nextRectForResize,
 } from "../gdl_backend/webui/js/core/window-geometry.js";
+import {
+  deriveWindowManagerSnapshot,
+  deriveWindowRenderPlan,
+  deriveWindowViews as derivePureWindowViews,
+  nextKeyboardResizeRect,
+  nextPointerInteractionRect,
+  sameWindowRect,
+} from "../gdl_backend/webui/js/core/window-policy.js";
 import { describeApplicationLaunchers } from "../gdl_backend/webui/js/core/desktop.js";
 import * as windowManagerFacade from "../gdl_backend/webui/js/core/window-manager.js";
 import {
@@ -2837,6 +2845,59 @@ test("任务栏按钮真实激活路径只执行 descriptor 对应的生产回�
   available.delete("crawl");
   assert.equal(activateTaskbarWindow(byId.get("crawl"), callbacks), false);
   assert.deepEqual(calls, []);
+});
+
+test("window pure policy 独立投影焦点/z 序、交互矩形与兼容快照", () => {
+  assert.equal(derivePureWindowViews, deriveWindowViews);
+  const stack = [
+    windowRecord("crawl", "normal", windowRect({ x: 100, y: 80, w: 500, h: 300 })),
+    windowRecord("tasks", "maximized", windowRect({ x: 40, y: 30, w: 640, h: 420 })),
+  ];
+  const plan = deriveWindowRenderPlan(stack, "tasks", false);
+  assert.equal(Object.isFrozen(plan), true);
+  assert.deepEqual(plan.map(({ record, view, zIndex }) => [
+    record.appId, view.visible, view.maximized, zIndex,
+  ]), [
+    ["crawl", true, false, 0],
+    ["tasks", true, true, 1],
+  ]);
+  assert.equal(plan[0].record, stack[0]);
+  assert.equal("zIndex" in stack[0], false);
+
+  const viewport = { width: 1000, height: 700 };
+  const options = { minW: 360, minH: 240, taskbarHeight: 40 };
+  const drag = nextPointerInteractionRect({
+    type: "drag",
+    resizeDirection: "",
+    startClientX: 10,
+    startClientY: 20,
+    startRect: stack[0].rect,
+  }, { clientX: 35, clientY: 50 }, viewport, options);
+  assert.deepEqual(drag, { x: 125, y: 110, w: 500, h: 300 });
+  const resize = nextPointerInteractionRect({
+    type: "resize",
+    resizeDirection: "right",
+    startClientX: 10,
+    startClientY: 20,
+    startRect: stack[0].rect,
+  }, { clientX: 42, clientY: 99 }, viewport, options);
+  assert.deepEqual(resize, { x: 100, y: 80, w: 532, h: 300 });
+  assert.deepEqual(
+    nextKeyboardResizeRect(stack[0], "bottom", "ArrowDown", viewport, options),
+    { x: 100, y: 80, w: 500, h: 316 },
+  );
+  assert.equal(nextKeyboardResizeRect(stack[0], "bottom", "ArrowRight", viewport, options), null);
+  assert.equal(sameWindowRect(stack[0].rect, { ...stack[0].rect }), true);
+  assert.deepEqual(deriveWindowManagerSnapshot(
+    { appId: "tasks", visibility: "open", windowState: "maximized" },
+    stack[1],
+    false,
+  ), {
+    appId: "tasks",
+    visibility: "open",
+    maximized: true,
+    preferredWindowState: "maximized",
+  });
 });
 
 test("移动断点窗口视图全部最大化且仅聚焦窗口可见", () => {

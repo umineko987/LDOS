@@ -789,6 +789,7 @@ class ApiTests(unittest.TestCase):
             "/ui/js/core/storage-service.js",
             "/ui/js/core/storage-snapshot.js",
             "/ui/js/core/window-manager.js",
+            "/ui/js/core/window-policy.js",
             "/ui/js/components/dialog.js",
             "/ui/js/components/error-view.js",
             "/ui/js/components/proxy-dom.js",
@@ -920,6 +921,7 @@ class ApiTests(unittest.TestCase):
             "/ui/js/core/store-transition.js",
             "/ui/js/core/store-window-transition.js",
             "/ui/js/core/window-manager.js",
+            "/ui/js/core/window-policy.js",
         ]
         component_paths = [
             "/ui/js/components/dialog.js",

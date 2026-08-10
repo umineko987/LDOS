@@ -1208,6 +1208,9 @@ class WebUiModuleTests(unittest.TestCase):
         manager = (webui / "js" / "core" / "window-manager.js").read_text(
             encoding="utf-8"
         )
+        window_policy = (
+            webui / "js" / "core" / "window-policy.js"
+        ).read_text(encoding="utf-8")
         desktop = (webui / "js" / "core" / "desktop.js").read_text(
             encoding="utf-8"
         )
@@ -1307,7 +1310,7 @@ class WebUiModuleTests(unittest.TestCase):
         ]
         self.assertIn("applyRect(instance.element, interaction.rect)", pointer_move)
         self.assertNotIn("actions.", pointer_move)
-        self.assertIn("KEYBOARD_RESIZE_STEP = 16", manager)
+        self.assertIn("KEYBOARD_RESIZE_STEP = 16", window_policy)
 
         self.assertRegex(
             actions,
@@ -1352,6 +1355,9 @@ class WebUiModuleTests(unittest.TestCase):
         manager = (webui / "js" / "core" / "window-manager.js").read_text(
             encoding="utf-8"
         )
+        window_policy = (
+            webui / "js" / "core" / "window-policy.js"
+        ).read_text(encoding="utf-8")
         taskbar = (
             webui / "js" / "components" / "taskbar-windows.js"
         ).read_text(encoding="utf-8")
@@ -1411,10 +1417,10 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn("actions.restoreWindow(appId)", task_activation)
         self.assertIn("actions.focusWindow(appId)", task_activation)
         self.assertIn("deriveWindowViews", manager)
-        self.assertIn("mobile || record.windowState", manager)
-        self.assertIn("rect: Object.freeze({ ...record.rect })", manager)
+        self.assertIn("mobile || record.windowState", window_policy)
+        self.assertIn("rect: Object.freeze({ ...record.rect })", window_policy)
         view_projection = javascript_block(
-            manager, "export function deriveWindowViews"
+            window_policy, "export function deriveWindowViews"
         )
         self.assertNotIn("actions.", view_projection)
         self.assertNotIn("record.rect =", view_projection)
