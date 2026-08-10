@@ -782,6 +782,12 @@ class ApiTests(unittest.TestCase):
             "/ui/js/core/wallpaper-image-import.js",
             "/ui/js/core/wallpaper-storage.js",
             "/ui/js/core/storage.js",
+            "/ui/js/core/storage-contract.js",
+            "/ui/js/core/storage-layout.js",
+            "/ui/js/core/storage-persistence.js",
+            "/ui/js/core/storage-preferences.js",
+            "/ui/js/core/storage-service.js",
+            "/ui/js/core/storage-snapshot.js",
             "/ui/js/core/window-manager.js",
             "/ui/js/components/dialog.js",
             "/ui/js/components/error-view.js",
@@ -898,6 +904,12 @@ class ApiTests(unittest.TestCase):
             "/ui/js/core/diagnostics-model.js",
             "/ui/js/core/router.js",
             "/ui/js/core/storage.js",
+            "/ui/js/core/storage-contract.js",
+            "/ui/js/core/storage-layout.js",
+            "/ui/js/core/storage-persistence.js",
+            "/ui/js/core/storage-preferences.js",
+            "/ui/js/core/storage-service.js",
+            "/ui/js/core/storage-snapshot.js",
             "/ui/js/core/store.js",
             "/ui/js/core/store-business-transition.js",
             "/ui/js/core/store-contract.js",
@@ -951,7 +963,7 @@ class ApiTests(unittest.TestCase):
                 self.assertNotIn("globalThis.fetch", source, path)
                 self.assertNotIn("fetch(", source, path)
             self.assertNotIn("XMLHttpRequest", source, path)
-            if path != "/ui/js/core/storage.js":
+            if path != "/ui/js/core/storage-persistence.js":
                 self.assertNotIn("localStorage", source, path)
                 self.assertNotIn("sessionStorage", source, path)
 

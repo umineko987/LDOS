@@ -219,6 +219,25 @@ import {
   createWindowManager,
   deriveWindowViews,
 } from "../gdl_backend/webui/js/core/window-manager.js";
+import {
+  deserializeWindowLayout,
+  projectWindowLayout,
+  serializeWindowLayout,
+} from "../gdl_backend/webui/js/core/storage-layout.js";
+import { createStoragePersistenceAdapter } from "../gdl_backend/webui/js/core/storage-persistence.js";
+import {
+  deserializeUiPreferences,
+  projectUiPreferences,
+  serializeUiPreferences,
+} from "../gdl_backend/webui/js/core/storage-preferences.js";
+import { createStorageServiceFromAdapter } from "../gdl_backend/webui/js/core/storage-service.js";
+import {
+  parseStorageObject,
+  projectApplicationId,
+  projectBatchId,
+  readApplicationIdSnapshot,
+  readBatchIdSnapshot,
+} from "../gdl_backend/webui/js/core/storage-snapshot.js";
 import * as storageFacade from "../gdl_backend/webui/js/core/storage.js";
 import {
   clampWindowRect,
@@ -4976,6 +4995,65 @@ test("Storage facade、service shape、keys 与序列化 snapshot 保持精确�
     clampWindowRect(windowRect({ x: 9_999, y: -9_999 }), { width: 800, height: 600 }),
     { x: 768, y: -448, w: 720, h: 480 },
   );
+});
+
+test("Storage snapshot/layout/preference/persistence/service 各层可独立纯测试", () => {
+  assert.deepEqual(parseStorageObject('{"safe":true}'), { safe: true });
+  assert.equal(parseStorageObject("x".repeat(4097)), null);
+  assert.equal(readApplicationIdSnapshot("review"), "review");
+  assert.equal(readApplicationIdSnapshot("unknown"), null);
+  assert.equal(projectApplicationId("crawl"), "crawl");
+  assert.throws(() => projectApplicationId("unknown"), TypeError);
+  assert.equal(readBatchIdSnapshot("batch:1"), "batch:1");
+  assert.equal(readBatchIdSnapshot("../private"), null);
+  assert.equal(projectBatchId("batch:1"), "batch:1");
+  assert.throws(() => projectBatchId("../private"), TypeError);
+
+  const serializedLayout = serializeWindowLayout([
+    windowRecord("crawl", "normal", windowRect({ x: 10 })),
+    windowRecord("review", "maximized", windowRect({ x: 20 })),
+    windowRecord("crawl", "minimized", windowRect({ x: 30 })),
+  ]);
+  assert.deepEqual(projectWindowLayout(JSON.parse(serializedLayout).windows), [
+    windowRecord("review", "maximized", windowRect({ x: 20 })),
+    windowRecord("crawl", "minimized", windowRect({ x: 30 })),
+  ]);
+  assert.deepEqual(
+    deserializeWindowLayout(serializedLayout, { width: 1280, height: 720 }),
+    JSON.parse(serializedLayout).windows,
+  );
+
+  const migrated = deserializeUiPreferences(JSON.stringify({
+    animations: "reduced",
+    wallpaperFit: "contain",
+    taskbarDensity: "compact",
+  }));
+  assert.deepEqual(migrated, {
+    ...PERSONALIZATION_DEFAULTS,
+    animations: "off",
+    wallpaperFit: "contain",
+    taskbarDensity: "compact",
+  });
+  assert.deepEqual(projectUiPreferences(migrated), migrated);
+  assert.equal(serializeUiPreferences(migrated), JSON.stringify(migrated));
+
+  const local = new MemoryStorage();
+  const session = new MemoryStorage();
+  const persistence = createStoragePersistenceAdapter({
+    localStorage: local,
+    sessionStorage: session,
+  });
+  assert.equal(persistence.writeSession(STORAGE_KEYS.currentApp, "crawl"), true);
+  assert.equal(persistence.readSession(STORAGE_KEYS.currentApp), "crawl");
+  assert.throws(() => persistence.readLocal(STORAGE_KEYS.currentApp), TypeError);
+  assert.throws(() => persistence.writeSession(STORAGE_KEYS.windowLayout, "{}"), TypeError);
+
+  const service = createStorageServiceFromAdapter(persistence);
+  assert.equal(service.readCurrentApp(), "crawl");
+  assert.equal(service.writeActiveBatchId("batch:1"), true);
+  assert.equal(service.readActiveBatchId(), "batch:1");
+  assert.equal(session.values.has(STORAGE_KEYS.windowLayout), false);
+  assert.equal(local.values.has(STORAGE_KEYS.activeBatch), false);
 });
 
 test("Storage 危险键与访问器不能污染 snapshot，损坏值仍安全自愈", () => {
