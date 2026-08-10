@@ -16,7 +16,8 @@ from gdl_backend._scheduler_artifacts import (
 
 class SchedulerArtifactDecisionTests(unittest.TestCase):
     def test_stdout_path_parsing_is_lexical(self):
-        absolute = Path("/tmp/output/image.jpg")
+        absolute = Path(tempfile.gettempdir()).resolve() / "output" / "image.jpg"
+        self.assertTrue(absolute.is_absolute())
 
         self.assertEqual(parse_artifact_output(str(absolute)), absolute)
         self.assertEqual(parse_artifact_output(f"# {absolute}"), absolute)

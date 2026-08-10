@@ -212,9 +212,10 @@ class AuthAdapterTests(unittest.TestCase):
         process = Process()
         spawn = AsyncMock(return_value=process)
         terminate = AsyncMock()
+        repo_path = Path("/fixture/gallery-dl")
         adapter = GalleryDlPixivOAuthAdapter(
             python_executable="/fixture/python",
-            repo_path=Path("/fixture/gallery-dl"),
+            repo_path=repo_path,
             spawn_process=spawn,
             terminate_process=terminate,
         )
@@ -241,10 +242,10 @@ class AuthAdapterTests(unittest.TestCase):
         self.assertIn("extractor.oauth.input=true", command)
         self.assertIn("proxy=http://user:secret@127.0.0.1:7890", command)
         self.assertEqual(command[-1], "oauth:pixiv")
-        self.assertEqual(spawn.await_args.kwargs["cwd"], "/fixture/gallery-dl")
+        self.assertEqual(spawn.await_args.kwargs["cwd"], str(repo_path))
         self.assertEqual(
             spawn.await_args.kwargs["env"]["PYTHONPATH"].split(__import__("os").pathsep)[0],
-            "/fixture/gallery-dl",
+            str(repo_path),
         )
         terminate.assert_not_awaited()
 
