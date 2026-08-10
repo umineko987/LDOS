@@ -15,7 +15,7 @@ This directory replaces the former dependency on a developer's
   structural pair deliberately has low SSCD similarity and must classify as
   `L2-结构` through DINO, edge, and geometric evidence.
 
-Reproduce the images and verify their committed hashes:
+Reproduce the images, compare decoded pixels across platforms, and verify the committed file hashes:
 
 ```bash
 ./.venv/bin/python tests/fixtures/real_variant_pairs/generate.py --check

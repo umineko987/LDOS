@@ -132,9 +132,11 @@ class RealVariantPairTests(unittest.TestCase):
             destination = Path(temporary)
             generator.render_fixtures(destination)
             for name in generator.IMAGE_NAMES:
+                generated = destination / name
+                committed = FIXTURE_ROOT / name
                 self.assertEqual(
-                    sha256(destination / name),
-                    self.manifest["files"][name]["sha256"],
+                    generator.pixel_sha256(generated),
+                    generator.pixel_sha256(committed),
                     name,
                 )
 

@@ -246,6 +246,18 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def pixel_sha256(path: Path) -> str:
+    """Hash decoded pixels rather than platform-dependent PNG compression."""
+
+    with Image.open(path) as image:
+        image.load()
+        digest = hashlib.sha256()
+        digest.update(image.mode.encode("ascii"))
+        digest.update(f"{image.width}x{image.height}".encode("ascii"))
+        digest.update(image.tobytes())
+    return digest.hexdigest()
+
+
 def check_fixtures(destination: Path) -> None:
     manifest = json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
     expected = manifest["files"]
@@ -253,13 +265,21 @@ def check_fixtures(destination: Path) -> None:
         generated = Path(temporary)
         render_fixtures(generated)
         for name in IMAGE_NAMES:
-            actual_hash = sha256(generated / name)
-            if actual_hash != expected[name]["sha256"]:
+            committed_path = destination / name
+            committed_hash = sha256(committed_path)
+            if committed_hash != expected[name]["sha256"]:
                 raise SystemExit(
-                    f"fixture regeneration mismatch for {name}: "
-                    f"expected {expected[name]['sha256']}, got {actual_hash}"
+                    f"committed fixture hash mismatch for {name}: "
+                    f"expected {expected[name]['sha256']}, got {committed_hash}"
                 )
-    print("real-variant fixture generation is reproducible")
+            generated_pixel_hash = pixel_sha256(generated / name)
+            committed_pixel_hash = pixel_sha256(committed_path)
+            if generated_pixel_hash != committed_pixel_hash:
+                raise SystemExit(
+                    f"fixture pixel regeneration mismatch for {name}: "
+                    f"expected {committed_pixel_hash}, got {generated_pixel_hash}"
+                )
+    print("real-variant fixture pixels are reproducible and committed hashes match")
 
 
 def main() -> int:
