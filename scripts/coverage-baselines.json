@@ -48,7 +48,7 @@
       "minimum": {
         "line": {
           "covered": 1298,
-          "total": 1799
+          "total": 1797
         },
         "branch": {
           "covered": 352,
@@ -80,6 +80,36 @@
         "branch": {
           "covered": 439,
           "total": 1096
+        }
+      },
+      "minimum_by_environment": {
+        "Windows-py3.11": {
+          "measured_environment": "GitHub Actions windows-2025, CPython 3.11.9, coverage.py 7.15.4",
+          "reason": "Windows does not execute POSIX permission and /proc cleanup paths; its platform-specific coverage is gated independently rather than compared with Linux.",
+          "minimum": {
+            "line": {
+              "covered": 1662,
+              "total": 2869
+            },
+            "branch": {
+              "covered": 424,
+              "total": 1096
+            }
+          }
+        },
+        "Windows-py3.14": {
+          "measured_environment": "GitHub Actions windows-2025, CPython 3.14.6, coverage.py 7.15.4",
+          "reason": "Windows does not execute POSIX permission and /proc cleanup paths; its platform-specific coverage is gated independently rather than compared with Linux.",
+          "minimum": {
+            "line": {
+              "covered": 1660,
+              "total": 2869
+            },
+            "branch": {
+              "covered": 424,
+              "total": 1096
+            }
+          }
         }
       }
     }

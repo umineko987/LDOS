@@ -1,3 +1,4 @@
+import importlib
 import os
 import sys
 import shutil
@@ -57,15 +58,21 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-try:
-    from PIL import ImageTk
-    import tkinter as tk
-    from tkinter import ttk, messagebox
-except ImportError:
-    ImageTk = None
-    tk = None
-    ttk = None
-    messagebox = None
+def _load_gui_modules(import_module=importlib.import_module):
+    """Load the optional Tk modules through an injectable import boundary."""
+
+    try:
+        return (
+            import_module("PIL.ImageTk"),
+            import_module("tkinter"),
+            import_module("tkinter.ttk"),
+            import_module("tkinter.messagebox"),
+        )
+    except ImportError:
+        return None, None, None, None
+
+
+ImageTk, tk, ttk, messagebox = _load_gui_modules()
 
 # ================= 核心处理逻辑 =================
 
