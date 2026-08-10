@@ -97,19 +97,6 @@ def discover_chrome_executable(explicit: str = "") -> Path:
     raise FileNotFoundError("Chrome or Chromium executable was not found")
 
 
-def read_devtools_active_port(profile_dir: Path) -> tuple[int, str] | None:
-    path = profile_dir / "DevToolsActivePort"
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-        port = int(lines[0])
-        endpoint = str(lines[1]).strip()
-    except (OSError, ValueError, IndexError):
-        return None
-    if not 1 <= port <= 65535 or not endpoint.startswith("/devtools/browser/"):
-        return None
-    return port, f"ws://127.0.0.1:{port}{endpoint}"
-
-
 def allocate_debug_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
