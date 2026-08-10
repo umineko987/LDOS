@@ -129,10 +129,27 @@ import {
   resolveNavigationTarget,
 } from "../gdl_backend/webui/js/core/router.js";
 import {
+  isBusinessActionType,
+  reduceBusinessState,
+} from "../gdl_backend/webui/js/core/store-business-transition.js";
+import { normalizeAction } from "../gdl_backend/webui/js/core/store-contract.js";
+import {
   cloneInput,
   makeImmutable,
 } from "../gdl_backend/webui/js/core/store-data.js";
+import { createStore as createStoreFromFactory } from "../gdl_backend/webui/js/core/store-factory.js";
 import { createStoreRuntime } from "../gdl_backend/webui/js/core/store-runtime.js";
+import {
+  actionCreators as stateActionCreators,
+  createInitialState as createStateSnapshot,
+  selectors as stateSelectors,
+} from "../gdl_backend/webui/js/core/store-state.js";
+import { reduceNormalizedRootState } from "../gdl_backend/webui/js/core/store-transition.js";
+import {
+  isWindowActionType,
+  reduceWindowState,
+  withDerivedWindowFocus,
+} from "../gdl_backend/webui/js/core/store-window-transition.js";
 import * as storeFacade from "../gdl_backend/webui/js/core/store.js";
 import {
   ACTION_TYPES,
@@ -1639,6 +1656,50 @@ test("root reducer 是纯转移并统一维护窗口去重、z 序和焦点回�
   const closed = rootReducer(opened, actionCreators.windowClosed("crawl"));
   assert.equal(closed.ui.focusedAppId, "tasks");
   assert.throws(() => rootReducer(closed, { type: "unknown/action" }), UnknownActionError);
+});
+
+test("store contract/state/business/window/root/factory 各层可独立导入和纯执行", () => {
+  assert.equal(stateActionCreators, actionCreators);
+  assert.equal(stateSelectors, selectors);
+  assert.deepEqual(createStateSnapshot(), createInitialState());
+  assert.equal(isBusinessActionType(ACTION_TYPES.SYSTEM_SHELL_SUMMARY_UPDATED), true);
+  assert.equal(isBusinessActionType(ACTION_TYPES.UI_WINDOW_OPENED), false);
+  assert.equal(isWindowActionType(ACTION_TYPES.UI_WINDOW_OPENED), true);
+  assert.equal(isWindowActionType(ACTION_TYPES.REVIEW_CLEARED), false);
+
+  const rawPayload = shellSnapshot();
+  const normalized = normalizeAction(actionCreators.shellSummaryUpdated(rawPayload));
+  rawPayload.summary.api.label = "mutated outside";
+  const initial = createInitialState();
+  const business = reduceBusinessState(initial, normalized);
+  assert.equal(business.system.summary.api.label, "API 已就绪");
+  assert.equal(initial.system.health, null);
+
+  const openedWithoutFocus = reduceWindowState(
+    initial,
+    normalizeAction(actionCreators.windowOpened("crawl")),
+  );
+  assert.equal(openedWithoutFocus.ui.focusedAppId, null);
+  const opened = withDerivedWindowFocus(openedWithoutFocus);
+  assert.equal(opened.ui.focusedAppId, "crawl");
+  const rootOpened = reduceNormalizedRootState(
+    initial,
+    normalizeAction(actionCreators.windowOpened("crawl")),
+  );
+  assert.deepEqual(rootOpened, opened);
+
+  const factoryStore = createStoreFromFactory({ reportError: () => {} });
+  factoryStore.dispatch(actionCreators.windowOpened("crawl"));
+  assert.equal(factoryStore.getState().ui.focusedAppId, "crawl");
+
+  const dangerous = JSON.parse(
+    '{"open":true,"constructor":{"prototype":{"polluted":true}}}',
+  );
+  assert.throws(
+    () => rootReducer(initial, { type: ACTION_TYPES.UI_START_MENU_CHANGED, payload: dangerous }),
+    TypeError,
+  );
+  assert.equal({}.polluted, undefined);
 });
 
 test("store data 与 runtime 可脱离 root transition 单独导入和纯执行", () => {

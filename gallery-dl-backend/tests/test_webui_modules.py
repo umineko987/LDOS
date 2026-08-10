@@ -438,7 +438,14 @@ class WebUiModuleTests(unittest.TestCase):
             self.assertNotIn("/api/v1/proxy", source, name)
             self.assertNotIn("/api/v1/sites", source, name)
 
-        store = (webui / "js" / "core" / "store.js").read_text(encoding="utf-8")
+        store = "\n".join(
+            (webui / "js" / "core" / name).read_text(encoding="utf-8")
+            for name in (
+                "store-contract.js",
+                "store-state.js",
+                "store-business-transition.js",
+            )
+        )
         for action in (
             'DIAGNOSTICS_RECEIVED: "diagnostics/received"',
             'CRAWL_SEARCH_RECEIVED: "crawl/searchReceived"',
