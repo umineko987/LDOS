@@ -6,9 +6,6 @@ const FILTERS = new Set(["", "duplicate", "single", "unreadable"]);
 const GROUP_KINDS = new Set(["duplicate", "single", "unreadable"]);
 const ACTIVE_STATUSES = new Set(["pending", "analyzing", "auto_applying", "applying"]);
 const LISTABLE_STATUSES = new Set(["ready", "applying", "applied", "apply_failed"]);
-const STABLE_STATUSES = new Set([
-  "not_started", "waiting_for_crawl", "ready", "applied", "failed", "apply_failed", "disabled",
-]);
 const STATUS_LABELS = Object.freeze({
   not_started: "去重未开始", waiting_for_crawl: "待开始分析", pending: "分析已排队",
   analyzing: "去重分析中", auto_applying: "自动去重中", ready: "待审核",
@@ -382,10 +379,6 @@ export function markReviewPageSaved(reviewState, summary) {
 
 export function shouldPollReview(summary) {
   return Boolean(summary && ACTIVE_STATUSES.has(summary.status));
-}
-
-export function reviewIsStable(summary) {
-  return Boolean(summary && STABLE_STATUSES.has(summary.status));
 }
 
 export function reviewCanList(summary) {

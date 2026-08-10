@@ -375,7 +375,6 @@ class WebUiModuleTests(unittest.TestCase):
             source = app_sources[name]
             for endpoint in endpoints:
                 self.assertEqual(source.count(f'"{endpoint}"'), 1, (name, endpoint))
-            self.assertNotIn("createDeferredApplication", source, name)
             for hook in ("mount", "activate", "deactivate", "unmount"):
                 self.assertIn(f"{hook}(", source, name)
 

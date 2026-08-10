@@ -99,17 +99,6 @@ export function createEmptyState({
   return element;
 }
 
-export function createDeferredApplication({ summary, capabilities, links = [] }) {
-  return createApplicationShell({
-    status: "warning",
-    statusLabel: "页面已就绪，功能开发中",
-    summary,
-    panelTitle: "计划功能",
-    capabilities,
-    links,
-  });
-}
-
 export function createPlaceholderShell({ responsibility }) {
   return createApplicationShell({
     status: "disabled",
