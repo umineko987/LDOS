@@ -90,13 +90,3 @@ export function makeImmutable(value, seen = new WeakMap()) {
   IMMUTABLE_VALUES.add(target);
   return target;
 }
-
-export function shallowEqual(left, right) {
-  if (Object.is(left, right)) return true;
-  if (!isPlainObject(left) || !isPlainObject(right)) return false;
-  const leftKeys = Object.keys(left);
-  const rightKeys = Object.keys(right);
-  return leftKeys.length === rightKeys.length &&
-    leftKeys.every((key) => Object.prototype.hasOwnProperty.call(right, key) &&
-      Object.is(left[key], right[key]));
-}

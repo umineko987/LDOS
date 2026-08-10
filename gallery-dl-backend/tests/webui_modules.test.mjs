@@ -159,7 +159,6 @@ import {
   DEFAULT_WINDOW_RECT,
   rootReducer,
   selectors,
-  shallowEqual,
   UnknownActionError,
 } from "../gdl_backend/webui/js/core/store.js";
 import {
@@ -1554,7 +1553,6 @@ test("store/storage/window-manager 兼容入口保持精确 export shape", () =>
     "createStore",
     "rootReducer",
     "selectors",
-    "shallowEqual",
   ]);
   assert.deepEqual(Object.keys(storageFacade), [
     "STORAGE_KEYS",
@@ -1678,8 +1676,6 @@ test("store action 字符串、creator/selector shape 与初始 snapshot 保持�
     type: ACTION_TYPES.UI_START_MENU_CHANGED,
     payload: { open: true },
   });
-  assert.equal(shallowEqual({ value: 1 }, { value: 1 }), true);
-  assert.equal(shallowEqual({ value: {} }, { value: {} }), false);
 });
 
 test("root reducer 是纯转移并统一维护窗口去重、z 序和焦点回退", () => {
