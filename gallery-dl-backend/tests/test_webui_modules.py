@@ -927,7 +927,9 @@ class WebUiModuleTests(unittest.TestCase):
 
         self.assertIn('id: "policy"', definitions)
         self.assertIn('label: "站点设置"', definitions)
-        self.assertIn('windowTitle: "C:\\\\IMAGEWEAVE\\\\POLICY.CPL"', definitions)
+        self.assertIn('windowTitle: "站点设置"', definitions)
+        self.assertIn('group: "connections"', definitions)
+        self.assertIn('description: "配置各站点的并发、重试和代理策略。"', definitions)
         self.assertIn('createElement("legend", { text: "选择站点" })', policy_dom)
         for label in (
             "最大并发数",
@@ -1684,10 +1686,11 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn('"aria-disabled": "true"', desktop)
         self.assertIn('link.getAttribute("aria-disabled") === "true"', desktop)
         self.assertIn('event.key !== "Enter" && event.key !== " "', desktop)
-        self.assertIn('application?.availability === "ready"', router)
+        self.assertIn('application.availability === "ready"', router)
+        self.assertIn('application.availability === "preview"', router)
         for app_id in ("gallery", "schedule", "export"):
             self.assertEqual(definitions.count(f'id: "{app_id}"'), 1)
-        self.assertEqual(definitions.count('availability: "placeholder"'), 3)
+        self.assertEqual(definitions.count('availability: "preview"'), 3)
 
         self.assertIn(".task-window-list", desktop_css)
         self.assertIn('.task-window-button[aria-pressed="true"]', desktop_css)

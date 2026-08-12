@@ -60,19 +60,19 @@ try {
     motion: motionController,
   });
   const api = createApiClient();
-  const taskbarHeight = Number.parseFloat(
+  const dockHeight = Number.parseFloat(
     getComputedStyle(document.documentElement)
       .getPropertyValue("--imageweave-taskbar-height"),
   );
-  const windows = storage.readWindowLayout({
+  storage.readWindowPlacements({
     width: window.innerWidth,
     height: window.innerHeight,
   }, {
-    taskbarHeight: Number.isFinite(taskbarHeight) && taskbarHeight >= 0
-      ? taskbarHeight
+    taskbarHeight: Number.isFinite(dockHeight) && dockHeight >= 0
+      ? dockHeight
       : 0,
   });
-  const store = createStore({ initialState: createInitialState({ windows }) });
+  const store = createStore({ initialState: createInitialState({ windows: [] }) });
   polling = createPollingManager({
     focusSource: createStorePollingFocusSource(store),
   });

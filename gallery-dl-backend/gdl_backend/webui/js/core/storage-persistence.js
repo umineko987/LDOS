@@ -1,7 +1,11 @@
 import { STORAGE_KEYS } from "./storage-contract.js";
 
 const SESSION_KEYS = new Set([STORAGE_KEYS.currentApp, STORAGE_KEYS.activeBatch]);
-const LOCAL_KEYS = new Set([STORAGE_KEYS.windowLayout, STORAGE_KEYS.uiPreferences]);
+const LOCAL_KEYS = new Set([
+  STORAGE_KEYS.windowLayout,
+  STORAGE_KEYS.windowPlacements,
+  STORAGE_KEYS.uiPreferences,
+]);
 
 function browserStorage(name) {
   try {
@@ -61,6 +65,9 @@ export function createStoragePersistenceAdapter({
     },
     writeLocal(key, value) {
       return safeWrite(localStorage, requireScopedKey(LOCAL_KEYS, key), value);
+    },
+    removeLocal(key) {
+      return safeRemove(localStorage, requireScopedKey(LOCAL_KEYS, key));
     },
   });
 }

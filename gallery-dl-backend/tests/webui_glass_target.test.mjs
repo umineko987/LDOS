@@ -176,9 +176,8 @@ test("目标位置迁移：旧工作区只提取按应用排序的位置和最�
   const legacy = JSON.stringify({
     windows: [
       windowRecord("review", "maximized", { x: 24, y: 32, w: 1080, h: 640 }),
-      windowRecord("crawl", "normal", { x: 40, y: 48, w: 760, h: 500 }),
-      windowRecord("tasks", "minimized", { x: 96, y: 80, w: 820, h: 520 }),
       windowRecord("crawl", "normal", { x: 64, y: 56, w: 780, h: 510 }),
+      windowRecord("tasks", "minimized", { x: 96, y: 80, w: 820, h: 520 }),
     ],
   });
 
@@ -190,12 +189,15 @@ test("目标位置迁移：旧工作区只提取按应用排序的位置和最�
       { appId: "review", rect: { x: 24, y: 32, w: 1080, h: 640 }, maximized: true },
     ],
   );
-  assert.equal(
-    migrateLegacyWindowLayout(JSON.stringify({
-      windows: [{ ...windowRecord("crawl", "normal"), backendPath: "/private" }],
-    }), { width: 1440, height: 900 }),
-    null,
-  );
+  for (const windows of [
+    [{ ...windowRecord("crawl", "normal"), backendPath: "/private" }],
+    [windowRecord("crawl", "normal"), windowRecord("crawl", "maximized")],
+  ]) {
+    assert.equal(
+      migrateLegacyWindowLayout(JSON.stringify({ windows }), { width: 1440, height: 900 }),
+      null,
+    );
+  }
 });
 
 test("目标位置存储：版本化 key 与严格 round-trip 不保存运行、焦点或最小化事实", () => {

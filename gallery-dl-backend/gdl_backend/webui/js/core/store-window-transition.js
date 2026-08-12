@@ -109,12 +109,29 @@ export function prepareInitialWindowState(clonedInitialState) {
   return clonedInitialState;
 }
 
-function defaultWindowRecord(appId) {
+function projectOpeningPlacement(value) {
+  if (value === null || value === undefined) return null;
+  if (!isPlainObject(value)) throw new TypeError("窗口启动位置无效");
+  const keys = Object.keys(value);
+  if (
+    keys.length !== 2
+    || !["rect", "maximized"].every((key) => keys.includes(key))
+    || typeof value.maximized !== "boolean"
+  ) {
+    throw new TypeError("窗口启动位置无效");
+  }
+  return { rect: requireWindowRect(value.rect), maximized: value.maximized };
+}
+
+function defaultWindowRecord(appId, placement = null) {
   const app = getApplicationDefinitionById(requireAppId(appId));
+  const projectedPlacement = projectOpeningPlacement(placement);
   return {
     appId,
-    windowState: requireWindowState(app.defaultWindowState),
-    rect: { ...DEFAULT_WINDOW_RECT },
+    windowState: projectedPlacement
+      ? (projectedPlacement.maximized ? "maximized" : "normal")
+      : requireWindowState(app.defaultWindowState),
+    rect: projectedPlacement?.rect || { ...DEFAULT_WINDOW_RECT },
   };
 }
 
@@ -126,6 +143,7 @@ export function reduceWindowState(state, action) {
   switch (action.type) {
     case ACTION_TYPES.UI_WINDOW_OPENED: {
       const appId = requireAppId(action.payload?.appId);
+      const placement = projectOpeningPlacement(action.payload?.placement);
       const existingIndex = state.ui.windows.findIndex((item) => item.appId === appId);
       const existing = existingIndex >= 0 ? state.ui.windows[existingIndex] : null;
       const opened = existing
@@ -133,7 +151,7 @@ export function reduceWindowState(state, action) {
             ...existing,
             windowState: existing.windowState === "minimized" ? "normal" : existing.windowState,
           }
-        : defaultWindowRecord(appId);
+        : defaultWindowRecord(appId, placement);
       const windows = state.ui.windows.filter((item) => item.appId !== appId);
       windows.push(opened);
       return {

@@ -1,5 +1,5 @@
 import {
-  DEFAULT_APP_ID,
+  applicationDefinitions,
   getApplicationDefinitionById,
 } from "./app-definitions.js";
 import { hasExactDataKeys, ownDataValue, parseStorageObject } from "./storage-snapshot.js";
@@ -8,7 +8,7 @@ import { clampRect } from "./window-geometry.js";
 const WINDOW_STATES = new Set(["normal", "maximized", "minimized"]);
 const WINDOW_RECT_KEYS = Object.freeze(["x", "y", "w", "h"]);
 const DEFAULT_VIEWPORT = Object.freeze({ width: 1280, height: 720 });
-const DEFAULT_WINDOW_RECT = Object.freeze({ x: 160, y: 64, w: 800, h: 560 });
+const MAX_PLACEMENTS = 128;
 
 export function normalizeViewport(viewport) {
   if (!hasExactDataKeys(viewport, ["width", "height"])) return DEFAULT_VIEWPORT;
@@ -38,93 +38,152 @@ export function clampWindowRect(rect, viewport, geometryOptions = {}) {
   try {
     return clampRect(projected, normalizedViewport, geometryOptions);
   } catch {
-    // 读取端保持 T11 的静默自愈：无效视口选项退回无任务栏的安全几何。
     return clampRect(projected, normalizedViewport);
   }
 }
 
-function projectWindowRecord(
-  value,
-  { readyOnly = false, viewport = null, geometryOptions = {} } = {},
-) {
-  if (!hasExactDataKeys(value, ["appId", "windowState", "rect"])) {
-    throw new TypeError("窗口记录无效");
+function projectPlacement(value, { viewport = null, geometryOptions = {} } = {}) {
+  if (!hasExactDataKeys(value, ["appId", "rect", "maximized"])) {
+    throw new TypeError("窗口位置偏好无效");
   }
   const appId = ownDataValue(value, "appId");
-  const app = typeof appId === "string" ? getApplicationDefinitionById(appId) : null;
-  if (!app) throw new TypeError("应用 ID 无效");
-  if (readyOnly && app.availability !== "ready") return null;
-  const windowState = ownDataValue(value, "windowState");
-  if (!WINDOW_STATES.has(windowState)) throw new TypeError("窗口状态无效");
+  if (typeof appId !== "string" || !getApplicationDefinitionById(appId)) {
+    throw new TypeError("应用 ID 无效");
+  }
+  const maximized = ownDataValue(value, "maximized");
+  if (typeof maximized !== "boolean") throw new TypeError("最大化偏好无效");
   const rect = viewport
     ? clampWindowRect(ownDataValue(value, "rect"), viewport, geometryOptions)
     : projectWindowRect(ownDataValue(value, "rect"));
-  return { appId, windowState, rect };
+  return { appId, rect, maximized };
 }
 
-function deduplicateWindowRecords(windows) {
-  const result = [];
-  for (const windowRecord of windows) {
-    const existing = result.findIndex((item) => item.appId === windowRecord.appId);
-    if (existing >= 0) result.splice(existing, 1);
-    result.push(windowRecord);
+function projectLegacyRecord(value, viewport, geometryOptions) {
+  if (!hasExactDataKeys(value, ["appId", "windowState", "rect"])) {
+    throw new TypeError("旧窗口记录无效");
   }
-  return result;
+  const appId = ownDataValue(value, "appId");
+  if (typeof appId !== "string" || !getApplicationDefinitionById(appId)) {
+    throw new TypeError("应用 ID 无效");
+  }
+  const windowState = ownDataValue(value, "windowState");
+  if (!WINDOW_STATES.has(windowState)) throw new TypeError("窗口状态无效");
+  return {
+    appId,
+    rect: clampWindowRect(ownDataValue(value, "rect"), viewport, geometryOptions),
+    maximized: windowState === "maximized",
+  };
 }
 
-export function createDefaultWindowLayout(
-  viewport = DEFAULT_VIEWPORT,
-  geometryOptions = {},
-) {
-  return [{
-    appId: DEFAULT_APP_ID,
-    windowState: getApplicationDefinitionById(DEFAULT_APP_ID).defaultWindowState,
-    rect: clampWindowRect(DEFAULT_WINDOW_RECT, viewport, geometryOptions),
-  }];
+function requireUniquePlacements(values, projector) {
+  if (!Array.isArray(values) || values.length > MAX_PLACEMENTS) {
+    throw new TypeError("窗口位置偏好必须是有限数组");
+  }
+  const seen = new Set();
+  const placements = [];
+  for (const value of values) {
+    const placement = projector(value);
+    if (seen.has(placement.appId)) throw new TypeError("窗口位置偏好包含重复应用");
+    seen.add(placement.appId);
+    placements.push(placement);
+  }
+  return placements;
 }
 
-export function deserializeWindowLayout(serialized, viewport, geometryOptions = {}) {
+export function projectWindowPlacements(placements) {
+  return requireUniquePlacements(placements, (value) => projectPlacement(value));
+}
+
+export function serializeWindowPlacements(placements) {
+  return JSON.stringify({ placements: projectWindowPlacements(placements) });
+}
+
+export function deserializeWindowPlacements(serialized, viewport, geometryOptions = {}) {
   const stored = parseStorageObject(serialized);
-  if (!stored || !hasExactDataKeys(stored, ["windows"])) return null;
-  const rawWindows = ownDataValue(stored, "windows");
-  if (!Array.isArray(rawWindows)) return null;
+  if (!stored || !hasExactDataKeys(stored, ["placements"])) return null;
   const normalizedViewport = normalizeViewport(viewport);
-  const windows = [];
   try {
-    for (const value of rawWindows) {
-      if (!hasExactDataKeys(value, ["appId", "windowState", "rect"])) return null;
-      const appId = ownDataValue(value, "appId");
-      if (typeof appId !== "string") return null;
-      const app = getApplicationDefinitionById(appId);
-      if (!app || app.availability !== "ready") continue;
-      windows.push(projectWindowRecord(value, {
-        readyOnly: true,
+    return requireUniquePlacements(
+      ownDataValue(stored, "placements"),
+      (value) => projectPlacement(value, {
         viewport: normalizedViewport,
         geometryOptions,
-      }));
-    }
+      }),
+    );
   } catch {
     return null;
   }
-  return deduplicateWindowRecords(windows);
+}
+
+export function migrateLegacyWindowLayout(serialized, viewport, geometryOptions = {}) {
+  const stored = parseStorageObject(serialized);
+  if (!stored || !hasExactDataKeys(stored, ["windows"])) return null;
+  const normalizedViewport = normalizeViewport(viewport);
+  try {
+    const migrated = requireUniquePlacements(
+      ownDataValue(stored, "windows"),
+      (value) => projectLegacyRecord(value, normalizedViewport, geometryOptions),
+    );
+    const byId = new Map(migrated.map((placement) => [placement.appId, placement]));
+    return applicationDefinitions
+      .filter((definition) => byId.has(definition.id))
+      .map((definition) => byId.get(definition.id));
+  } catch {
+    return null;
+  }
+}
+
+export function placementForApplication(placements, appId) {
+  if (!Array.isArray(placements) || typeof appId !== "string") return null;
+  const placement = placements.find((item) => item?.appId === appId);
+  return placement ? { ...placement, rect: { ...placement.rect } } : null;
+}
+
+export function placementsFromWindowStack(windows, previousPlacements = []) {
+  const previous = new Map(projectWindowPlacements(previousPlacements).map((item) => [item.appId, item]));
+  if (!Array.isArray(windows)) throw new TypeError("窗口栈必须是数组");
+  for (const record of windows) {
+    if (!hasExactDataKeys(record, ["appId", "windowState", "rect"])) {
+      throw new TypeError("窗口记录无效");
+    }
+    const appId = ownDataValue(record, "appId");
+    const app = typeof appId === "string" ? getApplicationDefinitionById(appId) : null;
+    const windowState = ownDataValue(record, "windowState");
+    if (!app || !WINDOW_STATES.has(windowState)) throw new TypeError("窗口记录无效");
+    const rect = projectWindowRect(ownDataValue(record, "rect"));
+    previous.set(appId, { appId, rect, maximized: windowState === "maximized" });
+  }
+  return applicationDefinitions
+    .filter((definition) => previous.has(definition.id))
+    .map((definition) => previous.get(definition.id));
+}
+
+// v1 helpers remain exported for one-version compatibility tests and migration callers.
+export function deserializeWindowLayout(serialized, viewport, geometryOptions = {}) {
+  const placements = migrateLegacyWindowLayout(serialized, viewport, geometryOptions);
+  return placements?.map((placement) => ({
+    appId: placement.appId,
+    windowState: placement.maximized ? "maximized" : "normal",
+    rect: placement.rect,
+  })) ?? null;
 }
 
 export function projectWindowLayout(windows) {
-  if (!Array.isArray(windows)) throw new TypeError("窗口布局必须是数组");
-  const projected = [];
-  for (const value of windows) {
-    const windowRecord = projectWindowRecord(value, { readyOnly: true });
-    if (windowRecord) projected.push(windowRecord);
-  }
-  return deduplicateWindowRecords(projected);
+  return placementsFromWindowStack(windows).map((placement) => ({
+    appId: placement.appId,
+    windowState: placement.maximized ? "maximized" : "normal",
+    rect: placement.rect,
+  }));
 }
 
 export function serializeWindowLayout(windows) {
   return JSON.stringify({ windows: projectWindowLayout(windows) });
 }
 
+export function createDefaultWindowLayout() {
+  return [];
+}
+
 export function restoreWindowLayout(serialized, viewport, geometryOptions = {}) {
-  const normalizedViewport = normalizeViewport(viewport);
-  return deserializeWindowLayout(serialized, normalizedViewport, geometryOptions)
-    ?? createDefaultWindowLayout(normalizedViewport, geometryOptions);
+  return deserializeWindowLayout(serialized, viewport, geometryOptions) ?? [];
 }

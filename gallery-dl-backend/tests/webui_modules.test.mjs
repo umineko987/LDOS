@@ -234,8 +234,11 @@ import {
 } from "../gdl_backend/webui/js/core/window-manager.js";
 import {
   deserializeWindowLayout,
+  deserializeWindowPlacements,
+  migrateLegacyWindowLayout,
   projectWindowLayout,
   serializeWindowLayout,
+  serializeWindowPlacements,
 } from "../gdl_backend/webui/js/core/storage-layout.js";
 import { createStoragePersistenceAdapter } from "../gdl_backend/webui/js/core/storage-persistence.js";
 import {
@@ -309,106 +312,20 @@ import vaultApplication, {
 } from "../gdl_backend/webui/js/apps/vault.js";
 
 const EXPECTED_APPLICATION_METADATA = Object.freeze([
-  Object.freeze({
-    id: "crawl",
-    label: "图片采集",
-    icon: "download",
-    route: "/crawl",
-    windowTitle: "C:\\IMAGEWEAVE\\CRAWL.EXE",
-    availability: "ready",
-    defaultWindowState: "normal",
-  }),
-  Object.freeze({
-    id: "tasks",
-    label: "批次管理",
-    icon: "list",
-    route: "/tasks",
-    windowTitle: "C:\\IMAGEWEAVE\\TASKMGR.EXE",
-    availability: "ready",
-    defaultWindowState: "normal",
-  }),
-  Object.freeze({
-    id: "proxy",
-    label: "代理管理",
-    icon: "network",
-    route: "/proxy",
-    windowTitle: "C:\\IMAGEWEAVE\\PROXY.CPL",
-    availability: "ready",
-    defaultWindowState: "normal",
-  }),
-  Object.freeze({
-    id: "vault",
-    label: "授权管理",
-    icon: "key",
-    route: "/vault",
-    windowTitle: "C:\\IMAGEWEAVE\\VAULT.CPL",
-    availability: "ready",
-    defaultWindowState: "normal",
-  }),
-  Object.freeze({
-    id: "review",
-    label: "去重审核",
-    icon: "images",
-    route: "/review",
-    windowTitle: "C:\\IMAGEWEAVE\\REVIEW.EXE",
-    availability: "ready",
-    defaultWindowState: "maximized",
-  }),
-  Object.freeze({
-    id: "policy",
-    label: "站点设置",
-    icon: "sliders",
-    route: "/policy",
-    windowTitle: "C:\\IMAGEWEAVE\\POLICY.CPL",
-    availability: "ready",
-    defaultWindowState: "normal",
-  }),
-  Object.freeze({
-    id: "diagnostics",
-    label: "系统诊断",
-    icon: "activity",
-    route: "/diagnostics",
-    windowTitle: "C:\\IMAGEWEAVE\\DIAG.EXE",
-    availability: "ready",
-    defaultWindowState: "normal",
-  }),
-  Object.freeze({
-    id: "personalization",
-    label: "外观设置",
-    icon: "sliders",
-    route: "/personalization",
-    windowTitle: "C:\\IMAGEWEAVE\\DESKTOP.CPL",
-    availability: "ready",
-    defaultWindowState: "normal",
-  }),
-  Object.freeze({
-    id: "gallery",
-    label: "图片库",
-    icon: "folder",
-    route: "/gallery",
-    windowTitle: "C:\\IMAGEWEAVE\\GALLERY.EXE",
-    availability: "placeholder",
-    defaultWindowState: "normal",
-  }),
-  Object.freeze({
-    id: "schedule",
-    label: "定时任务",
-    icon: "calendar",
-    route: "/schedule",
-    windowTitle: "C:\\IMAGEWEAVE\\SCHEDULE.EXE",
-    availability: "placeholder",
-    defaultWindowState: "normal",
-  }),
-  Object.freeze({
-    id: "export",
-    label: "数据集导出",
-    icon: "archive",
-    route: "/export",
-    windowTitle: "C:\\IMAGEWEAVE\\EXPORT.EXE",
-    availability: "placeholder",
-    defaultWindowState: "normal",
-  }),
-]);
+  ["crawl", "图片采集", "download", "/crawl", "图片采集", "workflow", "搜索来源、选择地址并创建有序采集批次。", "ready", "normal"],
+  ["tasks", "批次管理", "list", "/tasks", "批次管理", "workflow", "查看采集进度，并取消、重试或重新规划批次。", "ready", "normal"],
+  ["proxy", "代理管理", "network", "/proxy", "代理管理", "connections", "管理代理来源、运行池状态与连接探测。", "ready", "normal"],
+  ["vault", "授权管理", "key", "/vault", "授权管理", "connections", "管理站点授权、浏览器会话与授权代理。", "ready", "normal"],
+  ["review", "去重审核", "images", "/review", "去重审核", "workflow", "比较重复候选、确认保留项并应用整理结果。", "ready", "maximized"],
+  ["policy", "站点设置", "sliders", "/policy", "站点设置", "connections", "配置各站点的并发、重试和代理策略。", "ready", "normal"],
+  ["diagnostics", "系统诊断", "activity", "/diagnostics", "系统诊断", "system", "检查服务、配置能力与调度器健康状态。", "ready", "normal"],
+  ["personalization", "外观设置", "sliders", "/personalization", "外观设置", "system", "调整主题、壁纸、窗口可读性与动效。", "ready", "normal"],
+  ["gallery", "图片库", "folder", "/gallery", "图片库", "workflow", "浏览、搜索和整理已下载的图片。", "preview", "normal"],
+  ["schedule", "定时任务", "calendar", "/schedule", "定时任务", "workflow", "查看与编辑自动采集计划。", "preview", "normal"],
+  ["export", "数据集导出", "archive", "/export", "数据集导出", "workflow", "配置来源并导出审核后的数据集。", "preview", "normal"],
+].map(([id, label, icon, route, windowTitle, group, description, availability, defaultWindowState]) => Object.freeze({
+  id, label, icon, route, windowTitle, group, description, availability, defaultWindowState,
+})));
 
 const APPLICATION_METADATA_KEYS = Object.freeze([
   "id",
@@ -416,6 +333,8 @@ const APPLICATION_METADATA_KEYS = Object.freeze([
   "icon",
   "route",
   "windowTitle",
+  "group",
+  "description",
   "availability",
   "defaultWindowState",
 ]);
@@ -1288,7 +1207,7 @@ test("应用 registry 保持 11 项元数据、默认路由与生命周期基线
   assert.equal(applications.length, 11);
   assert.deepEqual(applicationMetadataSnapshot(applications), EXPECTED_APPLICATION_METADATA);
   assert.deepEqual(
-    applications.filter((application) => application.availability === "placeholder")
+    applications.filter((application) => application.availability === "preview")
       .map((application) => application.id),
     ["gallery", "schedule", "export"],
   );
@@ -1668,6 +1587,13 @@ test("store action 字符串、creator/selector shape 与初始 snapshot 保持�
     type: ACTION_TYPES.UI_WINDOW_OPENED,
     payload: { appId: "crawl" },
   });
+  assert.deepEqual(actionCreators.windowOpened("crawl", {
+    rect,
+    maximized: true,
+  }), {
+    type: ACTION_TYPES.UI_WINDOW_OPENED,
+    payload: { appId: "crawl", placement: { rect, maximized: true } },
+  });
   assert.deepEqual(actionCreators.windowMoved("crawl", rect), {
     type: ACTION_TYPES.UI_WINDOW_MOVED,
     payload: { appId: "crawl", rect },
@@ -1990,10 +1916,10 @@ test("跨应用 action 先调用 router，只有路由结果才能更新 focused
   assert.equal(store.getState().ui.windows[0].windowState, "normal");
   actions.minimizeWindow("review");
   assert.equal(store.getState().ui.focusedAppId, null);
-  assert.deepEqual(navigations, ["review"], "无聚焦窗口时不得触发路由重开");
+  assert.deepEqual(navigations, ["review", null], "无聚焦窗口时必须同步桌面路由");
   actions.restoreWindow("review");
   assert.equal(store.getState().ui.focusedAppId, "review");
-  assert.deepEqual(navigations, ["review", "review"]);
+  assert.deepEqual(navigations, ["review", null, "review"]);
   assert.equal(WINDOW_LAYOUT_DEBOUNCE_MS >= 300, true);
   assert.deepEqual(timers.delays(), [WINDOW_LAYOUT_DEBOUNCE_MS]);
   assert.deepEqual(writes.map((entry) => entry[0]), ["app", "app"]);
@@ -2001,6 +1927,26 @@ test("跨应用 action 先调用 router，只有路由结果才能更新 focused
   assert.deepEqual(writes.map((entry) => entry[0]), ["app", "app", "layout"]);
   assert.deepEqual(writes.at(-1)[1].map((item) => item.windowState), ["normal"]);
   actions.destroy();
+});
+
+test("windowOpened 只在首次启动消费位置 hint，既有窗口状态不被覆盖", () => {
+  const placement = {
+    rect: windowRect({ x: 111, y: 77, w: 800, h: 520 }),
+    maximized: true,
+  };
+  const store = createStore({ reportError: () => {} });
+  store.dispatch(actionCreators.windowOpened("crawl", placement));
+  assert.deepEqual(selectors.windowStack(store.getState()), [
+    windowRecord("crawl", "maximized", placement.rect),
+  ]);
+  store.dispatch(actionCreators.windowStateChanged("crawl", "normal"));
+  store.dispatch(actionCreators.windowOpened("crawl", {
+    rect: windowRect({ x: 999 }),
+    maximized: true,
+  }));
+  assert.deepEqual(selectors.windowStack(store.getState()), [
+    windowRecord("crawl", "normal", placement.rect),
+  ]);
 });
 
 test("windowOpened 重复打开同一 appId 不会产生第二个窗口", () => {
@@ -2895,7 +2841,7 @@ test("selectors.windowView 保持旧形状且 hash 只包含单个聚焦应用",
   assert.equal(selectors.windowStack(store.getState()), store.getState().ui.windows);
   assert.equal(hashForRoute(resolveNavigationTarget("review")), "#/review");
   assert.equal(hashForRoute(resolveNavigationTarget("review")).includes("?"), false);
-  assert.equal(parseHashRoute("#/review?windows=crawl"), "/crawl");
+  assert.equal(parseHashRoute("#/review?windows=crawl"), null);
 });
 
 test("每个已开窗口产生一个使用中文 label 的任务栏按钮描述", () => {
@@ -2914,7 +2860,7 @@ test("每个已开窗口产生一个使用中文 label 的任务栏按钮描述"
     }),
   );
   assert.equal(descriptions[0].label, "图片采集");
-  assert.notEqual(descriptions[0].label, descriptions[0].title);
+  assert.equal(descriptions[0].title, "图片采集");
 });
 
 test("聚焦窗口任务栏按钮 aria-pressed 为 true 且其他为 false", () => {
@@ -3126,71 +3072,57 @@ test("START 菜单含即将推出分组且占位项全部 aria-disabled", () => 
   assert.equal(launchers.startMenuGroups[0].items.every((item) => item.ariaDisabled === null), true);
 });
 
-test("占位应用 hash 与导航目标仍严格回退到 DEFAULT_ROUTE", () => {
+test("preview 应用 hash 与导航目标可启动，畸形路由回桌面", () => {
   for (const target of ["gallery", "schedule", "export"]) {
     const app = getApplicationById(target);
-    assert(app, target);
-    assert.notEqual(app.availability, "ready");
-    assert.equal(parseHashRoute(`#${app.route}`), DEFAULT_ROUTE);
-    assert.equal(resolveNavigationTarget(target), DEFAULT_ROUTE);
-    assert.equal(resolveNavigationTarget(app.route), DEFAULT_ROUTE);
-    assert.equal(hashForRoute(app.route), `#${DEFAULT_ROUTE}`);
+    assert.equal(app?.availability, "preview", target);
+    assert.equal(parseHashRoute(`#${app.route}`), app.route);
+    assert.equal(resolveNavigationTarget(target), app.route);
+    assert.equal(resolveNavigationTarget(app.route), app.route);
+    assert.equal(hashForRoute(app.route), `#${app.route}`);
   }
   assert.equal(parseHashRoute("#/review"), "/review");
-  assert.equal(parseHashRoute("#/review?windows=crawl"), DEFAULT_ROUTE);
+  assert.equal(parseHashRoute("#/review?windows=crawl"), null);
 });
 
-test("布局反序列化会丢弃未知和非 ready 应用、去重并 clamp rect", () => {
+test("旧 workspace 只迁移严格位置偏好且启动保持空窗口栈", () => {
   const local = new MemoryStorage();
   const session = new MemoryStorage();
-  local.values.set(STORAGE_KEYS.windowLayout, JSON.stringify({
-    windows: [
-      windowRecord("crawl", "normal", windowRect({ x: 12, y: 18 })),
-      windowRecord("unknown", "normal", windowRect()),
-      windowRecord("gallery", "normal", windowRect()),
-      windowRecord("review", "maximized", windowRect({ x: 5_000, y: -5_000, w: 800, h: 560 })),
-      windowRecord("crawl", "minimized", windowRect({ x: -5_000, y: 5_000 })),
-    ],
-  }));
+  local.values.set(STORAGE_KEYS.windowLayout, JSON.stringify({ windows: [
+    windowRecord("crawl", "normal", windowRect({ x: 12, y: 18 })),
+    windowRecord("review", "maximized", windowRect({ x: 5_000, y: -5_000, w: 800, h: 560 })),
+    windowRecord("gallery", "normal", windowRect()),
+  ] }));
   const storage = createStorageService({ localStorage: local, sessionStorage: session });
-  const windows = storage.readWindowLayout({ width: 1024, height: 600 });
-  assert.deepEqual(windows, [
-    windowRecord("review", "maximized", { x: 992, y: -528, w: 800, h: 560 }),
-    windowRecord("crawl", "minimized", { x: -688, y: 120, w: 720, h: 480 }),
+  const placements = storage.readWindowPlacements({ width: 1024, height: 600 });
+  assert.deepEqual(placements, [
+    { appId: "crawl", rect: { x: 12, y: 18, w: 720, h: 480 }, maximized: false },
+    { appId: "review", rect: { x: 992, y: -528, w: 800, h: 560 }, maximized: true },
+    { appId: "gallery", rect: { x: 48, y: 36, w: 720, h: 480 }, maximized: false },
   ]);
-  const repaired = JSON.parse(local.values.get(STORAGE_KEYS.windowLayout));
-  assert.deepEqual(repaired, { windows });
-  assert.equal(JSON.stringify(repaired).includes("unknown"), false);
-  assert.equal(JSON.stringify(repaired).includes("gallery"), false);
-  assert.equal(JSON.stringify(repaired).includes("zIndex"), false);
-  assert.equal(STORAGE_KEYS.windowLayout, "imageweave.window-layout.v1");
+  assert.equal(local.values.has(STORAGE_KEYS.windowLayout), false);
+  assert.deepEqual(JSON.parse(local.values.get(STORAGE_KEYS.windowPlacements)), { placements });
+  assert.deepEqual(createInitialState({ windows: [] }).ui.windows, []);
 });
 
-test("损坏的 localStorage 窗口布局静默回退到安全默认布局", () => {
-  const damagedValues = [
+test("损坏的旧 workspace 静默清理且不会打开默认应用", () => {
+  for (const serialized of [
     "{broken-json",
     JSON.stringify([]),
     JSON.stringify({ windows: {} }),
     JSON.stringify({ windows: [windowRecord("crawl", "open")] }),
-    JSON.stringify({ windows: [windowRecord("crawl", "normal", windowRect({ w: 359 }))] }),
+    JSON.stringify({ windows: [windowRecord("crawl"), windowRecord("crawl")] }),
     JSON.stringify({ windows: [{ ...windowRecord("crawl"), zIndex: 99 }] }),
-    JSON.stringify({ windows: [], backendPath: "/private/output" }),
-  ];
-  for (const serialized of damagedValues) {
+  ]) {
     const local = new MemoryStorage();
     local.values.set(STORAGE_KEYS.windowLayout, serialized);
     const storage = createStorageService({
       localStorage: local,
       sessionStorage: new MemoryStorage(),
     });
-    let windows;
-    assert.doesNotThrow(() => {
-      windows = storage.readWindowLayout({ width: 800, height: 600 });
-    });
-    assert.deepEqual(windows, [
-      windowRecord("crawl", "normal", { x: 160, y: 40, w: 800, h: 560 }),
-    ]);
-    assert.deepEqual(JSON.parse(local.values.get(STORAGE_KEYS.windowLayout)), { windows });
+    assert.doesNotThrow(() => storage.readWindowPlacements({ width: 800, height: 600 }));
+    assert.deepEqual(storage.readWindowPlacements({ width: 800, height: 600 }), []);
+    assert.equal(local.values.has(STORAGE_KEYS.windowLayout), false);
   }
 });
 
@@ -3208,7 +3140,7 @@ test("DESKTOP.CPL 以 ready 应用注册且不改变既有应用相对顺序", (
     id: "personalization",
     label: "外观设置",
     route: "/personalization",
-    windowTitle: "C:\\IMAGEWEAVE\\DESKTOP.CPL",
+    windowTitle: "外观设置",
     availability: "ready",
     defaultWindowState: "normal",
   });
@@ -5191,170 +5123,112 @@ test("壁纸仓库固定 schema、归一化错误且关闭后不泄漏连接行�
   ));
 });
 
-test("Storage facade、service shape、keys 与序列化 snapshot 保持精确兼容", () => {
+test("Storage v2 位置偏好 facade、service shape 与 key 保持严格", () => {
   assert.deepEqual(STORAGE_KEYS, {
     currentApp: "imageweave.ui:current-app",
     activeBatch: "imageweave.ui:active-batch",
     windowLayout: "imageweave.window-layout.v1",
+    windowPlacements: "imageweave.window-placements.v2",
     uiPreferences: "imageweave.ui:ui-preferences",
   });
-  assert.equal(Object.isFrozen(STORAGE_KEYS), true);
   const local = new MemoryStorage();
   const session = new MemoryStorage();
   const storage = createStorageService({ localStorage: local, sessionStorage: session });
   assert.deepEqual(Object.keys(storage), [
-    "readCurrentApp", "writeCurrentApp", "readActiveBatchId", "writeActiveBatchId",
-    "clearActiveBatchId", "readWindowLayout", "writeWindowLayout",
+    "readCurrentApp", "writeCurrentApp", "clearCurrentApp",
+    "readActiveBatchId", "writeActiveBatchId", "clearActiveBatchId",
+    "readWindowPlacements", "readWindowPlacement", "writeWindowPlacements",
+    "writeWindowPlacementsFromStack", "readWindowLayout", "writeWindowLayout",
     "readUiPreferences", "writeUiPreferences", "writePersonalizationPreferences",
   ]);
-  assert.equal(Object.isFrozen(storage), true);
-
-  const layout = [windowRecord("crawl", "normal", windowRect())];
-  storage.writeWindowLayout(layout);
-  assert.equal(
-    local.values.get(STORAGE_KEYS.windowLayout),
-    '{"windows":[{"appId":"crawl","windowState":"normal","rect":{"x":48,"y":36,"w":720,"h":480}}]}',
-  );
-  storage.writeUiPreferences(PERSONALIZATION_DEFAULTS);
-  assert.equal(
-    local.values.get(STORAGE_KEYS.uiPreferences),
-    JSON.stringify(PERSONALIZATION_DEFAULTS),
-  );
-  assert.deepEqual(createDefaultWindowLayout({ width: 800, height: 600 }), [
-    windowRecord("crawl", "normal", { x: 160, y: 40, w: 800, h: 560 }),
-  ]);
+  const stack = [windowRecord("crawl", "normal", windowRect())];
+  assert.equal(storage.writeWindowLayout(stack), true);
+  assert.deepEqual(JSON.parse(local.values.get(STORAGE_KEYS.windowPlacements)), {
+    placements: [{ appId: "crawl", rect: windowRect(), maximized: false }],
+  });
+  assert.deepEqual(storage.readWindowPlacement("crawl"), {
+    rect: windowRect(), maximized: false,
+  });
+  assert.deepEqual(createDefaultWindowLayout({ width: 800, height: 600 }), []);
   assert.deepEqual(
     clampWindowRect(windowRect({ x: 9_999, y: -9_999 }), { width: 800, height: 600 }),
     { x: 768, y: -448, w: 720, h: 480 },
   );
 });
 
-test("Storage snapshot/layout/preference/persistence/service 各层可独立纯测试", () => {
+test("Storage v1/v2 纯序列化、迁移与 persistence 作用域", () => {
   assert.deepEqual(parseStorageObject('{"safe":true}'), { safe: true });
   assert.equal(parseStorageObject("x".repeat(4097)), null);
-  assert.equal(readApplicationIdSnapshot("review"), "review");
-  assert.equal(readApplicationIdSnapshot("unknown"), null);
-  assert.equal(projectApplicationId("crawl"), "crawl");
-  assert.throws(() => projectApplicationId("unknown"), TypeError);
-  assert.equal(readBatchIdSnapshot("batch:1"), "batch:1");
-  assert.equal(readBatchIdSnapshot("../private"), null);
-  assert.equal(projectBatchId("batch:1"), "batch:1");
-  assert.throws(() => projectBatchId("../private"), TypeError);
-
-  const serializedLayout = serializeWindowLayout([
-    windowRecord("crawl", "normal", windowRect({ x: 10 })),
+  const placements = [
+    { appId: "crawl", rect: windowRect({ x: 10 }), maximized: false },
+    { appId: "review", rect: windowRect({ x: 20 }), maximized: true },
+  ];
+  const serialized = serializeWindowPlacements(placements);
+  assert.deepEqual(deserializeWindowPlacements(serialized, { width: 1280, height: 720 }), placements);
+  assert.deepEqual(migrateLegacyWindowLayout(JSON.stringify({ windows: [
     windowRecord("review", "maximized", windowRect({ x: 20 })),
     windowRecord("crawl", "minimized", windowRect({ x: 30 })),
+  ] }), { width: 1280, height: 720 }), [
+    { appId: "crawl", rect: windowRect({ x: 30 }), maximized: false },
+    { appId: "review", rect: windowRect({ x: 20 }), maximized: true },
   ]);
-  assert.deepEqual(projectWindowLayout(JSON.parse(serializedLayout).windows), [
-    windowRecord("review", "maximized", windowRect({ x: 20 })),
-    windowRecord("crawl", "minimized", windowRect({ x: 30 })),
-  ]);
-  assert.deepEqual(
-    deserializeWindowLayout(serializedLayout, { width: 1280, height: 720 }),
-    JSON.parse(serializedLayout).windows,
-  );
-
-  const migrated = deserializeUiPreferences(JSON.stringify({
-    animations: "reduced",
-    wallpaperFit: "contain",
-    taskbarDensity: "compact",
-  }));
-  assert.deepEqual(migrated, {
-    ...PERSONALIZATION_DEFAULTS,
-    animations: "off",
-    wallpaperFit: "contain",
-    taskbarDensity: "compact",
-  });
-  assert.deepEqual(projectUiPreferences(migrated), migrated);
-  assert.equal(serializeUiPreferences(migrated), JSON.stringify(migrated));
 
   const local = new MemoryStorage();
   const session = new MemoryStorage();
-  const persistence = createStoragePersistenceAdapter({
-    localStorage: local,
-    sessionStorage: session,
-  });
+  const persistence = createStoragePersistenceAdapter({ localStorage: local, sessionStorage: session });
   assert.equal(persistence.writeSession(STORAGE_KEYS.currentApp, "crawl"), true);
-  assert.equal(persistence.readSession(STORAGE_KEYS.currentApp), "crawl");
+  assert.equal(persistence.writeLocal(STORAGE_KEYS.windowPlacements, serialized), true);
+  assert.equal(persistence.removeLocal(STORAGE_KEYS.windowPlacements), true);
   assert.throws(() => persistence.readLocal(STORAGE_KEYS.currentApp), TypeError);
   assert.throws(() => persistence.writeSession(STORAGE_KEYS.windowLayout, "{}"), TypeError);
-
   const service = createStorageServiceFromAdapter(persistence);
   assert.equal(service.readCurrentApp(), "crawl");
   assert.equal(service.writeActiveBatchId("batch:1"), true);
   assert.equal(service.readActiveBatchId(), "batch:1");
-  assert.equal(session.values.has(STORAGE_KEYS.windowLayout), false);
-  assert.equal(local.values.has(STORAGE_KEYS.activeBatch), false);
 });
 
-test("Storage 危险键与访问器不能污染 snapshot，损坏值仍安全自愈", () => {
+test("Storage 位置偏好拒绝危险键、访问器、重复和未知 app", () => {
   const local = new MemoryStorage();
-  const session = new MemoryStorage();
-  local.values.set(
-    STORAGE_KEYS.windowLayout,
-    '{"windows":[],"__proto__":{"storagePolluted":true}}',
-  );
-  local.values.set(
-    STORAGE_KEYS.uiPreferences,
-    '{"animations":"off","constructor":{"prototype":{"storagePolluted":true}}}',
-  );
-  const storage = createStorageService({ localStorage: local, sessionStorage: session });
-  assert.deepEqual(storage.readWindowLayout({ width: 800, height: 600 }), [
-    windowRecord("crawl", "normal", { x: 160, y: 40, w: 800, h: 560 }),
-  ]);
-  assert.deepEqual(storage.readUiPreferences(), {
-    ...PERSONALIZATION_DEFAULTS,
-    animations: "off",
-  });
+  const storage = createStorageService({ localStorage: local, sessionStorage: new MemoryStorage() });
+  local.values.set(STORAGE_KEYS.windowPlacements, '{"placements":[],"__proto__":{}}');
+  assert.deepEqual(storage.readWindowPlacements({ width: 800, height: 600 }), []);
   assert.equal({}.storagePolluted, undefined);
-  assert.equal(local.values.get(STORAGE_KEYS.windowLayout).includes("__proto__"), false);
-  assert.equal(local.values.get(STORAGE_KEYS.uiPreferences).includes("constructor"), false);
-
-  const accessorLayout = windowRecord("crawl");
+  const accessor = { appId: "crawl", maximized: false };
   let getterCalled = false;
-  Object.defineProperty(accessorLayout, "rect", {
+  Object.defineProperty(accessor, "rect", {
     enumerable: true,
-    get() {
-      getterCalled = true;
-      return windowRect();
-    },
+    get() { getterCalled = true; return windowRect(); },
   });
-  assert.throws(() => storage.writeWindowLayout([accessorLayout]), TypeError);
+  assert.throws(() => storage.writeWindowPlacements([accessor]), TypeError);
   assert.equal(getterCalled, false);
-  for (const key of ["__proto__", "prototype", "constructor"]) {
-    const unsafe = JSON.parse(`{"appId":"crawl","windowState":"normal","rect":{"x":48,"y":36,"w":720,"h":480},"${key}":{}}`);
-    assert.throws(() => storage.writeWindowLayout([unsafe]), TypeError);
-  }
+  assert.throws(() => storage.writeWindowPlacements([
+    { appId: "unknown", rect: windowRect(), maximized: false },
+  ]), TypeError);
+  assert.throws(() => storage.writeWindowPlacements([
+    { appId: "crawl", rect: windowRect(), maximized: false },
+    { appId: "crawl", rect: windowRect(), maximized: true },
+  ]), TypeError);
 });
 
-test("Storage 只写固定命名空间白名单并区分 session/local", () => {
+test("Storage 只写固定 session/local 命名空间", () => {
   const local = new MemoryStorage();
   const session = new MemoryStorage();
   const storage = createStorageService({ localStorage: local, sessionStorage: session });
   assert.equal(storage.writeCurrentApp("review"), true);
   assert.equal(storage.writeActiveBatchId("batch-123"), true);
-  const savedLayout = [windowRecord("review", "normal")];
-  assert.equal(storage.writeWindowLayout(savedLayout), true);
+  assert.equal(storage.writeWindowLayout([windowRecord("review")]), true);
   assert.equal(storage.writeUiPreferences({ taskbarDensity: "compact" }), true);
-
   assert.deepEqual([...session.values.keys()].sort(), [
-    STORAGE_KEYS.activeBatch,
-    STORAGE_KEYS.currentApp,
+    STORAGE_KEYS.activeBatch, STORAGE_KEYS.currentApp,
   ].sort());
   assert.deepEqual([...local.values.keys()].sort(), [
-    STORAGE_KEYS.uiPreferences,
-    STORAGE_KEYS.windowLayout,
+    STORAGE_KEYS.uiPreferences, STORAGE_KEYS.windowPlacements,
   ].sort());
   assert.equal(storage.readCurrentApp(), "review");
   assert.equal(storage.readActiveBatchId(), "batch-123");
-  assert.deepEqual(storage.readWindowLayout({ width: 1280, height: 720 }), savedLayout);
-  assert.deepEqual(storage.readUiPreferences(), {
-    ...PERSONALIZATION_DEFAULTS,
-    taskbarDensity: "compact",
-  });
-  assert.equal(storage.setItem, undefined);
-  assert.equal(storage.getItem, undefined);
+  assert.deepEqual(storage.readWindowPlacements({ width: 1280, height: 720 }), [
+    { appId: "review", rect: windowRect(), maximized: false },
+  ]);
 });
 
 test("Storage 迁移动效旧值并对损坏字段逐项回退", () => {
@@ -5548,7 +5422,7 @@ test("Storage 兼容不可用或损坏的浏览器存储并自愈偏好 JSON", (
   assert.equal(storage.readActiveBatchId(), null);
   assert.deepEqual(
     storage.readWindowLayout({ width: 800, height: 600 }),
-    [windowRecord("crawl", "normal", { x: 160, y: 40, w: 800, h: 560 })],
+    [],
   );
   assert.deepEqual(storage.readUiPreferences(), PERSONALIZATION_DEFAULTS);
   assert.deepEqual(
@@ -5564,7 +5438,7 @@ test("Storage 兼容不可用或损坏的浏览器存储并自愈偏好 JSON", (
   assert.equal(unavailable.writeCurrentApp("crawl"), false);
   assert.deepEqual(
     unavailable.readWindowLayout({ width: 800, height: 600 }),
-    [windowRecord("crawl", "normal", { x: 160, y: 40, w: 800, h: 560 })],
+    [],
   );
   assert.equal(unavailable.writeWindowLayout([windowRecord("crawl")]), false);
   assert.deepEqual(unavailable.readUiPreferences(), PERSONALIZATION_DEFAULTS);

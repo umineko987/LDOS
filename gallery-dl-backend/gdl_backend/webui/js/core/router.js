@@ -1,29 +1,44 @@
 import {
-  DEFAULT_ROUTE,
   getApplicationById,
   getApplicationByRoute,
 } from "./app-registry.js";
 
-function readyApplication(application) {
-  return application?.availability === "ready" ? application : null;
+function launchableApplication(application) {
+  return application
+    && (application.availability === "ready" || application.availability === "preview")
+    ? application
+    : null;
+}
+
+function routeFromTarget(target) {
+  if (typeof target !== "string") return null;
+  const byId = launchableApplication(getApplicationById(target));
+  if (byId) return byId.route;
+  return launchableApplication(getApplicationByRoute(target))?.route || null;
 }
 
 export function parseHashRoute(hash) {
-  if (typeof hash !== "string" || !hash.startsWith("#/")) return DEFAULT_ROUTE;
+  if (hash === "" || hash === "#" || hash === "#/") return null;
+  if (typeof hash !== "string" || !hash.startsWith("#/")) return null;
   const route = hash.slice(1);
-  return readyApplication(getApplicationByRoute(route)) ? route : DEFAULT_ROUTE;
+  return launchableApplication(getApplicationByRoute(route)) ? route : null;
 }
 
 export function hashForRoute(route) {
-  const normalized = readyApplication(getApplicationByRoute(route))?.route || DEFAULT_ROUTE;
-  return `#${normalized}`;
+  const normalized = routeFromTarget(route);
+  return normalized ? `#${normalized}` : "";
 }
 
 export function resolveNavigationTarget(target) {
-  if (typeof target !== "string") return DEFAULT_ROUTE;
-  const byId = readyApplication(getApplicationById(target));
-  if (byId) return byId.route;
-  return readyApplication(getApplicationByRoute(target))?.route || DEFAULT_ROUTE;
+  return routeFromTarget(target);
+}
+
+function desktopUrl(location) {
+  return `${location.pathname}${location.search}`;
+}
+
+function urlForRoute(location, route) {
+  return `${desktopUrl(location)}${hashForRoute(route)}`;
 }
 
 export function createHashRouter(onRouteChange) {
@@ -31,17 +46,20 @@ export function createHashRouter(onRouteChange) {
   let started = false;
 
   const dispatch = (reason) => {
-    const route = parseHashRoute(window.location.hash);
+    const originalHash = window.location.hash;
+    const route = parseHashRoute(originalHash);
+    const malformed = route === null && !["", "#", "#/"].includes(originalHash);
     const canonicalHash = hashForRoute(route);
-    const canonicalized = window.location.hash !== canonicalHash;
+    const canonicalized = originalHash !== canonicalHash;
     if (canonicalized) {
-      window.history.replaceState(
-        null,
-        "",
-        `${window.location.pathname}${window.location.search}${canonicalHash}`,
-      );
+      window.history.replaceState(null, "", urlForRoute(window.location, route));
     }
-    onRouteChange(getApplicationByRoute(route), { reason, canonicalized });
+    onRouteChange(route === null ? null : getApplicationByRoute(route), {
+      reason,
+      canonicalized,
+      malformed,
+      originalHash,
+    });
   };
 
   const onHashChange = () => dispatch("hashchange");
@@ -54,14 +72,25 @@ export function createHashRouter(onRouteChange) {
       dispatch("initial");
     },
 
-    navigate(target) {
+    navigate(target, { replace = false } = {}) {
       const route = resolveNavigationTarget(target);
       const nextHash = hashForRoute(route);
       if (window.location.hash === nextHash) {
         dispatch("same-route");
-      } else {
+      } else if (replace) {
+        window.history.replaceState(null, "", urlForRoute(window.location, route));
+        dispatch("replace-route");
+      } else if (nextHash) {
         window.location.hash = nextHash;
+      } else {
+        window.location.hash = "";
       }
+    },
+
+    restore(target) {
+      const route = resolveNavigationTarget(target);
+      window.history.replaceState(null, "", urlForRoute(window.location, route));
+      dispatch("restore-route");
     },
 
     stop() {

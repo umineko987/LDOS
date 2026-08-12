@@ -18,10 +18,19 @@ export function createShellActions({
   if (
     !storage
     || typeof storage.writeCurrentApp !== "function"
-    || typeof storage.writeWindowLayout !== "function"
+    || (
+      typeof storage.writeWindowPlacementsFromStack !== "function"
+      && typeof storage.writeWindowLayout !== "function"
+    )
   ) {
     throw new TypeError("actions 需要安全存储服务");
   }
+  const clearCurrentApp = typeof storage.clearCurrentApp === "function"
+    ? () => storage.clearCurrentApp()
+    : () => {};
+  const writeWindowPlacements = typeof storage.writeWindowPlacementsFromStack === "function"
+    ? (windows) => storage.writeWindowPlacementsFromStack(windows)
+    : (windows) => storage.writeWindowLayout(windows);
   if (typeof getRegisteredApplicationById !== "function") {
     throw new TypeError("actions 需要应用查询服务");
   }
@@ -57,7 +66,7 @@ export function createShellActions({
   const flushWindowLayout = () => {
     if (!layoutPending) return false;
     layoutPending = false;
-    storage.writeWindowLayout(windowStack());
+    writeWindowPlacements(windowStack());
     return true;
   };
 
@@ -112,7 +121,11 @@ export function createShellActions({
 
   const syncFocusedRoute = () => {
     const appId = selectors.focusedAppId(store.getState());
-    if (appId === null) return;
+    if (appId === null) {
+      clearCurrentApp();
+      router.navigate(null);
+      return;
+    }
     storage.writeCurrentApp(appId);
     router.navigate(appId);
   };
@@ -128,13 +141,21 @@ export function createShellActions({
     const alreadyFocused = existing
       && existing.windowState !== "minimized"
       && selectors.focusedAppId(store.getState()) === app.id;
-    if (!alreadyFocused) dispatchWindowAction(actionCreators.windowOpened(app.id));
+    const placement = existing
+      ? null
+      : storage.readWindowPlacement?.(app.id) ?? null;
+    if (!alreadyFocused) dispatchWindowAction(actionCreators.windowOpened(app.id, placement));
     storage.writeCurrentApp(app.id);
+  };
+
+  const desktopResolved = () => {
+    clearCurrentApp();
   };
 
   return Object.freeze({
     navigateToApp,
     routeResolved,
+    desktopResolved,
     setStartMenuOpen(open) {
       store.dispatch(actionCreators.startMenuChanged(Boolean(open)));
     },

@@ -236,9 +236,6 @@ export function initializeDesktop(root = document, services = {}) {
   };
 
   const activateRoute = (app, navigation = {}) => {
-    if (!app) return;
-    // 恢复为空栈或全最小化布局时，初始 hash 只保留地址，不得擅自重开窗口。
-    if (navigation.reason === "initial" && store.getState().ui.focusedAppId === null) return;
     const transition = ++routeTransitionVersion;
     void (async () => {
       const previous = currentApp;
@@ -246,7 +243,7 @@ export function initializeDesktop(root = document, services = {}) {
       if (
         previous
         && previousMounted
-        && previous.id !== app.id
+        && previous.id !== app?.id
         && typeof previous.beforeLeave === "function"
       ) {
         let allowed = false;
@@ -259,11 +256,27 @@ export function initializeDesktop(root = document, services = {}) {
         if (!allowed) {
           focusBodyAfterRouteAppId = null;
           announcer.textContent = `无法离开${previous.label}；请先处理未保存内容。`;
-          router.navigate(previous.id);
+          router.restore(previous.id);
+          windowManager?.focusBody(previous.id);
           return;
         }
       }
       if (transition !== routeTransitionVersion) return;
+      if (!app) {
+        const previousRecord = previous
+          ? selectors.windowStack(store.getState()).find((record) => record.appId === previous.id)
+          : null;
+        if (previousRecord && previousRecord.windowState !== "minimized") {
+          actions.minimizeWindow(previous.id);
+        }
+        currentApp = null;
+        actions.desktopResolved();
+        document.title = "ImageWeave";
+        announcer.textContent = navigation.malformed
+          ? "无法识别该地址，已返回 ImageWeave 桌面。"
+          : "已返回 ImageWeave 桌面。";
+        return;
+      }
       currentApp = app;
       updateNavigationState(app);
       actions.routeResolved(app);
@@ -276,7 +289,7 @@ export function initializeDesktop(root = document, services = {}) {
     })().catch(() => {
       focusBodyAfterRouteAppId = null;
       announcer.textContent = "应用切换失败；当前窗口保持不变。";
-      if (currentApp) router.navigate(currentApp.id);
+      router.restore(currentApp?.id ?? null);
     });
   };
 

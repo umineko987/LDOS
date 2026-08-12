@@ -1,8 +1,10 @@
 import { STORAGE_KEYS } from "./storage-contract.js";
 import {
+  deserializeWindowPlacements,
+  migrateLegacyWindowLayout,
   normalizeViewport,
-  restoreWindowLayout,
-  serializeWindowLayout,
+  placementsFromWindowStack,
+  serializeWindowPlacements,
 } from "./storage-layout.js";
 import { createStoragePersistenceAdapter } from "./storage-persistence.js";
 import {
@@ -37,6 +39,62 @@ function requirePersistenceAdapter(persistence) {
 
 export function createStorageServiceFromAdapter(persistenceAdapter) {
   const persistence = requirePersistenceAdapter(persistenceAdapter);
+  const removeLocal = typeof persistence.removeLocal === "function"
+    ? (key) => persistence.removeLocal(key)
+    : () => false;
+  let placementCache = null;
+
+  const readWindowPlacements = (viewport = undefined, geometryOptions = {}) => {
+    const normalizedViewport = normalizeViewport(viewport);
+    const serialized = persistence.readLocal(STORAGE_KEYS.windowPlacements);
+    let placements = deserializeWindowPlacements(
+      serialized,
+      normalizedViewport,
+      geometryOptions,
+    );
+
+    if (serialized !== null) {
+      if (placements === null) {
+        removeLocal(STORAGE_KEYS.windowPlacements);
+        placements = [];
+      } else {
+        const repaired = serializeWindowPlacements(placements);
+        if (serialized !== repaired) {
+          persistence.writeLocal(STORAGE_KEYS.windowPlacements, repaired);
+        }
+      }
+      // A v2 value, valid or damaged, is authoritative. The legacy workspace is one-shot only.
+      removeLocal(STORAGE_KEYS.windowLayout);
+    } else {
+      const legacy = persistence.readLocal(STORAGE_KEYS.windowLayout);
+      placements = legacy === null
+        ? []
+        : migrateLegacyWindowLayout(legacy, normalizedViewport, geometryOptions) ?? [];
+      if (legacy !== null) {
+        if (placements.length > 0) {
+          persistence.writeLocal(
+            STORAGE_KEYS.windowPlacements,
+            serializeWindowPlacements(placements),
+          );
+        }
+        removeLocal(STORAGE_KEYS.windowLayout);
+      }
+    }
+    placementCache = placements;
+    return placements.map((placement) => ({
+      ...placement,
+      rect: { ...placement.rect },
+    }));
+  };
+
+  const writeWindowPlacements = (placements) => {
+    const serialized = serializeWindowPlacements(placements);
+    const projected = JSON.parse(serialized).placements;
+    const written = persistence.writeLocal(STORAGE_KEYS.windowPlacements, serialized);
+    if (written) placementCache = projected;
+    return written;
+  };
+
   return Object.freeze({
     readCurrentApp() {
       const stored = persistence.readSession(STORAGE_KEYS.currentApp);
@@ -52,6 +110,9 @@ export function createStorageServiceFromAdapter(persistenceAdapter) {
         projectApplicationId(appId),
       );
     },
+    clearCurrentApp() {
+      return persistence.removeSession(STORAGE_KEYS.currentApp);
+    },
     readActiveBatchId() {
       const stored = persistence.readSession(STORAGE_KEYS.activeBatch);
       if (stored === null) return null;
@@ -66,23 +127,26 @@ export function createStorageServiceFromAdapter(persistenceAdapter) {
     clearActiveBatchId() {
       return persistence.removeSession(STORAGE_KEYS.activeBatch);
     },
+    readWindowPlacements,
+    readWindowPlacement(appId) {
+      if (typeof appId !== "string") return null;
+      const placements = placementCache ?? readWindowPlacements();
+      const placement = placements.find((item) => item.appId === appId);
+      return placement
+        ? { rect: { ...placement.rect }, maximized: placement.maximized }
+        : null;
+    },
+    writeWindowPlacements,
+    writeWindowPlacementsFromStack(windows) {
+      const previous = placementCache ?? readWindowPlacements();
+      return writeWindowPlacements(placementsFromWindowStack(windows, previous));
+    },
+    // Compatibility names now expose placement preferences, never a restorable workspace.
     readWindowLayout(viewport = undefined, geometryOptions = {}) {
-      const normalizedViewport = normalizeViewport(viewport);
-      const serialized = persistence.readLocal(STORAGE_KEYS.windowLayout);
-      const windows = restoreWindowLayout(serialized, normalizedViewport, geometryOptions);
-      if (serialized !== null) {
-        const repaired = serializeWindowLayout(windows);
-        if (serialized !== repaired) {
-          persistence.writeLocal(STORAGE_KEYS.windowLayout, repaired);
-        }
-      }
-      return windows;
+      return readWindowPlacements(viewport, geometryOptions);
     },
     writeWindowLayout(windows) {
-      return persistence.writeLocal(
-        STORAGE_KEYS.windowLayout,
-        serializeWindowLayout(windows),
-      );
+      return this.writeWindowPlacementsFromStack(windows);
     },
     readUiPreferences() {
       const serialized = persistence.readLocal(STORAGE_KEYS.uiPreferences);

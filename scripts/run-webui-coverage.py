@@ -18,7 +18,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "gallery-dl-backend"
 SOURCE_WEBUI = BACKEND / "gdl_backend" / "webui"
-SOURCE_TEST = BACKEND / "tests" / "webui_modules.test.mjs"
+SOURCE_TESTS = (
+    BACKEND / "tests" / "webui_modules.test.mjs",
+    BACKEND / "tests" / "webui_phase2_contract.test.mjs",
+)
 BASELINES_PATH = ROOT / "scripts" / "coverage-baselines.json"
 SUMMARY_SCRIPT = ROOT / "scripts" / "summarize-node-coverage.cjs"
 GROUPS = ("core", "apps", "components")
@@ -49,7 +52,8 @@ def _prepare_tree(root: Path) -> None:
     shutil.copytree(SOURCE_WEBUI / "js", root / "gdl_backend" / "webui" / "js")
     shutil.copytree(SOURCE_WEBUI / "styles", root / "gdl_backend" / "webui" / "styles")
     (root / "tests").mkdir()
-    shutil.copy2(SOURCE_TEST, root / "tests" / SOURCE_TEST.name)
+    for source_test in SOURCE_TESTS:
+        shutil.copy2(source_test, root / "tests" / source_test.name)
     (root / "package.json").write_text(
         '{"type":"module","private":true}\n',
         encoding="utf-8",
@@ -65,7 +69,7 @@ def _run_node_tests(node: str, *, coverage: bool, root: Path, raw: Path | None):
                 "--test-coverage-include=gdl_backend/webui/js/**/*.js",
             ]
         )
-    command.append(f"tests/{SOURCE_TEST.name}")
+    command.extend(f"tests/{source_test.name}" for source_test in SOURCE_TESTS)
     environment = os.environ.copy()
     if coverage:
         assert raw is not None
@@ -145,7 +149,7 @@ def _write_summary(output: Path, result: dict) -> str:
         [
             f"- gate: **{result['status']}**",
             "- source assertions in Python are excluded; only executions from "
-            "tests/webui_modules.test.mjs contribute",
+            "tests/webui_modules.test.mjs and tests/webui_phase2_contract.test.mjs contribute",
         ]
     )
     for omission in result["explicit_omissions"]:
@@ -265,7 +269,9 @@ def main() -> int:
         "node": actual_node,
         "command": _display_command(command),
         "parser_command": _display_command(parser_command),
-        "behavior_test": "gallery-dl-backend/tests/webui_modules.test.mjs",
+        "behavior_tests": [
+            str(source_test.relative_to(ROOT)) for source_test in SOURCE_TESTS
+        ],
         "tests": counts,
         "groups": groups,
         "minimum": minimum,

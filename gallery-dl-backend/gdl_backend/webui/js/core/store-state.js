@@ -160,8 +160,11 @@ export const actionCreators = Object.freeze({
   reviewCleared(batchId = "") {
     return action(ACTION_TYPES.REVIEW_CLEARED, { batchId });
   },
-  windowOpened(appId) {
-    return action(ACTION_TYPES.UI_WINDOW_OPENED, { appId });
+  windowOpened(appId, placement = null) {
+    return action(
+      ACTION_TYPES.UI_WINDOW_OPENED,
+      placement === null ? { appId } : { appId, placement },
+    );
   },
   windowClosed(appId) {
     return action(ACTION_TYPES.UI_WINDOW_CLOSED, { appId });
