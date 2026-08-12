@@ -263,6 +263,30 @@ class WebUiModuleTests(unittest.TestCase):
         ]
         self.assertEqual(rendered, [], f"WebUI 静态 import graph 存在循环：{rendered}")
 
+    def test_webui_fixtures_are_test_only_and_absent_from_production_sources(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui_root = backend_root / "gdl_backend" / "webui"
+        fixture_root = backend_root / "tests" / "fixtures" / "webui"
+
+        self.assertTrue(fixture_root.is_dir())
+        self.assertTrue((fixture_root / "README.md").is_file())
+        self.assertEqual(
+            fixture_root.resolve().relative_to((backend_root / "tests").resolve()).parts[:2],
+            ("fixtures", "webui"),
+        )
+
+        forbidden_references = (
+            "tests/fixtures/webui",
+            "tests\\fixtures\\webui",
+            "webui_glass_target.test.mjs",
+        )
+        for path in webui_root.rglob("*"):
+            if not path.is_file() or path.suffix not in {".html", ".css", ".js"}:
+                continue
+            source = path.read_text(encoding="utf-8")
+            for reference in forbidden_references:
+                self.assertNotIn(reference, source, str(path.relative_to(webui_root)))
+
     def test_store_static_dependency_closure_excludes_apps_and_views(self):
         backend_root = Path(__file__).resolve().parents[1]
         javascript_root = backend_root / "gdl_backend" / "webui" / "js"
