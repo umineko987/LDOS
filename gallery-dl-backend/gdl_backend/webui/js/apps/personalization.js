@@ -448,33 +448,42 @@ function createPersonalizationController(context) {
     view.focusAfter("delete");
   };
 
-  const confirmDiscard = async (purpose) => {
+  let discardRequest = null;
+  const confirmDiscard = (purpose) => {
+    if (discardRequest) return discardRequest;
     if (operationBusy()) {
       view.setStatus("saving", "图片或设置正在处理，完成前无法离开外观设置。");
-      return false;
+      return Promise.resolve(false);
     }
-    if (!hasUnappliedDraft()) return true;
-    let choice = "cancel";
-    try {
-      choice = await dialogs.open({
-        title: "放弃未应用的外观设置？",
-        message: `当前主题、动效、背景、图片显示或窗口透明度尚未应用。${purpose}后将放弃这些更改。`,
-        confirmLabel: "放弃更改并离开",
-        dangerous: true,
-        confirmationText: "确认后将恢复上次保存的设置，未应用内容不会写入浏览器存储。",
-      });
-    } catch {
-      choice = "cancel";
-    }
-    if (choice !== "confirm" || !active || destroyed) {
-      if (active && !destroyed) {
-        view.setStatus("dirty", "已取消离开，未应用的更改继续保留。");
+    if (!hasUnappliedDraft()) return Promise.resolve(true);
+    const request = (async () => {
+      let choice = "cancel";
+      try {
+        choice = await dialogs.open({
+          title: "放弃未应用的外观设置？",
+          message: `当前主题、动效、背景、图片显示或窗口透明度尚未应用。${purpose}后将放弃这些更改。`,
+          confirmLabel: "放弃更改并离开",
+          dangerous: true,
+          confirmationText: "确认后将恢复上次保存的设置，未应用内容不会写入浏览器存储。",
+        });
+      } catch {
+        choice = "cancel";
       }
-      return false;
-    }
-    return cancelDraft(
-      "已放弃未应用的更改，设置已恢复。",
-    );
+      if (choice !== "confirm" || !active || destroyed) {
+        if (active && !destroyed) {
+          view.setStatus("dirty", "已取消离开，未应用的更改继续保留。");
+        }
+        return false;
+      }
+      return cancelDraft(
+        "已放弃未应用的更改，设置已恢复。",
+      );
+    })();
+    const trackedRequest = request.finally(() => {
+      if (discardRequest === trackedRequest) discardRequest = null;
+    });
+    discardRequest = trackedRequest;
+    return trackedRequest;
   };
 
   const themeInputValuesMatchRuntimeDraft = () => {

@@ -5247,7 +5247,11 @@ test("G2 主题低对比即时预览应用，格式与 setter 失败仍安全阻
     assert.equal(unloadEvent.returnValue, "");
 
     dialogChoices.push("cancel");
-    assert.equal(await personalizationApplication.beforeLeave(), false);
+    const firstDiscard = personalizationApplication.beforeLeave();
+    const duplicateDiscard = personalizationApplication.beforeWindowHide(null, "minimized");
+    assert.equal(firstDiscard, duplicateDiscard);
+    assert.equal(dialogCalls.length, 1);
+    assert.equal(await firstDiscard, false);
     assert.match(dialogCalls.at(-1).message, /切换应用后将放弃/);
     assert.equal(accent.value, "#123", "取消离开继续保留非法格式表单值");
 
