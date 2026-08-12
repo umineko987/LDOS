@@ -101,10 +101,10 @@ export function createEmptyState({
 
 export function createPlaceholderShell({ responsibility }) {
   return createApplicationShell({
-    status: "disabled",
-    statusLabel: "功能开发中",
-    summary: "功能正在开发，暂不可用。",
-    panelTitle: "计划功能",
+    status: "warning",
+    statusLabel: "前端预览",
+    summary: "后端能力尚未接入；当前只提供受控说明，不会发送业务请求。",
+    panelTitle: "计划能力",
     capabilities: [responsibility],
     links: [],
   });
