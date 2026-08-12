@@ -8,6 +8,7 @@ import crawlApplication, * as crawlControllerModule from "../gdl_backend/webui/j
 import {
   createCrawlView,
   createSourceErrorWarning,
+  readCrawlSourceOptions,
 } from "../gdl_backend/webui/js/components/crawl-view.js";
 
 const {
@@ -817,8 +818,22 @@ test("3A controller：create 幂等、单次 active batch/导航、失败保留�
   }
 });
 
-test("3A view：三段语义工作区、权威摘要、自然语言排序按钮和局部 active source", () => {
+test("3A view：三段语义工作区、来源 override、权威摘要和局部 active source", () => {
   assert.equal(typeof createCrawlView, "function");
+  const selects = new Map([
+    ["source-danbooru", { value: "" }],
+    ["source-twitter", { value: "prefer" }],
+    ["source-pixiv", { value: "direct" }],
+    ["source-exhentai", { value: "required" }],
+    ["source-pawchive", { value: "" }],
+  ]);
+  assert.deepEqual(readCrawlSourceOptions({
+    sitePicker: { querySelector: (selector) => selects.get(selector.match(/name=\"([^\"]+)/)?.[1]) || null },
+  }), {
+    twitter: { proxy_mode: "prefer" },
+    pixiv: { proxy_mode: "direct" },
+    exhentai: { proxy_mode: "required" },
+  });
   for (const contract of [
     /<aside|createElement\("aside"/,
     /createElement\("main"/,

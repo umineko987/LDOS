@@ -78,10 +78,10 @@ function selectProxyMode(name, value = "required", { inherit = false, label = "è
   return select;
 }
 
-function sourceOptionValues(elements) {
+export function readCrawlSourceOptions(elements) {
   const result = {};
   for (const site of CRAWL_SITE_DEFINITIONS) {
-    const select = elements.sourceOverrides.querySelector(`[name="source-${site.id}"]`);
+    const select = elements.sitePicker.querySelector(`[name="source-${site.id}"]`);
     if (select?.value) result[site.id] = { proxy_mode: select.value };
   }
   return result;
@@ -541,8 +541,11 @@ export function createCrawlView(context) {
     const notices = [];
     const authBySite = state.auth?.bySite instanceof Map ? state.auth.bySite : new Map();
     const required = ["twitter", "pixiv", "exhentai"].filter((site) => {
-      const status = authBySite.get(site);
-      return status && !status.authorized;
+      const sourceAuth = state.crawl.sources.find((source) => source.site === site)?.auth;
+      const vaultAuth = authBySite.get(site);
+      return sourceAuth?.known
+        ? !sourceAuth.authorized && sourceAuth.state === "required"
+        : Boolean(vaultAuth && !vaultAuth.authorized);
     });
     if (required.length) {
       const labels = required.map((site) => CRAWL_SITE_DEFINITIONS.find((item) => item.id === site)?.label || site);
@@ -838,7 +841,7 @@ export function createCrawlView(context) {
         sites: selectedSites(elements),
         limit: Number(elements.searchLimit.value),
         proxyMode: elements.searchProxy.value,
-        sourceOptions: sourceOptionValues(elements),
+        sourceOptions: readCrawlSourceOptions(elements),
       };
     },
     readCrawlDraft() {
@@ -847,7 +850,7 @@ export function createCrawlView(context) {
         maxTasks: Number(elements.maxTasks.value),
         proxyMode: elements.crawlProxy.value,
         outputDir: elements.outputDir.value,
-        sourceOptions: sourceOptionValues(elements),
+        sourceOptions: readCrawlSourceOptions(elements),
         ehDownload: {
           image_mode: elements.imageResample.checked ? "resample" : "original",
           gp_policy: elements.imageResample.checked ? "stop" : elements.gpPolicy.value,
