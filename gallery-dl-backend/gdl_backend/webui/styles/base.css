@@ -14,10 +14,12 @@ body {
 
 body {
   min-width: 320px;
-  color: var(--imageweave-accent);
+  color: var(--imageweave-text-primary);
   background: var(--imageweave-surface);
+  font-family: var(--imageweave-font-sans);
   font-size: 16px;
   line-height: 1.55;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -36,14 +38,24 @@ a {
 
 button:focus-visible,
 a:focus-visible,
-[tabindex="-1"]:focus-visible {
-  outline: var(--imageweave-focus-width) solid var(--imageweave-accent);
-  outline-offset: 2px;
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 1px var(--imageweave-focus-halo);
 }
 
 ::selection {
-  color: var(--imageweave-surface);
-  background: var(--imageweave-accent);
+  color: #FFFFFF;
+  background: #0867C7;
+}
+
+::placeholder {
+  color: var(--imageweave-text-secondary);
+  opacity: 1;
 }
 
 [hidden] {
@@ -59,20 +71,33 @@ p {
 
 h1 {
   margin-bottom: 12px;
-  font-size: clamp(1.75rem, 4vw, 2.7rem);
+  font-size: clamp(1.7rem, 3.2vw, 2.55rem);
   line-height: 1.12;
+  letter-spacing: -0.025em;
 }
 
 h2 {
   margin-bottom: 14px;
-  padding-bottom: 5px;
-  border-bottom: var(--imageweave-border-width) solid var(--imageweave-accent);
-  font-size: 1.25rem;
+  padding-bottom: 7px;
+  border-bottom: var(--imageweave-border-width) solid var(--imageweave-separator);
+  font-size: 1.2rem;
+  line-height: 1.25;
+}
+
+h3 {
+  line-height: 1.3;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--imageweave-font-mono);
 }
 
 code {
   overflow-wrap: anywhere;
-  font-family: inherit;
+  color: var(--imageweave-text-code);
   font-weight: 700;
 }
 
@@ -93,12 +118,15 @@ code {
   top: 8px;
   left: 8px;
   z-index: 100;
-  min-height: 44px;
-  padding: 7px 10px;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  color: var(--imageweave-surface);
-  background: var(--imageweave-accent);
-  transform: translateY(-160%);
+  min-height: var(--imageweave-control-height);
+  padding: 8px 13px;
+  border: var(--imageweave-border-strong-width) solid var(--imageweave-border-strong);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-inverse);
+  background: #34424F;
+  background: color-mix(in srgb, var(--imageweave-accent) 76%, var(--imageweave-text-primary) 24%);
+  box-shadow: var(--imageweave-shadow-flyout);
+  transform: translateY(-180%);
 }
 
 .skip-link:focus {
@@ -111,18 +139,72 @@ code {
   left: 50%;
   z-index: 200;
   width: min(520px, calc(100vw - 32px));
-  padding: 20px;
-  border: 4px double var(--imageweave-accent);
-  background: var(--imageweave-surface);
-  box-shadow: var(--imageweave-hard-shadow);
+  padding: 22px;
+  border: var(--imageweave-border-strong-width) solid var(--imageweave-state-danger);
+  border-radius: var(--imageweave-radius-card);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-content-solid);
+  background: var(--imageweave-surface-content);
+  box-shadow: var(--imageweave-shadow-flyout);
   transform: translate(-50%, -50%);
 }
 
 .shell-error p {
   margin: 14px 0 0;
+  color: var(--imageweave-text-secondary);
 }
 
 * {
-  scrollbar-color: var(--imageweave-accent) var(--imageweave-surface);
+  scrollbar-color: var(--imageweave-border-strong) var(--imageweave-surface-content-solid);
   scrollbar-width: thin;
+}
+
+@media (forced-colors: active) {
+  *,
+  *::before,
+  *::after {
+    background-image: none !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  html,
+  body {
+    color: CanvasText;
+    background: Canvas;
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  summary {
+    forced-color-adjust: auto;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  summary:focus-visible,
+  [tabindex]:focus-visible {
+    outline: var(--imageweave-focus-width) solid Highlight !important;
+    outline-offset: 3px;
+  }
+
+  ::selection {
+    color: HighlightText;
+    background: Highlight;
+  }
+
+  .skip-link,
+  .shell-error {
+    border-color: CanvasText;
+    color: CanvasText;
+    background: Canvas;
+  }
 }

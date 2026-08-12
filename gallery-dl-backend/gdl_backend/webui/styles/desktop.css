@@ -316,9 +316,12 @@
   min-width: 360px;
   min-height: 240px;
   overflow: hidden;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
+  border-radius: var(--imageweave-radius-window);
+  color: var(--imageweave-text-primary);
   background: var(--imageweave-surface);
-  box-shadow: var(--imageweave-small-shadow);
+  background: var(--imageweave-surface-content);
+  box-shadow: var(--imageweave-shadow-card);
   pointer-events: auto;
   transform: none;
   animation: imageweave-window-appear 120ms ease-out;
@@ -331,7 +334,8 @@
 }
 
 .application-window[data-window-focused] {
-  box-shadow: var(--imageweave-hard-shadow);
+  border-color: var(--imageweave-border-strong);
+  box-shadow: var(--imageweave-shadow-window);
 }
 
 .application-window[data-window-interacting] {
@@ -340,6 +344,7 @@
 
 .window-layer--opacity-solid .application-window {
   background: var(--imageweave-surface);
+  background: var(--imageweave-surface-content-solid);
 }
 
 .window-layer--opacity-subtle .application-window {
@@ -376,8 +381,10 @@
   min-width: 0;
   min-height: var(--imageweave-window-title-height);
   padding: 3px 4px 3px 10px;
-  color: var(--imageweave-surface);
-  background: var(--imageweave-accent);
+  border-bottom: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
+  color: var(--imageweave-text-inverse);
+  background: #46515D;
+  background: color-mix(in srgb, var(--imageweave-accent) 82%, var(--imageweave-text-primary) 18%);
   line-height: 1.2;
   cursor: move;
   touch-action: none;
@@ -477,9 +484,11 @@
   width: min(360px, calc(100vw - 16px));
   max-height: calc(100dvh - var(--imageweave-taskbar-height) - 12px);
   overflow: auto;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
+  border-radius: var(--imageweave-radius-card);
   background: var(--imageweave-surface);
-  box-shadow: 5px -5px 0 var(--imageweave-accent);
+  background: var(--imageweave-surface-environment);
+  box-shadow: var(--imageweave-shadow-menu);
 }
 
 .start-menu > strong {
@@ -554,8 +563,10 @@
   align-items: center;
   height: var(--imageweave-taskbar-height);
   padding: 4px 6px;
-  border-top: var(--imageweave-border-width) solid var(--imageweave-accent);
+  border-top: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
   background: var(--imageweave-surface);
+  background: var(--imageweave-surface-environment);
+  box-shadow: var(--imageweave-shadow-dock);
 }
 
 .start-button,
@@ -641,9 +652,11 @@
   width: min(280px, calc(100vw - 12px));
   max-height: calc(100dvh - var(--imageweave-taskbar-height) - 16px);
   overflow: auto;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
+  border-radius: var(--imageweave-radius-card);
   background: var(--imageweave-surface);
-  box-shadow: var(--imageweave-hard-shadow);
+  background: var(--imageweave-surface-environment);
+  box-shadow: var(--imageweave-shadow-menu);
 }
 
 .task-window-overflow__list {
@@ -696,6 +709,35 @@
   white-space: nowrap;
 }
 
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .window-layer--opacity-subtle .application-window,
+  .window-layer--opacity-soft .application-window {
+    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-navigation)) saturate(118%);
+    backdrop-filter: blur(var(--imageweave-glass-blur-navigation)) saturate(118%);
+  }
+
+  .start-menu,
+  .taskbar,
+  .task-window-overflow {
+    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(124%);
+    backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(124%);
+  }
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .window-layer--opacity-solid .application-window,
+  .window-layer--opacity-subtle .application-window,
+  .window-layer--opacity-soft .application-window {
+    background: var(--imageweave-surface-content-solid) !important;
+  }
+
+  .start-menu,
+  .taskbar,
+  .task-window-overflow {
+    background: var(--imageweave-surface-environment-solid) !important;
+  }
+}
+
 :root[data-motion="off"] .application-window {
   animation: none;
   transition: none;
@@ -709,19 +751,37 @@
 }
 
 @media (forced-colors: active) {
+  .desktop-wallpaper {
+    background: Canvas;
+  }
+
+  .desktop-wallpaper__image-layer,
+  .desktop-wallpaper__mask {
+    display: none !important;
+  }
+
+  .desktop-icon,
   .application-window,
   .window-layer--opacity-solid .application-window,
   .window-layer--opacity-subtle .application-window,
-  .window-layer--opacity-soft .application-window {
+  .window-layer--opacity-soft .application-window,
+  .start-menu,
+  .taskbar,
+  .task-window-overflow {
     border-color: CanvasText;
+    color: CanvasText;
     background: Canvas !important;
+    background-image: none !important;
     box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
   .window-titlebar {
     border-bottom: var(--imageweave-border-width) solid CanvasText;
     color: Canvas;
     background: CanvasText;
+    background-image: none;
   }
 
   .window-resize-handle,

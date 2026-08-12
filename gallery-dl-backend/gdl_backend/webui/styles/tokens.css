@@ -1,17 +1,105 @@
 :root {
+  /* The personalization runtime may write only these two six-digit HEX values. */
   --imageweave-accent: #46515D;
   --imageweave-surface: #F4F1EA;
-  --imageweave-border-width: 2px;
-  --imageweave-hard-shadow: 5px 5px 0 var(--imageweave-accent);
-  --imageweave-small-shadow: 3px 3px 0 var(--imageweave-accent);
+
+  --imageweave-font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  --imageweave-font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+
+  --imageweave-text-primary: #17212B;
+  --imageweave-text-secondary: #56616D;
+  --imageweave-text-inverse: #FFFFFF;
+  --imageweave-text-code: #293744;
+
+  /* Solid values precede color-mix so unsupported engines keep an opaque UI. */
+  --imageweave-surface-content-solid: #F8F7F3;
+  --imageweave-surface-navigation-solid: #ECEFF1;
+  --imageweave-surface-environment-solid: #E4E8EB;
+  --imageweave-surface-control-solid: #FBFAF7;
+  --imageweave-surface-content: var(--imageweave-surface-content-solid);
+  --imageweave-surface-content: color-mix(in srgb, var(--imageweave-surface) 96%, transparent);
+  --imageweave-surface-navigation: var(--imageweave-surface-navigation-solid);
+  --imageweave-surface-navigation: color-mix(in srgb, var(--imageweave-surface) 86%, transparent);
+  --imageweave-surface-environment: var(--imageweave-surface-environment-solid);
+  --imageweave-surface-environment: color-mix(in srgb, var(--imageweave-surface) 74%, transparent);
+  --imageweave-surface-control: var(--imageweave-surface-control-solid);
+  --imageweave-surface-control: color-mix(in srgb, var(--imageweave-surface) 96%, #FFFFFF 4%);
+  --imageweave-surface-control-hover: #EEF1F3;
+  --imageweave-surface-control-hover: color-mix(in srgb, var(--imageweave-accent) 10%, var(--imageweave-surface) 90%);
+  --imageweave-surface-control-active: #E2E7EA;
+  --imageweave-surface-control-active: color-mix(in srgb, var(--imageweave-accent) 17%, var(--imageweave-surface) 83%);
+
+  --imageweave-border-subtle-solid: #B9C2CA;
+  --imageweave-border-strong-solid: #687581;
+  --imageweave-border-subtle: var(--imageweave-border-subtle-solid);
+  --imageweave-border-subtle: color-mix(in srgb, var(--imageweave-accent) 24%, var(--imageweave-surface) 76%);
+  --imageweave-border-strong: var(--imageweave-border-strong-solid);
+  --imageweave-border-strong: color-mix(in srgb, var(--imageweave-accent) 66%, var(--imageweave-text-primary) 34%);
+  --imageweave-separator: #CDD3D8;
+  --imageweave-separator: color-mix(in srgb, var(--imageweave-accent) 18%, var(--imageweave-surface) 82%);
+  --imageweave-focus-ring: #0867C7;
+  --imageweave-focus-halo: #FFFFFF;
+
+  --imageweave-state-danger: #B42318;
+  --imageweave-state-danger-surface-solid: #FCE9E7;
+  --imageweave-state-danger-surface: var(--imageweave-state-danger-surface-solid);
+  --imageweave-state-danger-surface: color-mix(in srgb, var(--imageweave-state-danger) 12%, var(--imageweave-surface) 88%);
+  --imageweave-state-warning: #8A5200;
+  --imageweave-state-warning-surface-solid: #F8EED8;
+  --imageweave-state-warning-surface: var(--imageweave-state-warning-surface-solid);
+  --imageweave-state-warning-surface: color-mix(in srgb, var(--imageweave-state-warning) 13%, var(--imageweave-surface) 87%);
+  --imageweave-state-success: #137A4A;
+  --imageweave-state-success-surface-solid: #E1F3E9;
+  --imageweave-state-success-surface: var(--imageweave-state-success-surface-solid);
+  --imageweave-state-success-surface: color-mix(in srgb, var(--imageweave-state-success) 12%, var(--imageweave-surface) 88%);
+  --imageweave-state-running: #286AA6;
+  --imageweave-state-running-surface-solid: #E4EFF9;
+  --imageweave-state-running-surface: var(--imageweave-state-running-surface-solid);
+  --imageweave-state-running-surface: color-mix(in srgb, var(--imageweave-state-running) 12%, var(--imageweave-surface) 88%);
+  --imageweave-state-disabled: #68737D;
+  --imageweave-state-disabled-surface-solid: #ECEEEF;
+  --imageweave-state-disabled-surface: var(--imageweave-state-disabled-surface-solid);
+  --imageweave-state-disabled-surface: color-mix(in srgb, var(--imageweave-state-disabled) 10%, var(--imageweave-surface) 90%);
+
+  --imageweave-shadow-window: 0 26px 70px rgb(7 13 20 / 0.34), 0 8px 24px rgb(7 13 20 / 0.22);
+  --imageweave-shadow-menu: 0 18px 44px rgb(7 13 20 / 0.28), 0 5px 14px rgb(7 13 20 / 0.18);
+  --imageweave-shadow-dock: 0 20px 48px rgb(7 13 20 / 0.32), 0 5px 16px rgb(7 13 20 / 0.2);
+  --imageweave-shadow-flyout: 0 16px 36px rgb(7 13 20 / 0.26), 0 4px 12px rgb(7 13 20 / 0.16);
+  --imageweave-shadow-card: 0 8px 22px rgb(7 13 20 / 0.12), 0 1px 3px rgb(7 13 20 / 0.1);
+  --imageweave-shadow-control: 0 2px 5px rgb(7 13 20 / 0.14);
+
+  --imageweave-radius-window: 18px;
+  --imageweave-radius-card: 13px;
+  --imageweave-radius-control: 9px;
+  --imageweave-radius-pill: 999px;
+  --imageweave-border-width: 1px;
+  --imageweave-border-strong-width: 2px;
   --imageweave-focus-width: 3px;
-  --imageweave-taskbar-height: 40px;
-  --imageweave-window-title-height: 40px;
+
+  --imageweave-menubar-height: 32px;
+  --imageweave-dock-height: 72px;
+  --imageweave-taskbar-height: 44px;
+  --imageweave-window-title-height: 44px;
+  --imageweave-window-action-size: 32px;
   --imageweave-control-size: 32px;
+  --imageweave-control-height: 44px;
+  --imageweave-control-height-compact: 36px;
+  --imageweave-desktop-min-width: 1180px;
+  --imageweave-desktop-min-height: 720px;
+
+  --imageweave-glass-blur-navigation: 18px;
+  --imageweave-glass-blur-environment: 24px;
+  --imageweave-transition-fast: 120ms ease-out;
+  --imageweave-transition-standard: 180ms ease-out;
+
+  /* Compatibility aliases for existing phase-0 shell and application CSS. */
+  --imageweave-hard-shadow: var(--imageweave-shadow-flyout);
+  --imageweave-small-shadow: var(--imageweave-shadow-card);
+
   color-scheme: light;
-  color: var(--imageweave-accent);
+  color: var(--imageweave-text-primary);
   background: var(--imageweave-surface);
-  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, "Microsoft YaHei UI", monospace;
+  font-family: var(--imageweave-font-sans);
   font-synthesis: none;
 }
 
@@ -20,6 +108,28 @@
 }
 
 :root[data-theme-tone="dark"] {
+  --imageweave-text-primary: #F4F7FA;
+  --imageweave-text-secondary: #B8C2CC;
+  --imageweave-text-inverse: #111820;
+  --imageweave-text-code: #DCE5ED;
+  --imageweave-surface-content-solid: #202830;
+  --imageweave-surface-navigation-solid: #1C252E;
+  --imageweave-surface-environment-solid: #18212A;
+  --imageweave-surface-control-solid: #242E38;
+  --imageweave-border-subtle-solid: #667482;
+  --imageweave-border-strong-solid: #A7B3BF;
+  --imageweave-focus-ring: #8AC8FF;
+  --imageweave-focus-halo: #101820;
+  --imageweave-state-danger: #FF9C94;
+  --imageweave-state-danger-surface-solid: #3B2527;
+  --imageweave-state-warning: #F3C36F;
+  --imageweave-state-warning-surface-solid: #392F20;
+  --imageweave-state-success: #72D6A5;
+  --imageweave-state-success-surface-solid: #20372C;
+  --imageweave-state-running: #8CC8FF;
+  --imageweave-state-running-surface-solid: #203344;
+  --imageweave-state-disabled: #AAB4BE;
+  --imageweave-state-disabled-surface-solid: #2B333B;
   color-scheme: dark;
 }
 
@@ -27,6 +137,41 @@
   :root {
     --imageweave-accent: CanvasText !important;
     --imageweave-surface: Canvas !important;
+    --imageweave-text-primary: CanvasText;
+    --imageweave-text-secondary: CanvasText;
+    --imageweave-text-inverse: Canvas;
+    --imageweave-text-code: CanvasText;
+    --imageweave-surface-content-solid: Canvas;
+    --imageweave-surface-navigation-solid: Canvas;
+    --imageweave-surface-environment-solid: Canvas;
+    --imageweave-surface-control-solid: ButtonFace;
+    --imageweave-surface-content: Canvas;
+    --imageweave-surface-navigation: Canvas;
+    --imageweave-surface-environment: Canvas;
+    --imageweave-surface-control: ButtonFace;
+    --imageweave-surface-control-hover: ButtonFace;
+    --imageweave-surface-control-active: Highlight;
+    --imageweave-border-subtle: CanvasText;
+    --imageweave-border-strong: CanvasText;
+    --imageweave-separator: CanvasText;
+    --imageweave-focus-ring: Highlight;
+    --imageweave-focus-halo: Canvas;
+    --imageweave-state-danger: CanvasText;
+    --imageweave-state-warning: CanvasText;
+    --imageweave-state-success: CanvasText;
+    --imageweave-state-running: CanvasText;
+    --imageweave-state-disabled: GrayText;
+    --imageweave-state-danger-surface: Canvas;
+    --imageweave-state-warning-surface: Canvas;
+    --imageweave-state-success-surface: Canvas;
+    --imageweave-state-running-surface: Canvas;
+    --imageweave-state-disabled-surface: Canvas;
+    --imageweave-shadow-window: none;
+    --imageweave-shadow-menu: none;
+    --imageweave-shadow-dock: none;
+    --imageweave-shadow-flyout: none;
+    --imageweave-shadow-card: none;
+    --imageweave-shadow-control: none;
     color: CanvasText;
     background: Canvas;
   }
