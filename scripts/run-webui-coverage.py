@@ -22,6 +22,7 @@ SOURCE_TESTS = (
     BACKEND / "tests" / "webui_modules.test.mjs",
     BACKEND / "tests" / "webui_phase2_contract.test.mjs",
     BACKEND / "tests" / "webui_glass_target.test.mjs",
+    BACKEND / "tests" / "webui_stage3_crawl_contract.test.mjs",
 )
 BASELINES_PATH = ROOT / "scripts" / "coverage-baselines.json"
 SUMMARY_SCRIPT = ROOT / "scripts" / "summarize-node-coverage.cjs"

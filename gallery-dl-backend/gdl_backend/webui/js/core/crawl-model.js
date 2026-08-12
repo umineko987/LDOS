@@ -41,6 +41,11 @@ const EVIDENCE_LABELS = Object.freeze({
 
 export const CRAWL_SITE_DEFINITIONS = SITE_DEFINITIONS;
 export const CRAWL_PAGE_LIMITS = Object.freeze({ search: 200, addresses: 500, tasks: 100_000 });
+export const CRAWL_SEARCH_PHASES = Object.freeze([
+  "initial", "loading", "settled", "error", "recovery",
+]);
+
+const CRAWL_SEARCH_PHASE_SET = new Set(CRAWL_SEARCH_PHASES);
 
 function isRecord(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -399,6 +404,47 @@ export function crawlCandidateVisible(snapshot, source, candidate) {
   return source.site !== "exhentai" || candidateMatchesEhFilter(candidate, snapshot.ehTagFilter);
 }
 
+export function deriveCrawlSearchPresentation({ snapshot, phase = "initial" }) {
+  validateCrawlSnapshot(snapshot);
+  if (!CRAWL_SEARCH_PHASE_SET.has(phase)) throw new TypeError("搜索阶段无效");
+  const hasResults = snapshot.addressCount + snapshot.weakEvidenceCount > 0;
+  const partialSourceCount = snapshot.sources.filter((source) => source.status === "partial").length;
+  const failedSourceCount = snapshot.sources.filter((source) => source.status === "failed").length;
+  let state = phase;
+  if (phase === "settled") {
+    state = !hasResults
+      ? "empty"
+      : partialSourceCount || failedSourceCount
+        ? "partial"
+        : "content";
+  }
+  return Object.freeze({ state, hasResults, partialSourceCount, failedSourceCount });
+}
+
+export function deriveCrawlSubmitPresentation(snapshot, { busy = "", invalidReason = "" } = {}) {
+  validateCrawlSnapshot(snapshot);
+  const selectedSources = snapshot.sources.filter((source) =>
+    source.addresses.some((candidate) => candidate.selected));
+  const selectedAddressCount = selectedSources.reduce(
+    (total, source) => total + source.addresses.filter((candidate) => candidate.selected).length,
+    0,
+  );
+  const selectedSourceCount = selectedSources.length;
+  let state = "ready";
+  let reason = "已就绪，可按当前顺序创建批次。";
+  if (busy) {
+    state = "busy";
+    reason = busy === "crawl" ? "批次正在创建，请勿重复提交。" : "搜索进行中，请等待完成。";
+  } else if (invalidReason) {
+    state = "invalid";
+    reason = String(invalidReason).slice(0, 180);
+  } else if (!selectedAddressCount) {
+    state = "disabled";
+    reason = "请先选择至少一个候选地址。";
+  }
+  return Object.freeze({ state, selectedSourceCount, selectedAddressCount, reason });
+}
+
 function strictProxyMode(value, fallback = "required") {
   if (!PROXY_MODES.has(value)) throw new TypeError("代理模式无效");
   return value || fallback;
@@ -476,7 +522,11 @@ export function buildCrawlPayload({
     if (source.site === "exhentai") {
       const imageMode = ehDownload?.image_mode;
       const gpPolicy = ehDownload?.gp_policy;
-      if (!["original", "resample"].includes(imageMode) || !["stop", "resized"].includes(gpPolicy)) {
+      if (
+        !["original", "resample"].includes(imageMode)
+        || !["stop", "resized"].includes(gpPolicy)
+        || (imageMode === "resample" && gpPolicy !== "stop")
+      ) {
         throw new TypeError("EH 下载选项无效");
       }
       item.eh_download = { image_mode: imageMode, gp_policy: gpPolicy };

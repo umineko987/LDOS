@@ -16,11 +16,14 @@ export const CRAWL_ENDPOINTS = Object.freeze({
   crawls: "/api/v1/crawls",
 });
 
-const AUTOCOMPLETE_DELAY_MS = 300;
+export const AUTOCOMPLETE_DELAY_MS = 300;
 
-function createCrawlController(context) {
+export function createCrawlController(context, {
+  createView = createCrawlView,
+  initialOperations = null,
+} = {}) {
   const { root, api, store, actions } = context;
-  const view = createCrawlView(context);
+  const view = createView(context);
   let active = false;
   let destroyed = false;
   let busy = "";
@@ -31,7 +34,10 @@ function createCrawlController(context) {
   let focusOutTimer = null;
   let operationController = null;
   let operationSequence = 0;
-  let addressOperations = new Map();
+  let addressOperations = initialOperations instanceof Map
+    ? new Map(initialOperations)
+    : new Map();
+  let searchHadError = false;
 
   const stopAutocomplete = () => {
     if (autocompleteTimer !== null) clearTimeout(autocompleteTimer);
@@ -104,6 +110,7 @@ function createCrawlController(context) {
     view.hideSuggestions();
     view.clearError();
     setBusy("search");
+    view.setSearchState("loading");
     view.setOperationMessage("正在搜索多个站点，离开页面将取消本次搜索……");
     let captured = payload;
     payload = null;
@@ -116,15 +123,22 @@ function createCrawlController(context) {
       const projection = projectCrawlSearchResponse(response);
       addressOperations = projection.operations;
       store.dispatch(actionCreators.crawlSearchReceived(response));
+      view.normalizeActiveSource();
       view.clearError();
+      view.setSearchState(searchHadError ? "recovery" : "settled");
+      searchHadError = false;
       view.setOperationMessage(
         `搜索完成：${projection.snapshot.addressCount} 个候选，${projection.snapshot.weakEvidenceCount} 个待核实结果。`,
       );
       return true;
     } catch (error) {
       if (isAbortError(error) || controller.signal.aborted) return false;
-      if (active && requestLifecycle === lifecycle) showError(error);
-      view.setOperationMessage("搜索失败，上次结果已保留。请检查授权或代理后重试。");
+      if (active && requestLifecycle === lifecycle) {
+        searchHadError = true;
+        showError(error);
+        view.setSearchState("error");
+        view.setOperationMessage("搜索失败，上次结果已保留。请检查授权或代理后重试。");
+      }
       return false;
     } finally {
       captured = null;
@@ -207,22 +221,25 @@ function createCrawlController(context) {
     if (!(button instanceof HTMLButtonElement) || button.disabled) return;
     const action = button.dataset.crawlAction;
     if (action === "suggestion") {
-      view.elements.keyword.value = button.dataset.suggestionValue || "";
-      view.hideSuggestions();
-      view.elements.keyword.focus({ preventScroll: true });
+      chooseSuggestion(button.dataset.suggestionValue || "");
       return;
     }
     if (action === "open-vault") return actions.navigateToApp("vault");
     if (action === "open-proxy") return actions.navigateToApp("proxy");
+    if (action === "source-activate") {
+      view.setActiveSource(button.closest("[data-source-key]")?.dataset.sourceKey || "");
+      return;
+    }
     if (action === "select-visible") {
       const keys = view.visibleCandidateKeys();
       store.dispatch(actionCreators.crawlVisibleSelectionChanged(keys, true));
       return;
     }
-    if (action === "clear-selection") {
-      const keys = store.getState().crawl.sources.flatMap((source) =>
-        source.addresses.map((candidate) => candidate.key));
-      store.dispatch(actionCreators.crawlVisibleSelectionChanged(keys, false));
+    if (action === "clear-source-selection") {
+      store.dispatch(actionCreators.crawlVisibleSelectionChanged(
+        view.visibleCandidateKeys(),
+        false,
+      ));
       return;
     }
     if (action === "eh-clear") {
@@ -282,7 +299,9 @@ function createCrawlController(context) {
       view.renderPreconditions();
     }
     if (target instanceof HTMLInputElement && target.name === "eh-image-mode") {
-      view.elements.gpPolicy.disabled = target.value === "resample" && target.checked;
+      const resample = target.value === "resample" && target.checked;
+      view.elements.gpPolicy.disabled = resample;
+      if (resample) view.elements.gpPolicy.value = "stop";
     }
   };
 
@@ -293,20 +312,55 @@ function createCrawlController(context) {
   };
 
   const onFocusOut = (event) => {
-    if (event.target !== view.elements.keyword) return;
+    if (event.target !== view.elements.keyword && !view.elements.suggestions.contains(event.target)) return;
     stopFocusOut();
     focusOutTimer = setTimeout(() => {
       focusOutTimer = null;
       if (!active || destroyed) return;
-      if (!view.elements.suggestions.contains(document.activeElement)) view.hideSuggestions();
+      if (!view.elements.suggestions.contains(document.activeElement)
+          && document.activeElement !== view.elements.keyword) view.hideSuggestions();
     }, 0);
   };
 
+  const chooseSuggestion = (value) => {
+    if (!value) return false;
+    view.elements.keyword.value = value;
+    view.hideSuggestions();
+    view.elements.keyword.focus({ preventScroll: true });
+    return true;
+  };
+
   const onKeyDown = (event) => {
-    if (event.key === "Escape" && !view.elements.suggestions.hidden) {
+    const suggestionsOpen = !view.elements.suggestions.hidden;
+    const inCombobox = event.target === view.elements.keyword
+      || view.elements.suggestions.contains(event.target);
+    if (!inCombobox) return;
+    if (event.key === "Escape" && suggestionsOpen) {
       event.preventDefault();
       view.hideSuggestions();
       view.elements.keyword.focus({ preventScroll: true });
+      return;
+    }
+    if (!suggestionsOpen) return;
+    const command = {
+      ArrowDown: "next",
+      ArrowUp: "previous",
+      Home: "first",
+      End: "last",
+    }[event.key];
+    if (command) {
+      event.preventDefault();
+      view.moveSuggestionFocus(command);
+      return;
+    }
+    if (event.key === "Enter") {
+      const value = event.target instanceof HTMLElement
+        ? event.target.dataset.suggestionValue || view.activeSuggestionValue()
+        : view.activeSuggestionValue();
+      if (value) {
+        event.preventDefault();
+        chooseSuggestion(value);
+      }
     }
   };
 
@@ -327,6 +381,8 @@ function createCrawlController(context) {
       setElementInert(root, false);
       root.dataset.lifecycle = "active";
       view.renderPreconditions();
+      view.normalizeActiveSource();
+      view.setSearchState(store.getState().crawl.sources.length ? "settled" : "initial");
       view.setOperationMessage(store.getState().crawl.sources.length
         ? "上次搜索结果已保留，可继续选择来源或重新搜索。"
         : "输入关键词并选择搜索来源。" );

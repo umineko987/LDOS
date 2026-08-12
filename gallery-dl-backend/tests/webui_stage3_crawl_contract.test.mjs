@@ -311,6 +311,9 @@ function controllerHarness({ apiOverrides = {}, initialSearch = null } = {}) {
   const root = new TestElement("main");
   const keyword = new TestInput();
   keyword.value = "stage 3";
+  keyword.setAttribute("role", "combobox");
+  keyword.setAttribute("aria-expanded", "false");
+  keyword.setAttribute("aria-controls", "crawl-suggestions");
   const suggestions = new TestElement("div");
   suggestions.hidden = true;
   const ehTagQuery = new TestInput();
@@ -518,7 +521,10 @@ test("3A model/store：来源、地址与筛选顺序精确进入 crawl payload"
   assert.equal(payload.max_tasks, 4242);
   assert.equal(payload.proxy_mode, "prefer");
   assert.equal(payload.output_dir, "stage3/output");
-  assert.equal(JSON.stringify(store.getState().crawl).includes("https://"), false);
+  const stored = JSON.stringify(store.getState().crawl);
+  assert.equal(stored.includes("danbooru.donmai.us/posts"), false);
+  assert.equal(stored.includes("e-hentai.org/g/"), false);
+  assert.equal(stored.includes("x.com/artist_1/media"), false);
 });
 
 test("3A model：EH include/exclude、筛选外已选、弱证据与下载 fallback 约束", () => {
