@@ -101,6 +101,13 @@ export function createWindowManager({
   const focusBody = (appId = selectors.focusedAppId(store.getState())) => (
     appId === null ? false : windows.focusBody(appId)
   );
+  const focusDockTarget = (appId) => {
+    const focus = () => {
+      if (!destroying && !destroyed) taskbarWindows?.focusButton(appId);
+    };
+    queueMicrotask(focus);
+    globalThis.requestAnimationFrame?.(focus);
+  };
 
   const interactionController = createWindowInteractionController({
     actions,
@@ -150,7 +157,7 @@ export function createWindowManager({
     const onLostPointerCapture = (event) => finishPointerInteraction(instance, event);
     const onMinimize = () => requestHide(instance, "minimized", () => {
       actions.minimizeWindow(instance.appId);
-      taskbarWindows?.focusButton(instance.appId);
+      focusDockTarget(instance.appId);
     });
     const onMaximize = (event) => {
       const record = recordFor(instance.appId);
@@ -261,7 +268,7 @@ export function createWindowManager({
       if (!instance) return;
       requestHide(instance, "minimized", () => {
         actions.minimizeWindow(appId);
-        taskbarWindows?.focusButton(appId);
+        focusDockTarget(appId);
       });
       return;
     }

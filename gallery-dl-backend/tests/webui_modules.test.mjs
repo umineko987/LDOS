@@ -3003,6 +3003,34 @@ test("window close 后固定应用聚焦 Dock，动态应用回退应用中心",
   }
 });
 
+test("window manager 最小化在应用停用后异步聚焦可见 Dock 目标", async () => {
+  const fixture = installWindowManagerDomFixture();
+  const store = createStore({
+    initialState: createInitialState({ windows: [windowRecord("vault")] }),
+    reportError: () => {},
+  });
+  let manager = null;
+  try {
+    manager = createWindowManager({
+      windowLayer: fixture.windowLayer,
+      windowTemplate: fixture.windowTemplate,
+      taskList: fixture.taskList,
+      store,
+      actions: createManagerActions(store),
+      onVisibilityChange(visible) {
+        if (!visible) windowElementFor(fixture.windowLayer, "vault")?.querySelector("[data-window-body]")?.focus();
+      },
+    });
+    windowElementFor(fixture.windowLayer, "vault")
+      .querySelector("[data-window-minimize]").emit("click");
+    await flushPromises();
+    assert.equal(fixture.documentObject.activeElement?.dataset?.dockItem, "app:vault");
+  } finally {
+    manager?.destroy();
+    fixture.restore();
+  }
+});
+
 test("window manager 任务栏激活执行最小化恢复，destroy 生命周期错误隔离且幂等", () => {
   const fixture = installWindowManagerDomFixture();
   const store = createStore({

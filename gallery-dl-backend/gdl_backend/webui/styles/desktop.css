@@ -813,6 +813,7 @@
   z-index: 80;
   display: flex;
   align-items: center;
+  height: var(--imageweave-menubar-height);
   min-height: var(--imageweave-menubar-height);
   padding: 4px 12px;
   border-bottom: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
@@ -932,7 +933,7 @@
 
 .window-layer {
   top: var(--imageweave-menubar-height);
-  bottom: calc(var(--imageweave-dock-height) + 24px);
+  bottom: calc(var(--imageweave-dock-height) + 28px);
 }
 
 .window-titlebar {
