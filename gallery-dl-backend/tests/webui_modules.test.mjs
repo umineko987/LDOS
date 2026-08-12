@@ -3392,6 +3392,33 @@ test("菜单打开应用中心先关闭 menu 并把可见 trigger 作为返回�
   }
 });
 
+test("应用中心空启动列表时只把 panel 纳入 Tab 环", () => {
+  const fixture = installWindowManagerDomFixture();
+  const host = new FakeDomHtmlElement("div");
+  fixture.documentObject.documentElement.append(host);
+  let center = null;
+  try {
+    center = createApplicationCenter({
+      host,
+      definitions: applications.map((definition) => ({
+        ...definition,
+        availability: "placeholder",
+      })),
+      onLaunch() {},
+      documentObject: fixture.documentObject,
+    });
+    assert.equal(center.open(), true);
+    const panel = host.querySelector("[data-application-center-panel]");
+    assert.equal(fixture.documentObject.activeElement, panel);
+    const tab = fixture.documentObject.emit("keydown", { key: "Tab", target: panel });
+    assert.equal(tab.defaultPrevented, true);
+    assert.equal(fixture.documentObject.activeElement, panel);
+  } finally {
+    center?.destroy();
+    fixture.restore();
+  }
+});
+
 test("应用中心 Tab/Shift+Tab 环绕且 Escape 只关闭顶层并恢复触发器", () => {
   const fixture = installWindowManagerDomFixture();
   const host = new FakeDomHtmlElement("div");

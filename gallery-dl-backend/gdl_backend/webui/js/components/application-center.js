@@ -142,7 +142,14 @@ export function createApplicationCenter({
     return true;
   };
 
-  const focusableElements = () => [...panel.querySelectorAll("button:not([disabled])")];
+  const launchableElements = () => [
+    ...panel.querySelectorAll("[data-application-center-app]:not([disabled])"),
+  ];
+  const focusableElements = () => {
+    const launchable = launchableElements();
+    return launchable.length > 0 ? [closeButton, ...launchable] : [];
+  };
+  closeButton.tabIndex = launchableElements().length > 0 ? 0 : -1;
 
   const openCenter = (trigger = documentObject.activeElement) => {
     if (destroyed) return false;
@@ -150,8 +157,8 @@ export function createApplicationCenter({
     open = true;
     host.hidden = false;
     setElementInert(panel, false);
-    const launchTarget = panel.querySelector("[data-application-center-app]:not([disabled])");
-    (launchTarget || closeButton || panel).focus({ preventScroll: true });
+    const launchTarget = launchableElements()[0];
+    (launchTarget || panel).focus({ preventScroll: true });
     return true;
   };
 
