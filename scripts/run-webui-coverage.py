@@ -21,6 +21,7 @@ SOURCE_WEBUI = BACKEND / "gdl_backend" / "webui"
 SOURCE_TESTS = (
     BACKEND / "tests" / "webui_modules.test.mjs",
     BACKEND / "tests" / "webui_phase2_contract.test.mjs",
+    BACKEND / "tests" / "webui_glass_target.test.mjs",
 )
 BASELINES_PATH = ROOT / "scripts" / "coverage-baselines.json"
 SUMMARY_SCRIPT = ROOT / "scripts" / "summarize-node-coverage.cjs"
@@ -150,7 +151,7 @@ def _write_summary(output: Path, result: dict) -> str:
         [
             f"- gate: **{result['status']}**",
             "- source assertions in Python are excluded; only executions from "
-            "tests/webui_modules.test.mjs and tests/webui_phase2_contract.test.mjs contribute",
+            "all authoritative tests in SOURCE_TESTS contribute",
         ]
     )
     for omission in result["explicit_omissions"]:
