@@ -246,6 +246,7 @@ export function initializeDesktop(root = document, services = {}) {
     store,
     selectors,
     actions,
+    onWindowCommand: (command, appId) => windowManager.activate(command, appId),
     onOpenApplicationCenter: (trigger) => applicationCenter.open(trigger),
     onRefreshSummary: () => refreshSummary?.(),
   });

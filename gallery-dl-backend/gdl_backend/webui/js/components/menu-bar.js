@@ -48,6 +48,7 @@ export function createMenuBar({
   store,
   selectors,
   actions,
+  onWindowCommand,
   onOpenApplicationCenter,
   onRefreshSummary,
   documentObject = globalThis.document,
@@ -60,6 +61,9 @@ export function createMenuBar({
   }
   if (!actions || typeof actions.navigateToApp !== "function") {
     throw new TypeError("菜单栏需要 shell actions");
+  }
+  if (typeof onWindowCommand !== "function") {
+    throw new TypeError("菜单栏需要窗口命令委托");
   }
 
   const appName = root.querySelector("[data-menu-current-app]");
@@ -133,12 +137,7 @@ export function createMenuBar({
     else if (command.id === "refresh-summary") onRefreshSummary?.();
     else if (command.id === "diagnostics") actions.navigateToApp("diagnostics");
     else if (command.id?.startsWith("window:")) {
-      const callback = {
-        focus: actions.focusWindow,
-        restore: actions.restoreWindow,
-        minimize: actions.minimizeWindow,
-      }[command.command];
-      callback?.call(actions, command.appId);
+      onWindowCommand(command.command, command.appId);
     } else return false;
     closeMenu();
     return true;

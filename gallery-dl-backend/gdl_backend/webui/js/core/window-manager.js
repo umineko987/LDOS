@@ -251,7 +251,7 @@ export function createWindowManager({
     taskbarWindows?.render(stack, focusedAppId);
   };
 
-  const onDockActivate = (activation, appId) => {
+  const activate = (activation, appId) => {
     if (activation === "open") {
       actions.navigateToApp(appId);
       return;
@@ -288,7 +288,7 @@ export function createWindowManager({
   try {
     taskbarWindows = createDock({
       container: taskList,
-      onActivate: onDockActivate,
+      onActivate: activate,
       onOpenApplicationCenter,
     });
     window.addEventListener("resize", onViewportChange);
@@ -315,6 +315,13 @@ export function createWindowManager({
       return appId === null ? null : windows.bodyFor(appId);
     },
     focusBody,
+    activate(command, appId) {
+      if (destroying || destroyed || !["minimize", "restore", "focus"].includes(command)) {
+        return false;
+      }
+      activate(command, appId);
+      return true;
+    },
     destroy() {
       if (destroyed) return;
       destroying = true;

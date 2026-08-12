@@ -1600,6 +1600,9 @@ class WebUiModuleTests(unittest.TestCase):
         taskbar = (
             webui / "js" / "components" / "taskbar-windows.js"
         ).read_text(encoding="utf-8")
+        menu_bar = (
+            webui / "js" / "components" / "menu-bar.js"
+        ).read_text(encoding="utf-8")
         desktop = (webui / "js" / "core" / "desktop.js").read_text(
             encoding="utf-8"
         )
@@ -1649,7 +1652,7 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn('dataset: { dockItem: item.key, dockState: item.state }', taskbar)
         self.assertNotIn("innerHTML", taskbar)
 
-        task_activation = javascript_block(manager, "const onDockActivate =")
+        task_activation = javascript_block(manager, "const activate =")
         self.assertIn('requestHide(instance, "minimized"', task_activation)
         self.assertIn("actions.minimizeWindow(appId)", task_activation)
         self.assertIn("actions.restoreWindow(appId)", task_activation)
@@ -1677,6 +1680,10 @@ class WebUiModuleTests(unittest.TestCase):
 
         self.assertIn("createApplicationCenter", desktop)
         self.assertIn("createMenuBar", desktop)
+        self.assertIn("onWindowCommand:", desktop)
+        self.assertNotIn("actions.minimizeWindow", menu_bar)
+        self.assertNotIn("actions.restoreWindow", menu_bar)
+        self.assertNotIn("actions.focusWindow", menu_bar)
         self.assertIn('application.availability === "ready"', router)
         self.assertIn('application.availability === "preview"', router)
         for app_id in ("gallery", "schedule", "export"):

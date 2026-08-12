@@ -231,6 +231,7 @@ import {
   sameWindowRect,
 } from "../gdl_backend/webui/js/core/window-policy.js";
 import {
+  createMenuBar,
   deriveWindowMenu,
   isShellShortcutTarget,
   shortcutModifier,
@@ -463,14 +464,29 @@ class FakeDomNode {
       clientX: 0,
       clientY: 0,
       defaultPrevented: false,
+      propagationStopped: false,
+      immediatePropagationStopped: false,
       preventDefault() {
         this.defaultPrevented = true;
+      },
+      stopPropagation() {
+        this.propagationStopped = true;
+      },
+      stopImmediatePropagation() {
+        this.immediatePropagationStopped = true;
+        this.propagationStopped = true;
       },
       ...init,
     };
     if (!("target" in init)) event.target = this;
     event.currentTarget = this;
-    for (const listener of [...(this.listeners.get(type) || [])]) listener(event);
+    for (const listener of [...(this.listeners.get(type) || [])]) {
+      listener(event);
+      if (event.immediatePropagationStopped) break;
+    }
+    if (!event.propagationStopped && this.parentNode) {
+      return this.parentNode.emit(type, { ...event, target: event.target });
+    }
     return event;
   }
 
@@ -514,6 +530,15 @@ class FakeDomNode {
       if (nested) return nested;
     }
     return null;
+  }
+
+  querySelectorAll(selector) {
+    const matches = [];
+    for (const child of this.children) {
+      if (child instanceof FakeDomElement && child.matches(selector)) matches.push(child);
+      matches.push(...child.querySelectorAll(selector));
+    }
+    return matches;
   }
 
   get firstElementChild() {
@@ -565,6 +590,7 @@ class FakeDomElement extends FakeDomNode {
     const normalized = String(value);
     this.attributes.set(name, normalized);
     if (name === "hidden") this.hidden = true;
+    if (name === "disabled") this.disabled = true;
     if (name.startsWith("data-")) this.dataset[datasetNameForAttribute(name)] = normalized;
   }
 
@@ -579,6 +605,7 @@ class FakeDomElement extends FakeDomNode {
   removeAttribute(name) {
     const existed = this.attributes.delete(name);
     if (name === "hidden") this.hidden = false;
+    if (name === "disabled") this.disabled = false;
     if (name.startsWith("data-")) delete this.dataset[datasetNameForAttribute(name)];
     if (existed) this.onAttributeRemove?.(name);
   }
@@ -591,11 +618,20 @@ class FakeDomElement extends FakeDomNode {
   }
 
   matches(selector) {
-    if (selector === "button") return this.tagName === "BUTTON";
-    if (selector.split(",").map((item) => item.trim()).includes(this.tagName.toLowerCase())) {
+    const normalized = selector.trim();
+    if (normalized === "button") return this.tagName === "BUTTON";
+    const dataSelector = /^\[data-([a-z0-9-]+)(?:="([^"]*)")?\]$/i.exec(normalized);
+    if (dataSelector) {
+      const value = this.dataset[datasetNameForAttribute(`data-${dataSelector[1]}`)];
+      return value !== undefined && (dataSelector[2] === undefined || value === dataSelector[2]);
+    }
+    if (normalized === '[role="menuitem"]') {
+      return ["menuitem", "menuitemcheckbox"].includes(this.getAttribute("role"));
+    }
+    if (normalized.split(",").map((item) => item.trim()).includes(this.tagName.toLowerCase())) {
       return true;
     }
-    const match = /^\[([a-z0-9-]+)(?:="([^"]*)")?\]$/i.exec(selector);
+    const match = /^\[([a-z0-9-]+)(?:="([^"]*)")?\]$/i.exec(normalized);
     if (!match) return false;
     if (!this.hasAttribute(match[1])) return false;
     return match[2] === undefined || this.getAttribute(match[1]) === match[2];
@@ -612,6 +648,9 @@ class FakeDomElement extends FakeDomNode {
 
   focus() {
     this.focused = true;
+    if (globalThis.document && "activeElement" in globalThis.document) {
+      globalThis.document.activeElement = this;
+    }
   }
 
   setPointerCapture(pointerId) {
@@ -646,6 +685,7 @@ class FakeDomDocument extends FakeDomNode {
   constructor() {
     super("#document");
     this.documentElement = new FakeDomHtmlElement("html");
+    this.activeElement = null;
     this.documentElement.clientWidth = 1_200;
     this.documentElement.clientHeight = 800;
   }
@@ -2658,6 +2698,142 @@ test("window manager 保持快照、z 序投影和生命周期/关闭回退顺�
     fixture.restore();
   }
   assert.equal(lifecycle.filter(([event]) => event === "unmount").length, 2);
+});
+
+test("菜单组件拒绝缺失宿主依赖且不建立窗口状态旁路", () => {
+  const fixture = installWindowManagerDomFixture();
+  const root = new FakeDomHtmlElement("header");
+  const appName = new FakeDomHtmlElement("span");
+  appName.setAttribute("data-menu-current-app", "");
+  const menuHost = new FakeDomHtmlElement("nav");
+  menuHost.setAttribute("data-menu-items", "");
+  root.append(appName, menuHost);
+  const store = createStore({ reportError: () => {} });
+  const valid = {
+    root,
+    store,
+    selectors,
+    actions: { navigateToApp() {} },
+    onWindowCommand() {},
+    documentObject: fixture.documentObject,
+    windowObject: fixture.windowObject,
+  };
+  try {
+    assert.throws(() => createMenuBar({ ...valid, root: {} }), /宿主无效/);
+    assert.throws(() => createMenuBar({ ...valid, store: null }), /中央状态/);
+    assert.throws(() => createMenuBar({ ...valid, selectors: null }), /selector/);
+    assert.throws(() => createMenuBar({ ...valid, actions: null }), /shell actions/);
+    assert.throws(() => createMenuBar({ ...valid, onWindowCommand: null }), /窗口命令委托/);
+    const incomplete = new FakeDomHtmlElement("header");
+    assert.throws(() => createMenuBar({ ...valid, root: incomplete }), /DOM 不完整/);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("窗口菜单命令只委托 window manager 生命周期入口", async () => {
+  const fixture = installWindowManagerDomFixture();
+  const root = new FakeDomHtmlElement("header");
+  const appName = new FakeDomHtmlElement("span");
+  appName.setAttribute("data-menu-current-app", "");
+  const menuHost = new FakeDomHtmlElement("nav");
+  menuHost.setAttribute("data-menu-items", "");
+  root.append(appName, menuHost);
+  const store = createStore({
+    initialState: createInitialState({ windows: [windowRecord("personalization")] }),
+    reportError: () => {},
+  });
+  const actions = createManagerActions(store);
+  actions.navigateToApp = () => false;
+  let manager = null;
+  let menu = null;
+  let beforeHideCount = 0;
+  let centerOpenCount = 0;
+  let refreshCount = 0;
+  const decisions = [];
+  try {
+    manager = createWindowManager({
+      windowLayer: fixture.windowLayer,
+      windowTemplate: fixture.windowTemplate,
+      taskList: fixture.taskList,
+      store,
+      actions,
+      onBeforeHide(_app, visibility) {
+        beforeHideCount += 1;
+        assert.equal(visibility, "minimized");
+        return new Promise((resolve) => decisions.push(resolve));
+      },
+    });
+    menu = createMenuBar({
+      root,
+      store,
+      selectors,
+      actions,
+      onWindowCommand: (command, appId) => manager.activate(command, appId),
+      onOpenApplicationCenter() { centerOpenCount += 1; },
+      onRefreshSummary() { refreshCount += 1; },
+      documentObject: fixture.documentObject,
+      windowObject: fixture.windowObject,
+    });
+    const windowTrigger = menuHost.querySelector('[data-shell-menu-trigger="window"]');
+    windowTrigger.emit("click");
+    const minimize = menuHost.querySelector('[data-menu-command="window:personalization"]');
+    assert(minimize instanceof HTMLButtonElement);
+    minimize.emit("click");
+    manager.activate("minimize", "personalization");
+    assert.equal(beforeHideCount, 1);
+    assert.equal(selectors.windowStack(store.getState())[0].windowState, "normal");
+    assert.equal(selectors.focusedAppId(store.getState()), "personalization");
+
+    decisions.shift()(false);
+    await flushPromises();
+    assert.equal(selectors.windowStack(store.getState())[0].windowState, "normal");
+    assert.equal(selectors.focusedAppId(store.getState()), "personalization");
+
+    windowTrigger.emit("click");
+    menuHost.querySelector('[data-menu-command="window:personalization"]').emit("click");
+    assert.equal(beforeHideCount, 2);
+    decisions.shift()(true);
+    await flushPromises();
+    assert.equal(selectors.windowStack(store.getState())[0].windowState, "minimized");
+    assert.equal(selectors.focusedAppId(store.getState()), null);
+    // 覆盖菜单键盘导航、快捷键、外部关闭和幂等销毁分支。
+    const fileTrigger = menuHost.querySelector('[data-shell-menu-trigger="file"]');
+    fileTrigger.emit("click");
+    for (const key of ["End", "Home", "ArrowDown", "ArrowUp"]) {
+      fixture.documentObject.emit("keydown", { key, target: fixture.documentObject.activeElement });
+    }
+    fixture.documentObject.emit("keydown", { key: "Escape" });
+    assert.equal(fileTrigger.getAttribute("aria-expanded"), "false");
+
+    fileTrigger.emit("click");
+    fixture.documentObject.emit("pointerdown", { target: new FakeDomHtmlElement("aside") });
+    assert.equal(fileTrigger.getAttribute("aria-expanded"), "false");
+
+    fixture.documentObject.emit("keydown", {
+      key: "r", ctrlKey: true, target: new FakeDomHtmlElement("div"),
+    });
+    fixture.documentObject.emit("keydown", {
+      key: "o", metaKey: true, target: new FakeDomHtmlElement("div"),
+    });
+    fixture.documentObject.emit("keydown", {
+      key: "o", ctrlKey: true, altKey: true, target: new FakeDomHtmlElement("div"),
+    });
+    assert.deepEqual([refreshCount, centerOpenCount], [1, 1]);
+
+    assert.equal(menu.close(), false);
+    assert.equal(manager.activate("open", "crawl"), false);
+    menu.destroy();
+    menu.destroy();
+    menu = null;
+    manager.destroy();
+    assert.equal(manager.activate("focus", "personalization"), false);
+    manager = null;
+  } finally {
+    menu?.destroy();
+    manager?.destroy();
+    fixture.restore();
+  }
 });
 
 test("window manager 对 async beforeHide 去重并淘汰 stale request", async () => {
