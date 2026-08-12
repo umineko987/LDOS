@@ -286,10 +286,10 @@
 .desktop-wallpaper--custom ~ .desktop-icons .desktop-icon:hover,
 .desktop-wallpaper--custom ~ .desktop-icons .desktop-icon:focus-visible,
 .desktop-wallpaper--custom ~ .desktop-icons .desktop-icon[aria-current="page"] {
-  border-color: var(--imageweave-accent);
-  outline: var(--imageweave-focus-width) solid var(--imageweave-surface);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 5px var(--imageweave-accent), var(--imageweave-small-shadow);
+  border-color: var(--imageweave-border-strong);
+  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 1px var(--imageweave-focus-halo), var(--imageweave-shadow-card);
 }
 
 .desktop-icon .application-label {
@@ -360,6 +360,7 @@
 .application-window[data-maximized] {
   min-width: 0;
   min-height: 0;
+  border-radius: 0;
   transform: none;
 }
 

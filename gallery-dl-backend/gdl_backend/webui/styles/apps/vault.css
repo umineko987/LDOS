@@ -129,15 +129,12 @@
 .vault-site-card[data-site-state="running"] {
   border-style: double;
   border-width: 4px;
-  background: repeating-linear-gradient(
-    135deg,
-    var(--imageweave-surface) 0 10px,
-    var(--imageweave-accent) 10px 12px
-  );
+  background: var(--imageweave-state-running-surface-solid);
+  background: var(--imageweave-state-running-surface);
 }
 
 .vault-site-card[data-site-state="running"] > * {
-  background: var(--imageweave-surface);
+  background: transparent;
 }
 
 .vault-site-card[data-site-state="error"] {
@@ -309,7 +306,7 @@
 }
 
 .vault-secret-input:focus-visible {
-  outline: var(--imageweave-focus-width) solid var(--imageweave-accent);
+  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
   outline-offset: 2px;
 }
 

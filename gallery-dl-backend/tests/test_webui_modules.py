@@ -1268,6 +1268,163 @@ class WebUiModuleTests(unittest.TestCase):
             css_block(status_css, ".error-view"),
         )
 
+    def test_glass_phase_one_visual_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        styles = webui / "styles"
+        tokens = (styles / "tokens.css").read_text(encoding="utf-8")
+        base = (styles / "base.css").read_text(encoding="utf-8")
+        desktop = (styles / "desktop.css").read_text(encoding="utf-8")
+        controls = (styles / "controls.css").read_text(encoding="utf-8")
+        status = (styles / "status.css").read_text(encoding="utf-8")
+        dialog = (styles / "dialog.css").read_text(encoding="utf-8")
+        runtime = (webui / "js" / "core" / "personalization.js").read_text(
+            encoding="utf-8"
+        )
+        model = (
+            webui / "js" / "core" / "personalization-model.js"
+        ).read_text(encoding="utf-8")
+        shared_dom = {
+            "status-badge": webui / "js" / "components" / "status.js",
+            "empty-state": webui / "js" / "components" / "empty-state.js",
+            "error-view": webui / "js" / "components" / "error-view.js",
+            "imageweave-dialog": webui / "js" / "components" / "dialog.js",
+        }
+        app_ids = (
+            "crawl",
+            "tasks",
+            "proxy",
+            "vault",
+            "review",
+            "policy",
+            "diagnostics",
+            "personalization",
+        )
+        app_css = {
+            app_id: (styles / "apps" / f"{app_id}.css").read_text(
+                encoding="utf-8"
+            )
+            for app_id in app_ids
+        }
+        production_css = "\n".join(
+            [tokens, base, desktop, controls, status, dialog, *app_css.values()]
+        )
+
+        # 三档表面必须各有不透明前置值，随后才使用受控 sRGB mix。
+        default_tokens = tokens.split(':root[data-theme-tone="light"]', 1)[0]
+        for tier, percentage in (
+            ("content", 96),
+            ("navigation", 86),
+            ("environment", 74),
+        ):
+            solid_name = f"--imageweave-surface-{tier}-solid"
+            token_name = f"--imageweave-surface-{tier}"
+            self.assertRegex(
+                default_tokens,
+                rf"{re.escape(solid_name)}:\s*#[0-9A-Fa-f]{{6}}\s*;",
+            )
+            declarations = re.findall(
+                rf"{re.escape(token_name)}:\s*([^;]+);",
+                default_tokens,
+            )
+            self.assertGreaterEqual(len(declarations), 2, token_name)
+            self.assertNotIn("color-mix", declarations[0], token_name)
+            self.assertRegex(
+                declarations[1],
+                rf"color-mix\(in srgb,.*\s{percentage}%,\s*transparent\)",
+                token_name,
+            )
+
+        token_groups = {
+            "text": ("primary", "secondary", "inverse", "code"),
+            "border": ("subtle", "strong"),
+            "shadow": ("window", "menu", "dock", "flyout", "card", "control"),
+            "radius": ("window", "card", "control", "pill"),
+            "state": ("danger", "warning", "success", "running", "disabled"),
+        }
+        for group, names in token_groups.items():
+            for name in names:
+                self.assertIn(f"--imageweave-{group}-{name}:", tokens)
+        for token_name in (
+            "--imageweave-separator:",
+            "--imageweave-focus-ring:",
+            "--imageweave-menubar-height:",
+            "--imageweave-dock-height:",
+            "--imageweave-window-title-height:",
+            "--imageweave-window-action-size:",
+            "--imageweave-control-height:",
+            "--imageweave-desktop-min-width:",
+            "--imageweave-desktop-min-height:",
+        ):
+            self.assertIn(token_name, tokens)
+        self.assertIn("system-ui", tokens)
+        self.assertIn("--imageweave-font-mono", tokens)
+        self.assertIn("font-family: var(--imageweave-font-sans)", base)
+        self.assertIn("font-family: var(--imageweave-font-mono)", controls)
+
+        # 共享 selector 覆盖全部八个真实应用，不要求重写其 DOM 或布局。
+        for app_id in app_ids:
+            self.assertIn(f".{app_id}-button", controls, app_id)
+            self.assertIn(f".{app_id}-panel", controls, app_id)
+        for selector in ("input[type=\"search\"]", "select", "textarea"):
+            self.assertIn(selector, controls)
+        self.assertIn("[aria-invalid=\"true\"]", controls)
+        self.assertIn(":disabled", controls)
+        self.assertIn("--imageweave-focus-ring", base)
+        self.assertIn("--imageweave-focus-ring", controls)
+        for class_name, source_path in shared_dom.items():
+            source = source_path.read_text(encoding="utf-8")
+            self.assertIn(class_name, source)
+            self.assertIn(f".{class_name}", status + dialog)
+        for state_name in ("ready", "running", "warning", "error", "disabled"):
+            self.assertIn(f'[data-status="{state_name}"]', status)
+        self.assertIn('role: status === "error" ? "alert" : "status"', shared_dom["empty-state"].read_text(encoding="utf-8"))
+        self.assertIn('attributes: { role: "alert" }', shared_dom["error-view"].read_text(encoding="utf-8"))
+
+        # 不支持 backdrop 时使用实色；强制颜色和两种动效关闭路径可独立生效。
+        for source in (desktop, dialog):
+            self.assertIn("@supports not", source)
+            self.assertIn("backdrop-filter: blur(1px)", source)
+            self.assertIn("-solid) !important", source)
+        for source in (base, desktop, controls, status, dialog):
+            self.assertIn("@media (forced-colors: active)", source)
+        forced_contract = "\n".join((base, desktop, controls, status, dialog))
+        for declaration in (
+            "background-image: none",
+            "box-shadow: none",
+            "backdrop-filter: none",
+            "CanvasText",
+            "ButtonFace",
+            "Highlight",
+            "GrayText",
+        ):
+            self.assertIn(declaration, forced_contract)
+        self.assertIn(':root[data-motion="off"]', status)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", status)
+        self.assertGreaterEqual(status.count("transition-property: none !important"), 2)
+        self.assertGreaterEqual(status.count("animation-name: none !important"), 2)
+
+        # 个性化边界仍只有两个主题属性；静态视觉代码不引入外部资源或新颜色语法。
+        set_property_names = re.findall(
+            r'\.setProperty\(\s*"([^"]+)"', runtime
+        )
+        self.assertEqual(
+            set(set_property_names),
+            {
+                "background-image",
+                "--imageweave-accent",
+                "--imageweave-surface",
+            },
+        )
+        interface_keys = model[
+            model.index("export const INTERFACE_THEME_PREFERENCE_KEYS") :
+            model.index("];", model.index("export const INTERFACE_THEME_PREFERENCE_KEYS"))
+        ]
+        self.assertEqual(interface_keys.count('"themeAccent"'), 1)
+        self.assertEqual(interface_keys.count('"themeSurface"'), 1)
+        for forbidden in ("oklch(", "@import", "http://", "https://", "data:image", "data:font"):
+            self.assertNotIn(forbidden, production_css)
+
     def test_window_manager_t12_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
         webui = backend_root / "gdl_backend" / "webui"

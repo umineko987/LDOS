@@ -79,8 +79,8 @@
 .tasks-sources { display: grid; gap: 10px; }
 .tasks-source-card { display: grid; gap: 7px; min-width: 0; padding: 11px; border: var(--imageweave-border-width) solid var(--imageweave-accent); }
 .tasks-address { display: grid; grid-template-columns: auto auto minmax(150px, 1fr) minmax(220px, 1.5fr); gap: 8px; align-items: center; min-width: 0; padding: 8px; border: var(--imageweave-border-width) dotted var(--imageweave-accent); }
-.tasks-address--current { border-style: double; border-width: 4px; background: repeating-linear-gradient(135deg, var(--imageweave-surface) 0 9px, var(--imageweave-accent) 9px 11px); }
-.tasks-address--current > * { background: var(--imageweave-surface); }
+.tasks-address--current { border-style: double; border-width: 4px; background: var(--imageweave-state-running-surface); }
+.tasks-address--current > * { background: transparent; }
 .tasks-address > strong,
 .tasks-address > span { overflow-wrap: anywhere; }
 .tasks-order { display: grid; width: 30px; height: 30px; place-items: center; color: var(--imageweave-surface); background: var(--imageweave-accent); font-weight: 900; }

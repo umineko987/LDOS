@@ -90,19 +90,15 @@
 .policy-source-option:has(input:checked) {
   border-style: double;
   border-width: 4px;
-  background: repeating-linear-gradient(
-    135deg,
-    var(--imageweave-surface) 0 9px,
-    var(--imageweave-accent) 9px 11px
-  );
+  background: var(--imageweave-surface-control-active);
 }
 
 .policy-source-option:has(input:checked) > * {
-  background: var(--imageweave-surface);
+  background: transparent;
 }
 
 .policy-source-option:has(input:focus-visible) {
-  outline: var(--imageweave-focus-width) solid var(--imageweave-accent);
+  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
   outline-offset: 3px;
 }
 
@@ -206,7 +202,7 @@
 
 .policy-field input:focus-visible,
 .policy-field select:focus-visible {
-  outline: var(--imageweave-focus-width) solid var(--imageweave-accent);
+  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
   outline-offset: 2px;
 }
 
@@ -234,11 +230,8 @@
 
 .policy-dirty-live[data-dirty="true"] {
   border-style: dashed;
-  background: repeating-linear-gradient(
-    135deg,
-    var(--imageweave-surface) 0 8px,
-    var(--imageweave-accent) 8px 10px
-  );
+  background: var(--imageweave-state-warning-surface-solid);
+  background: var(--imageweave-state-warning-surface);
 }
 
 .policy-form-actions {

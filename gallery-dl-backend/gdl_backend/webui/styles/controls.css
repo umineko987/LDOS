@@ -1,35 +1,56 @@
 button {
-  border-radius: 0;
+  border-radius: var(--imageweave-radius-control);
   cursor: pointer;
+  transition:
+    color var(--imageweave-transition-fast),
+    background-color var(--imageweave-transition-fast),
+    border-color var(--imageweave-transition-fast),
+    box-shadow var(--imageweave-transition-fast),
+    transform var(--imageweave-transition-fast);
 }
 
-button:disabled {
+button:disabled,
+button[aria-disabled="true"] {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.58;
 }
 
 .window-actions button {
   display: grid;
-  width: var(--imageweave-control-size);
-  height: var(--imageweave-control-size);
+  width: var(--imageweave-window-action-size);
+  height: var(--imageweave-window-action-size);
   padding: 0;
   place-items: center;
-  border: var(--imageweave-border-width) solid var(--imageweave-surface);
-  color: var(--imageweave-accent);
-  background: var(--imageweave-surface);
+  border: var(--imageweave-border-width) solid transparent;
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-inverse);
+  background: rgb(255 255 255 / 0.12);
+  box-shadow: none;
+}
+
+.window-actions button:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 0.48);
+  background: rgb(255 255 255 / 0.22);
+}
+
+.window-actions button[data-window-close]:hover:not(:disabled) {
+  border-color: var(--imageweave-state-danger);
+  color: #FFFFFF;
+  background: #B42318;
 }
 
 .window-actions button:focus-visible {
-  color: var(--imageweave-surface);
-  background: var(--imageweave-accent);
-  outline-color: var(--imageweave-surface);
-  outline-offset: -4px;
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-control-solid);
+  outline-color: var(--imageweave-focus-ring);
+  outline-offset: 2px;
 }
 
 .app-view {
   width: 100%;
   max-width: 960px;
   margin: 0 auto;
+  color: var(--imageweave-text-primary);
 }
 
 .app-header {
@@ -40,20 +61,45 @@ button:disabled {
 
 .app-executable {
   margin-bottom: 7px;
-  font-size: 0.78rem;
+  color: var(--imageweave-text-secondary);
+  font-family: var(--imageweave-font-mono);
+  font-size: 0.76rem;
   font-weight: 700;
+  letter-spacing: 0.025em;
   overflow-wrap: anywhere;
 }
 
 .app-summary {
   max-width: 70ch;
   margin: 15px 0 0;
+  color: var(--imageweave-text-secondary);
+}
+
+.app-view :is(
+  .deferred-panel,
+  .crawl-panel,
+  .tasks-panel,
+  .proxy-panel,
+  .vault-panel,
+  .review-panel,
+  .policy-panel,
+  .diagnostics-panel,
+  .personalization-panel
+) {
+  border-color: var(--imageweave-border-subtle);
+  border-radius: var(--imageweave-radius-card);
+  background: var(--imageweave-surface-content-solid);
+  background: var(--imageweave-surface-content);
+  box-shadow: var(--imageweave-shadow-card);
 }
 
 .deferred-panel {
   padding: clamp(15px, 2.5vw, 24px);
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  box-shadow: var(--imageweave-small-shadow);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
+  border-radius: var(--imageweave-radius-card);
+  background: var(--imageweave-surface-content-solid);
+  background: var(--imageweave-surface-content);
+  box-shadow: var(--imageweave-shadow-card);
 }
 
 .deferred-capabilities {
@@ -71,17 +117,468 @@ button:disabled {
   margin-top: 24px;
 }
 
-.route-button {
-  min-height: 44px;
-  padding: 7px 12px;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  background: var(--imageweave-surface);
-  box-shadow: var(--imageweave-small-shadow);
-  font-weight: 700;
+:is(button, a):is(
+  .route-button,
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+) {
+  display: inline-flex;
+  min-height: var(--imageweave-control-height);
+  padding: 8px 14px;
+  align-items: center;
+  justify-content: center;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-strong);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-control-solid);
+  background: var(--imageweave-surface-control);
+  box-shadow: var(--imageweave-shadow-control);
+  font: inherit;
+  font-weight: 750;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
 }
 
-.route-button:hover,
-.route-button:focus-visible {
-  color: var(--imageweave-surface);
-  background: var(--imageweave-accent);
+:is(button, a):is(
+  .route-button,
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+):hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--imageweave-border-strong);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-control-hover);
+  box-shadow: var(--imageweave-shadow-card);
+  transform: translateY(-1px);
+}
+
+:is(button, a):is(
+  .route-button,
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+):active:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--imageweave-surface-control-active);
+  box-shadow: none;
+  transform: translateY(0);
+}
+
+:is(button, a):is(
+  .route-button,
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+):focus-visible {
+  outline-color: var(--imageweave-focus-ring);
+  outline-offset: 3px;
+}
+
+:is(button, a):is(
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+):is(
+  .crawl-button--primary,
+  .tasks-button--primary,
+  .proxy-button--primary,
+  .vault-button--primary,
+  .review-button--primary,
+  .policy-button--primary,
+  .diagnostics-button--primary,
+  .personalization-button--primary
+) {
+  border-color: var(--imageweave-border-strong);
+  color: var(--imageweave-text-primary);
+  background: #DDE4E8;
+  background: color-mix(in srgb, var(--imageweave-accent) 18%, var(--imageweave-surface) 82%);
+  box-shadow: 0 0 0 1px var(--imageweave-border-strong), var(--imageweave-shadow-control);
+}
+
+:is(button, a):is(
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+):is(
+  .crawl-button--primary,
+  .tasks-button--primary,
+  .proxy-button--primary,
+  .vault-button--primary,
+  .review-button--primary,
+  .policy-button--primary,
+  .diagnostics-button--primary,
+  .personalization-button--primary
+):hover:not(:disabled):not([aria-disabled="true"]),
+:is(button, a):is(
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+):is(
+  .crawl-button--primary,
+  .tasks-button--primary,
+  .proxy-button--primary,
+  .vault-button--primary,
+  .review-button--primary,
+  .policy-button--primary,
+  .diagnostics-button--primary,
+  .personalization-button--primary
+):focus-visible {
+  color: var(--imageweave-text-primary);
+  background: #D1DCE2;
+  background: color-mix(in srgb, var(--imageweave-accent) 25%, var(--imageweave-surface) 75%);
+}
+
+:is(button, a):is(
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .personalization-button
+):is(
+  .crawl-button--dangerous,
+  .tasks-button--dangerous,
+  .proxy-button--dangerous,
+  .vault-button--dangerous,
+  .review-button--dangerous,
+  .policy-button--dangerous,
+  .personalization-button--dangerous
+) {
+  border: var(--imageweave-border-strong-width) solid var(--imageweave-state-danger);
+  color: var(--imageweave-state-danger);
+  background: var(--imageweave-state-danger-surface-solid);
+  background: var(--imageweave-state-danger-surface);
+  box-shadow: inset 3px 0 0 var(--imageweave-state-danger);
+}
+
+:is(button, a):is(
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .review-button,
+  .diagnostics-button
+):is(
+  .crawl-button--small,
+  .tasks-button--small,
+  .proxy-button--small,
+  .review-button--small,
+  .diagnostics-button--small
+) {
+  min-height: var(--imageweave-control-height-compact);
+  padding: 6px 10px;
+  box-shadow: none;
+  font-size: 0.82rem;
+}
+
+:is(button, a):is(
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+)[aria-busy="true"] {
+  background-image: none;
+  border-style: dashed;
+  box-shadow: none;
+  cursor: progress;
+}
+
+:is(button, a):is(
+  .route-button,
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+):is(:disabled, [aria-disabled="true"]) {
+  border-color: var(--imageweave-border-subtle);
+  color: var(--imageweave-state-disabled);
+  background: var(--imageweave-state-disabled-surface-solid);
+  background: var(--imageweave-state-disabled-surface);
+  box-shadow: none;
+  opacity: 0.7;
+  transform: none;
+}
+
+.app-view :is(
+  input:not([type]),
+  input[type="text"],
+  input[type="search"],
+  input[type="password"],
+  input[type="number"],
+  input[type="email"],
+  input[type="url"],
+  input[type="tel"],
+  select,
+  textarea
+) {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--imageweave-control-height);
+  padding: 8px 11px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-control-solid);
+  background: var(--imageweave-surface-control);
+  box-shadow: inset 0 1px 2px rgb(7 13 20 / 0.08);
+  font: inherit;
+  transition:
+    background-color var(--imageweave-transition-fast),
+    border-color var(--imageweave-transition-fast),
+    box-shadow var(--imageweave-transition-fast);
+}
+
+.app-view :is(
+  input:not([type]),
+  input[type="text"],
+  input[type="search"],
+  input[type="password"],
+  input[type="number"],
+  input[type="email"],
+  input[type="url"],
+  input[type="tel"],
+  select,
+  textarea
+):hover:not(:disabled):not([readonly]) {
+  border-color: var(--imageweave-border-strong);
+}
+
+.app-view :is(
+  input:not([type]),
+  input[type="text"],
+  input[type="search"],
+  input[type="password"],
+  input[type="number"],
+  input[type="email"],
+  input[type="url"],
+  input[type="tel"],
+  select,
+  textarea
+):focus-visible {
+  border-color: var(--imageweave-focus-ring);
+  outline-color: var(--imageweave-focus-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 1px var(--imageweave-focus-halo);
+}
+
+.app-view :is(
+  input:not([type]),
+  input[type="text"],
+  input[type="search"],
+  input[type="password"],
+  input[type="number"],
+  input[type="email"],
+  input[type="url"],
+  input[type="tel"],
+  select,
+  textarea
+)[aria-invalid="true"] {
+  border: var(--imageweave-border-strong-width) solid var(--imageweave-state-danger);
+  background: var(--imageweave-state-danger-surface-solid);
+  background: var(--imageweave-state-danger-surface);
+}
+
+.app-view :is(
+  input:not([type]),
+  input[type="text"],
+  input[type="search"],
+  input[type="password"],
+  input[type="number"],
+  input[type="email"],
+  input[type="url"],
+  input[type="tel"],
+  select,
+  textarea
+):is(:disabled, [readonly]) {
+  border-color: var(--imageweave-border-subtle);
+  color: var(--imageweave-state-disabled);
+  background: var(--imageweave-state-disabled-surface-solid);
+  background: var(--imageweave-state-disabled-surface);
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.78;
+}
+
+.app-view textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.app-view :is(input[type="checkbox"], input[type="radio"]) {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--imageweave-accent);
+}
+
+.app-view :is(input[type="checkbox"], input[type="radio"]):focus-visible {
+  outline-color: var(--imageweave-focus-ring);
+  outline-offset: 3px;
+}
+
+.app-view input[type="range"] {
+  min-height: var(--imageweave-control-height);
+  accent-color: var(--imageweave-accent);
+}
+
+.start-button,
+.task-window-button,
+.task-window-overflow-button,
+.taskbar-summary-action {
+  border-color: var(--imageweave-border-strong);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-control-solid);
+  background: var(--imageweave-surface-control);
+}
+
+.task-window-button[aria-pressed="true"],
+.task-window-overflow-button[aria-expanded="true"],
+.start-button[aria-expanded="true"] {
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-control-active);
+  box-shadow: inset 0 0 0 var(--imageweave-border-width) var(--imageweave-border-strong);
+}
+
+@media (forced-colors: active) {
+  .app-view :is(
+    .deferred-panel,
+    .crawl-panel,
+    .tasks-panel,
+    .proxy-panel,
+    .vault-panel,
+    .review-panel,
+    .policy-panel,
+    .diagnostics-panel,
+    .personalization-panel
+  ),
+  .deferred-panel {
+    border-color: CanvasText;
+    color: CanvasText;
+    background: Canvas;
+    box-shadow: none;
+  }
+
+  :is(button, a):is(
+    .route-button,
+    .crawl-button,
+    .tasks-button,
+    .proxy-button,
+    .vault-button,
+    .review-button,
+    .policy-button,
+    .diagnostics-button,
+    .personalization-button
+  ),
+  .start-button,
+  .task-window-button,
+  .task-window-overflow-button,
+  .taskbar-summary-action,
+  .window-actions button,
+  .app-view :is(input, select, textarea) {
+    border-color: ButtonText;
+    color: ButtonText;
+    background: ButtonFace;
+    background-image: none;
+    box-shadow: none;
+    forced-color-adjust: auto;
+  }
+
+  :is(button, a):is(
+    .crawl-button,
+    .tasks-button,
+    .proxy-button,
+    .vault-button,
+    .review-button,
+    .policy-button,
+    .diagnostics-button,
+    .personalization-button
+  ):is(
+    .crawl-button--primary,
+    .tasks-button--primary,
+    .proxy-button--primary,
+    .vault-button--primary,
+    .review-button--primary,
+    .policy-button--primary,
+    .diagnostics-button--primary,
+    .personalization-button--primary
+  ) {
+    border-color: Highlight;
+    color: HighlightText;
+    background: Highlight;
+  }
+
+  :is(button, a):is(
+    .crawl-button--dangerous,
+    .tasks-button--dangerous,
+    .proxy-button--dangerous,
+    .vault-button--dangerous,
+    .review-button--dangerous,
+    .policy-button--dangerous,
+    .personalization-button--dangerous
+  ) {
+    border: var(--imageweave-border-strong-width) double CanvasText;
+  }
+
+  :is(button, a):is(
+    .route-button,
+    .crawl-button,
+    .tasks-button,
+    .proxy-button,
+    .vault-button,
+    .review-button,
+    .policy-button,
+    .diagnostics-button,
+    .personalization-button
+  ):is(:disabled, [aria-disabled="true"]),
+  .app-view :is(input, select, textarea):is(:disabled, [readonly]) {
+    border-color: GrayText;
+    color: GrayText;
+    background: Canvas;
+    opacity: 1;
+  }
 }
