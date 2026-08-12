@@ -932,7 +932,7 @@
 
 .window-layer {
   top: var(--imageweave-menubar-height);
-  bottom: calc(var(--imageweave-taskbar-height) + 14px);
+  bottom: calc(var(--imageweave-dock-height) + 24px);
 }
 
 .window-titlebar {
