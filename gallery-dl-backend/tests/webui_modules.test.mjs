@@ -319,19 +319,19 @@ import vaultApplication, {
 } from "../gdl_backend/webui/js/apps/vault.js";
 
 const EXPECTED_APPLICATION_METADATA = Object.freeze([
-  ["crawl", "图片采集", "download", "/crawl", "图片采集", "workflow", "搜索来源、选择地址并创建有序采集批次。", "ready", "normal"],
-  ["tasks", "批次管理", "list", "/tasks", "批次管理", "workflow", "查看采集进度，并取消、重试或重新规划批次。", "ready", "normal"],
-  ["proxy", "代理管理", "network", "/proxy", "代理管理", "connections", "管理代理来源、运行池状态与连接探测。", "ready", "normal"],
-  ["vault", "授权管理", "key", "/vault", "授权管理", "connections", "管理站点授权、浏览器会话与授权代理。", "ready", "normal"],
-  ["review", "去重审核", "images", "/review", "去重审核", "workflow", "比较重复候选、确认保留项并应用整理结果。", "ready", "maximized"],
-  ["policy", "站点设置", "sliders", "/policy", "站点设置", "connections", "配置各站点的并发、重试和代理策略。", "ready", "normal"],
-  ["diagnostics", "系统诊断", "activity", "/diagnostics", "系统诊断", "system", "检查服务、配置能力与调度器健康状态。", "ready", "normal"],
-  ["personalization", "外观设置", "sliders", "/personalization", "外观设置", "system", "调整主题、壁纸、窗口可读性与动效。", "ready", "normal"],
-  ["gallery", "图片库", "folder", "/gallery", "图片库", "workflow", "浏览、搜索和整理已下载的图片。", "preview", "normal"],
-  ["schedule", "定时任务", "calendar", "/schedule", "定时任务", "workflow", "查看与编辑自动采集计划。", "preview", "normal"],
-  ["export", "数据集导出", "archive", "/export", "数据集导出", "workflow", "配置来源并导出审核后的数据集。", "preview", "normal"],
-].map(([id, label, icon, route, windowTitle, group, description, availability, defaultWindowState]) => Object.freeze({
-  id, label, icon, route, windowTitle, group, description, availability, defaultWindowState,
+  ["crawl", "图片采集", "download", "/crawl", "图片采集", "workflow", "搜索来源、选择地址并创建有序采集批次。", 0, "ready", "normal"],
+  ["tasks", "批次管理", "list", "/tasks", "批次管理", "workflow", "查看采集进度，并取消、重试或重新规划批次。", 1, "ready", "normal"],
+  ["proxy", "代理管理", "network", "/proxy", "代理管理", "connections", "管理代理来源、运行池状态与连接探测。", 0, "ready", "normal"],
+  ["vault", "授权管理", "key", "/vault", "授权管理", "connections", "管理站点授权、浏览器会话与授权代理。", 1, "ready", "normal"],
+  ["review", "去重审核", "images", "/review", "去重审核", "workflow", "比较重复候选、确认保留项并应用整理结果。", 3, "ready", "maximized"],
+  ["policy", "站点设置", "sliders", "/policy", "站点设置", "connections", "配置各站点的并发、重试和代理策略。", 2, "ready", "normal"],
+  ["diagnostics", "系统诊断", "activity", "/diagnostics", "系统诊断", "system", "检查服务、配置能力与调度器健康状态。", 0, "ready", "normal"],
+  ["personalization", "外观设置", "sliders", "/personalization", "外观设置", "system", "调整主题、壁纸、窗口可读性与动效。", 1, "ready", "normal"],
+  ["gallery", "图片库", "folder", "/gallery", "图片库", "workflow", "浏览、搜索和整理已下载的图片。", 2, "preview", "normal"],
+  ["schedule", "定时任务", "calendar", "/schedule", "定时任务", "workflow", "查看与编辑自动采集计划。", 4, "preview", "normal"],
+  ["export", "数据集导出", "archive", "/export", "数据集导出", "workflow", "配置来源并导出审核后的数据集。", 5, "preview", "normal"],
+].map(([id, label, icon, route, windowTitle, group, description, applicationCenterOrder, availability, defaultWindowState]) => Object.freeze({
+  id, label, icon, route, windowTitle, group, description, applicationCenterOrder, availability, defaultWindowState,
 })));
 
 const APPLICATION_METADATA_KEYS = Object.freeze([
@@ -342,6 +342,7 @@ const APPLICATION_METADATA_KEYS = Object.freeze([
   "windowTitle",
   "group",
   "description",
+  "applicationCenterOrder",
   "availability",
   "defaultWindowState",
 ]);

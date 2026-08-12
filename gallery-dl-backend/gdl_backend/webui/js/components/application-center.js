@@ -20,6 +20,7 @@ function projectDefinition(definition) {
     label: definition.label,
     icon: definition.icon,
     description: definition.description,
+    applicationCenterOrder: definition.applicationCenterOrder,
     availability: definition.availability,
     availabilityLabel: availability.label,
     availabilityStatus: availability.status,
@@ -37,17 +38,13 @@ export function deriveApplicationCenterGroups(definitions) {
     seen.add(definition.id);
     grouped.get(definition.group).push(projectDefinition(definition));
   }
-  return Object.freeze(APPLICATION_GROUPS.map((group) => {
-    const byId = new Map(grouped.get(group.id).map((item) => [item.id, item]));
-    if (byId.size !== group.appIds.length || group.appIds.some((appId) => !byId.has(appId))) {
-      throw new TypeError("应用中心分组与 definitions 不一致");
-    }
-    return Object.freeze({
-      id: group.id,
-      title: group.title,
-      items: Object.freeze(group.appIds.map((appId) => byId.get(appId))),
-    });
-  }));
+  return Object.freeze(APPLICATION_GROUPS.map((group) => Object.freeze({
+    id: group.id,
+    title: group.title,
+    items: Object.freeze(grouped.get(group.id).toSorted((left, right) => (
+      left.applicationCenterOrder - right.applicationCenterOrder
+    ))),
+  })));
 }
 
 export function createApplicationCenter({

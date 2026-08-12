@@ -6,26 +6,15 @@ const APPLICATION_METADATA_KEYS = Object.freeze([
   "windowTitle",
   "group",
   "description",
+  "applicationCenterOrder",
   "availability",
   "defaultWindowState",
 ]);
 
 export const APPLICATION_GROUPS = Object.freeze([
-  Object.freeze({
-    id: "workflow",
-    title: "工作流",
-    appIds: Object.freeze(["crawl", "tasks", "gallery", "review", "schedule", "export"]),
-  }),
-  Object.freeze({
-    id: "connections",
-    title: "连接与策略",
-    appIds: Object.freeze(["proxy", "vault", "policy"]),
-  }),
-  Object.freeze({
-    id: "system",
-    title: "系统",
-    appIds: Object.freeze(["diagnostics", "personalization"]),
-  }),
+  Object.freeze({ id: "workflow", title: "工作流" }),
+  Object.freeze({ id: "connections", title: "连接与策略" }),
+  Object.freeze({ id: "system", title: "系统" }),
 ]);
 
 const APPLICATION_GROUP_IDS = new Set(APPLICATION_GROUPS.map((group) => group.id));
@@ -36,6 +25,7 @@ export function validateApplicationDefinitions(items) {
   if (!Array.isArray(items)) throw new TypeError("应用元数据必须是数组");
   const ids = new Set();
   const routes = new Set();
+  const groupOrders = new Map(APPLICATION_GROUPS.map((group) => [group.id, new Set()]));
   for (const item of items) {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw new TypeError("应用元数据必须是对象");
@@ -65,10 +55,13 @@ export function validateApplicationDefinitions(items) {
     if (!APPLICATION_GROUP_IDS.has(item.group)) {
       throw new TypeError(`${item.id} 应用分组无效`);
     }
-    const declaredGroup = APPLICATION_GROUPS.find((group) => group.id === item.group);
-    if (!declaredGroup?.appIds.includes(item.id)) {
-      throw new TypeError(`${item.id} 应用分组与固定顺序不一致`);
+    if (!Number.isInteger(item.applicationCenterOrder) || item.applicationCenterOrder < 0) {
+      throw new TypeError(`${item.id} 应用中心顺序无效`);
     }
+    if (groupOrders.get(item.group).has(item.applicationCenterOrder)) {
+      throw new TypeError(`${item.group} 应用中心顺序重复`);
+    }
+    groupOrders.get(item.group).add(item.applicationCenterOrder);
     if (!AVAILABILITIES.has(item.availability)) {
       throw new TypeError(`${item.id} 应用可用性无效`);
     }
@@ -90,6 +83,7 @@ const definitions = [
     windowTitle: "图片采集",
     group: "workflow",
     description: "搜索来源、选择地址并创建有序采集批次。",
+    applicationCenterOrder: 0,
     availability: "ready",
     defaultWindowState: "normal",
   },
@@ -101,6 +95,7 @@ const definitions = [
     windowTitle: "批次管理",
     group: "workflow",
     description: "查看采集进度，并取消、重试或重新规划批次。",
+    applicationCenterOrder: 1,
     availability: "ready",
     defaultWindowState: "normal",
   },
@@ -112,6 +107,7 @@ const definitions = [
     windowTitle: "代理管理",
     group: "connections",
     description: "管理代理来源、运行池状态与连接探测。",
+    applicationCenterOrder: 0,
     availability: "ready",
     defaultWindowState: "normal",
   },
@@ -123,6 +119,7 @@ const definitions = [
     windowTitle: "授权管理",
     group: "connections",
     description: "管理站点授权、浏览器会话与授权代理。",
+    applicationCenterOrder: 1,
     availability: "ready",
     defaultWindowState: "normal",
   },
@@ -134,6 +131,7 @@ const definitions = [
     windowTitle: "去重审核",
     group: "workflow",
     description: "比较重复候选、确认保留项并应用整理结果。",
+    applicationCenterOrder: 3,
     availability: "ready",
     defaultWindowState: "maximized",
   },
@@ -145,6 +143,7 @@ const definitions = [
     windowTitle: "站点设置",
     group: "connections",
     description: "配置各站点的并发、重试和代理策略。",
+    applicationCenterOrder: 2,
     availability: "ready",
     defaultWindowState: "normal",
   },
@@ -156,6 +155,7 @@ const definitions = [
     windowTitle: "系统诊断",
     group: "system",
     description: "检查服务、配置能力与调度器健康状态。",
+    applicationCenterOrder: 0,
     availability: "ready",
     defaultWindowState: "normal",
   },
@@ -167,6 +167,7 @@ const definitions = [
     windowTitle: "外观设置",
     group: "system",
     description: "调整主题、壁纸、窗口可读性与动效。",
+    applicationCenterOrder: 1,
     availability: "ready",
     defaultWindowState: "normal",
   },
@@ -178,6 +179,7 @@ const definitions = [
     windowTitle: "图片库",
     group: "workflow",
     description: "浏览、搜索和整理已下载的图片。",
+    applicationCenterOrder: 2,
     availability: "preview",
     defaultWindowState: "normal",
   },
@@ -189,6 +191,7 @@ const definitions = [
     windowTitle: "定时任务",
     group: "workflow",
     description: "查看与编辑自动采集计划。",
+    applicationCenterOrder: 4,
     availability: "preview",
     defaultWindowState: "normal",
   },
@@ -200,6 +203,7 @@ const definitions = [
     windowTitle: "数据集导出",
     group: "workflow",
     description: "配置来源并导出审核后的数据集。",
+    applicationCenterOrder: 5,
     availability: "preview",
     defaultWindowState: "normal",
   },
