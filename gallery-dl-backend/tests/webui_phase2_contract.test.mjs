@@ -182,6 +182,21 @@ test("阶段 2 v1 只迁移位置偏好并严格拒绝重复和未知字段", ()
   }
 });
 
+test("阶段 2 storage v2 验证与 v1 迁移共享 window-layer 本地工作区", () => {
+  const layerViewport = { width: 1000, height: 600 };
+  const layerOptions = { minW: 360, minH: 240, taskbarHeight: 0 };
+  const clippedRect = { x: 64, y: 121, w: 720, h: 480 };
+  assert.equal(deserializeWindowPlacements(JSON.stringify({ placements: [
+    { appId: "crawl", rect: clippedRect, maximized: false },
+  ] }), layerViewport, layerOptions), null);
+
+  assert.deepEqual(migrateLegacyWindowLayout(JSON.stringify({ windows: [
+    windowRecord("crawl", "normal", clippedRect),
+  ] }), layerViewport, layerOptions), [
+    { appId: "crawl", rect: { x: 64, y: 120, w: 720, h: 480 }, maximized: false },
+  ]);
+});
+
 test("阶段 2 正式 DOM 包含五层、交通灯与严格桌面边界", () => {
   assert.equal(typeof desktopModule.initializeDesktop, "function");
   assert.equal("describeApplicationLaunchers" in desktopModule, false);

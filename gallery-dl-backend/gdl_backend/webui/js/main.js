@@ -6,6 +6,10 @@ import { createWallpaperStorage } from "./core/wallpaper-storage.js";
 import { createPollingManager } from "./core/polling.js";
 import { createStorePollingFocusSource } from "./core/polling-focus-source.js";
 import { createStorageService } from "./core/storage.js";
+import {
+  measureWindowLayerViewport,
+  windowLayerGeometryOptions,
+} from "./core/window-workspace.js";
 import { createInitialState, createStore } from "./core/store.js";
 import { createDialogController } from "./components/dialog.js";
 import { createStatusBadge } from "./components/status.js";
@@ -50,29 +54,22 @@ try {
     wallpaperStorage = null;
     console.warn("本地壁纸存储初始化失败；桌面与纯色设置仍可正常使用");
   }
+  const windowLayer = document.querySelector("[data-window-layer]");
   personalizationController = createPersonalizationRuntime({
     wallpaper: document.querySelector("[data-desktop-wallpaper]"),
     wallpaperImage: document.querySelector("[data-desktop-wallpaper-image]"),
     wallpaperMask: document.querySelector("[data-desktop-wallpaper-mask]"),
-    windowLayer: document.querySelector("[data-window-layer]"),
+    windowLayer,
     themeRoot: document.documentElement,
     storage,
     wallpaperStorage,
     motion: motionController,
   });
   const api = createApiClient();
-  const dockHeight = Number.parseFloat(
-    getComputedStyle(document.documentElement)
-      .getPropertyValue("--imageweave-dock-height"),
+  storage.readWindowPlacements(
+    measureWindowLayerViewport(windowLayer, document),
+    windowLayerGeometryOptions(),
   );
-  storage.readWindowPlacements({
-    width: window.innerWidth,
-    height: window.innerHeight,
-  }, {
-    taskbarHeight: Number.isFinite(dockHeight) && dockHeight >= 0
-      ? dockHeight
-      : 0,
-  });
   const store = createStore({ initialState: createInitialState({ windows: [] }) });
   polling = createPollingManager({
     focusSource: createStorePollingFocusSource(store),

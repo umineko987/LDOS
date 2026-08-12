@@ -1116,9 +1116,11 @@ class WebUiModuleTests(unittest.TestCase):
             main,
         )
         self.assertIn(
-            'windowLayer: document.querySelector("[data-window-layer]")',
+            'const windowLayer = document.querySelector("[data-window-layer]")',
             main,
         )
+        self.assertIn("measureWindowLayerViewport(windowLayer, document)", main)
+        self.assertIn("windowLayerGeometryOptions()", main)
         self.assertIn(
             'themeRoot: document.documentElement',
             main,
@@ -1558,9 +1560,11 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn("`app-content-${app.id}`", window_dom)
 
         self.assertIn(
-            'windowLayer: document.querySelector("[data-window-layer]")',
+            'const windowLayer = document.querySelector("[data-window-layer]")',
             main,
         )
+        self.assertIn("measureWindowLayerViewport(windowLayer, document)", main)
+        self.assertIn("windowLayerGeometryOptions()", main)
         self.assertIn(".window-layer {", desktop_css)
         self.assertIn("position: absolute", desktop_css)
         self.assertIn("inset: 0", desktop_css)

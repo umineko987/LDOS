@@ -1,9 +1,9 @@
 import { getApplicationById } from "./app-registry.js";
 import { applyWindowRect, createWindowDomLifecycle } from "./window-dom-lifecycle.js";
 import {
-  WINDOW_MIN_HEIGHT,
-  WINDOW_MIN_WIDTH,
-} from "./window-geometry.js";
+  measureWindowLayerViewport,
+  windowLayerGeometryOptions,
+} from "./window-workspace.js";
 import { createWindowHideController } from "./window-hide-controller.js";
 import { createWindowInteractionController } from "./window-interaction.js";
 import {
@@ -43,27 +43,8 @@ export function createWindowManager({
   let destroying = false;
   let destroyed = false;
 
-  const viewportSnapshot = () => ({
-    width: Math.max(32, window.innerWidth || document.documentElement.clientWidth || 1280),
-    height: Math.max(32, window.innerHeight || document.documentElement.clientHeight || 720),
-  });
-
-  const geometryOptions = (viewport = viewportSnapshot()) => {
-    let taskbarHeight = 0;
-    try {
-      const raw = getComputedStyle(document.documentElement)
-        .getPropertyValue("--imageweave-dock-height");
-      const parsed = Number.parseFloat(raw);
-      if (Number.isFinite(parsed) && parsed >= 0) taskbarHeight = parsed;
-    } catch {
-      // CSS Token 不可读时使用零高度，窗口仍由纯几何函数保持至少 32px 可见。
-    }
-    return {
-      minW: WINDOW_MIN_WIDTH,
-      minH: WINDOW_MIN_HEIGHT,
-      taskbarHeight: Math.min(taskbarHeight, Math.max(0, viewport.height - 32)),
-    };
-  };
+  const viewportSnapshot = () => measureWindowLayerViewport(windowLayer, document);
+  const geometryOptions = windowLayerGeometryOptions;
 
   const recordFor = (appId) => (
     selectors.windowStack(store.getState()).find((record) => record.appId === appId) || null

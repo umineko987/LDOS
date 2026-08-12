@@ -219,6 +219,10 @@ import {
 import { createWindowHideController } from "../gdl_backend/webui/js/core/window-hide-controller.js";
 import { createWindowInteractionController } from "../gdl_backend/webui/js/core/window-interaction.js";
 import {
+  measureWindowLayerViewport,
+  windowLayerGeometryOptions,
+} from "../gdl_backend/webui/js/core/window-workspace.js";
+import {
   deriveWindowManagerSnapshot,
   deriveWindowRenderPlan,
   deriveWindowViews as derivePureWindowViews,
@@ -697,6 +701,12 @@ function installWindowManagerDomFixture() {
   windowObject.innerHeight = 800;
   windowObject.matchMedia = () => mobileViewport;
   const windowLayer = new FakeDomHtmlElement("div");
+  windowLayer.clientWidth = 1_200;
+  windowLayer.clientHeight = 800;
+  windowLayer.getBoundingClientRect = () => ({
+    width: windowLayer.clientWidth,
+    height: windowLayer.clientHeight,
+  });
   const taskList = new FakeDomHtmlElement("div");
   const windowTemplate = {
     content: {
@@ -713,13 +723,15 @@ function installWindowManagerDomFixture() {
   install("SVGElement", FakeDomSvgElement);
   install("document", documentObject);
   install("window", windowObject);
+  const computedValues = new Map([["--imageweave-taskbar-height", "40px"]]);
   install("getComputedStyle", () => ({
     getPropertyValue(name) {
-      return name === "--imageweave-taskbar-height" ? "40px" : "";
+      return computedValues.get(name) || "";
     },
   }));
 
   return Object.freeze({
+    computedValues,
     documentObject,
     mobileViewport,
     windowObject,
@@ -2501,6 +2513,83 @@ test("window hide collaborator 独立去重 async 请求并淘汰失效实例", 
   assert.equal(beforeHideCount, 2);
   record = null;
   controller.destroy();
+});
+
+test("window-layer 工作区投影使用真实本地尺寸且几何选项不重复扣 Dock", () => {
+  const fixture = installWindowManagerDomFixture();
+  try {
+    fixture.windowLayer.clientWidth = 1_440;
+    fixture.windowLayer.clientHeight = 772;
+    assert.deepEqual(measureWindowLayerViewport(fixture.windowLayer, fixture.documentObject), {
+      width: 1_440,
+      height: 772,
+    });
+    assert.deepEqual(windowLayerGeometryOptions(), {
+      minW: 360,
+      minH: 240,
+      taskbarHeight: 0,
+    });
+    assert.deepEqual(
+      maximizedRect(
+        measureWindowLayerViewport(fixture.windowLayer, fixture.documentObject),
+        windowLayerGeometryOptions(),
+      ),
+      { x: 0, y: 0, w: 1_440, h: 772 },
+    );
+  } finally {
+    fixture.restore();
+  }
+});
+
+test("window manager 最大化严格使用 window-layer 本地工作区且不重复扣 Dock", () => {
+  const fixture = installWindowManagerDomFixture();
+  fixture.windowLayer.clientWidth = 1_000;
+  fixture.windowLayer.clientHeight = 600;
+  fixture.computedValues.set("--imageweave-dock-height", "72px");
+  const rect = windowRect({ x: 91, y: 73, w: 640, h: 420 });
+  const store = createStore({
+    initialState: createInitialState({ windows: [windowRecord("crawl", "normal", rect)] }),
+    reportError: () => {},
+  });
+  let manager = null;
+  try {
+    manager = createWindowManager({
+      windowLayer: fixture.windowLayer,
+      windowTemplate: fixture.windowTemplate,
+      taskList: fixture.taskList,
+      store,
+      actions: createManagerActions(store),
+    });
+    const element = windowElementFor(fixture.windowLayer, "crawl");
+    assert.deepEqual({
+      left: element.style.left,
+      top: element.style.top,
+      width: element.style.width,
+      height: element.style.height,
+    }, { left: "91px", top: "73px", width: "640px", height: "420px" });
+
+    element.querySelector("[data-window-maximize]").emit("click", { detail: 1 });
+    assert.equal(element.hasAttribute("data-maximized"), true);
+    assert.deepEqual({
+      left: element.style.left,
+      top: element.style.top,
+      width: element.style.width,
+      height: element.style.height,
+    }, { left: "0px", top: "0px", width: "1000px", height: "600px" });
+
+    element.querySelector("[data-window-maximize]").emit("click", { detail: 1 });
+    assert.equal(element.hasAttribute("data-maximized"), false);
+    assert.deepEqual(selectors.windowStack(store.getState())[0].rect, rect);
+    assert.deepEqual({
+      left: element.style.left,
+      top: element.style.top,
+      width: element.style.width,
+      height: element.style.height,
+    }, { left: "91px", top: "73px", width: "640px", height: "420px" });
+  } finally {
+    manager?.destroy();
+    fixture.restore();
+  }
 });
 
 test("window manager 保持快照、z 序投影和生命周期/关闭回退顺序", () => {
