@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -286,6 +289,47 @@ class WebUiModuleTests(unittest.TestCase):
             source = path.read_text(encoding="utf-8")
             for reference in forbidden_references:
                 self.assertNotIn(reference, source, str(path.relative_to(webui_root)))
+
+    def test_legacy_webui_visual_baseline_has_fixed_safe_provenance(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        baseline_root = backend_root / "tests" / "fixtures" / "webui" / "baselines"
+        metadata_path = baseline_root / "legacy-desktop-1440x900.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            set(metadata),
+            {
+                "schema_version",
+                "baseline",
+                "file",
+                "captured_at",
+                "viewport",
+                "route",
+                "source",
+                "capture_method",
+                "browser",
+                "runtime_data",
+                "sha256",
+            },
+        )
+        self.assertEqual(metadata["schema_version"], 1)
+        self.assertEqual(metadata["baseline"], "pre-glass-desktop")
+        self.assertEqual(metadata["file"], "legacy-desktop-1440x900.png")
+        self.assertEqual(
+            metadata["viewport"],
+            {"width": 1440, "height": 900, "device_scale_factor": 1},
+        )
+        self.assertEqual(metadata["route"], "#/crawl")
+        self.assertIs(metadata["runtime_data"], False)
+
+        image = (baseline_root / metadata["file"]).read_bytes()
+        self.assertEqual(image[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(struct.unpack(">II", image[16:24]), (1440, 900))
+        self.assertEqual(hashlib.sha256(image).hexdigest(), metadata["sha256"])
+
+        provenance = json.dumps(metadata, ensure_ascii=False)
+        self.assertNotIn(str(Path.home()), provenance)
+        self.assertNotIn("runtime/downloads", provenance)
 
     def test_store_static_dependency_closure_excludes_apps_and_views(self):
         backend_root = Path(__file__).resolve().parents[1]
