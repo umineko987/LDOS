@@ -261,15 +261,16 @@ export function createDock({
     if (!(event.target instanceof Element)) return null;
     const button = event.target.closest("[data-dock-item]");
     if (!(button instanceof HTMLButtonElement) || !container.contains(button)) return null;
-    return currentModel.items.find((item) => item.key === button.dataset.dockItem) || null;
+    const item = currentModel.items.find((candidate) => candidate.key === button.dataset.dockItem);
+    return item ? { item, button } : null;
   };
   const onClick = (event) => {
     if (event.target === overflowButton) return;
-    const item = itemFromEvent(event);
-    if (!item) return;
+    const match = itemFromEvent(event);
+    if (!match) return;
     closeOverflow();
-    activateDockItem(item, {
-      openApplicationCenter: onOpenApplicationCenter,
+    activateDockItem(match.item, {
+      openApplicationCenter: () => onOpenApplicationCenter(match.button),
       open: (appId) => onActivate("open", appId),
       minimize: (appId) => onActivate("minimize", appId),
       focus: (appId) => onActivate("focus", appId),
@@ -292,7 +293,7 @@ export function createDock({
   const onKeyDown = (event) => {
     if (event.key !== "Escape" || overflowButton.getAttribute("aria-expanded") !== "true") return;
     event.preventDefault();
-    event.stopPropagation();
+    event.stopImmediatePropagation();
     closeOverflow({ returnFocus: true });
   };
 
@@ -305,11 +306,18 @@ export function createDock({
     render,
     closeOverflow,
     focusButton(appId) {
-      const key = `app:${appId}`;
-      const button = container.querySelector(`[data-dock-item="${key}"]`);
-      if (!(button instanceof HTMLButtonElement)) return false;
-      button.focus({ preventScroll: true });
-      return true;
+      const key = appId === null ? "application-center" : `app:${appId}`;
+      const visibleButton = primary.querySelector(`[data-dock-item="${key}"]`);
+      if (visibleButton instanceof HTMLButtonElement) {
+        visibleButton.focus({ preventScroll: true });
+        return true;
+      }
+      const overflowItem = currentModel.overflow.some((item) => item.key === key);
+      if (overflowItem && !overflowButton.hidden) {
+        overflowButton.focus({ preventScroll: true });
+        return true;
+      }
+      return false;
     },
     destroy() {
       if (destroyed) return;

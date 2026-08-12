@@ -315,6 +315,9 @@ export function createWindowManager({
       return appId === null ? null : windows.bodyFor(appId);
     },
     focusBody,
+    focusDockButton(appId) {
+      return taskbarWindows?.focusButton(appId) === true;
+    },
     activate(command, appId) {
       if (destroying || destroyed || !["minimize", "restore", "focus"].includes(command)) {
         return false;

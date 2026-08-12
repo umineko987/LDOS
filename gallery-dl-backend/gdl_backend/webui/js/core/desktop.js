@@ -231,6 +231,9 @@ export function initializeDesktop(root = document, services = {}) {
     onVisibilityChange(visible, app) {
       setLifecycleActive(app, visible);
     },
+    onCloseFocus(app) {
+      if (!windowManager.focusDockButton(app.id)) windowManager.focusDockButton(null);
+    },
     onOpenApplicationCenter: (trigger) => applicationCenter.open(trigger),
     onBeforeHide(app, visibility) {
       if (typeof app?.beforeWindowHide !== "function") return true;

@@ -290,7 +290,9 @@ import {
   deriveDockModel,
   deriveTaskbarWindowModel,
   describeTaskbarWindows,
+  createDock,
 } from "../gdl_backend/webui/js/components/taskbar-windows.js";
+import { createApplicationCenter } from "../gdl_backend/webui/js/components/application-center.js";
 import { toSafeErrorViewModel } from "../gdl_backend/webui/js/components/error-view.js";
 import { createDialogController } from "../gdl_backend/webui/js/components/dialog.js";
 import { createSourceErrorWarning } from "../gdl_backend/webui/js/components/crawl-view.js";
@@ -544,6 +546,11 @@ class FakeDomNode {
   get firstElementChild() {
     return this.children.find((child) => child instanceof FakeDomElement) || null;
   }
+
+  get isConnected() {
+    if (this instanceof FakeDomDocument) return true;
+    return Boolean(this.parentNode?.isConnected);
+  }
 }
 
 class FakeDomTextNode extends FakeDomNode {
@@ -620,6 +627,11 @@ class FakeDomElement extends FakeDomNode {
   matches(selector) {
     const normalized = selector.trim();
     if (normalized === "button") return this.tagName === "BUTTON";
+    if (normalized === "button:not([disabled])") {
+      return this.tagName === "BUTTON" && !this.disabled;
+    }
+    const dataNotDisabled = /^(\[data-[^\]]+\]):not\(\[disabled\]\)$/i.exec(normalized);
+    if (dataNotDisabled) return this.matches(dataNotDisabled[1]) && !this.disabled;
     const dataSelector = /^\[data-([a-z0-9-]+)(?:="([^"]*)")?\]$/i.exec(normalized);
     if (dataSelector) {
       const value = this.dataset[datasetNameForAttribute(`data-${dataSelector[1]}`)];
@@ -685,6 +697,7 @@ class FakeDomDocument extends FakeDomNode {
   constructor() {
     super("#document");
     this.documentElement = new FakeDomHtmlElement("html");
+    this.documentElement.parentNode = this;
     this.activeElement = null;
     this.documentElement.clientWidth = 1_200;
     this.documentElement.clientHeight = 800;
@@ -2819,7 +2832,23 @@ test("窗口菜单命令只委托 window manager 生命周期入口", async () =
     fixture.documentObject.emit("keydown", {
       key: "o", ctrlKey: true, altKey: true, target: new FakeDomHtmlElement("div"),
     });
+    fixture.documentObject.emit("keydown", {
+      key: "o",
+      ctrlKey: true,
+      defaultPrevented: true,
+      target: new FakeDomHtmlElement("div"),
+    });
     assert.deepEqual([refreshCount, centerOpenCount], [1, 1]);
+
+    const escapeTrigger = menuHost.querySelector('[data-shell-menu-trigger="help"]');
+    escapeTrigger.emit("click");
+    let secondaryEscapeCount = 0;
+    fixture.documentObject.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") secondaryEscapeCount += 1;
+    });
+    const escape = fixture.documentObject.emit("keydown", { key: "Escape" });
+    assert.equal(escape.immediatePropagationStopped, true);
+    assert.equal(secondaryEscapeCount, 0);
 
     assert.equal(menu.close(), false);
     assert.equal(manager.activate("open", "crawl"), false);
@@ -2925,6 +2954,49 @@ test("window manager 桌面 resize 取消交互且 normal rect 只异步修复�
       maximized: false,
       preferredWindowState: "normal",
     });
+  } finally {
+    manager?.destroy();
+    fixture.restore();
+  }
+});
+
+test("window close 后固定应用聚焦 Dock，动态应用回退应用中心", () => {
+  const fixture = installWindowManagerDomFixture();
+  const store = createStore({
+    initialState: createInitialState({ windows: [
+      windowRecord("crawl"),
+      windowRecord("proxy"),
+    ] }),
+    reportError: () => {},
+  });
+  const actions = createManagerActions(store);
+  let manager = null;
+  const focusResults = [];
+  try {
+    manager = createWindowManager({
+      windowLayer: fixture.windowLayer,
+      windowTemplate: fixture.windowTemplate,
+      taskList: fixture.taskList,
+      store,
+      actions,
+      onCloseFocus(app) {
+        const appFocused = manager.focusDockButton(app.id);
+        const fallbackFocused = appFocused ? false : manager.focusDockButton(null);
+        focusResults.push([app.id, appFocused, fallbackFocused]);
+      },
+    });
+    windowElementFor(fixture.windowLayer, "proxy")
+      .querySelector("[data-window-close]").emit("click");
+    assert.deepEqual(focusResults.at(-1), ["proxy", false, true]);
+    assert.equal(
+      fixture.documentObject.activeElement?.dataset?.dockItem,
+      "application-center",
+    );
+
+    windowElementFor(fixture.windowLayer, "crawl")
+      .querySelector("[data-window-close]").emit("click");
+    assert.deepEqual(focusResults.at(-1), ["crawl", true, false]);
+    assert.equal(fixture.documentObject.activeElement?.dataset?.dockItem, "app:crawl");
   } finally {
     manager?.destroy();
     fixture.restore();
@@ -3244,6 +3316,157 @@ test("任务栏按钮真实激活路径只执行 descriptor 对应的生产回�
   available.delete("crawl");
   assert.equal(activateTaskbarWindow(byId.get("crawl"), callbacks), false);
   assert.deepEqual(calls, []);
+});
+
+test("菜单打开应用中心先关闭 menu 并把可见 trigger 作为返回焦点", () => {
+  const fixture = installWindowManagerDomFixture();
+  const root = new FakeDomHtmlElement("header");
+  const appName = new FakeDomHtmlElement("span");
+  appName.setAttribute("data-menu-current-app", "");
+  const menuHost = new FakeDomHtmlElement("nav");
+  menuHost.setAttribute("data-menu-items", "");
+  root.append(appName, menuHost);
+  fixture.documentObject.documentElement.append(root);
+  const centerHost = new FakeDomHtmlElement("div");
+  fixture.documentObject.documentElement.append(centerHost);
+  const store = createStore({ reportError: () => {} });
+  let center = null;
+  let menu = null;
+  try {
+    center = createApplicationCenter({
+      host: centerHost,
+      definitions: applications,
+      onLaunch() {},
+      documentObject: fixture.documentObject,
+    });
+    menu = createMenuBar({
+      root,
+      store,
+      selectors,
+      actions: { navigateToApp() {} },
+      onWindowCommand() {},
+      onOpenApplicationCenter: (trigger) => center.open(trigger),
+      onRefreshSummary() {},
+      documentObject: fixture.documentObject,
+      windowObject: fixture.windowObject,
+    });
+    const fileTrigger = menuHost.querySelector('[data-shell-menu-trigger="file"]');
+    fileTrigger.emit("click");
+    menuHost.querySelector('[data-menu-command="open-center"]').emit("click");
+    assert.equal(fileTrigger.getAttribute("aria-expanded"), "false");
+    assert.equal(center.isOpen(), true);
+    fixture.documentObject.emit("keydown", { key: "Escape" });
+    assert.equal(fixture.documentObject.activeElement, fileTrigger);
+  } finally {
+    menu?.destroy();
+    center?.destroy();
+    fixture.restore();
+  }
+});
+
+test("应用中心 Tab/Shift+Tab 环绕且 Escape 只关闭顶层并恢复触发器", () => {
+  const fixture = installWindowManagerDomFixture();
+  const host = new FakeDomHtmlElement("div");
+  fixture.documentObject.documentElement.append(host);
+  const trigger = new FakeDomHtmlButtonElement("button");
+  fixture.documentObject.documentElement.append(trigger);
+  let center = null;
+  try {
+    center = createApplicationCenter({
+      host,
+      definitions: applications,
+      onLaunch() {},
+      documentObject: fixture.documentObject,
+    });
+    assert.equal(center.open(trigger), true);
+    const panel = host.querySelector("[data-application-center-panel]");
+    const focusable = panel.querySelectorAll("button:not([disabled])");
+    const launchTarget = panel.querySelector("[data-application-center-app]:not([disabled])");
+    assert.equal(focusable.length > 1, true);
+    assert.equal(fixture.documentObject.activeElement, launchTarget);
+
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    first.focus();
+    fixture.documentObject.emit("keydown", {
+      key: "Tab", shiftKey: true, target: first,
+    });
+    assert.equal(fixture.documentObject.activeElement, last);
+    fixture.documentObject.emit("keydown", {
+      key: "Tab", shiftKey: false, target: last,
+    });
+    assert.equal(fixture.documentObject.activeElement, first);
+
+    let secondaryEscapeCount = 0;
+    fixture.documentObject.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") secondaryEscapeCount += 1;
+    });
+    const escape = fixture.documentObject.emit("keydown", { key: "Escape" });
+    assert.equal(escape.immediatePropagationStopped, true);
+    assert.equal(secondaryEscapeCount, 0);
+    assert.equal(center.isOpen(), false);
+    assert.equal(fixture.documentObject.activeElement, trigger);
+    assert.equal(center.close(), false);
+  } finally {
+    center?.destroy();
+    fixture.restore();
+  }
+});
+
+test("Dock 应用中心动作显式传递实际 launcher button", () => {
+  const fixture = installWindowManagerDomFixture();
+  const container = new FakeDomHtmlElement("div");
+  fixture.documentObject.documentElement.append(container);
+  let dock = null;
+  let receivedTrigger = null;
+  try {
+    dock = createDock({
+      container,
+      onActivate() {},
+      onOpenApplicationCenter(trigger) { receivedTrigger = trigger; },
+      documentObject: fixture.documentObject,
+    });
+    dock.render([], null);
+    const launcher = container.querySelector('[data-dock-item="application-center"]');
+    launcher.emit("click");
+    assert.equal(receivedTrigger, launcher);
+  } finally {
+    dock?.destroy();
+    fixture.restore();
+  }
+});
+
+test("Dock overflow Escape 只关闭自己且隐藏项 focusButton 回退可见 trigger", () => {
+  const fixture = installWindowManagerDomFixture();
+  const container = new FakeDomHtmlElement("div");
+  fixture.documentObject.documentElement.append(container);
+  let dock = null;
+  try {
+    dock = createDock({
+      container,
+      onActivate() {},
+      onOpenApplicationCenter() {},
+      documentObject: fixture.documentObject,
+    });
+    dock.render([windowRecord("proxy")], "proxy", { visibleLimit: 5 });
+    const overflowTrigger = container.querySelector("[data-dock-overflow-button]");
+    overflowTrigger.emit("click");
+    assert.equal(overflowTrigger.getAttribute("aria-expanded"), "true");
+    assert.equal(dock.focusButton("proxy"), true);
+    assert.equal(fixture.documentObject.activeElement, overflowTrigger);
+    let secondaryEscapeCount = 0;
+    fixture.documentObject.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") secondaryEscapeCount += 1;
+    });
+    const escape = fixture.documentObject.emit("keydown", { key: "Escape" });
+    assert.equal(escape.immediatePropagationStopped, true);
+    assert.equal(secondaryEscapeCount, 0);
+    assert.equal(overflowTrigger.getAttribute("aria-expanded"), "false");
+    assert.equal(fixture.documentObject.activeElement, overflowTrigger);
+  } finally {
+    dock?.destroy();
+    fixture.restore();
+  }
 });
 
 test("Dock 纯模型覆盖固定动态顺序、四状态、overflow 与动作委托", () => {

@@ -142,13 +142,16 @@ export function createApplicationCenter({
     return true;
   };
 
+  const focusableElements = () => [...panel.querySelectorAll("button:not([disabled])")];
+
   const openCenter = (trigger = documentObject.activeElement) => {
     if (destroyed) return false;
     returnFocus = trigger instanceof HTMLElement ? trigger : null;
     open = true;
     host.hidden = false;
     setElementInert(panel, false);
-    panel.querySelector("[data-application-center-app]:not([disabled])")?.focus({ preventScroll: true });
+    const launchTarget = panel.querySelector("[data-application-center-app]:not([disabled])");
+    (launchTarget || closeButton || panel).focus({ preventScroll: true });
     return true;
   };
 
@@ -165,10 +168,29 @@ export function createApplicationCenter({
     onLaunch(appId, button);
   };
   const onKeyDown = (event) => {
-    if (!open || event.key !== "Escape") return;
-    event.preventDefault();
-    event.stopPropagation();
-    close();
+    if (!open) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      close();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = focusableElements();
+    if (focusable.length === 0) {
+      event.preventDefault();
+      panel.focus({ preventScroll: true });
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && documentObject.activeElement === first) {
+      event.preventDefault();
+      last.focus({ preventScroll: true });
+    } else if (!event.shiftKey && documentObject.activeElement === last) {
+      event.preventDefault();
+      first.focus({ preventScroll: true });
+    }
   };
 
   panel.addEventListener("click", onClick);

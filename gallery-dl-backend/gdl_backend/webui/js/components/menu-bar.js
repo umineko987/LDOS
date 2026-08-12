@@ -131,10 +131,15 @@ export function createMenuBar({
     return true;
   };
 
-  const runCommand = (command) => {
+  const runCommand = (command, trigger = null) => {
     if (!command || command.enabled !== true) return false;
-    if (command.id === "open-center") onOpenApplicationCenter?.();
-    else if (command.id === "refresh-summary") onRefreshSummary?.();
+    if (command.id === "open-center") {
+      const returnTarget = buttons.get(openMenuId) || trigger;
+      closeMenu();
+      onOpenApplicationCenter?.(returnTarget);
+      return true;
+    }
+    if (command.id === "refresh-summary") onRefreshSummary?.();
     else if (command.id === "diagnostics") actions.navigateToApp("diagnostics");
     else if (command.id?.startsWith("window:")) {
       onWindowCommand(command.command, command.appId);
@@ -223,7 +228,7 @@ export function createMenuBar({
     const command = menuDefinitions()[openMenuId]?.find(
       (item) => item.id === commandButton.dataset.menuCommand,
     );
-    runCommand(command);
+    runCommand(command, commandButton);
   };
 
   const onDocumentKeyDown = (event) => {
@@ -233,7 +238,7 @@ export function createMenuBar({
       const index = items.indexOf(documentObject.activeElement);
       if (event.key === "Escape") {
         event.preventDefault();
-        event.stopPropagation();
+        event.stopImmediatePropagation();
         closeMenu({ returnFocus: true });
         return;
       }
@@ -250,13 +255,18 @@ export function createMenuBar({
         return;
       }
     }
-    if (isShellShortcutTarget(event.target) || !shortcutModifier(event) || event.altKey) return;
+    if (
+      event.defaultPrevented
+      || isShellShortcutTarget(event.target)
+      || !shortcutModifier(event)
+      || event.altKey
+    ) return;
     if (event.key.toLowerCase() === "r") {
       event.preventDefault();
       onRefreshSummary?.();
     } else if (event.key.toLowerCase() === "o") {
       event.preventDefault();
-      onOpenApplicationCenter?.();
+      onOpenApplicationCenter?.(event.target);
     }
   };
   const onOutsidePointerDown = (event) => {

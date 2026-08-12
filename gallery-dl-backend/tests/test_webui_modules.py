@@ -1647,6 +1647,7 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn('"aria-expanded": "false"', taskbar)
         self.assertIn('"aria-controls": DOCK_OVERFLOW_LIST_ID', taskbar)
         self.assertIn('event.key !== "Escape"', taskbar)
+        self.assertIn("event.stopImmediatePropagation()", taskbar)
         self.assertIn('documentObject.addEventListener("pointerdown"', taskbar)
         self.assertIn('"aria-label": item.ariaLabel', taskbar)
         self.assertIn('dataset: { dockItem: item.key, dockState: item.state }', taskbar)
@@ -1680,10 +1681,14 @@ class WebUiModuleTests(unittest.TestCase):
 
         self.assertIn("createApplicationCenter", desktop)
         self.assertIn("createMenuBar", desktop)
+        self.assertIn("onCloseFocus(app)", desktop)
+        self.assertIn("windowManager.focusDockButton(null)", desktop)
         self.assertIn("onWindowCommand:", desktop)
         self.assertNotIn("actions.minimizeWindow", menu_bar)
         self.assertNotIn("actions.restoreWindow", menu_bar)
         self.assertNotIn("actions.focusWindow", menu_bar)
+        self.assertIn("event.defaultPrevented", menu_bar)
+        self.assertIn("event.stopImmediatePropagation()", menu_bar)
         self.assertIn('application.availability === "ready"', router)
         self.assertIn('application.availability === "preview"', router)
         for app_id in ("gallery", "schedule", "export"):
