@@ -145,7 +145,8 @@ function sanitizeFacets(value) {
     const tags = [];
     for (const item of Array.isArray(facet.tags) ? facet.tags.slice(0, 160) : []) {
       if (!isRecord(item)) continue;
-      const parsed = parseEhTag(item.tag);
+      const rawTag = String(item.tag || "");
+      const parsed = parseEhTag(rawTag.includes(":") ? rawTag : `${namespace}:${rawTag}`);
       if (!parsed) continue;
       tags.push(Object.freeze({
         key: parsed.key,

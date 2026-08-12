@@ -98,6 +98,7 @@ export function createCrawlController(context, {
       payload = buildSearchPayload(view.readSearchDraft());
     } catch (error) {
       showError({ code: "invalid_search", status: 422, message: error.message });
+      view.setSearchState(store.getState().crawl.sources.length ? "error" : "initial");
       view.setOperationMessage("请修正标记项后再搜索。");
       return false;
     }
@@ -109,8 +110,8 @@ export function createCrawlController(context, {
     stopAutocomplete();
     view.hideSuggestions();
     view.clearError();
-    setBusy("search");
     view.setSearchState("loading");
+    setBusy("search");
     view.setOperationMessage("正在搜索多个站点，离开页面将取消本次搜索……");
     let captured = payload;
     payload = null;
