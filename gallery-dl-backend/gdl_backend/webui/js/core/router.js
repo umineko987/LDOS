@@ -44,6 +44,7 @@ function urlForRoute(location, route) {
 export function createHashRouter(onRouteChange) {
   if (typeof onRouteChange !== "function") throw new TypeError("路由回调必须是函数");
   let started = false;
+  let pendingNavigation = null;
 
   const dispatch = (reason) => {
     const originalHash = window.location.hash;
@@ -54,29 +55,33 @@ export function createHashRouter(onRouteChange) {
     if (canonicalized) {
       window.history.replaceState(null, "", urlForRoute(window.location, route));
     }
+    const navigation = pendingNavigation?.hash === canonicalHash
+      ? pendingNavigation
+      : null;
+    pendingNavigation = null;
     onRouteChange(route === null ? null : getApplicationByRoute(route), {
       reason,
       canonicalized,
       malformed,
       originalHash,
+      skipBeforeLeave: navigation?.skipBeforeLeave === true,
     });
   };
 
   const onHashChange = () => dispatch("hashchange");
-  const onPopState = () => dispatch("popstate");
 
   return Object.freeze({
     start() {
       if (started) return;
       started = true;
       window.addEventListener("hashchange", onHashChange);
-      window.addEventListener("popstate", onPopState);
       dispatch("initial");
     },
 
-    navigate(target, { replace = false } = {}) {
+    navigate(target, { replace = false, skipBeforeLeave = false } = {}) {
       const route = resolveNavigationTarget(target);
       const nextHash = hashForRoute(route);
+      pendingNavigation = { hash: nextHash, skipBeforeLeave: skipBeforeLeave === true };
       if (window.location.hash === nextHash) {
         dispatch("same-route");
       } else if (replace) {
@@ -93,6 +98,8 @@ export function createHashRouter(onRouteChange) {
 
     restore(target) {
       const route = resolveNavigationTarget(target);
+      const nextHash = hashForRoute(route);
+      pendingNavigation = { hash: nextHash, skipBeforeLeave: true };
       window.history.replaceState(null, "", urlForRoute(window.location, route));
       dispatch("restore-route");
     },
@@ -100,8 +107,8 @@ export function createHashRouter(onRouteChange) {
     stop() {
       if (!started) return;
       started = false;
+      pendingNavigation = null;
       window.removeEventListener("hashchange", onHashChange);
-      window.removeEventListener("popstate", onPopState);
     },
   });
 }

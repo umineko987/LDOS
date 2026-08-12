@@ -123,7 +123,7 @@ export function createShellActions({
     const appId = selectors.focusedAppId(store.getState());
     if (appId === null) {
       clearCurrentApp();
-      router.navigate(null);
+      router.navigate(null, { skipBeforeLeave: true });
       return;
     }
     storage.writeCurrentApp(appId);

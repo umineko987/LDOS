@@ -223,7 +223,8 @@ export function initializeDesktop(root = document, services = {}) {
       const previous = currentApp;
       const previousMounted = previous ? mountedApplications.get(previous.id) : null;
       if (
-        previous
+        navigation.skipBeforeLeave !== true
+        && previous
         && previousMounted
         && previous.id !== app?.id
         && typeof previous.beforeLeave === "function"
