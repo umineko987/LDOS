@@ -56,8 +56,9 @@ class Stage3WebUiHarnessTests(unittest.TestCase):
         )
         self.assertEqual(
             [len(item["addresses"]) for item in payload["sources"]],
-            [1, 1, 1, 1, 1],
+            [0, 1, 1, 1, 2],
         )
+        self.assertEqual(len(payload["sources"][0]["weak_evidence"]), 1)
         self.assertEqual(payload["sources"][3]["status"], "partial")
         self.assertEqual(
             payload["sources"][3]["tag_facets"][0]["namespace"],

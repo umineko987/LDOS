@@ -76,15 +76,16 @@ class Stage3DiscoveryHarness:
             raise DiscoveryError("proxy_pool_unavailable", "synthetic transport boundary")
         if keyword == "no-result":
             return {"authors": []}
+        artist_name = "weak_stage3" if keyword == "partial" else keyword.replace(" ", "_") or "stage3_artist"
         return {
             "authors": [
                 {
                     "id": "303",
-                    "name": keyword.replace(" ", "_") or "stage3_artist",
-                    "display_name": keyword,
-                    "other_names": ["stage3_alias"],
+                    "name": artist_name,
+                    "display_name": "Weak Stage 3" if keyword == "partial" else keyword,
+                    "other_names": [keyword, "stage3_alias"],
                     "url": "https://danbooru.donmai.us/artists/303",
-                    "works_url": "https://danbooru.donmai.us/posts?tags=stage3_artist",
+                    "works_url": f"https://danbooru.donmai.us/posts?tags={artist_name}",
                     "origin": "danbooru_artist_directory",
                 }
             ]
@@ -113,7 +114,11 @@ class Stage3DiscoveryHarness:
             candidate = _candidate(site)
             if site == "pawchive":
                 candidate["title"] = base_keyword
-            candidates = [candidate]
+                second = _candidate(site, "2")
+                second["title"] = f"{base_keyword} archive"
+                candidates = [candidate, second]
+            else:
+                candidates = [candidate]
             if site == "exhentai":
                 candidates[0]["thumbnail_url"] = ""
             if site == "danbooru":
