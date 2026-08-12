@@ -19,12 +19,7 @@ import {
 import { selectors } from "./store.js";
 
 export { deriveWindowViews };
-import {
-  activateTaskbarWindow,
-  createTaskbarWindowList,
-} from "../components/taskbar-windows.js";
-
-const MOBILE_QUERY = "(max-width: 767px)";
+import { createDock } from "../components/taskbar-windows.js";
 
 export function createWindowManager({
   windowLayer,
@@ -37,8 +32,9 @@ export function createWindowManager({
   onVisibilityChange,
   onCloseFocus,
   onBeforeHide,
+  onOpenApplicationCenter = () => {},
 }) {
-  const mobileViewport = window.matchMedia(MOBILE_QUERY);
+  const mobileViewport = { matches: false, addEventListener() {}, removeEventListener() {} };
   const pendingRectRepairs = new Map();
   let windows = null;
   let currentStack = selectors.windowStack(store.getState());
@@ -56,7 +52,7 @@ export function createWindowManager({
     let taskbarHeight = 0;
     try {
       const raw = getComputedStyle(document.documentElement)
-        .getPropertyValue("--imageweave-taskbar-height");
+        .getPropertyValue("--imageweave-dock-height");
       const parsed = Number.parseFloat(raw);
       if (Number.isFinite(parsed) && parsed >= 0) taskbarHeight = parsed;
     } catch {
@@ -274,26 +270,29 @@ export function createWindowManager({
     taskbarWindows?.render(stack, focusedAppId);
   };
 
-  const onTaskWindowActivate = (descriptor) => {
-    activateTaskbarWindow(descriptor, {
-      canActivate: (appId) => Boolean(recordFor(appId) && windows.has(appId)),
-      minimize: (appId) => {
-        const instance = windows.get(appId);
-        if (!instance) return;
-        requestHide(instance, "minimized", () => {
-          actions.minimizeWindow(appId);
-          taskbarWindows?.focusButton(appId);
-        });
-      },
-      restore: (appId) => {
-        actions.restoreWindow(appId);
-        focusBody(appId);
-      },
-      focus: (appId) => {
-        actions.focusWindow(appId);
-        focusBody(appId);
-      },
-    });
+  const onDockActivate = (activation, appId) => {
+    if (activation === "open") {
+      actions.navigateToApp(appId);
+      return;
+    }
+    if (activation === "minimize") {
+      const instance = windows.get(appId);
+      if (!instance) return;
+      requestHide(instance, "minimized", () => {
+        actions.minimizeWindow(appId);
+        taskbarWindows?.focusButton(appId);
+      });
+      return;
+    }
+    if (activation === "restore") {
+      actions.restoreWindow(appId);
+      focusBody(appId);
+      return;
+    }
+    if (activation === "focus") {
+      actions.focusWindow(appId);
+      focusBody(appId);
+    }
   };
 
   const onViewportChange = () => {
@@ -306,11 +305,11 @@ export function createWindowManager({
 
   let unsubscribe = () => {};
   try {
-    taskbarWindows = createTaskbarWindowList({
+    taskbarWindows = createDock({
       container: taskList,
-      onActivate: onTaskWindowActivate,
+      onActivate: onDockActivate,
+      onOpenApplicationCenter,
     });
-    mobileViewport.addEventListener("change", onViewportChange);
     window.addEventListener("resize", onViewportChange);
     renderStack(currentStack);
     unsubscribe = store.subscribe(selectors.windowStack, renderStack);
@@ -318,7 +317,6 @@ export function createWindowManager({
     destroying = true;
     for (const appId of [...windows.keys()]) removeInstance(appId);
     taskbarWindows?.destroy();
-    mobileViewport.removeEventListener("change", onViewportChange);
     window.removeEventListener("resize", onViewportChange);
     throw error;
   }
@@ -341,7 +339,6 @@ export function createWindowManager({
       destroying = true;
       for (const instance of windows.values()) finishPointerInteraction(instance);
       unsubscribe();
-      mobileViewport.removeEventListener("change", onViewportChange);
       window.removeEventListener("resize", onViewportChange);
       for (const appId of [...windows.keys()]) removeInstance(appId);
       hideController.destroy();

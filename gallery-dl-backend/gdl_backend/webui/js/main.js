@@ -16,6 +16,7 @@ let motionController = null;
 let personalizationController = null;
 let wallpaperStorage = null;
 let summaryController = null;
+let refreshSummary = null;
 let polling = null;
 let dialogs = null;
 let destroyed = false;
@@ -62,7 +63,7 @@ try {
   const api = createApiClient();
   const dockHeight = Number.parseFloat(
     getComputedStyle(document.documentElement)
-      .getPropertyValue("--imageweave-taskbar-height"),
+      .getPropertyValue("--imageweave-dock-height"),
   );
   storage.readWindowPlacements({
     width: window.innerWidth,
@@ -85,12 +86,14 @@ try {
     dialogs,
     motion: motionController,
     personalization: personalizationController,
+    refreshSummary: () => refreshSummary?.(),
   });
   summaryController = initializeTaskbarSummary(document, {
     api,
     store,
     actions: desktopController.actions,
     polling,
+    onReady: (refresh) => { refreshSummary = refresh; },
   });
   window.addEventListener("pagehide", destroy);
 } catch {

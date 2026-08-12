@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="description" content="ImageWeave 图片采集与管理界面">
   <link rel="icon" href="data:,">
-  <title>ImageWeave — 图片采集</title>
+  <title>ImageWeave</title>
   <link rel="stylesheet" href="./styles/tokens.css">
   <link rel="stylesheet" href="./styles/base.css">
   <link rel="stylesheet" href="./styles/desktop.css">
@@ -34,140 +34,77 @@
       aria-hidden="true"
       inert
     >
-      <div
-        class="desktop-wallpaper__image-layer"
-        data-desktop-wallpaper-image
-        hidden
-      >
-        <img
-          class="desktop-wallpaper__image"
-          alt=""
-          draggable="false"
-        >
+      <div class="desktop-wallpaper__image-layer" data-desktop-wallpaper-image hidden>
+        <img class="desktop-wallpaper__image" alt="" draggable="false">
       </div>
       <div class="desktop-wallpaper__mask" data-desktop-wallpaper-mask></div>
     </div>
 
-    <nav class="desktop-icons" data-desktop-icons aria-label="ImageWeave 应用快捷方式"></nav>
+    <header class="menu-bar" data-menu-bar aria-label="ImageWeave 菜单栏">
+      <div class="menu-bar__identity">
+        <strong class="menu-bar__brand">ImageWeave</strong>
+        <span class="menu-bar__current-app" data-menu-current-app hidden></span>
+      </div>
+      <nav class="menu-bar__items" data-menu-items aria-label="应用菜单"></nav>
+      <div class="menu-bar__summary" aria-label="系统摘要">
+        <span class="status-badge status-badge--compact" data-status="disabled" data-taskbar-summary="api">
+          <span aria-hidden="true">—</span><span>服务检查中</span>
+        </span>
+        <span class="status-badge status-badge--compact" data-status="disabled" data-taskbar-summary="proxy">
+          <span aria-hidden="true">—</span><span>代理检查中</span>
+        </span>
+        <span class="status-badge status-badge--compact" data-status="disabled" data-taskbar-summary="dedup">
+          <span aria-hidden="true">—</span><span>去重检查中</span>
+        </span>
+        <button type="button" class="menu-bar__summary-action" data-taskbar-refresh aria-label="刷新系统状态" title="刷新系统状态">刷新</button>
+        <button type="button" class="menu-bar__summary-action" data-taskbar-diagnostics aria-label="打开系统诊断" title="打开系统诊断">诊断</button>
+        <span class="menu-bar__clock" aria-label="当前本地时间">
+          <span data-clock-icon aria-hidden="true">◷</span>
+          <time data-clock>--:--</time>
+        </span>
+      </div>
+    </header>
 
-    <div
-      class="window-layer window-layer--opacity-solid"
-      data-window-layer
-    ></div>
+    <div class="window-layer window-layer--opacity-solid" data-window-layer></div>
 
     <template data-window-template>
-      <section
-        class="application-window"
-        data-application-window
-        role="group"
-      >
+      <section class="application-window" data-application-window role="group">
         <header class="window-titlebar" data-window-titlebar>
-          <strong data-window-title></strong>
-          <div class="window-actions" aria-label="窗口操作">
-            <button type="button" data-window-minimize aria-label="最小化窗口" title="最小化">
-              <span aria-hidden="true">—</span>
+          <div class="window-traffic-lights" aria-label="窗口操作">
+            <button type="button" class="window-traffic-light window-traffic-light--close" data-window-close aria-label="关闭窗口" title="关闭窗口">
+              <span aria-hidden="true"></span>
             </button>
-            <button
-              type="button"
-              data-window-maximize
-              aria-label="最大化窗口"
-              aria-pressed="false"
-              title="最大化"
-            >
-              <span aria-hidden="true">□</span>
+            <button type="button" class="window-traffic-light window-traffic-light--minimize" data-window-minimize aria-label="最小化窗口" title="最小化窗口">
+              <span aria-hidden="true"></span>
             </button>
-            <button type="button" data-window-close aria-label="关闭窗口" title="关闭">
-              <span aria-hidden="true">×</span>
+            <button type="button" class="window-traffic-light window-traffic-light--maximize" data-window-maximize aria-label="最大化窗口" aria-pressed="false" aria-disabled="false" title="最大化窗口">
+              <span aria-hidden="true"></span>
             </button>
           </div>
+          <strong data-window-title></strong>
+          <span class="window-titlebar__balance" aria-hidden="true"></span>
         </header>
         <main class="window-body" data-window-body tabindex="-1"></main>
-        <button
-          type="button"
-          class="window-resize-handle window-resize-handle--right"
-          data-window-resize="right"
-          aria-label="调整窗口宽度"
-        ></button>
-        <button
-          type="button"
-          class="window-resize-handle window-resize-handle--bottom"
-          data-window-resize="bottom"
-          aria-label="调整窗口高度"
-        ></button>
-        <button
-          type="button"
-          class="window-resize-handle window-resize-handle--corner"
-          data-window-resize="corner"
-          aria-label="调整窗口宽度和高度"
-        ></button>
+        <button type="button" class="window-resize-handle window-resize-handle--right" data-window-resize="right" aria-label="调整窗口宽度"></button>
+        <button type="button" class="window-resize-handle window-resize-handle--bottom" data-window-resize="bottom" aria-label="调整窗口高度"></button>
+        <button type="button" class="window-resize-handle window-resize-handle--corner" data-window-resize="corner" aria-label="调整窗口宽度和高度"></button>
       </section>
     </template>
 
-    <aside id="start-menu" class="start-menu" data-start-menu hidden>
-      <strong>IMAGEWEAVE — APPLICATIONS</strong>
-      <nav data-start-menu-items aria-label="START 开始菜单"></nav>
-    </aside>
+    <div class="application-center-host" data-application-center-host hidden></div>
 
-    <footer class="taskbar" aria-label="ImageWeave 任务栏">
-      <button
-        type="button"
-        class="start-button"
-        data-start-button
-        aria-controls="start-menu"
-        aria-expanded="false"
-      >START</button>
-
-      <div
-        class="task-window-list"
-        data-task-window-list
-        aria-label="打开的应用窗口"
-      ></div>
-
-      <div class="taskbar-status" aria-label="系统摘要">
-        <span
-          class="status-badge status-badge--compact"
-          data-status="disabled"
-          data-taskbar-summary="api"
-        >
-          <span aria-hidden="true">—</span><span>服务检查中</span>
-        </span>
-        <span
-          class="status-badge status-badge--compact"
-          data-status="disabled"
-          data-taskbar-summary="proxy"
-        >
-          <span aria-hidden="true">—</span><span>代理检查中</span>
-        </span>
-        <span
-          class="status-badge status-badge--compact"
-          data-status="disabled"
-          data-taskbar-summary="dedup"
-        >
-          <span aria-hidden="true">—</span><span>去重检查中</span>
-        </span>
-        <button
-          type="button"
-          class="taskbar-summary-action"
-          data-taskbar-refresh
-          aria-label="刷新系统状态"
-          title="刷新系统状态"
-        >↻</button>
-        <button
-          type="button"
-          class="taskbar-summary-action taskbar-summary-action--diagnostics"
-          data-taskbar-diagnostics
-          aria-label="打开系统诊断"
-          title="打开系统诊断"
-        >DIAG</button>
-      </div>
-
-      <span class="clock" aria-label="当前本地时间">
-        <span data-clock-icon aria-hidden="true">◷</span>
-        <time data-clock>--:--</time>
-      </span>
-    </footer>
+    <nav class="dock" data-dock aria-label="ImageWeave Dock">
+      <div class="dock__items" data-task-window-list></div>
+    </nav>
   </div>
 
-  <p class="visually-hidden" data-route-announcer aria-live="polite"></p>
+  <section class="desktop-size-blocker" data-desktop-size-blocker role="alert" aria-labelledby="desktop-size-title">
+    <div class="desktop-size-blocker__panel">
+      <h1 id="desktop-size-title">请使用更大的桌面窗口</h1>
+      <p>ImageWeave 需要至少 1180 × 720 CSS 像素。请扩大浏览器窗口后继续。</p>
+    </div>
+  </section>
+
+  <p class="visually-hidden" data-route-announcer aria-live="polite" aria-atomic="true"></p>
 </body>
 </html>

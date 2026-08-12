@@ -10,6 +10,7 @@ const ICON_PATHS = Object.freeze({
   folder: '<path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m7 16 3-3 2 2 3-4 3 5"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>',
   archive: '<path d="M3 6h18M5 6v14h14V6M9 10h6"/><rect x="2" y="3" width="20" height="3" rx="1"/>',
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   minus: '<path d="M5 12h14"/>',
   square: '<rect x="4" y="4" width="16" height="16"/>',
   restore: '<rect x="3" y="7" width="14" height="14"/><path d="M7 7V3h14v14h-4"/>',

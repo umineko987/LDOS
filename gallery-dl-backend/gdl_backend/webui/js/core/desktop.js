@@ -4,7 +4,9 @@ import { createHashRouter } from "./router.js";
 import { createElement, requireElement, setElementInert } from "./dom.js";
 import { selectors } from "./store.js";
 import { createWindowManager } from "./window-manager.js";
+import { createApplicationCenter } from "../components/application-center.js";
 import { createIcon } from "../components/icons.js";
+import { createMenuBar } from "../components/menu-bar.js";
 import { createStatusBadge } from "../components/status.js";
 
 function launcherDescriptor(app, disabled = false) {
@@ -123,12 +125,11 @@ export function initializeDesktop(root = document, services = {}) {
     dialogs,
     motion = null,
     personalization = null,
+    refreshSummary = null,
   } = services;
   const desktop = requireElement("[data-desktop]", root);
-  const desktopIcons = requireElement("[data-desktop-icons]", desktop);
-  const startMenu = requireElement("[data-start-menu]", desktop);
-  const startMenuItems = requireElement("[data-start-menu-items]", startMenu);
-  const startButton = requireElement("[data-start-button]", desktop);
+  const menuBarElement = requireElement("[data-menu-bar]", desktop);
+  const applicationCenterHost = requireElement("[data-application-center-host]", desktop);
   const windowLayer = requireElement("[data-window-layer]", desktop);
   const windowTemplate = requireElement("[data-window-template]", desktop);
   if (!(windowTemplate instanceof HTMLTemplateElement)) {
@@ -140,19 +141,13 @@ export function initializeDesktop(root = document, services = {}) {
   const skipLink = requireElement("[data-skip-link]", root);
   const announcer = requireElement("[data-route-announcer]", root);
 
-  const launchers = describeApplicationLaunchers();
-  for (const app of launchers.desktop) {
-    desktopIcons.append(createApplicationLink(app, "desktop"));
-  }
-  for (const group of launchers.startMenuGroups) {
-    startMenuItems.append(createStartMenuGroup(group));
-  }
-
   const mountedApplications = new Map();
   let currentApp = null;
   let router;
   let actions;
   let windowManager = null;
+  let applicationCenter = null;
+  let menuBar = null;
   let routeTransitionVersion = 0;
   let focusBodyAfterRouteAppId = null;
 
@@ -221,19 +216,6 @@ export function initializeDesktop(root = document, services = {}) {
     }
   };
 
-  const updateNavigationState = (app) => {
-    for (const link of desktop.querySelectorAll("[data-app-link]")) {
-      if (!(link instanceof HTMLElement)) continue;
-      const current = link.dataset.appLink === app.id;
-      if (current) link.setAttribute("aria-current", "page");
-      else link.removeAttribute("aria-current");
-    }
-  };
-
-  const focusDesktopApplication = (app) => {
-    const link = desktopIcons.querySelector(`[data-app-link="${app.id}"]`);
-    if (link instanceof HTMLElement) link.focus();
-  };
 
   const activateRoute = (app, navigation = {}) => {
     const transition = ++routeTransitionVersion;
@@ -278,7 +260,6 @@ export function initializeDesktop(root = document, services = {}) {
         return;
       }
       currentApp = app;
-      updateNavigationState(app);
       actions.routeResolved(app);
       if (focusBodyAfterRouteAppId === app.id) {
         focusBodyAfterRouteAppId = null;
@@ -301,6 +282,14 @@ export function initializeDesktop(root = document, services = {}) {
     getRegisteredApplicationById: getApplicationById,
   });
 
+  applicationCenter = createApplicationCenter({
+    host: applicationCenterHost,
+    definitions: applications,
+    onLaunch(appId) {
+      focusBodyAfterRouteAppId = appId;
+      actions.navigateToApp(appId);
+    },
+  });
   windowManager = createWindowManager({
     windowLayer,
     windowTemplate,
@@ -316,9 +305,7 @@ export function initializeDesktop(root = document, services = {}) {
     onVisibilityChange(visible, app) {
       setLifecycleActive(app, visible);
     },
-    onCloseFocus(app) {
-      focusDesktopApplication(app);
-    },
+    onOpenApplicationCenter: (trigger) => applicationCenter.open(trigger),
     onBeforeHide(app, visibility) {
       if (typeof app?.beforeWindowHide !== "function") return true;
       const mounted = mountedApplications.get(app.id);
@@ -328,64 +315,20 @@ export function initializeDesktop(root = document, services = {}) {
     },
   });
 
-  const renderStartMenu = (open, previous) => {
-    startMenu.hidden = !open;
-    startButton.setAttribute("aria-expanded", String(open));
-    if (open && !previous) {
-      startMenuItems.querySelector('a:not([aria-disabled="true"])')?.focus();
-    }
-  };
-  const unsubscribeStartMenu = store.subscribe(selectors.startMenuOpen, renderStartMenu, {
-    fireImmediately: true,
+  menuBar = createMenuBar({
+    root: menuBarElement,
+    store,
+    selectors,
+    actions,
+    onOpenApplicationCenter: (trigger) => applicationCenter.open(trigger),
+    onRefreshSummary: () => refreshSummary?.(),
   });
-
-  const setMenuOpen = (open, { returnFocus = false } = {}) => {
-    actions.setStartMenuOpen(open);
-    if (!open && returnFocus) startButton.focus();
-  };
-
-  const onNavigationClick = (event) => {
-    if (!(event.target instanceof Element)) return;
-    const link = event.target.closest("[data-app-link]");
-    if (!(link instanceof HTMLAnchorElement)) return;
-    event.preventDefault();
-    if (link.getAttribute("aria-disabled") === "true") return;
-    focusBodyAfterRouteAppId = event.detail === 0 ? link.dataset.appLink : null;
-    actions.navigateToApp(link.dataset.appLink);
-  };
-  const onNavigationKeyDown = (event) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    if (!(event.target instanceof Element)) return;
-    const link = event.target.closest('[data-app-link][aria-disabled="true"]');
-    if (!(link instanceof HTMLAnchorElement) || !startMenuItems.contains(link)) return;
-    event.preventDefault();
-  };
-
-  const onStartClick = () => setMenuOpen(!store.getState().ui.startMenuOpen);
-  const onOutsidePointerDown = (event) => {
-    if (!store.getState().ui.startMenuOpen || !(event.target instanceof Node)) return;
-    if (startMenu.contains(event.target) || startButton.contains(event.target)) return;
-    setMenuOpen(false);
-  };
-  const onKeyDown = (event) => {
-    if (event.key === "Escape" && store.getState().ui.startMenuOpen) {
-      event.preventDefault();
-      setMenuOpen(false, { returnFocus: true });
-    }
-  };
   const onSkip = () => {
     if (windowManager.focusBody()) return;
     const snapshot = windowManager.getSnapshot();
-    const fallbackApp = snapshot.appId ? applications.find((app) => app.id === snapshot.appId) : null;
-    if (fallbackApp) focusDesktopApplication(fallbackApp);
+    if (snapshot.appId) windowManager.focusBody(snapshot.appId);
   };
 
-  desktopIcons.addEventListener("click", onNavigationClick);
-  startMenuItems.addEventListener("click", onNavigationClick);
-  startMenuItems.addEventListener("keydown", onNavigationKeyDown);
-  startButton.addEventListener("click", onStartClick);
-  document.addEventListener("pointerdown", onOutsidePointerDown);
-  document.addEventListener("keydown", onKeyDown);
   skipLink.addEventListener("click", onSkip);
   clockIcon.replaceChildren(createIcon("clock", { size: 16, strokeWidth: 2 }));
   const stopClock = startClock(clock);
@@ -403,13 +346,8 @@ export function initializeDesktop(root = document, services = {}) {
       router.stop();
       stopClock();
       windowManager.destroy();
-      unsubscribeStartMenu();
-      desktopIcons.removeEventListener("click", onNavigationClick);
-      startMenuItems.removeEventListener("click", onNavigationClick);
-      startMenuItems.removeEventListener("keydown", onNavigationKeyDown);
-      startButton.removeEventListener("click", onStartClick);
-      document.removeEventListener("pointerdown", onOutsidePointerDown);
-      document.removeEventListener("keydown", onKeyDown);
+      menuBar?.destroy();
+      applicationCenter?.destroy();
       skipLink.removeEventListener("click", onSkip);
       for (const appId of [...mountedApplications.keys()]) {
         const app = applications.find((candidate) => candidate.id === appId);

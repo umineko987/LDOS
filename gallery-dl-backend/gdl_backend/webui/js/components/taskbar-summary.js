@@ -134,7 +134,14 @@ async function readEndpoint(api, path, signal) {
   }
 }
 
-export function initializeTaskbarSummary(root, { api, store, actions, polling, now = Date.now }) {
+export function initializeTaskbarSummary(root, {
+  api,
+  store,
+  actions,
+  polling,
+  now = Date.now,
+  onReady = null,
+}) {
   const slots = {
     api: requireElement('[data-taskbar-summary="api"]', root),
     proxy: requireElement('[data-taskbar-summary="proxy"]', root),
@@ -187,6 +194,8 @@ export function initializeTaskbarSummary(root, { api, store, actions, polling, n
   const onDiagnostics = () => actions.navigateToApp("diagnostics");
   refreshButton.addEventListener("click", onRefresh);
   diagnosticsButton.addEventListener("click", onDiagnostics);
+
+  if (typeof onReady === "function") onReady(onRefresh);
 
   return Object.freeze({
     refresh: onRefresh,

@@ -1,24 +1,139 @@
 import { getApplicationDefinitionById } from "../core/app-definitions.js";
 import { createElement } from "../core/dom.js";
+import { createIcon } from "./icons.js";
 
 export const _TASKBAR_VISIBLE_LIMIT = 6;
+export const DOCK_FIXED_APP_IDS = Object.freeze(["crawl", "tasks", "gallery", "review"]);
 
-const TASKBAR_OVERFLOW_LIST_ID = "task-window-overflow-list";
+const DOCK_OVERFLOW_LIST_ID = "dock-overflow-list";
+const STATE_COPY = Object.freeze({
+  closed: "已关闭",
+  focused: "当前聚焦",
+  background: "正在后台运行",
+  minimized: "已最小化",
+});
 
+function requireDockApplication(appId) {
+  const app = getApplicationDefinitionById(appId);
+  if (!app) throw new TypeError("Dock 应用无效");
+  return app;
+}
+
+function dockApplicationDescriptor(appId, record, focusedAppId) {
+  const app = requireDockApplication(appId);
+  const state = !record
+    ? "closed"
+    : record.windowState === "minimized"
+      ? "minimized"
+      : record.appId === focusedAppId
+        ? "focused"
+        : "background";
+  const activation = {
+    closed: "open",
+    focused: "minimize",
+    background: "focus",
+    minimized: "restore",
+  }[state];
+  return Object.freeze({
+    key: `app:${app.id}`,
+    appId: app.id,
+    label: app.label,
+    title: app.windowTitle,
+    icon: app.icon,
+    state,
+    stateLabel: STATE_COPY[state],
+    activation,
+    ariaLabel: `${app.label}，${STATE_COPY[state]}；${{
+      open: "打开应用",
+      minimize: "最小化窗口",
+      focus: "聚焦窗口",
+      restore: "恢复窗口",
+    }[activation]}`,
+  });
+}
+
+export function deriveDockModel(windowStack, focusedAppId, {
+  visibleLimit = _TASKBAR_VISIBLE_LIMIT,
+} = {}) {
+  if (!Array.isArray(windowStack)) throw new TypeError("Dock 窗口栈必须是数组");
+  if (!Number.isInteger(visibleLimit) || visibleLimit < 1) {
+    throw new TypeError("Dock 可见项上限无效");
+  }
+  const records = new Map();
+  for (const record of windowStack) {
+    if (!record || typeof record.appId !== "string" || records.has(record.appId)) {
+      throw new TypeError("Dock 窗口栈包含无效或重复应用");
+    }
+    requireDockApplication(record.appId);
+    records.set(record.appId, record);
+  }
+  const dynamicIds = windowStack
+    .map((record) => record.appId)
+    .filter((appId) => !DOCK_FIXED_APP_IDS.includes(appId));
+  const appIds = [...DOCK_FIXED_APP_IDS, ...dynamicIds];
+  const items = Object.freeze([
+    Object.freeze({
+      key: "application-center",
+      appId: null,
+      label: "应用中心",
+      title: "应用中心",
+      icon: "grid",
+      state: "launcher",
+      stateLabel: "打开应用中心",
+      activation: "open-center",
+      ariaLabel: "应用中心；打开全部应用列表",
+    }),
+    ...appIds.map((appId) => dockApplicationDescriptor(
+      appId,
+      records.get(appId) || null,
+      focusedAppId,
+    )),
+  ]);
+  return Object.freeze({
+    items,
+    visible: Object.freeze(items.slice(0, visibleLimit)),
+    overflow: Object.freeze(items.slice(visibleLimit)),
+  });
+}
+
+export function activateDockItem(item, {
+  openApplicationCenter,
+  open,
+  minimize,
+  focus,
+  restore,
+} = {}) {
+  const activation = item?.activation;
+  if (activation === "open-center") {
+    if (typeof openApplicationCenter !== "function") {
+      throw new TypeError("Dock 应用中心处理器无效");
+    }
+    openApplicationCenter();
+    return true;
+  }
+  if (
+    typeof item?.appId !== "string"
+    || !getApplicationDefinitionById(item.appId)
+    || !["open", "minimize", "focus", "restore"].includes(activation)
+  ) return false;
+  const callback = { open, minimize, focus, restore }[activation];
+  if (typeof callback !== "function") throw new TypeError("Dock 激活处理器无效");
+  callback(item.appId);
+  return true;
+}
+
+// Compatibility projections retained for callers that still consume the pure taskbar names.
 export function describeTaskbarWindows(windowStack, focusedAppId) {
   if (!Array.isArray(windowStack)) throw new TypeError("任务栏窗口栈必须是数组");
   return Object.freeze(windowStack.map((record) => {
-    const app = getApplicationDefinitionById(record?.appId);
-    if (!app) throw new TypeError("任务栏窗口应用无效");
-    const minimized = record.windowState === "minimized";
-    const focused = !minimized && record.appId === focusedAppId;
+    const descriptor = dockApplicationDescriptor(record.appId, record, focusedAppId);
     return Object.freeze({
-      appId: app.id,
-      label: app.label,
-      title: app.windowTitle,
-      ariaPressed: String(focused),
-      minimized,
-      activation: focused ? "minimize" : minimized ? "restore" : "focus",
+      appId: descriptor.appId,
+      label: descriptor.label,
+      title: descriptor.title,
+      ariaPressed: String(descriptor.state === "focused"),
+      minimized: descriptor.state === "minimized",
+      activation: descriptor.activation,
     });
   }));
 }
@@ -29,22 +144,10 @@ export function activateTaskbarWindow(descriptor, {
   restore,
   focus,
 } = {}) {
-  const appId = descriptor?.appId;
-  const activation = descriptor?.activation;
-  if (
-    typeof appId !== "string"
-    || !getApplicationDefinitionById(appId)
-    || !["minimize", "restore", "focus"].includes(activation)
-    || typeof canActivate !== "function"
-    || canActivate(appId, descriptor) !== true
-  ) return false;
-
-  const callback = { minimize, restore, focus }[activation];
-  if (typeof callback !== "function") {
-    throw new TypeError("任务栏窗口激活处理器无效");
+  if (typeof canActivate !== "function" || canActivate(descriptor?.appId, descriptor) !== true) {
+    return false;
   }
-  callback(appId);
-  return true;
+  return activateDockItem(descriptor, { minimize, restore, focus });
 }
 
 export function deriveTaskbarWindowModel(windowStack, focusedAppId) {
@@ -56,71 +159,77 @@ export function deriveTaskbarWindowModel(windowStack, focusedAppId) {
   });
 }
 
-export function createTaskbarWindowList({
+export function createDock({
   container,
   onActivate,
+  onOpenApplicationCenter,
   documentObject = globalThis.document,
 }) {
-  if (!(container instanceof HTMLElement)) throw new TypeError("任务栏窗口容器无效");
-  if (typeof onActivate !== "function") throw new TypeError("任务栏窗口激活回调无效");
+  if (!(container instanceof HTMLElement)) throw new TypeError("Dock 容器无效");
+  if (typeof onActivate !== "function") throw new TypeError("Dock 窗口激活回调无效");
+  if (typeof onOpenApplicationCenter !== "function") {
+    throw new TypeError("Dock 应用中心回调无效");
+  }
   if (!documentObject || typeof documentObject.addEventListener !== "function") {
-    throw new TypeError("任务栏窗口列表需要可用的 document");
+    throw new TypeError("Dock 需要可用的 document");
   }
 
   const primary = createElement("div", {
-    className: "task-window-primary",
-    dataset: { taskWindowPrimary: "" },
+    className: "dock__primary",
+    attributes: { role: "list", "aria-label": "常用和运行中的应用" },
+    dataset: { dockPrimary: "" },
   });
   const overflowButton = createElement("button", {
-    className: "task-window-overflow-button",
-    text: "⋯",
+    className: "dock__overflow-button",
+    text: "更多",
     attributes: {
       type: "button",
-      "aria-label": "更多打开的窗口",
-      "aria-controls": TASKBAR_OVERFLOW_LIST_ID,
+      "aria-label": "更多 Dock 应用",
+      "aria-controls": DOCK_OVERFLOW_LIST_ID,
       "aria-expanded": "false",
-      title: "更多打开的窗口",
+      title: "更多 Dock 应用",
       hidden: "",
     },
-    dataset: { taskWindowOverflowButton: "" },
+    dataset: { dockOverflowButton: "" },
   });
   const overflowPanel = createElement("div", {
-    className: "task-window-overflow",
-    attributes: {
-      id: TASKBAR_OVERFLOW_LIST_ID,
-      hidden: "",
-    },
-    dataset: { taskWindowOverflow: "" },
+    className: "dock__overflow",
+    attributes: { id: DOCK_OVERFLOW_LIST_ID, hidden: "" },
+    dataset: { dockOverflow: "" },
   });
   const overflowList = createElement("ul", {
-    className: "task-window-overflow__list",
-    attributes: { "aria-label": "更多打开的窗口" },
+    className: "dock__overflow-list",
+    attributes: { "aria-label": "更多 Dock 应用" },
   });
   overflowPanel.append(overflowList);
   container.replaceChildren(primary, overflowButton, overflowPanel);
 
-  const buttons = new Map();
-  let currentModel = deriveTaskbarWindowModel([], null);
+  let currentModel = deriveDockModel([], null);
   let destroyed = false;
 
-  const buttonFor = (descriptor) => {
-    let button = buttons.get(descriptor.appId);
-    if (!button) {
-      button = createElement("button", {
-        className: "task-window-button",
-        attributes: { type: "button" },
-      });
-      buttons.set(descriptor.appId, button);
-    }
-    button.dataset.taskWindow = descriptor.appId;
-    button.textContent = descriptor.label;
-    button.title = descriptor.title;
-    button.setAttribute("aria-pressed", descriptor.ariaPressed);
-    button.setAttribute(
-      "aria-label",
-      descriptor.minimized ? `${descriptor.label}（已最小化）` : descriptor.label,
+  const createDockButton = (item) => {
+    const button = createElement("button", {
+      className: "dock__item",
+      attributes: {
+        type: "button",
+        role: "listitem",
+        "aria-label": item.ariaLabel,
+        "aria-pressed": String(item.state === "focused"),
+        title: item.ariaLabel,
+      },
+      dataset: { dockItem: item.key, dockState: item.state },
+    });
+    button.append(
+      createElement("span", { className: "dock__icon", attributes: { "aria-hidden": "true" } }, [
+        createIcon(item.icon, { size: 25, strokeWidth: 1.7 }),
+      ]),
+      createElement("span", { className: "dock__label", text: item.label }),
+      createElement("span", {
+        className: "dock__state",
+        text: item.stateLabel,
+        attributes: { "aria-hidden": "true" },
+      }),
     );
-    button.toggleAttribute("data-minimized", descriptor.minimized);
     return button;
   };
 
@@ -134,98 +243,93 @@ export function createTaskbarWindowList({
     return wasOpen;
   };
 
-  const openOverflow = () => {
-    if (destroyed || currentModel.overflow.length === 0) return false;
-    overflowPanel.hidden = false;
-    overflowButton.setAttribute("aria-expanded", "true");
-    overflowList.querySelector("button")?.focus({ preventScroll: true });
-    return true;
-  };
-
-  const render = (windowStack, focusedAppId) => {
+  const render = (windowStack, focusedAppId, options = {}) => {
     if (destroyed) return;
     closeOverflow();
-    currentModel = deriveTaskbarWindowModel(windowStack, focusedAppId);
-    const nextIds = new Set(currentModel.buttons.map((descriptor) => descriptor.appId));
-    for (const [appId, button] of buttons) {
-      if (nextIds.has(appId)) continue;
-      button.remove();
-      buttons.delete(appId);
-    }
-
-    primary.replaceChildren(...currentModel.visible.map(buttonFor));
-    overflowList.replaceChildren(...currentModel.overflow.map((descriptor) => {
-      const item = createElement("li");
-      item.append(buttonFor(descriptor));
-      return item;
+    currentModel = deriveDockModel(windowStack, focusedAppId, options);
+    primary.replaceChildren(...currentModel.visible.map(createDockButton));
+    overflowList.replaceChildren(...currentModel.overflow.map((item) => {
+      const listItem = createElement("li");
+      listItem.append(createDockButton(item));
+      return listItem;
     }));
-    const hasOverflow = currentModel.overflow.length > 0;
-    overflowButton.hidden = !hasOverflow;
-    container.toggleAttribute("data-has-overflow", hasOverflow);
+    overflowButton.hidden = currentModel.overflow.length === 0;
+    container.toggleAttribute("data-has-overflow", currentModel.overflow.length > 0);
   };
 
-  const onOverflowClick = () => {
-    if (overflowButton.getAttribute("aria-expanded") === "true") {
-      closeOverflow({ returnFocus: true });
-    } else {
-      openOverflow();
-    }
+  const itemFromEvent = (event) => {
+    if (!(event.target instanceof Element)) return null;
+    const button = event.target.closest("[data-dock-item]");
+    if (!(button instanceof HTMLButtonElement) || !container.contains(button)) return null;
+    return currentModel.items.find((item) => item.key === button.dataset.dockItem) || null;
   };
-  const onContainerClick = (event) => {
-    if (!(event.target instanceof Element)) return;
-    const button = event.target.closest("[data-task-window]");
-    if (!(button instanceof HTMLButtonElement) || !container.contains(button)) return;
-    const appId = button.dataset.taskWindow;
-    const descriptor = currentModel.buttons.find((item) => item.appId === appId);
-    if (!descriptor || buttons.get(appId) !== button) return;
-    onActivate(descriptor, button);
+  const onClick = (event) => {
+    if (event.target === overflowButton) return;
+    const item = itemFromEvent(event);
+    if (!item) return;
+    closeOverflow();
+    activateDockItem(item, {
+      openApplicationCenter: onOpenApplicationCenter,
+      open: (appId) => onActivate("open", appId),
+      minimize: (appId) => onActivate("minimize", appId),
+      focus: (appId) => onActivate("focus", appId),
+      restore: (appId) => onActivate("restore", appId),
+    });
+  };
+  const onOverflowClick = () => {
+    const open = overflowButton.getAttribute("aria-expanded") !== "true";
+    overflowButton.setAttribute("aria-expanded", String(open));
+    overflowPanel.hidden = !open;
+    if (open) overflowList.querySelector("button")?.focus({ preventScroll: true });
   };
   const onOutsidePointerDown = (event) => {
     if (
-      overflowButton.getAttribute("aria-expanded") !== "true"
-      || !(event.target instanceof Node)
-      || container.contains(event.target)
-    ) return;
-    closeOverflow();
+      overflowButton.getAttribute("aria-expanded") === "true"
+      && event.target instanceof Node
+      && !container.contains(event.target)
+    ) closeOverflow();
   };
-  const onDocumentKeyDown = (event) => {
-    if (
-      event.key !== "Escape"
-      || overflowButton.getAttribute("aria-expanded") !== "true"
-    ) return;
+  const onKeyDown = (event) => {
+    if (event.key !== "Escape" || overflowButton.getAttribute("aria-expanded") !== "true") return;
     event.preventDefault();
+    event.stopPropagation();
     closeOverflow({ returnFocus: true });
   };
 
+  container.addEventListener("click", onClick);
   overflowButton.addEventListener("click", onOverflowClick);
-  container.addEventListener("click", onContainerClick);
   documentObject.addEventListener("pointerdown", onOutsidePointerDown);
-  documentObject.addEventListener("keydown", onDocumentKeyDown);
+  documentObject.addEventListener("keydown", onKeyDown);
 
   return Object.freeze({
     render,
+    closeOverflow,
     focusButton(appId) {
-      const button = buttons.get(appId);
-      if (!button) return false;
-      if (currentModel.overflow.some((descriptor) => descriptor.appId === appId)) {
-        if (overflowPanel.hidden) overflowButton.focus({ preventScroll: true });
-        else button.focus({ preventScroll: true });
-      } else {
-        button.focus({ preventScroll: true });
-      }
+      const key = `app:${appId}`;
+      const button = container.querySelector(`[data-dock-item="${key}"]`);
+      if (!(button instanceof HTMLButtonElement)) return false;
+      button.focus({ preventScroll: true });
       return true;
     },
-    closeOverflow,
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      container.removeEventListener("click", onClick);
       overflowButton.removeEventListener("click", onOverflowClick);
-      container.removeEventListener("click", onContainerClick);
       documentObject.removeEventListener("pointerdown", onOutsidePointerDown);
-      documentObject.removeEventListener("keydown", onDocumentKeyDown);
-      buttons.clear();
-      currentModel = deriveTaskbarWindowModel([], null);
+      documentObject.removeEventListener("keydown", onKeyDown);
       container.replaceChildren();
+    },
+  });
+}
+
+export function createTaskbarWindowList({ container, onActivate, documentObject = globalThis.document }) {
+  return createDock({
+    container,
+    documentObject,
+    onOpenApplicationCenter() {},
+    onActivate(activation, appId) {
+      onActivate({ appId, activation });
     },
   });
 }

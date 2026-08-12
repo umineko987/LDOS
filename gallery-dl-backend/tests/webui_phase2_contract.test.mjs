@@ -12,6 +12,8 @@ import {
   parseHashRoute,
   resolveNavigationTarget,
 } from "../gdl_backend/webui/js/core/router.js";
+import { readFileSync } from "node:fs";
+
 import { STORAGE_KEYS } from "../gdl_backend/webui/js/core/storage-contract.js";
 import {
   deserializeWindowPlacements,
@@ -172,6 +174,37 @@ test("阶段 2 v1 只迁移位置偏好并严格拒绝重复和未知字段", ()
   ]) {
     assert.equal(migrateLegacyWindowLayout(JSON.stringify({ windows }), viewport), null);
   }
+});
+
+test("阶段 2 正式 DOM 包含五层、交通灯与严格桌面边界", () => {
+  const index = readFileSync(new URL("../gdl_backend/webui/index.html", import.meta.url), "utf8");
+  const desktopCss = readFileSync(
+    new URL("../gdl_backend/webui/styles/desktop.css", import.meta.url),
+    "utf8",
+  );
+  const responsiveCss = readFileSync(
+    new URL("../gdl_backend/webui/styles/responsive.css", import.meta.url),
+    "utf8",
+  );
+  for (const marker of [
+    "data-desktop-wallpaper", "data-menu-bar", "data-window-layer",
+    "data-application-center-host", "data-dock", "data-desktop-size-blocker",
+    "data-route-announcer",
+  ]) assert.equal(index.includes(marker), true, marker);
+  assert.equal(index.includes("data-start-menu"), false);
+  assert.equal(index.includes("data-desktop-icons"), false);
+  const trafficOrder = ["data-window-close", "data-window-minimize", "data-window-maximize"];
+  assert.deepEqual([...trafficOrder].sort((left, right) => index.indexOf(left) - index.indexOf(right)), trafficOrder);
+  assert.equal(index.includes('aria-pressed="false"'), true);
+  assert.equal(index.includes('aria-disabled="false"'), true);
+  assert.match(desktopCss, /\.window-traffic-light\s*\{[^}]*min-width:\s*30px;[^}]*min-height:\s*30px;/su);
+  assert.equal(desktopCss.includes("resize: both"), false);
+  assert.equal(responsiveCss.includes("@media (max-width: 1179px), (max-height: 719px)"), true);
+  assert.equal(responsiveCss.includes("@media (max-width: 767px)"), false);
+  assert.equal(responsiveCss.includes("display: none !important"), true);
+  assert.equal(desktopCss.includes(':root[data-motion="off"] .dock__item'), true);
+  assert.equal(desktopCss.includes("@media (prefers-reduced-motion: reduce)"), true);
+  assert.equal(desktopCss.includes("@media (forced-colors: active)"), true);
 });
 
 test("阶段 2 v2 strict round-trip 拒绝危险、访问器、重复、非有限和非法 rect", () => {

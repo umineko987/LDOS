@@ -607,7 +607,9 @@ class ApiTests(unittest.TestCase):
 
         index = self.client.get("/ui/")
         self.assertEqual(index.status_code, 200)
-        self.assertIn("ImageWeave 应用快捷方式", index.text)
+        self.assertIn("ImageWeave 菜单栏", index.text)
+        self.assertIn("ImageWeave Dock", index.text)
+        self.assertNotIn("ImageWeave 应用快捷方式", index.text)
         self.assertNotIn("聚合爬取测试台", index.text)
         self.assertIn("text/html", index.headers["content-type"])
 
@@ -618,7 +620,8 @@ class ApiTests(unittest.TestCase):
     def test_webui_desktop_shell_static_contract(self):
         index = self.client.get("/ui/")
         self.assertEqual(index.status_code, 200)
-        self.assertIn("ImageWeave 应用快捷方式", index.text)
+        self.assertIn("ImageWeave 菜单栏", index.text)
+        self.assertIn("请使用更大的桌面窗口", index.text)
 
         parser = _TagCollector()
         parser.feed(index.text)
@@ -654,10 +657,14 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(layer_tags[0][0], "div", layer_attribute)
             self.assertNotIn("tabindex", layer_tags[0][1], layer_attribute)
 
-        self.assertIn('data-desktop-icons', index.text)
+        self.assertIn('data-menu-bar', index.text)
         self.assertIn('data-application-window', index.text)
-        self.assertIn('data-start-menu', index.text)
-        self.assertIn('data-task-window', index.text)
+        self.assertIn('data-application-center-host', index.text)
+        self.assertIn('data-dock', index.text)
+        self.assertIn('data-task-window-list', index.text)
+        self.assertIn('data-desktop-size-blocker', index.text)
+        self.assertNotIn('data-desktop-icons', index.text)
+        self.assertNotIn('data-start-menu', index.text)
         for summary in ("api", "proxy", "dedup"):
             self.assertEqual(
                 index.text.count(f'data-taskbar-summary="{summary}"'), 1
@@ -807,6 +814,9 @@ class ApiTests(unittest.TestCase):
             "/ui/js/components/diagnostics-view.js",
             "/ui/js/components/personalization-view.js",
             "/ui/js/components/taskbar-summary.js",
+            "/ui/js/components/taskbar-windows.js",
+            "/ui/js/components/application-center.js",
+            "/ui/js/components/menu-bar.js",
             "/ui/js/apps/proxy.js",
             "/ui/js/apps/vault.js",
             "/ui/js/apps/policy.js",
@@ -852,7 +862,7 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(definitions.text.count(f'id: "{app_id}"'), 1)
             self.assertEqual(definitions.text.count(f'route: "{route}"'), 1)
         self.assertEqual(definitions.text.count('availability: "ready"'), 8)
-        self.assertEqual(definitions.text.count('availability: "placeholder"'), 3)
+        self.assertEqual(definitions.text.count('availability: "preview"'), 3)
         self.assertIn('defaultWindowState: "maximized"', definitions.text)
 
         javascript_paths = [

@@ -1,5 +1,4 @@
 import { getApplicationById } from "./app-registry.js";
-import { createIcon } from "../components/icons.js";
 
 function requireCloneElement(root, selector, Constructor = HTMLElement) {
   const element = root.querySelector(selector);
@@ -77,8 +76,7 @@ export function createWindowDomLifecycle({
     titleEl.textContent = app.windowTitle;
     titleEl.title = app.windowTitle;
     bodyEl.id = bodyId;
-    minimize.replaceChildren(createIcon("minus", { size: 17, strokeWidth: 2 }));
-    close.replaceChildren(createIcon("close", { size: 17, strokeWidth: 2 }));
+    // 交通灯圆点由 CSS 绘制，避免视觉 glyph 缩小按钮的可点击命中区。
 
     const instance = {
       appId: app.id,
@@ -155,21 +153,14 @@ export function createWindowDomLifecycle({
       "aria-label",
       view.maximized ? "还原窗口" : "最大化窗口",
     );
-    instance.buttons.maximize.title = forced
-      ? "手机端所有窗口始终最大化"
-      : view.maximized
-        ? "还原"
-        : "最大化";
-    instance.buttons.maximize.replaceChildren(
-      createIcon(view.maximized ? "restore" : "square", { size: 15, strokeWidth: 2 }),
-    );
+    instance.buttons.maximize.title = view.maximized ? "还原窗口" : "最大化窗口";
     for (const handle of instance.buttons.resize.values()) {
-      handle.hidden = forced;
+      handle.hidden = false;
       handle.disabled = view.maximized;
-      handle.tabIndex = forced ? -1 : 0;
+      handle.tabIndex = view.maximized ? -1 : 0;
     }
 
-    // 移动端的展示抑制不等同于最小化；只有真实 minimized 才停用应用。
+    // 只有真实 minimized 才停用应用。
     if (instance.visible !== view.open) {
       instance.visible = view.open;
       notifyVisibility(view.open, app);

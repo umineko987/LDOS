@@ -227,6 +227,11 @@ import {
   sameWindowRect,
 } from "../gdl_backend/webui/js/core/window-policy.js";
 import { describeApplicationLaunchers } from "../gdl_backend/webui/js/core/desktop.js";
+import {
+  deriveWindowMenu,
+  isShellShortcutTarget,
+  shortcutModifier,
+} from "../gdl_backend/webui/js/components/menu-bar.js";
 import * as windowManagerFacade from "../gdl_backend/webui/js/core/window-manager.js";
 import {
   createWindowManager,
@@ -276,7 +281,9 @@ import {
 } from "../gdl_backend/webui/js/components/taskbar-summary.js";
 import {
   _TASKBAR_VISIBLE_LIMIT,
+  activateDockItem,
   activateTaskbarWindow,
+  deriveDockModel,
   deriveTaskbarWindowModel,
   describeTaskbarWindows,
 } from "../gdl_backend/webui/js/components/taskbar-windows.js";
@@ -581,6 +588,9 @@ class FakeDomElement extends FakeDomNode {
 
   matches(selector) {
     if (selector === "button") return this.tagName === "BUTTON";
+    if (selector.split(",").map((item) => item.trim()).includes(this.tagName.toLowerCase())) {
+      return true;
+    }
     const match = /^\[([a-z0-9-]+)(?:="([^"]*)")?\]$/i.exec(selector);
     if (!match) return false;
     if (!this.hasAttribute(match[1])) return false;
@@ -2610,7 +2620,7 @@ test("window manager 对 async beforeHide 去重并淘汰 stale request", async 
   }
 });
 
-test("window manager 移动断点取消交互且 normal rect 只异步修复一次", async () => {
+test("window manager 桌面 resize 取消交互且 normal rect 只异步修复一次", async () => {
   const fixture = installWindowManagerDomFixture();
   const originalRect = windowRect({ x: 5_000, y: 5_000 });
   const store = createStore({
@@ -2630,7 +2640,7 @@ test("window manager 移动断点取消交互且 normal rect 只异步修复一�
     });
     await flushPromises();
     assert.deepEqual(selectors.windowStack(store.getState())[0].rect, {
-      x: 1168, y: 280, w: 720, h: 480,
+      x: 1168, y: 320, w: 720, h: 480,
     });
     assert.equal(calls.filter(([name]) => name === "move").length, 1);
 
@@ -2638,20 +2648,18 @@ test("window manager 移动断点取消交互且 normal rect 只异步修复一�
     const titlebar = element.querySelector("[data-window-titlebar]");
     titlebar.emit("pointerdown", { pointerId: 21, clientX: 100, clientY: 100 });
     titlebar.emit("pointermove", { pointerId: 21, clientX: 140, clientY: 120 });
-    const beforeMobile = { ...selectors.windowStack(store.getState())[0].rect };
-    fixture.mobileViewport.setMatches(true);
+    const beforeResize = { ...selectors.windowStack(store.getState())[0].rect };
+    fixture.windowObject.emit("resize");
     assert.equal(element.hasAttribute("data-window-interacting"), false);
     assert.equal(calls.filter(([name]) => name === "move").length, 1);
-    assert.deepEqual(selectors.windowStack(store.getState())[0].rect, beforeMobile);
-    assert.equal(element.hasAttribute("data-maximized"), true);
+    assert.deepEqual(selectors.windowStack(store.getState())[0].rect, beforeResize);
+    assert.equal(element.hasAttribute("data-maximized"), false);
     assert.deepEqual(manager.getSnapshot(), {
       appId: "crawl",
       visibility: "open",
-      maximized: true,
+      maximized: false,
       preferredWindowState: "normal",
     });
-    fixture.mobileViewport.setMatches(false);
-    assert.equal(element.hasAttribute("data-maximized"), false);
   } finally {
     manager?.destroy();
     fixture.restore();
@@ -2683,12 +2691,21 @@ test("window manager 任务栏激活执行最小化恢复，destroy 生命周期
         throw new Error("private unmount detail");
       },
     });
-    const taskButton = fixture.taskList.children[0]?.children[0] || null;
+    const findButton = (node) => {
+      for (const child of node.children) {
+        if (child.dataset?.dockItem === "app:crawl") return child;
+        const nested = findButton(child);
+        if (nested) return nested;
+      }
+      return null;
+    };
+    let taskButton = findButton(fixture.taskList);
     assert(taskButton instanceof HTMLButtonElement);
-    // Fake DOM 的 dataset 是普通对象；补齐浏览器会自动反射的属性。
-    taskButton.setAttribute("data-task-window", "crawl");
+    taskButton.setAttribute("data-dock-item", "app:crawl");
     fixture.taskList.emit("click", { target: taskButton });
     assert.equal(selectors.windowStack(store.getState())[0].windowState, "minimized");
+    taskButton = findButton(fixture.taskList);
+    taskButton.setAttribute("data-dock-item", "app:crawl");
     fixture.taskList.emit("click", { target: taskButton });
     assert.equal(selectors.windowStack(store.getState())[0].windowState, "normal");
     assert.equal(selectors.focusedAppId(store.getState()), "crawl");
@@ -2962,6 +2979,73 @@ test("任务栏按钮真实激活路径只执行 descriptor 对应的生产回�
   available.delete("crawl");
   assert.equal(activateTaskbarWindow(byId.get("crawl"), callbacks), false);
   assert.deepEqual(calls, []);
+});
+
+test("Dock 纯模型覆盖固定动态顺序、四状态、overflow 与动作委托", () => {
+  const stack = [
+    windowRecord("tasks"),
+    windowRecord("proxy", "minimized"),
+    windowRecord("vault"),
+    windowRecord("review", "maximized"),
+  ];
+  const model = deriveDockModel(stack, "review", { visibleLimit: 6 });
+  assert.deepEqual(model.items.map((item) => [item.key, item.state, item.activation]), [
+    ["application-center", "launcher", "open-center"],
+    ["app:crawl", "closed", "open"],
+    ["app:tasks", "background", "focus"],
+    ["app:gallery", "closed", "open"],
+    ["app:review", "focused", "minimize"],
+    ["app:proxy", "minimized", "restore"],
+    ["app:vault", "background", "focus"],
+  ]);
+  assert.equal(model.items.every((item) => item.ariaLabel.length > 0), true);
+  assert.deepEqual(model.visible.map((item) => item.key), [
+    "application-center", "app:crawl", "app:tasks", "app:gallery", "app:review", "app:proxy",
+  ]);
+  assert.deepEqual(model.overflow.map((item) => item.key), ["app:vault"]);
+  const calls = [];
+  const handlers = {
+    openApplicationCenter: () => calls.push(["center"]),
+    open: (appId) => calls.push(["open", appId]),
+    minimize: (appId) => calls.push(["minimize", appId]),
+    focus: (appId) => calls.push(["focus", appId]),
+    restore: (appId) => calls.push(["restore", appId]),
+  };
+  for (const item of model.items.slice(0, 6)) assert.equal(activateDockItem(item, handlers), true);
+  assert.deepEqual(calls, [
+    ["center"], ["open", "crawl"], ["focus", "tasks"], ["open", "gallery"],
+    ["minimize", "review"], ["restore", "proxy"],
+  ]);
+  assert.equal(activateDockItem(null, handlers), false);
+  assert.equal(activateDockItem({ appId: "unknown", activation: "focus" }, handlers), false);
+  assert.throws(() => deriveDockModel(stack, "review", { visibleLimit: 0 }), TypeError);
+  assert.throws(() => deriveDockModel([stack[0], stack[0]], "tasks"), TypeError);
+});
+
+test("菜单窗口投影和 shell 快捷键过滤保持纯逻辑", () => {
+  assert.deepEqual(deriveWindowMenu([
+    windowRecord("crawl"),
+    windowRecord("tasks", "minimized"),
+    windowRecord("review", "maximized"),
+  ], "review").map((item) => [item.appId, item.command, item.checked]), [
+    ["crawl", "focus", false],
+    ["tasks", "restore", false],
+    ["review", "minimize", true],
+  ]);
+  assert.equal(shortcutModifier({ ctrlKey: true, metaKey: false }), true);
+  assert.equal(shortcutModifier({ ctrlKey: false, metaKey: true }), true);
+  assert.equal(shortcutModifier({ ctrlKey: false, metaKey: false }), false);
+  const fixture = installWindowManagerDomFixture();
+  try {
+    const input = new FakeDomHtmlElement("input");
+    const button = new FakeDomHtmlButtonElement("button");
+    const plain = new FakeDomHtmlElement("div");
+    assert.equal(isShellShortcutTarget(input), true);
+    assert.equal(isShellShortcutTarget(button), true);
+    assert.equal(isShellShortcutTarget(plain), false);
+  } finally {
+    fixture.restore();
+  }
 });
 
 test("window pure policy 独立投影焦点/z 序、交互矩形与兼容快照", () => {

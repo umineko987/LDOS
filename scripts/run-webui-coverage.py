@@ -51,6 +51,7 @@ def _node_version(node: str) -> str:
 def _prepare_tree(root: Path) -> None:
     shutil.copytree(SOURCE_WEBUI / "js", root / "gdl_backend" / "webui" / "js")
     shutil.copytree(SOURCE_WEBUI / "styles", root / "gdl_backend" / "webui" / "styles")
+    shutil.copy2(SOURCE_WEBUI / "index.html", root / "gdl_backend" / "webui" / "index.html")
     (root / "tests").mkdir()
     for source_test in SOURCE_TESTS:
         shutil.copy2(source_test, root / "tests" / source_test.name)
