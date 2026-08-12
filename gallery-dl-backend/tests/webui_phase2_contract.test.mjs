@@ -12,6 +12,7 @@ import {
   parseHashRoute,
   resolveNavigationTarget,
 } from "../gdl_backend/webui/js/core/router.js";
+import * as desktopModule from "../gdl_backend/webui/js/core/desktop.js";
 import { readFileSync } from "node:fs";
 
 import { STORAGE_KEYS } from "../gdl_backend/webui/js/core/storage-contract.js";
@@ -182,6 +183,8 @@ test("阶段 2 v1 只迁移位置偏好并严格拒绝重复和未知字段", ()
 });
 
 test("阶段 2 正式 DOM 包含五层、交通灯与严格桌面边界", () => {
+  assert.equal(typeof desktopModule.initializeDesktop, "function");
+  assert.equal("describeApplicationLaunchers" in desktopModule, false);
   const index = readFileSync(new URL("../gdl_backend/webui/index.html", import.meta.url), "utf8");
   const desktopCss = readFileSync(
     new URL("../gdl_backend/webui/styles/desktop.css", import.meta.url),

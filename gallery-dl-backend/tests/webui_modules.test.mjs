@@ -226,7 +226,6 @@ import {
   nextPointerInteractionRect,
   sameWindowRect,
 } from "../gdl_backend/webui/js/core/window-policy.js";
-import { describeApplicationLaunchers } from "../gdl_backend/webui/js/core/desktop.js";
 import {
   deriveWindowMenu,
   isShellShortcutTarget,
@@ -3130,31 +3129,6 @@ test("退出移动断点后窗口 rect 原样恢复且源窗口栈不被改写",
   assert.equal(mobileViews.every((view) => view.maximized), true);
   assert.deepEqual(restoredViews.map((view) => view.rect), original.map((item) => item.rect));
   assert.deepEqual(stack, original);
-});
-
-test("桌面图标描述只包含 availability 为 ready 的应用", () => {
-  const launchers = describeApplicationLaunchers();
-  assert.equal(launchers.desktop.length, 8);
-  assert.equal(launchers.desktop.every((item) => item.availability === "ready"), true);
-  assert.deepEqual(
-    launchers.desktop.map((item) => item.id),
-    applications.filter((app) => app.availability === "ready").map((app) => app.id),
-  );
-  for (const appId of ["gallery", "schedule", "export"]) {
-    assert.equal(launchers.desktop.some((item) => item.id === appId), false);
-  }
-});
-
-test("START 菜单含即将推出分组且占位项全部 aria-disabled", () => {
-  const launchers = describeApplicationLaunchers();
-  assert.deepEqual(
-    launchers.startMenuGroups.map((group) => group.title),
-    ["可用应用", "即将推出"],
-  );
-  const upcoming = launchers.startMenuGroups[1];
-  assert.deepEqual(upcoming.items.map((item) => item.id), ["gallery", "schedule", "export"]);
-  assert.equal(upcoming.items.every((item) => item.ariaDisabled === "true"), true);
-  assert.equal(launchers.startMenuGroups[0].items.every((item) => item.ariaDisabled === null), true);
 });
 
 test("preview 应用 hash 与导航目标可启动，畸形路由回桌面", () => {
