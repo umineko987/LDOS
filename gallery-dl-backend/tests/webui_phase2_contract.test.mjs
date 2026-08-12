@@ -57,7 +57,12 @@ function installRouterWindow(initialHash = "") {
     location,
     history: {
       replaceState(_state, _title, url) {
-        historyCalls.push(url);
+        historyCalls.push(["replace", url]);
+        const hashIndex = url.indexOf("#");
+        location.hash = hashIndex < 0 ? "" : url.slice(hashIndex);
+      },
+      pushState(_state, _title, url) {
+        historyCalls.push(["push", url]);
         const hashIndex = url.indexOf("#");
         location.hash = hashIndex < 0 ? "" : url.slice(hashIndex);
       },
@@ -111,7 +116,7 @@ test("阶段 2 hash router 规范化未知地址并保留 desktop/application �
     router.start();
     assert.deepEqual(events, [[null, "initial", true]]);
     assert.equal(fixture.location.hash, "");
-    assert.deepEqual(fixture.historyCalls, ["/ui/"]);
+    assert.deepEqual(fixture.historyCalls, [["replace", "/ui/"]]);
 
     router.navigate("crawl");
     assert.equal(fixture.location.hash, "#/crawl");
@@ -120,8 +125,8 @@ test("阶段 2 hash router 规范化未知地址并保留 desktop/application �
 
     router.navigate(null);
     assert.equal(fixture.location.hash, "");
-    fixture.emitHashChange();
-    assert.deepEqual(events.at(-1), [null, "hashchange", false]);
+    assert.deepEqual(fixture.historyCalls.at(-1), ["push", "/ui/"]);
+    assert.deepEqual(events.at(-1), [null, "desktop-navigation", false]);
 
     router.restore("review");
     assert.equal(fixture.location.hash, "#/review");

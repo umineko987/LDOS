@@ -63,12 +63,14 @@ export function createHashRouter(onRouteChange) {
   };
 
   const onHashChange = () => dispatch("hashchange");
+  const onPopState = () => dispatch("popstate");
 
   return Object.freeze({
     start() {
       if (started) return;
       started = true;
       window.addEventListener("hashchange", onHashChange);
+      window.addEventListener("popstate", onPopState);
       dispatch("initial");
     },
 
@@ -83,7 +85,9 @@ export function createHashRouter(onRouteChange) {
       } else if (nextHash) {
         window.location.hash = nextHash;
       } else {
-        window.location.hash = "";
+        window.history.pushState?.(null, "", desktopUrl(window.location));
+        if (window.location.hash !== "") window.location.hash = "";
+        dispatch("desktop-navigation");
       }
     },
 
@@ -97,6 +101,7 @@ export function createHashRouter(onRouteChange) {
       if (!started) return;
       started = false;
       window.removeEventListener("hashchange", onHashChange);
+      window.removeEventListener("popstate", onPopState);
     },
   });
 }

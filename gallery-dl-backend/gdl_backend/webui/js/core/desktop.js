@@ -249,7 +249,7 @@ export function initializeDesktop(root = document, services = {}) {
           ? selectors.windowStack(store.getState()).find((record) => record.appId === previous.id)
           : null;
         if (previousRecord && previousRecord.windowState !== "minimized") {
-          actions.minimizeWindow(previous.id);
+          actions.minimizeWindow(previous.id, { syncRoute: false });
         }
         currentApp = null;
         actions.desktopResolved();

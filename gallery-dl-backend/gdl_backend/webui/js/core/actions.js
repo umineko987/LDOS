@@ -159,13 +159,13 @@ export function createShellActions({
     setStartMenuOpen(open) {
       store.dispatch(actionCreators.startMenuChanged(Boolean(open)));
     },
-    minimizeWindow(appId) {
+    minimizeWindow(appId, { syncRoute = true } = {}) {
       const record = targetWindow(appId);
       if (!record || record.windowState === "minimized") return false;
       const changed = dispatchWindowAction(
         actionCreators.windowStateChanged(record.appId, "minimized"),
       );
-      if (changed) syncFocusedRoute();
+      if (changed && syncRoute) syncFocusedRoute();
       return changed;
     },
     restoreWindow(appId) {
