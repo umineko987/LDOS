@@ -230,7 +230,9 @@ test("阶段 2 v2 strict round-trip 拒绝危险、访问器、重复、非有�
     { placements: [placements[0], placements[0]] },
     { placements: [{ ...placements[0], appId: "unknown" }] },
     { placements: [{ ...placements[0], rect: { ...placements[0].rect, x: Number.NaN } }] },
+    { placements: [{ ...placements[0], rect: { ...placements[0].rect, y: Number.POSITIVE_INFINITY } }] },
     { placements: [{ ...placements[0], rect: { ...placements[0].rect, w: 359 } }] },
+    { placements: [{ ...placements[0], rect: { ...placements[0].rect, x: 1e12 } }] },
     ...["__proto__", "prototype", "constructor"].map((key) => ({
       placements: [dangerousPlacement(key)],
     })),

@@ -52,9 +52,16 @@ function projectPlacement(value, { viewport = null, geometryOptions = {} } = {})
   }
   const maximized = ownDataValue(value, "maximized");
   if (typeof maximized !== "boolean") throw new TypeError("最大化偏好无效");
+  const projectedRect = projectWindowRect(ownDataValue(value, "rect"));
   const rect = viewport
-    ? clampWindowRect(ownDataValue(value, "rect"), viewport, geometryOptions)
-    : projectWindowRect(ownDataValue(value, "rect"));
+    ? clampWindowRect(projectedRect, viewport, geometryOptions)
+    : projectedRect;
+  if (
+    viewport
+    && WINDOW_RECT_KEYS.some((key) => rect[key] !== projectedRect[key])
+  ) {
+    throw new RangeError("窗口位置偏好超出规范化几何边界");
+  }
   return { appId, rect, maximized };
 }
 
