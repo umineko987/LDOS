@@ -8,6 +8,7 @@ import {
   TASK_POLL_INTERVAL_MS,
   taskErrorGuidance,
   TERMINAL_BATCH_STATUSES,
+  validateBatchId,
 } from "../core/tasks-model.js";
 import { createTasksView } from "../components/tasks-view.js";
 
@@ -17,16 +18,16 @@ export const TASKS_ENDPOINTS = Object.freeze({
 
 const BATCH_POLL_KEY = "batches.active";
 
-function batchPath(batchId, suffix = "") {
-  if (typeof batchId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(batchId)) {
-    throw new TypeError("批次 ID 无效");
-  }
-  return `${TASKS_ENDPOINTS.crawls}/${encodeURIComponent(batchId)}${suffix}`;
+export function taskBatchPath(batchId, suffix = "") {
+  return `${TASKS_ENDPOINTS.crawls}/${encodeURIComponent(validateBatchId(batchId))}${suffix}`;
 }
 
-function createTasksController(context) {
+export function createTasksController(context, {
+  createView = createTasksView,
+} = {}) {
   const { root, api, store, polling, storage, actions, dialogs } = context;
-  const view = createTasksView(context);
+  const view = createView(context);
+  if (!view || typeof view !== "object") throw new TypeError("批次视图无效");
   const requestGate = createBatchRequestGate();
   let active = false;
   let destroyed = false;
@@ -40,6 +41,9 @@ function createTasksController(context) {
   const activeBatch = () => store.getState().batches.active;
 
   const abortRead = (entry) => entry?.controller.abort();
+  const setWorkspacePhase = (phase, message = "") => {
+    view.setWorkspacePhase?.(phase, message);
+  };
 
   const readRecent = async ({ replace = false, report = true } = {}) => {
     if (!active || destroyed) return false;
@@ -88,6 +92,7 @@ function createTasksController(context) {
   const handleMissingBatch = () => {
     actions.setActiveBatchId("");
     store.dispatch(actionCreators.batchSnapshotCleared());
+    setWorkspacePhase("empty", "该批次已不存在，已清除活动选择并停止自动刷新。");
     view.setOperationMessage("该批次已不存在，已停止自动刷新。请选择其他批次。");
     syncPolling();
   };
@@ -111,14 +116,17 @@ function createTasksController(context) {
     else externalSignal?.addEventListener("abort", abort, { once: true });
     const ticket = requestGate.beginRead(batchId);
     const promise = Promise.all([
-      api.get(batchPath(batchId), { signal: controller.signal }),
-      api.get(batchPath(batchId, `/tasks?limit=${TASK_DISPLAY_LIMIT}`), { signal: controller.signal }),
+      api.get(taskBatchPath(batchId), { signal: controller.signal }),
+      api.get(taskBatchPath(batchId, `/tasks?limit=${TASK_DISPLAY_LIMIT}`), { signal: controller.signal }),
     ])
       .then(([batch, tasks]) => {
         if (!active || destroyed || controller.signal.aborted ||
             !requestGate.isReadCurrent(ticket, activeBatchId())) return false;
         store.dispatch(actionCreators.batchSnapshotReceived(batch, tasks));
         view.clearError();
+        setWorkspacePhase(TERMINAL_BATCH_STATUSES.has(store.getState().batches.active?.status)
+          ? "terminal"
+          : "content");
         syncPolling();
         return true;
       })
@@ -126,7 +134,10 @@ function createTasksController(context) {
         if (isAbortError(error) || controller.signal.aborted) return false;
         const guidance = taskErrorGuidance(error);
         if (guidance.missing && batchId === activeBatchId()) handleMissingBatch();
-        else if (active && (report || !activeBatch())) view.showError(guidance);
+        else if (active && (report || !activeBatch())) {
+          setWorkspacePhase(activeBatch() ? "partial" : "error");
+          view.showError(guidance);
+        }
         throw error;
       })
       .finally(() => {
@@ -154,9 +165,15 @@ function createTasksController(context) {
     else syncPolling();
   };
 
+  const restoreWorkspacePhase = () => {
+    if (!activeBatch()) setWorkspacePhase("empty");
+    else if (TERMINAL_BATCH_STATUSES.has(activeBatch().status)) setWorkspacePhase("terminal");
+    else setWorkspacePhase("content");
+  };
+
   const runOperation = async ({ kind, request, successMessage }) => {
     if (!active || destroyed || busy || !activeBatchId()) return false;
-    requestGate.beginWrite();
+    const writeTicket = requestGate.beginWrite();
     abortRead(activeRead);
     abortRead(recentRead);
     const operation = ++operationSequence;
@@ -165,13 +182,15 @@ function createTasksController(context) {
     operationController = controller;
     view.clearError();
     setBusy(kind);
+    setWorkspacePhase("writing", "批次操作进行中；完成后将权威重读详情、任务和最近列表。");
     view.setOperationMessage("正在执行批次操作，完成后将读取最新状态……");
     let operationError = null;
     try {
       await request(batchId, controller.signal);
-      if (!active || destroyed || controller.signal.aborted || operation !== operationSequence) return false;
+      if (!active || destroyed || controller.signal.aborted || operation !== operationSequence ||
+          !requestGate.isWriteCurrent(writeTicket)) return false;
       await refreshAuthority({ report: false });
-      if (!active || destroyed || controller.signal.aborted) return false;
+      if (!active || destroyed || controller.signal.aborted || !requestGate.isWriteCurrent(writeTicket)) return false;
       view.clearError();
       view.setOperationMessage(successMessage);
       return true;
@@ -184,12 +203,19 @@ function createTasksController(context) {
         // 原操作错误更能解释当前状态，权威刷新失败不覆盖它。
       }
       if (active) view.showError(taskErrorGuidance(operationError));
+      if (active) setWorkspacePhase(activeBatch() ? "partial" : "error");
       view.setOperationMessage("操作失败，已重新读取最新状态；不会强制更改任务状态。");
       return false;
     } finally {
+      const failed = Boolean(operationError);
       operationError = null;
       if (operationController === controller) operationController = null;
-      if (operation === operationSequence) setBusy("");
+      if (operation === operationSequence) {
+        if (active && !destroyed && !failed) restoreWorkspacePhase();
+        busy = "";
+        view.setBusy("");
+        syncPolling();
+      }
     }
   };
 
@@ -210,7 +236,7 @@ function createTasksController(context) {
     })) return;
     await runOperation({
       kind: "cancel",
-      request: (batchId, signal) => api.post(batchPath(batchId, "/cancel"), {}, { signal }),
+      request: (batchId, signal) => api.post(taskBatchPath(batchId, "/cancel"), {}, { signal }),
       successMessage: "取消请求已接受，批次列表已刷新。",
     });
   };
@@ -228,7 +254,7 @@ function createTasksController(context) {
     await runOperation({
       kind: "retry",
       request: (batchId, signal) => api.post(
-        batchPath(batchId, "/retry"),
+        taskBatchPath(batchId, "/retry"),
         { additional_attempts: 2 },
         { signal },
       ),
@@ -248,7 +274,7 @@ function createTasksController(context) {
     })) return;
     await runOperation({
       kind: "rerun",
-      request: (batchId, signal) => api.post(batchPath(batchId, "/rerun"), {}, { signal }),
+      request: (batchId, signal) => api.post(taskBatchPath(batchId, "/rerun"), {}, { signal }),
       successMessage: "批次已重新规划，最新状态已刷新。",
     });
   };
@@ -263,28 +289,41 @@ function createTasksController(context) {
     store.dispatch(actionCreators.batchSnapshotCleared());
     requestGate.beginWrite();
     setBusy("load");
+    setWorkspacePhase("loading", "正在读取所选批次的详情与任务事实。");
     view.clearError();
+    let failed = false;
     try {
       await readActive(null, { replace: true, report: true });
       if (active) view.setOperationMessage("批次已加载，自动刷新状态已更新。");
     } catch {
+      failed = true;
       // readActive 已提供安全错误和陈旧 ID 恢复。
     } finally {
-      setBusy("");
+      if (active && !destroyed && !failed) restoreWorkspacePhase();
+      busy = "";
+      view.setBusy("");
+      syncPolling();
     }
   };
 
   const manualRefresh = async () => {
     if (busy) return;
     setBusy("refresh");
+    setWorkspacePhase(activeBatch() ? "loading" : "empty", "正在刷新批次详情、任务和最近列表。");
     view.clearError();
+    let failed = false;
     try {
       await refreshAuthority({ report: true });
       if (active) view.setOperationMessage("当前批次和最近列表已刷新。");
     } catch {
+      failed = true;
+      if (active) setWorkspacePhase(activeBatch() ? "partial" : "error");
       // 各读取路径已呈现安全错误。
     } finally {
-      setBusy("");
+      if (active && !destroyed && !failed) restoreWorkspacePhase();
+      busy = "";
+      view.setBusy("");
+      syncPolling();
     }
   };
 
@@ -314,6 +353,7 @@ function createTasksController(context) {
       setElementInert(root, false);
       root.dataset.lifecycle = "active";
       const restored = !activeBatchId() ? storage.readActiveBatchId() : null;
+      setWorkspacePhase("loading", "正在加载最近批次和活动批次……");
       view.setOperationMessage("正在加载最近批次和活动批次……");
       queueMicrotask(() => {
         if (!active || destroyed) return;
@@ -325,6 +365,8 @@ function createTasksController(context) {
               if (active) view.setOperationMessage("批次已加载；活动批次每 1.5 秒自动刷新，结束后停止。");
             })
             .catch(() => {});
+        } else {
+          setWorkspacePhase("empty", "暂无活动批次；可从最近批次中选择。");
         }
       });
     },

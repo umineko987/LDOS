@@ -1,6 +1,6 @@
 const BATCH_STATUSES = new Set([
-  "queued", "pending", "planning", "starting", "running", "succeeded",
-  "completed_with_errors", "cancelling", "cancelled", "failed",
+  "queued", "planning", "running", "succeeded", "completed_with_errors",
+  "cancelling", "cancelled",
 ]);
 const TASK_STATUSES = new Set([
   "queued", "pending", "starting", "running", "succeeded", "failed",
@@ -30,6 +30,60 @@ export const TASK_DISPLAY_LIMIT = 1_000;
 export const TASK_POLL_INTERVAL_MS = 1_500;
 export const TERMINAL_BATCH_STATUSES = TERMINAL_BATCHES;
 
+const RECENT_FILTERS = new Set(["all", "active", "attention", "terminal"]);
+const ACTIVE_BATCH_STATUSES = new Set([
+  "queued", "planning", "running", "cancelling",
+]);
+const ERROR_CATEGORY_DEFINITIONS = Object.freeze({
+  authentication: Object.freeze({
+    id: "authentication", label: "授权失效", kind: "warning", targetApp: "vault",
+  }),
+  proxy: Object.freeze({
+    id: "proxy", label: "代理不可用", kind: "warning", targetApp: "proxy",
+  }),
+  network: Object.freeze({
+    id: "network", label: "网络失败", kind: "error", targetApp: "proxy",
+  }),
+  rate_limit: Object.freeze({
+    id: "rate_limit", label: "站点限流", kind: "warning", targetApp: "proxy",
+  }),
+  extraction: Object.freeze({
+    id: "extraction", label: "提取失败", kind: "error", targetApp: "diagnostics",
+  }),
+  storage: Object.freeze({
+    id: "storage", label: "文件写入失败", kind: "error", targetApp: "diagnostics",
+  }),
+  cancelled: Object.freeze({
+    id: "cancelled", label: "任务已取消", kind: "warning", targetApp: "diagnostics",
+  }),
+  unknown: Object.freeze({
+    id: "unknown", label: "未分类错误", kind: "error", targetApp: "diagnostics",
+  }),
+});
+const TASKS_WORKSPACE_COPY = Object.freeze({
+  loading: Object.freeze({
+    kind: "running", label: "正在加载", message: "正在读取最近批次、批次详情与任务事实。",
+  }),
+  empty: Object.freeze({
+    kind: "disabled", label: "尚未选择批次", message: "从最近批次中选择，或先在图片采集页创建批次。",
+  }),
+  content: Object.freeze({
+    kind: "ready", label: "批次详情已就绪", message: "当前显示来自服务端的批次、地址、任务与文件聚合事实。",
+  }),
+  partial: Object.freeze({
+    kind: "warning", label: "部分信息不可用", message: "保留最近一次权威批次内容；请刷新以补齐最新详情。",
+  }),
+  error: Object.freeze({
+    kind: "error", label: "批次读取失败", message: "未获得可显示的批次详情；请按错误指引修复后重试。",
+  }),
+  terminal: Object.freeze({
+    kind: "warning", label: "批次已结束", message: "该批次处于终态，自动刷新已经停止。",
+  }),
+  writing: Object.freeze({
+    kind: "running", label: "正在写入", message: "批次操作进行中；完成后将权威重读详情、任务和最近列表。",
+  }),
+});
+
 function isRecord(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -49,6 +103,12 @@ function safeText(value, fallback = "", maximum = 160) {
 function safeId(value) {
   const text = typeof value === "string" ? value.trim() : "";
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(text) ? text : "";
+}
+
+export function validateBatchId(value) {
+  const id = safeId(value);
+  if (!id || id !== value) throw new TypeError("批次 ID 无效");
+  return id;
 }
 
 function boundedCount(value, maximum = 1_000_000_000) {
@@ -98,6 +158,38 @@ function sanitizeReview(value, batchId) {
     decidedGroupCount: boundedCount(value.decided_group_count),
     totalGroupCount: boundedCount(value.total_group_count),
   });
+}
+
+export function taskErrorCategory(value) {
+  const errorClass = safeText(value, "", 80)
+    .toLowerCase()
+    .replace(/[^a-z0-9_.:-]/g, "");
+  if (!errorClass) return null;
+  if (/auth|credential|cookie|oauth|login/.test(errorClass)) {
+    return ERROR_CATEGORY_DEFINITIONS.authentication;
+  }
+  if (/proxy/.test(errorClass)) return ERROR_CATEGORY_DEFINITIONS.proxy;
+  if (/rate|429|throttle/.test(errorClass)) return ERROR_CATEGORY_DEFINITIONS.rate_limit;
+  if (/network|timeout|connection|dns|tls/.test(errorClass)) {
+    return ERROR_CATEGORY_DEFINITIONS.network;
+  }
+  if (/storage|artifact|write|disk|file/.test(errorClass)) {
+    return ERROR_CATEGORY_DEFINITIONS.storage;
+  }
+  if (/cancel/.test(errorClass)) return ERROR_CATEGORY_DEFINITIONS.cancelled;
+  if (/extract|gallery|metadata|parse/.test(errorClass)) {
+    return ERROR_CATEGORY_DEFINITIONS.extraction;
+  }
+  return ERROR_CATEGORY_DEFINITIONS.unknown;
+}
+
+export function formatTaskBytes(value) {
+  const bytes = boundedCount(value, Number.MAX_SAFE_INTEGER);
+  if (!bytes) return "0 B";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  const amount = bytes / (1024 ** index);
+  return `${index === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[index]}`;
 }
 
 function sanitizeAddress(raw, fallbackOrder = 0) {
@@ -217,8 +309,11 @@ export function sanitizeTaskPage(value, batchId) {
       sequence: boundedCount(raw.sequence_no, 1_000_000),
       attemptCount: boundedCount(raw.attempt_count, 1_000),
       maxAttempts: boundedCount(raw.max_attempts, 1_000),
+      addressId: safeId(raw.crawl_address_id || raw.address_id),
       artifactCount: boundedCount(raw.artifact_count),
+      artifactBytes: boundedCount(raw.artifact_bytes, Number.MAX_SAFE_INTEGER),
       errorClass,
+      errorCategory: taskErrorCategory(errorClass),
       terminal: TERMINAL_TASKS.has(status),
     }));
   }
@@ -270,6 +365,32 @@ export function validateBatchState({ batch, tasks, recent }) {
   return { batch, tasks, recent };
 }
 
+export function filterRecentBatches(items, filter = "all") {
+  if (!Array.isArray(items) || !RECENT_FILTERS.has(filter)) {
+    throw new TypeError("最近批次筛选无效");
+  }
+  if (filter === "all") return items;
+  if (filter === "active") {
+    return items.filter((item) => ACTIVE_BATCH_STATUSES.has(item.status));
+  }
+  if (filter === "attention") {
+    return items.filter((item) => ["completed_with_errors", "cancelled", "failed"].includes(item.status));
+  }
+  return items.filter((item) => TERMINAL_BATCHES.has(item.status));
+}
+
+export function deriveTasksWorkspacePresentation({ phase = "idle", batch = null } = {}) {
+  let state;
+  if (phase === "writing") state = "writing";
+  else if (phase === "loading") state = "loading";
+  else if (phase === "partial") state = "partial";
+  else if (phase === "error") state = "error";
+  else if (!batch) state = "empty";
+  else if (TERMINAL_BATCHES.has(batch.status)) state = "terminal";
+  else state = "content";
+  return Object.freeze({ state, ...TASKS_WORKSPACE_COPY[state] });
+}
+
 export function shouldPollBatch(batch) {
   return Boolean(batch && !TERMINAL_BATCHES.has(batch.status));
 }
@@ -290,10 +411,30 @@ export function taskRecoveryTargets(tasks) {
   const authSites = new Set();
   let proxyIssue = false;
   for (const task of tasks || []) {
-    if (task.errorClass === "authentication" && task.site !== "unknown") authSites.add(task.site);
-    if (task.errorClass.includes("proxy")) proxyIssue = true;
+    const category = task.errorCategory || taskErrorCategory(task.errorClass);
+    if (category?.id === "authentication" && task.site !== "unknown") authSites.add(task.site);
+    if (["proxy", "network", "rate_limit"].includes(category?.id)) proxyIssue = true;
   }
   return Object.freeze({ authSites: Object.freeze([...authSites]), proxyIssue });
+}
+
+export function taskFileFacts(tasks) {
+  let taskWithFilesCount = 0;
+  let artifactCount = 0;
+  let artifactBytes = 0;
+  for (const task of tasks || []) {
+    const count = boundedCount(task?.artifactCount);
+    const bytes = boundedCount(task?.artifactBytes, Number.MAX_SAFE_INTEGER);
+    if (count || bytes) taskWithFilesCount += 1;
+    artifactCount += count;
+    artifactBytes += bytes;
+  }
+  return Object.freeze({
+    taskCount: Array.isArray(tasks) ? tasks.length : 0,
+    taskWithFilesCount,
+    artifactCount,
+    artifactBytes,
+  });
 }
 
 export function formatBatchTime(value) {
@@ -320,16 +461,29 @@ export function taskErrorGuidance(error) {
   const requestId = safeId(error?.requestId);
   const missing = code === "crawl_not_found" || status === 404;
   const conflict = status === 409;
-  const auth = /auth|credential|login/i.test(code);
+  const auth = /auth|credential|cookie|oauth|login/i.test(code);
   const proxy = /proxy/i.test(code);
+  const validation = status === 422;
+  const title = missing
+    ? "批次不存在"
+    : conflict
+      ? "批次状态已变化"
+      : validation
+        ? "批次参数无效"
+        : "批次操作失败";
+  const message = status === 0
+    ? "无法连接到 ImageWeave 服务。"
+    : validation
+      ? "服务拒绝了本次批次参数。"
+      : "服务未接受本次批次操作。";
   return Object.freeze({
     code,
     requestId,
     missing,
     conflict,
     targetApp: auth ? "vault" : proxy ? "proxy" : "diagnostics",
-    title: missing ? "批次不存在" : conflict ? "批次状态已变化" : "批次操作失败",
-    message: status === 0 ? "无法连接到 ImageWeave 服务。" : "服务未接受本次批次操作。",
+    title,
+    message,
     nextStep: missing
       ? "请选择其他最近批次。"
       : conflict
@@ -338,7 +492,9 @@ export function taskErrorGuidance(error) {
           ? "打开授权管理修复授权后，再重试未完成项。"
           : proxy
             ? "打开代理管理检查代理池后，再重试未完成项。"
-            : "保留当前批次，刷新或打开系统诊断检查连接。",
+            : validation
+              ? "保留当前批次，刷新权威详情并根据可用操作重试。"
+              : "保留当前批次，刷新或打开系统诊断检查连接。",
   });
 }
 
@@ -361,6 +517,10 @@ export function createBatchRequestGate() {
     },
     beginWrite() {
       write += 1;
+      return Object.freeze({ lifecycle, write });
+    },
+    isWriteCurrent(ticket) {
+      return ticket?.lifecycle === lifecycle && ticket?.write === write;
     },
     advanceLifecycle() {
       lifecycle += 1;
