@@ -179,6 +179,7 @@ function createPersonalizationController(context) {
       }
       if (hadLocalThemeDraft) view.acceptThemeDraft(next);
       else render(next);
+      view.renderPreviewFromState(next);
       showDraftStatus(next);
       return next;
     } catch {
@@ -575,9 +576,18 @@ function createPersonalizationController(context) {
     event.returnValue = "";
   };
 
+  const onWorkspaceKeyDown = (event) => {
+    if (event.target !== view.elements.workspace) return;
+    const direction = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+    if (!direction) return;
+    event.preventDefault();
+    view.scrollWorkspace(direction);
+  };
+
   root.addEventListener("change", onChange);
   root.addEventListener("input", onInput);
   root.addEventListener("click", onClick);
+  root.addEventListener("keydown", onWorkspaceKeyDown);
   root.addEventListener("submit", onSubmit);
   globalThis.addEventListener?.("beforeunload", onBeforeUnload);
   render();
@@ -644,6 +654,7 @@ function createPersonalizationController(context) {
       root.removeEventListener("change", onChange);
       root.removeEventListener("input", onInput);
       root.removeEventListener("click", onClick);
+      root.removeEventListener("keydown", onWorkspaceKeyDown);
       root.removeEventListener("submit", onSubmit);
       globalThis.removeEventListener?.("beforeunload", onBeforeUnload);
       view.destroy();

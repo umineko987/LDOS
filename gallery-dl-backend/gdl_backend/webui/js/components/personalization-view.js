@@ -2,6 +2,7 @@ import { createElement } from "../core/dom.js";
 import {
   calculateThemeContrastRatio,
   deriveInterfaceThemeTone,
+  derivePersonalizationPreview,
   isValidInterfaceTheme,
   normalizeThemeHex,
   PERSONALIZATION_DEFAULTS,
@@ -665,7 +666,7 @@ export function createPersonalizationView({ root, app }) {
     createElement("legend", { text: "窗口" }),
     createElement("p", {
       className: "personalization-help",
-      text: "选择窗口透明度；对话框、提示、任务栏和开始菜单始终不透明。",
+      text: "选择窗口透明度；对话框、提示、当前菜单栏和 Dock 始终使用可读实色表面。",
     }),
     windowOpacity.element,
     createElement("p", {
@@ -675,51 +676,189 @@ export function createPersonalizationView({ root, app }) {
     }),
   ]);
 
+  const previewWallpaper = createElement("div", {
+    className: "personalization-preview-wallpaper",
+    attributes: { "aria-hidden": "true" },
+  });
+  const previewDesktop = createElement("div", {
+    className: "personalization-preview-desktop",
+    attributes: {
+      role: "img",
+      "aria-label": "当前外观草稿的抽象桌面实时预览",
+    },
+    dataset: { personalizationWallpaper: PERSONALIZATION_DEFAULTS.wallpaperColor },
+  }, [
+    createElement("div", {
+      className: "personalization-preview-menu-bar",
+      attributes: { "aria-hidden": "true" },
+    }, [
+      createElement("span", { text: "ImageWeave" }),
+      createElement("span", { text: "文件  窗口  帮助" }),
+    ]),
+    previewWallpaper,
+    createElement("article", {
+      className: "personalization-preview-window",
+      attributes: { "aria-hidden": "true" },
+    }, [
+      createElement("div", { className: "personalization-preview-window__title" }),
+      createElement("div", { className: "personalization-preview-window__line" }),
+      createElement("div", { className: "personalization-preview-window__line personalization-preview-window__line--short" }),
+    ]),
+    createElement("div", {
+      className: "personalization-preview-dock",
+      attributes: { "aria-hidden": "true" },
+    }, [
+      createElement("span"),
+      createElement("span"),
+      createElement("span"),
+      createElement("span"),
+    ]),
+  ]);
+  const previewWallpaperStatus = createElement("p", {
+    className: "personalization-preview-live",
+    text: "石墨内置背景正在桌面预览。",
+    attributes: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
+  });
+  const previewThemeFact = createElement("p", {
+    className: "personalization-preview-fact",
+    text: `主题 ${PERSONALIZATION_DEFAULTS.themeAccent} / ${PERSONALIZATION_DEFAULTS.themeSurface}`,
+  });
+  const previewToneFact = createElement("p", {
+    className: "personalization-preview-fact",
+    text: "色调：浅色界面",
+  });
+  const previewBackgroundFact = createElement("p", {
+    className: "personalization-preview-fact",
+    text: "背景：石墨；遮罩深色 40%；模糊关闭（0px）",
+  });
+  const previewWindowFact = createElement("p", {
+    className: "personalization-preview-fact",
+    text: "窗口：实色（100%），文字可读性最高。",
+  });
+  const previewMotionFact = createElement("p", {
+    className: "personalization-preview-fact",
+    text: "动效：界面动效已开启并生效。",
+    attributes: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
+  });
+  const previewState = createElement("p", {
+    className: "personalization-preview-state",
+    text: "当前预览与已保存设置一致。",
+    attributes: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
+    dataset: { personalizationPreviewState: "clean" },
+  });
+
+  const previewColumn = createElement("aside", {
+    className: "personalization-column personalization-column--preview",
+    attributes: { "aria-labelledby": "personalization-preview-heading" },
+  }, [
+    createElement("header", { className: "personalization-column-header" }, [
+      createElement("p", { className: "personalization-column-kicker", text: "01 · 实时预览" }),
+      createElement("h2", { text: "当前桌面草稿", attributes: { id: "personalization-preview-heading" } }),
+      createElement("p", { text: "使用固定纹理和安全事实展示正在生效的完整草稿。" }),
+    ]),
+    createElement("div", { className: "personalization-column-scroll" }, [
+      previewDesktop,
+      previewWallpaperStatus,
+      createElement("section", {
+        className: "personalization-panel personalization-preview-facts",
+        attributes: { "aria-labelledby": "personalization-preview-facts-heading" },
+      }, [
+        createElement("h3", { text: "实时事实", attributes: { id: "personalization-preview-facts-heading" } }),
+        previewThemeFact,
+        previewToneFact,
+        previewBackgroundFact,
+        previewWindowFact,
+        previewMotionFact,
+        previewState,
+      ]),
+    ]),
+  ]);
+
+  const themeColumn = createElement("section", {
+    className: "personalization-column personalization-column--theme",
+    attributes: { "aria-labelledby": "personalization-theme-wallpaper-heading" },
+  }, [
+    createElement("header", { className: "personalization-column-header" }, [
+      createElement("p", { className: "personalization-column-kicker", text: "02 · 主题与壁纸" }),
+      createElement("h2", { text: "颜色与背景来源", attributes: { id: "personalization-theme-wallpaper-heading" } }),
+      createElement("p", { text: "两个原生颜色控件与固定来源白名单共同生成安全预览。" }),
+    ]),
+    createElement("div", { className: "personalization-column-scroll" }, [
+      themeFieldset,
+      sourceFieldset,
+      colorFieldset,
+      customFieldset,
+    ]),
+  ]);
+
+  const actionsPanel = createElement("section", {
+    className: "personalization-panel personalization-actions-panel",
+    attributes: { "aria-labelledby": "personalization-actions-heading" },
+  }, [
+    createElement("h2", {
+      text: "应用草稿",
+      attributes: { id: "personalization-actions-heading" },
+    }),
+    status,
+    createElement("div", { className: "personalization-actions" }, [
+      applyButton,
+      cancelButton,
+      resetButton,
+    ]),
+    createElement("p", {
+      className: "personalization-help",
+      text: "恢复推荐配色、石墨背景、默认图片显示、实色窗口和界面动效；点击“应用”后保存。",
+    }),
+  ]);
+  const displayColumn = createElement("section", {
+    className: "personalization-column personalization-column--display",
+    attributes: { "aria-labelledby": "personalization-display-heading" },
+  }, [
+    createElement("header", { className: "personalization-column-header" }, [
+      createElement("p", { className: "personalization-column-kicker", text: "03 · 显示与应用" }),
+      createElement("h2", { text: "可读性与提交", attributes: { id: "personalization-display-heading" } }),
+      createElement("p", { text: "调整图片、窗口和动效；缺失图片时原因保持可读。" }),
+    ]),
+    createElement("div", { className: "personalization-column-scroll" }, [
+      imageSettingsPanel,
+      windowFieldset,
+      motionFieldset,
+      actionsPanel,
+    ]),
+  ]);
+
+  const workspaceTrack = createElement("div", {
+    className: "personalization-workspace-track",
+    dataset: { personalizationWorkspaceTrack: "" },
+  }, [previewColumn, themeColumn, displayColumn]);
+  const workspace = createElement("section", {
+    className: "personalization-workspace",
+    attributes: {
+      tabindex: "0",
+      "aria-label": "外观设置三栏工作区；普通窗口可横向滚动",
+    },
+    dataset: { personalizationWorkspace: "" },
+  }, [workspaceTrack]);
   const form = createElement("form", {
     className: "personalization-form",
     attributes: { autocomplete: "off" },
     dataset: { personalizationForm: "settings" },
-  }, [
-    motionFieldset,
-    themeFieldset,
-    sourceFieldset,
-    colorFieldset,
-    customFieldset,
-    imageSettingsPanel,
-    windowFieldset,
-    createElement("section", {
-      className: "personalization-panel personalization-actions-panel",
-      attributes: { "aria-labelledby": "personalization-actions-heading" },
-    }, [
-      createElement("h2", {
-        text: "操作",
-        attributes: { id: "personalization-actions-heading" },
-      }),
-      status,
-      createElement("div", { className: "personalization-actions" }, [
-        applyButton,
-        cancelButton,
-        resetButton,
-      ]),
-      createElement("p", {
-        className: "personalization-help",
-        text: "恢复推荐配色、石墨背景、默认图片显示、实色窗口和界面动效；点击“应用”后保存。",
-      }),
-    ]),
-  ]);
+  }, [workspace]);
 
   root.classList.add("app-view", "personalization-app");
   root.setAttribute("aria-labelledby", "personalization-heading");
   root.replaceChildren(
     createElement("header", { className: "app-header personalization-app-header" }, [
-      createElement("p", { className: "app-executable", text: app.windowTitle }),
-      createElement("h1", {
-        text: app.label,
-        attributes: { id: "personalization-heading" },
-      }),
+      createElement("div", {}, [
+        createElement("p", { className: "app-executable", text: app.windowTitle }),
+        createElement("h1", {
+          text: app.label,
+          attributes: { id: "personalization-heading" },
+        }),
+      ]),
       createElement("p", {
         className: "app-summary",
-        text: "自定义主题、桌面背景、窗口透明度和界面动效。所有调整都会立即预览，点击“应用”后保存。",
+        text: "全部调整实时预览；应用后保存。",
       }),
     ]),
     form,
@@ -845,6 +984,34 @@ export function createPersonalizationView({ root, app }) {
     );
   };
 
+  const renderPreview = (state) => {
+    const preview = derivePersonalizationPreview(state);
+    previewWallpaper.className = [
+      "personalization-preview-wallpaper",
+      `personalization-preview-wallpaper--${preview.wallpaper.kind === "custom" ? "custom" : preview.wallpaper.colorId}`,
+      `personalization-preview-wallpaper--fit-${preview.wallpaper.fitId}`,
+      `personalization-preview-wallpaper--position-${preview.wallpaper.positionId}`,
+      `personalization-preview-wallpaper--mask-${preview.wallpaper.maskToneId}`,
+      `personalization-preview-wallpaper--mask-strength-${preview.wallpaper.maskStrength}`,
+      `personalization-preview-wallpaper--blur-${preview.wallpaper.blurId}`,
+    ].join(" ");
+    previewDesktop.dataset.personalizationWallpaper = preview.wallpaper.kind === "custom"
+      ? "custom"
+      : preview.wallpaper.colorId;
+    previewDesktop.dataset.personalizationWindowOpacity = preview.window.opacityId;
+    previewDesktop.dataset.personalizationMotion = preview.motion.statusId;
+    previewWallpaperStatus.textContent = preview.wallpaper.kind === "custom"
+      ? preview.custom.message
+      : `${preview.wallpaper.label}内置背景正在桌面预览。`;
+    previewThemeFact.textContent = `主题：强调色 ${preview.theme.accentHex}；窗口底色 ${preview.theme.surfaceHex}`;
+    previewToneFact.textContent = `色调：${preview.theme.toneLabel}`;
+    previewBackgroundFact.textContent = `背景：${preview.wallpaper.label}；${preview.wallpaper.fitLabel} / ${preview.wallpaper.positionLabel}；遮罩${preview.wallpaper.maskToneLabel} ${preview.wallpaper.maskStrength}%；模糊${preview.wallpaper.blurLabel}`;
+    previewWindowFact.textContent = `窗口：${preview.window.opacityLabel}。${preview.window.readabilityLabel}`;
+    previewMotionFact.textContent = `动效：${preview.motion.message}`;
+    previewState.dataset.personalizationPreviewState = preview.status.id;
+    previewState.textContent = preview.status.message;
+  };
+
   const renderThemeDraft = (
     state = latestState,
     theme = currentThemeInputState(),
@@ -852,6 +1019,10 @@ export function createPersonalizationView({ root, app }) {
     renderThemePresentation(theme);
     if (state) renderThemeDraftControls(state);
     return theme;
+  };
+
+  const renderPreviewFromState = (state) => {
+    renderPreview(state);
   };
 
   const renderState = (state, { preserveDraftValues = false } = {}) => {
@@ -995,6 +1166,17 @@ export function createPersonalizationView({ root, app }) {
   return Object.freeze({
     elements: Object.freeze({
       form,
+      workspace,
+      workspaceTrack,
+      previewDesktop,
+      previewWallpaper,
+      previewWallpaperStatus,
+      previewThemeFact,
+      previewToneFact,
+      previewBackgroundFact,
+      previewWindowFact,
+      previewMotionFact,
+      previewState,
       fileInput,
       chooseImageButton,
       deleteButton,
@@ -1100,6 +1282,21 @@ export function createPersonalizationView({ root, app }) {
       return localThemeDraft || state?.dirty === true;
     },
     renderState,
+    renderPreviewFromState,
+    scrollWorkspace(direction) {
+      if (direction !== -1 && direction !== 1) return false;
+      const amount = Math.max(240, Math.round((workspace.clientWidth || 720) * 0.72));
+      try {
+        workspace.scrollBy({ left: direction * amount, behavior: "smooth" });
+      } catch {
+        try {
+          workspace.scrollLeft += direction * amount;
+        } catch {
+          return false;
+        }
+      }
+      return true;
+    },
     setBusy(value, action = "") {
       busy = Boolean(value);
       busyAction = busy ? action : "";

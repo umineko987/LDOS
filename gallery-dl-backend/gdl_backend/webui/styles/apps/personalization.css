@@ -1,71 +1,211 @@
+.window-body:has(> .personalization-app) {
+  padding: 0;
+  overflow: hidden;
+}
+
 .personalization-app {
   display: grid;
-  gap: 18px;
-  max-width: 980px;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  max-width: none;
   min-width: 0;
+  min-height: 0;
+  margin: 0;
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-content-solid);
+}
+
+.personalization-app h1,
+.personalization-app h2,
+.personalization-app h3,
+.personalization-app p {
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+
+.personalization-app h2,
+.personalization-app h3 {
+  padding: 0;
+  border: 0;
+}
+
+.personalization-app h2 {
+  font-size: 1rem;
+}
+
+.personalization-app h3 {
+  font-size: 0.9rem;
 }
 
 .personalization-app-header {
-  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 13px 18px 11px;
+  border-bottom: var(--imageweave-border-width) solid var(--imageweave-separator);
+  background: var(--imageweave-surface-content-solid);
+}
+
+.personalization-app-header h1 {
+  font-size: 1.32rem;
+}
+
+.personalization-app-header .app-executable {
+  margin: 0 0 2px;
+}
+
+.personalization-app-header .app-summary {
+  max-width: 360px;
+  margin: 0;
+  color: var(--imageweave-text-secondary);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: right;
 }
 
 .personalization-form {
-  display: grid;
-  gap: 16px;
   min-width: 0;
+  min-height: 0;
+}
+
+.personalization-workspace {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+  background: var(--imageweave-surface-content-solid);
+}
+
+.personalization-workspace:focus-visible {
+  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
+  outline-offset: calc(-1 * var(--imageweave-focus-width));
+}
+
+.personalization-workspace-track {
+  display: grid;
+  grid-template-columns: minmax(330px, 0.92fr) minmax(410px, 1.12fr) minmax(430px, 1.18fr);
+  width: 100%;
+  min-width: 1180px;
+  height: 100%;
+  min-height: 100%;
+}
+
+.personalization-column {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: var(--imageweave-border-width) solid var(--imageweave-separator);
+  background: var(--imageweave-surface-content-solid);
+}
+
+.personalization-column:last-child {
+  border-right: 0;
+}
+
+.personalization-column--preview {
+  background: var(--imageweave-surface-navigation-solid);
+}
+
+.personalization-column-header {
+  min-width: 0;
+  padding: 13px 14px 11px;
+  border-bottom: var(--imageweave-border-width) solid var(--imageweave-separator);
+  background: inherit;
+}
+
+.personalization-column-header > p:last-child {
+  margin-top: 4px;
+  color: var(--imageweave-text-secondary);
+  font-size: 0.74rem;
+}
+
+.personalization-column-kicker {
+  margin: 0 0 3px;
+  color: var(--imageweave-text-secondary);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.personalization-column-scroll {
+  min-width: 0;
+  min-height: 0;
+  padding: 13px 13px 24px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.personalization-panel,
+.personalization-theme-control,
+.personalization-choice,
+.personalization-position-fieldset,
+.personalization-control-group,
+.personalization-theme-status,
+.personalization-settings-status,
+.personalization-image-state,
+.personalization-import-status,
+.personalization-save-status,
+.personalization-position-note,
+.personalization-motion-limit,
+.personalization-preview-live,
+.personalization-preview-state {
+  min-width: 0;
+  border: var(--imageweave-border-width) solid var(--imageweave-separator);
+  border-radius: var(--imageweave-radius-card);
+  background: var(--imageweave-surface-content-solid);
 }
 
 .personalization-panel {
-  min-width: 0;
-  margin: 0;
-  padding: clamp(14px, 2.5vw, 24px);
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  background: var(--imageweave-surface);
-  box-shadow: var(--imageweave-small-shadow);
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 12px;
 }
 
-.personalization-fieldset > legend {
-  padding: 0 8px 0 0;
-  font-size: 1.18rem;
-  font-weight: 900;
+.personalization-fieldset > legend,
+.personalization-position-fieldset > legend {
+  padding: 0 7px 0 0;
+  font-weight: 850;
 }
 
 .personalization-help {
-  margin: 0 0 13px;
-  overflow-wrap: anywhere;
-  font-size: 0.84rem;
-}
-
-.personalization-theme-panel {
-  display: grid;
-  gap: 13px;
-}
-
-.personalization-theme-panel > .personalization-help,
-.personalization-theme-panel > .personalization-theme-status {
   margin: 0;
+  color: var(--imageweave-text-secondary);
+  font-size: 0.76rem;
 }
 
 .personalization-theme-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 9px;
   min-width: 0;
 }
 
 .personalization-theme-control {
   display: grid;
-  gap: 8px;
-  min-width: 0;
-  padding: 12px;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  background: var(--imageweave-surface);
+  gap: 7px;
+  padding: 9px;
+  border-radius: var(--imageweave-radius-control);
 }
 
 .personalization-theme-color-row {
   display: grid;
-  grid-template-columns: minmax(44px, 1fr) minmax(0, auto);
-  gap: 10px;
+  grid-template-columns: minmax(44px, 1fr) auto;
+  gap: 8px;
   align-items: center;
   min-width: 0;
 }
@@ -74,15 +214,14 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 44px;
-  min-height: 44px;
   height: 44px;
+  min-height: 44px;
   margin: 0;
   padding: 3px;
   border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
   border-radius: var(--imageweave-radius-control);
   color: var(--imageweave-text-primary);
   background: var(--imageweave-surface-control-solid);
-  background: var(--imageweave-surface-control);
   cursor: pointer;
 }
 
@@ -90,17 +229,14 @@
   padding: 2px;
 }
 
-.personalization-theme-color::-webkit-color-swatch {
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  border-radius: 0;
-}
-
+.personalization-theme-color::-webkit-color-swatch,
 .personalization-theme-color::-moz-color-swatch {
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-strong);
   border-radius: 0;
 }
 
 .personalization-theme-color[aria-invalid="true"] {
+  border-color: var(--imageweave-state-danger);
   border-style: double;
   border-width: 4px;
 }
@@ -110,205 +246,85 @@
   cursor: not-allowed;
 }
 
-.personalization-theme-color:focus-visible {
-  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
-  outline-offset: 3px;
-}
-
-.personalization-theme-hex {
-  box-sizing: border-box;
-  min-width: 0;
-  max-width: 100%;
-  padding: 8px 9px;
-  overflow: hidden;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  background: var(--imageweave-surface);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
-  font-variant-numeric: tabular-nums;
-  font-weight: 900;
-}
-
-.personalization-theme-status {
-  padding: 10px 12px;
-  overflow-wrap: anywhere;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  background: var(--imageweave-surface);
-  font-weight: 850;
-}
-
-.personalization-theme-status[data-personalization-theme-status="invalid"],
-.personalization-theme-status[data-personalization-theme-status="error"] {
-  border-style: double;
-  border-width: 4px;
-}
-
-.personalization-theme-status[data-personalization-theme-status="error"] {
-  border-left-width: 8px;
-}
-
-.personalization-image-settings,
-.personalization-window-panel {
-  display: grid;
-  gap: 13px;
-}
-
-.personalization-image-settings[hidden] {
-  display: none;
-}
-
-.personalization-image-settings h2 {
-  margin: 0;
-}
-
-.personalization-control-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  min-width: 0;
-}
-
-.personalization-control-group,
-.personalization-control {
-  display: grid;
-  gap: 8px;
-  align-content: start;
-  min-width: 0;
-}
-
-.personalization-control-group {
-  padding: 12px;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-}
-
-.personalization-control-group > .personalization-help,
-.personalization-window-panel > .personalization-help,
-.personalization-opacity-note {
-  margin: 0;
-}
-
-.personalization-control__label {
-  font-weight: 900;
-}
-
-.personalization-select {
-  width: 100%;
-  min-height: 44px;
-  padding: 7px 36px 7px 10px;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  border-radius: 0;
-  color: var(--imageweave-accent);
-  background: var(--imageweave-surface);
-  font: inherit;
-  font-weight: 800;
-}
-
-.personalization-select:disabled,
-.personalization-range:disabled,
-.personalization-position-fieldset:disabled .personalization-position-choice {
-  border-style: dashed;
-  cursor: not-allowed;
-}
-
+.personalization-theme-color:focus-visible,
 .personalization-select:focus-visible,
-.personalization-range:focus-visible {
-  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
-  outline-offset: 3px;
-}
-
-.personalization-position-fieldset {
-  display: grid;
-  gap: 9px;
-  min-width: 0;
-  margin: 0;
-  padding: 12px;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-}
-
-.personalization-position-fieldset > legend {
-  padding: 0 7px 0 0;
-  font-weight: 900;
-}
-
-.personalization-position-fieldset > .personalization-help,
-.personalization-position-fieldset > .personalization-position-note {
-  margin: 0;
-}
-
-.personalization-position-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
-  min-width: 0;
-}
-
-.personalization-position-choice {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px;
-  align-items: center;
-  min-width: 0;
-  min-height: 46px;
-  padding: 7px;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  background: var(--imageweave-surface);
-  cursor: pointer;
-  font-size: 0.82rem;
-  font-weight: 850;
-}
-
-.personalization-position-choice input {
-  width: 20px;
-  height: 20px;
-  margin: 0;
-  accent-color: var(--imageweave-accent);
-}
-
-.personalization-position-choice:has(input:checked) {
-  border-style: double;
-  border-width: 4px;
-  box-shadow: 2px 2px 0 var(--imageweave-accent);
-}
-
+.personalization-range:focus-visible,
+.personalization-button:focus-visible,
+.personalization-choice:has(input:focus-visible),
 .personalization-position-choice:has(input:focus-visible) {
   outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
   outline-offset: 3px;
 }
 
-.personalization-range-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  min-width: 0;
-}
-
-.personalization-range {
-  width: 100%;
-  min-width: 0;
-  min-height: 44px;
-  margin: 0;
-  accent-color: var(--imageweave-accent);
-  animation: none;
-  transition: none;
-}
-
+.personalization-theme-hex,
 .personalization-range-output {
-  min-width: 4ch;
   padding: 7px 8px;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  background: var(--imageweave-surface);
-  text-align: center;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-code);
+  background: var(--imageweave-surface-control-solid);
+  font-family: var(--imageweave-font-mono);
   font-variant-numeric: tabular-nums;
-  font-weight: 900;
+  font-weight: 850;
+}
+
+.personalization-theme-hex {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personalization-theme-status,
+.personalization-settings-status,
+.personalization-image-state,
+.personalization-import-status,
+.personalization-save-status,
+.personalization-position-note,
+.personalization-motion-limit,
+.personalization-preview-live,
+.personalization-preview-state {
+  margin: 0;
+  padding: 9px 10px;
+  border-radius: var(--imageweave-radius-control);
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.personalization-theme-status[data-personalization-theme-status="invalid"],
+.personalization-theme-status[data-personalization-theme-status="error"],
+.personalization-import-status[data-personalization-import-status="error"],
+.personalization-image-state[data-personalization-image-state="unavailable"],
+.personalization-save-status[data-personalization-status="error"] {
+  border-color: var(--imageweave-state-danger);
+  background: var(--imageweave-state-danger-surface-solid);
+}
+
+.personalization-save-status[data-personalization-status="dirty"],
+.personalization-save-status[data-personalization-status="saving"],
+.personalization-image-state[data-personalization-image-state="pending"],
+.personalization-import-status[data-personalization-import-status="loading"],
+.personalization-import-status[data-personalization-import-status="warning"],
+.personalization-motion-limit,
+.personalization-settings-status[data-personalization-image-controls="missing"],
+.personalization-settings-status[data-personalization-image-controls="loading"],
+.personalization-settings-status[data-personalization-image-controls="busy"] {
+  border-color: var(--imageweave-state-warning);
+  background: var(--imageweave-state-warning-surface-solid);
+}
+
+.personalization-save-status[data-personalization-status="success"],
+.personalization-image-state[data-personalization-image-state="saved"],
+.personalization-import-status[data-personalization-import-status="success"] {
+  border-color: var(--imageweave-state-success);
+  background: var(--imageweave-state-success-surface-solid);
 }
 
 .personalization-motion-options,
 .personalization-source-options,
 .personalization-color-options {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -318,18 +334,16 @@
 }
 
 .personalization-color-options {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .personalization-choice {
   display: grid;
-  gap: 8px;
   align-content: start;
-  min-width: 0;
-  min-height: 86px;
-  padding: 11px;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  background: var(--imageweave-surface);
+  gap: 7px;
+  min-height: 70px;
+  padding: 9px;
+  border-radius: var(--imageweave-radius-control);
   cursor: pointer;
 }
 
@@ -356,8 +370,8 @@
 
 .personalization-source-choice__description {
   grid-area: description;
-  overflow-wrap: anywhere;
-  font-size: 0.78rem;
+  color: var(--imageweave-text-secondary);
+  font-size: 0.72rem;
 }
 
 .personalization-source-choice .personalization-choice__selection {
@@ -365,27 +379,17 @@
 }
 
 .personalization-color-choice {
-  grid-template-columns: 24px minmax(58px, auto) minmax(0, 1fr);
+  grid-template-columns: auto 44px minmax(0, 1fr);
   grid-template-areas:
     "input swatch label"
     "selection selection selection";
   align-items: center;
 }
 
-.personalization-choice:has(input:checked) {
-  border-style: double;
-  border-width: 4px;
-  box-shadow: 3px 3px 0 var(--imageweave-accent);
-}
-
-.personalization-choice:has(input:focus-visible) {
-  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
-  outline-offset: 3px;
-}
-
-.personalization-choice input {
-  width: 22px;
-  height: 22px;
+.personalization-choice input,
+.personalization-position-choice input {
+  width: 20px;
+  height: 20px;
   margin: 0;
   accent-color: var(--imageweave-accent);
 }
@@ -396,13 +400,13 @@
 
 .personalization-color-choice strong {
   grid-area: label;
-  overflow-wrap: anywhere;
 }
 
 .personalization-choice__selection {
   justify-self: end;
-  font-size: 0.75rem;
-  font-weight: 850;
+  color: var(--imageweave-text-secondary);
+  font-size: 0.68rem;
+  font-weight: 800;
 }
 
 .personalization-color-choice .personalization-choice__selection {
@@ -410,254 +414,428 @@
   justify-self: start;
 }
 
+.personalization-choice:has(input:checked),
+.personalization-position-choice:has(input:checked) {
+  border-color: var(--imageweave-border-strong);
+  border-width: var(--imageweave-border-strong-width);
+  background: var(--imageweave-surface-control-active);
+}
+
 .personalization-swatch {
   display: block;
   grid-area: swatch;
-  width: 58px;
-  height: 42px;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  box-shadow: 2px 2px 0 var(--imageweave-accent);
+  width: 42px;
+  height: 32px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-strong);
+  border-radius: var(--imageweave-radius-control);
 }
 
-.personalization-swatch--graphite {
-  background: #20242A;
+.personalization-swatch--graphite,
+.personalization-preview-wallpaper--graphite {
+  background-color: #20242A;
 }
 
-.personalization-swatch--slate {
-  background: #384554;
+.personalization-swatch--slate,
+.personalization-preview-wallpaper--slate {
+  background-color: #384554;
 }
 
-.personalization-swatch--deep-ocean {
-  background: #20364A;
+.personalization-swatch--deep-ocean,
+.personalization-preview-wallpaper--deep-ocean {
+  background-color: #20364A;
 }
 
-.personalization-swatch--forest {
-  background: #294039;
+.personalization-swatch--forest,
+.personalization-preview-wallpaper--forest {
+  background-color: #294039;
 }
 
-.personalization-swatch--plum-gray {
-  background: #403341;
+.personalization-swatch--plum-gray,
+.personalization-preview-wallpaper--plum-gray {
+  background-color: #403341;
 }
 
-.personalization-swatch--warm-paper {
-  background: #E7E1D6;
+.personalization-swatch--warm-paper,
+.personalization-preview-wallpaper--warm-paper {
+  background-color: #E7E1D6;
 }
 
-.personalization-motion-limit,
-.personalization-image-state,
-.personalization-import-status,
-.personalization-save-status,
-.personalization-settings-status,
-.personalization-position-note {
-  margin: 13px 0 0;
-  padding: 10px 12px;
-  border: var(--imageweave-border-width) dashed var(--imageweave-accent);
-  background: var(--imageweave-surface);
-  overflow-wrap: anywhere;
-  font-weight: 800;
-}
-
-.personalization-motion-limit {
-  border-left: 6px double var(--imageweave-accent);
-}
-
-.personalization-settings-status {
-  margin: 0;
-}
-
-.personalization-settings-status[data-personalization-image-controls="missing"],
-.personalization-settings-status[data-personalization-image-controls="loading"],
-.personalization-settings-status[data-personalization-image-controls="busy"] {
-  border-left: 6px double var(--imageweave-accent);
-}
-
-.personalization-position-note {
-  border-left: 6px double var(--imageweave-accent);
-  font-size: 0.82rem;
-}
-
-.personalization-image-panel {
-  display: grid;
-  gap: 11px;
-}
-
-.personalization-image-panel > .personalization-help,
-.personalization-image-panel > .personalization-image-state,
-.personalization-image-panel > .personalization-import-status {
-  margin: 0;
-}
-
-.personalization-image-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
-}
-
-.personalization-image-state[data-personalization-image-state="pending"],
-.personalization-import-status[data-personalization-import-status="loading"],
-.personalization-import-status[data-personalization-import-status="warning"] {
-  border-left: 6px double var(--imageweave-accent);
-}
-
-.personalization-image-state[data-personalization-image-state="saved"],
-.personalization-import-status[data-personalization-import-status="success"] {
-  border-style: solid;
-}
-
-.personalization-image-state[data-personalization-image-state="unavailable"],
-.personalization-import-status[data-personalization-import-status="error"] {
-  border-style: double;
-  border-width: 4px;
-}
-
-.personalization-image-note {
-  padding-top: 2px;
-  border-top: var(--imageweave-border-width) dotted var(--imageweave-accent);
-}
-
-.personalization-actions-panel {
-  display: grid;
-  gap: 13px;
-}
-
-.personalization-actions-panel h2 {
-  margin: 0;
-}
-
-.personalization-actions-panel .personalization-save-status {
-  margin: 0;
-}
-
-.personalization-save-status[data-personalization-status="dirty"],
-.personalization-save-status[data-personalization-status="saving"] {
-  border-style: dashed;
-}
-
-.personalization-save-status[data-personalization-status="error"] {
-  border-style: double;
-  border-width: 4px;
-}
-
+.personalization-image-actions,
 .personalization-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 9px;
+  gap: 8px;
 }
 
 .personalization-button {
-  min-width: 112px;
+  min-width: 104px;
   min-height: 44px;
-  padding: 7px 13px;
-  border: var(--imageweave-border-width) solid var(--imageweave-accent);
-  color: var(--imageweave-accent);
-  background: var(--imageweave-surface);
-  box-shadow: 2px 2px 0 var(--imageweave-accent);
-  font-weight: 850;
+  padding: 7px 12px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-strong);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-control-solid);
+  box-shadow: var(--imageweave-shadow-control);
+  font: inherit;
+  font-weight: 800;
+  transition: background-color var(--imageweave-transition-fast), color var(--imageweave-transition-fast);
 }
 
 .personalization-button:hover:not(:disabled),
-.personalization-button:focus-visible:not(:disabled),
+.personalization-button:focus-visible:not(:disabled) {
+  background: var(--imageweave-surface-control-hover);
+}
+
 .personalization-button--primary {
-  color: var(--imageweave-surface);
+  color: var(--imageweave-text-inverse);
   background: var(--imageweave-accent);
-}
-
-.personalization-button:focus-visible {
-  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
-  outline-offset: 3px;
-}
-
-.personalization-button--primary:hover:not(:disabled),
-.personalization-button--primary:focus-visible:not(:disabled) {
-  color: var(--imageweave-accent);
-  background: var(--imageweave-surface);
 }
 
 .personalization-button--dangerous {
-  border-style: double;
-  border-width: 4px;
+  border-color: var(--imageweave-state-danger);
 }
 
-.personalization-button--dangerous:hover:not(:disabled),
-.personalization-button--dangerous:focus-visible:not(:disabled) {
-  color: var(--imageweave-surface);
-  background: var(--imageweave-accent);
+.personalization-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .personalization-button[aria-busy="true"] {
   border-style: dashed;
 }
 
-@media (max-width: 767px) {
-  .personalization-app {
-    gap: 13px;
-  }
+.personalization-control-grid {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
 
-  .personalization-panel {
-    padding: 12px;
-    box-shadow: 2px 2px 0 var(--imageweave-accent);
-  }
+.personalization-control-group,
+.personalization-control {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+}
 
-  .personalization-color-options {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.personalization-control-group {
+  padding: 10px;
+  border-radius: var(--imageweave-radius-control);
+}
 
-  .personalization-theme-grid,
-  .personalization-control-grid {
-    grid-template-columns: 1fr;
-  }
+.personalization-control__label {
+  font-weight: 800;
+}
 
-  .personalization-image-actions,
-  .personalization-actions {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
+.personalization-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 34px 7px 10px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-strong);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-control-solid);
+  font: inherit;
+  font-weight: 750;
+}
 
-  .personalization-button {
-    width: 100%;
+.personalization-select:disabled,
+.personalization-range:disabled,
+.personalization-position-fieldset:disabled .personalization-position-choice {
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+.personalization-position-fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  border-radius: var(--imageweave-radius-control);
+}
+
+.personalization-position-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.personalization-position-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px;
+  align-items: center;
+  min-height: 42px;
+  padding: 6px;
+  border: var(--imageweave-border-width) solid var(--imageweave-separator);
+  border-radius: var(--imageweave-radius-control);
+  background: var(--imageweave-surface-content-solid);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.personalization-range-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.personalization-range {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0;
+  accent-color: var(--imageweave-accent);
+  animation: none;
+  transition: none;
+}
+
+.personalization-range-output {
+  min-width: 4ch;
+  text-align: center;
+}
+
+.personalization-image-settings[hidden] {
+  display: none;
+}
+
+.personalization-preview-desktop {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  min-height: 196px;
+  overflow: hidden;
+  border: var(--imageweave-border-strong-width) solid var(--imageweave-border-strong);
+  border-radius: var(--imageweave-radius-card);
+  background-color: #20242A;
+  isolation: isolate;
+}
+
+.personalization-preview-wallpaper--custom {
+  background-color: #263640;
+  background-image:
+    linear-gradient(135deg, transparent 0 34%, rgb(255 255 255 / 0.1) 34% 36%, transparent 36% 64%, rgb(255 255 255 / 0.08) 64% 66%, transparent 66%),
+    linear-gradient(45deg, #22313B 25%, #354A55 25% 50%, #293E49 50% 75%, #3C535D 75%);
+  background-size: 40px 40px, 48px 48px;
+}
+
+.personalization-preview-wallpaper--custom::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+}
+
+.personalization-preview-wallpaper--mask-dark::after {
+  background: rgb(0 0 0 / 0.22);
+}
+
+.personalization-preview-wallpaper--mask-light::after {
+  background: rgb(255 255 255 / 0.2);
+}
+
+.personalization-preview-menu-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 26px;
+  padding: 0 9px;
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-navigation-solid);
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.personalization-preview-wallpaper {
+  position: absolute;
+  inset: 26px 0 0;
+  z-index: -2;
+  background-color: #20242A;
+}
+
+.personalization-preview-window {
+  position: absolute;
+  inset: 29% 18% 27% 16%;
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  padding: 28px 12px 12px;
+  border: 2px solid var(--imageweave-accent);
+  border-radius: 8px;
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-content-solid);
+}
+
+.personalization-preview-desktop[data-personalization-window-opacity="subtle"] .personalization-preview-window {
+  opacity: 0.96;
+}
+
+.personalization-preview-desktop[data-personalization-window-opacity="soft"] .personalization-preview-window {
+  opacity: 0.92;
+}
+
+.personalization-preview-window__title {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 20px;
+  border-bottom: 1px solid var(--imageweave-separator);
+  background: var(--imageweave-surface-navigation-solid);
+}
+
+.personalization-preview-window__line {
+  height: 7px;
+  border-radius: var(--imageweave-radius-pill);
+  background: var(--imageweave-border-subtle);
+}
+
+.personalization-preview-window__line--short {
+  width: 62%;
+}
+
+.personalization-preview-dock {
+  position: absolute;
+  right: 25%;
+  bottom: 8px;
+  left: 25%;
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+  padding: 6px;
+  border: 1px solid var(--imageweave-border-strong);
+  border-radius: var(--imageweave-radius-pill);
+  background: var(--imageweave-surface-navigation-solid);
+}
+
+.personalization-preview-dock span {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--imageweave-border-strong);
+  border-radius: 5px;
+  background: var(--imageweave-surface-control-solid);
+}
+
+.personalization-preview-live {
+  margin: 10px 0;
+}
+
+.personalization-preview-facts {
+  gap: 0;
+}
+
+.personalization-preview-facts h3 {
+  margin: 0 0 4px;
+}
+
+.personalization-preview-fact {
+  margin: 0;
+  padding: 8px 0;
+  border-bottom: var(--imageweave-border-width) solid var(--imageweave-separator);
+  color: var(--imageweave-text-secondary);
+  font-size: 0.74rem;
+}
+
+.personalization-preview-state[data-personalization-preview-state="dirty"],
+.personalization-preview-state[data-personalization-preview-state="saving"] {
+  border-color: var(--imageweave-state-warning);
+  background: var(--imageweave-state-warning-surface-solid);
+}
+
+.personalization-preview-state[data-personalization-preview-state="clean"] {
+  border-color: var(--imageweave-state-success);
+  background: var(--imageweave-state-success-surface-solid);
+}
+
+.application-window[data-maximized] .personalization-workspace-track {
+  min-width: 100%;
+}
+
+.application-window:not([data-maximized]) .personalization-workspace-track {
+  grid-template-columns: minmax(320px, 0.9fr) minmax(400px, 1.12fr) minmax(420px, 1.18fr);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .personalization-button,
+  .personalization-preview-desktop {
+    transition: none;
+    animation: none;
   }
 }
 
-@media (max-width: 420px) {
-  .personalization-motion-options,
-  .personalization-source-options,
-  .personalization-color-options {
-    grid-template-columns: 1fr;
-  }
-
-  .personalization-position-choice {
-    gap: 4px;
-    padding: 6px;
-    font-size: 0.76rem;
-  }
-
-  .personalization-position-choice input {
-    width: 18px;
-    height: 18px;
-  }
-
-  .personalization-range-row {
-    gap: 8px;
-  }
-
-  .personalization-theme-color-row {
-    grid-template-columns: minmax(44px, 1fr) auto;
-    gap: 8px;
-  }
+:root[data-motion="off"] .personalization-button,
+:root[data-motion="off"] .personalization-preview-desktop {
+  transition: none;
+  animation: none;
 }
 
 @media (forced-colors: active) {
+  .personalization-app,
+  .personalization-app-header,
+  .personalization-workspace,
+  .personalization-workspace-track,
+  .personalization-column,
+  .personalization-column-header,
+  .personalization-column-scroll,
+  .personalization-panel,
   .personalization-theme-control,
-  .personalization-theme-color,
   .personalization-theme-hex,
-  .personalization-theme-status {
-    border-color: CanvasText;
+  .personalization-theme-status,
+  .personalization-settings-status,
+  .personalization-image-state,
+  .personalization-import-status,
+  .personalization-save-status,
+  .personalization-position-note,
+  .personalization-motion-limit,
+  .personalization-preview-live,
+  .personalization-preview-state,
+  .personalization-preview-fact,
+  .personalization-preview-desktop,
+  .personalization-preview-menu-bar,
+  .personalization-preview-window,
+  .personalization-preview-window__title,
+  .personalization-preview-dock,
+  .personalization-position-choice,
+  .personalization-choice {
     color: CanvasText;
+    border-color: CanvasText;
     background: Canvas;
-    forced-color-adjust: auto;
+    background-image: none;
+    box-shadow: none;
   }
 
-  .personalization-theme-color:focus-visible {
+  .personalization-button,
+  .personalization-select,
+  .personalization-theme-color,
+  .personalization-range-output,
+  .personalization-preview-dock span {
+    color: ButtonText;
+    border-color: ButtonText;
+    background: ButtonFace;
+    background-image: none;
+    box-shadow: none;
+  }
+
+  .personalization-button--primary,
+  .personalization-choice:has(input:checked),
+  .personalization-position-choice:has(input:checked) {
+    color: HighlightText;
+    background: Highlight;
+  }
+
+  .personalization-theme-color:focus-visible,
+  .personalization-select:focus-visible,
+  .personalization-range:focus-visible,
+  .personalization-button:focus-visible,
+  .personalization-workspace:focus-visible {
     outline-color: Highlight;
+  }
+
+  .personalization-preview-wallpaper,
+  .personalization-preview-wallpaper::after {
+    background: Canvas;
+    background-image: none;
   }
 }

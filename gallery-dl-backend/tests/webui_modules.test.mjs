@@ -4735,8 +4735,12 @@ test("E2 设置视图聚合回显禁用语义，并严格读取完整可读性�
       )),
     ];
 
-    assert.equal(elements.form.children[0].children[0].textContent, "动效");
-    assert.equal(elements.form.children[1], elements.themeFieldset);
+    assert.equal(elements.form.children.length, 1, "form 只包裹可聚焦三栏 workspace");
+    assert.equal(elements.form.children[0], elements.workspace);
+    assert.equal(elements.workspaceTrack.children.length, 3);
+    assert.equal(elements.workspaceTrack.children[0].children[0].children[0].textContent, "01 · 实时预览");
+    assert.equal(elements.workspaceTrack.children[1].children[0].children[0].textContent, "02 · 主题与壁纸");
+    assert.equal(elements.workspaceTrack.children[2].children[0].children[0].textContent, "03 · 显示与应用");
     assert.equal(elements.themeFieldset.children[0].textContent, "界面主题");
     assert.equal(elements.themeAccentInput.type, "color");
     assert.equal(elements.themeSurfaceInput.type, "color");
