@@ -7,42 +7,46 @@ const COMPONENT_STATUS_LABELS = Object.freeze({
   optional_warning: "提示",
 });
 const COMPONENTS = Object.freeze([
-  Object.freeze({ id: "process", label: "服务进程", next: "刷新诊断；若持续离线，请重新启动本地服务。" }),
-  Object.freeze({ id: "database", label: "SQLite", next: "请检查数据库目录和权限。" }),
-  Object.freeze({ id: "gallery_source", label: "gallery-dl", next: "请检查 gallery-dl 子模块。" }),
-  Object.freeze({ id: "project_proxy", label: "代理池", next: "打开代理管理检查节点来源和运行状态。", app: "proxy" }),
-  Object.freeze({ id: "mihomo", label: "Mihomo", next: "打开代理管理检查传输核心的安装和状态。", app: "proxy" }),
-  Object.freeze({ id: "scheduler", label: "任务调度器", next: "打开批次管理查看活动批次。", app: "tasks" }),
-  Object.freeze({ id: "ordered_crawls", label: "批次调度", next: "打开批次管理查看活动批次。", app: "tasks" }),
-  Object.freeze({ id: "dedup", label: "去重环境", next: "请检查去重运行环境和模型缓存。" }),
-  Object.freeze({ id: "dedup_python", label: "去重运行环境", next: "请检查虚拟环境。" }),
-  Object.freeze({ id: "torch", label: "计算环境", next: "请核对 CPU/CUDA 环境。" }),
-  Object.freeze({ id: "sscd_model", label: "SSCD 模型", next: "请检查模型缓存。" }),
-  Object.freeze({ id: "dino_model", label: "DINOv2 模型", next: "请检查模型缓存。" }),
+  Object.freeze({ id: "process", domain: "service", label: "服务进程", next: "刷新诊断；若持续离线，请重新启动本地服务。" }),
+  Object.freeze({ id: "database", domain: "service", label: "SQLite", next: "请检查数据库目录和权限。" }),
+  Object.freeze({ id: "gallery_source", domain: "service", label: "gallery-dl", next: "请检查 gallery-dl 子模块。" }),
+  Object.freeze({ id: "project_proxy", domain: "network", label: "代理池", next: "打开代理管理检查节点来源和运行状态。", app: "proxy" }),
+  Object.freeze({ id: "mihomo", domain: "network", label: "Mihomo", next: "打开代理管理检查传输核心的安装和状态。", app: "proxy" }),
+  Object.freeze({ id: "scheduler", domain: "tasks", label: "任务调度器", next: "打开批次管理查看活动批次。", app: "tasks" }),
+  Object.freeze({ id: "ordered_crawls", domain: "tasks", label: "批次调度", next: "打开批次管理查看活动批次。", app: "tasks" }),
+  Object.freeze({ id: "dedup", domain: "dedup", label: "去重环境", next: "请检查去重运行环境和模型缓存。" }),
+  Object.freeze({ id: "dedup_python", domain: "dedup", label: "去重运行环境", next: "请检查虚拟环境。" }),
+  Object.freeze({ id: "torch", domain: "dedup", label: "计算环境", next: "请核对 CPU/CUDA 环境。" }),
+  Object.freeze({ id: "sscd_model", domain: "dedup", label: "SSCD 模型", next: "请检查模型缓存。" }),
+  Object.freeze({ id: "dino_model", domain: "dedup", label: "DINOv2 模型", next: "请检查模型缓存。" }),
 ]);
+const SECTION_NAMES = Object.freeze(["health", "readiness", "config", "scheduler"]);
+const SAFE_ERROR_CODE = /^[A-Za-z0-9._:-]{1,128}$/;
+const DOMAIN_LABELS = Object.freeze({
+  service: "服务基础",
+  network: "连接与代理",
+  tasks: "任务执行",
+  dedup: "去重环境",
+});
 
 export const DIAGNOSTICS_POLL_INTERVAL_MS = 20_000;
 export const DIAGNOSTIC_COMPONENTS = COMPONENTS;
+export const DIAGNOSTIC_DOMAIN_LABELS = DOMAIN_LABELS;
 
 function isRecord(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function boundedCount(value, maximum = 1_000_000_000) {
-  const number = Number(value);
-  return Number.isInteger(number) && number >= 0 && number <= maximum ? number : 0;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= maximum
+    ? value
+    : 0;
 }
 
-function safeText(value, fallback = "", maximum = 80) {
-  if (typeof value !== "string" && typeof value !== "number") return fallback;
-  const text = String(value)
-    .replace(/[\u0000-\u001f\u007f]+/g, " ")
-    .replace(/https?:\/\/[^\s]+/gi, "[地址已隐藏]")
-    .replace(/\b(token|cookie|password|secret|authorization|oauth|session)\s*[:=]\s*[^\s,;]+/gi, "$1=[已隐藏]")
-    .replace(/(^|[\s(])(?:[A-Za-z]:[\\/]|\/)[^\s,;，；)]+/g, "$1[路径已隐藏]")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text ? text.slice(0, maximum) : fallback;
+function safeVersion(value, fallback = "未知版本") {
+  if (typeof value !== "string") return fallback;
+  const text = value.trim();
+  return /^[A-Za-z0-9.+_-]{1,40}$/.test(text) ? text : fallback;
 }
 
 function safeStatus(value, fallback = "error") {
@@ -52,20 +56,19 @@ function safeStatus(value, fallback = "error") {
 function uiStatus(status) {
   if (status === "ok") return "ready";
   if (status === "disabled") return "disabled";
-  if (["optional_missing", "optional_warning"].includes(status)) return "warning";
+  if (status === "optional_missing" || status === "optional_warning") return "warning";
   return "error";
 }
 
 function componentDetail(id, raw) {
   if (!isRecord(raw)) return "";
   if (id === "project_proxy") {
-    return `节点来源 ${boundedCount(raw.source_count)} · 健康 ${boundedCount(raw.healthy)} · ${raw.running ? "运行中" : "未运行"}`;
+    return `节点来源 ${boundedCount(raw.source_count)} · 健康 ${boundedCount(raw.healthy)} · ${raw.running === true ? "运行中" : "未运行"}`;
   }
   if (id === "torch") {
     const actual = ["cpu", "cuda", "unknown"].includes(raw.actual_device) ? raw.actual_device : "unknown";
     const configured = ["auto", "cpu", "cuda"].includes(raw.configured_device) ? raw.configured_device : "unknown";
-    const version = safeText(raw.version, "未知版本", 40);
-    return `Torch ${version} · 配置 ${configured} · 实际 ${actual} · CUDA ${raw.cuda_available ? "可用" : "不可用"}`;
+    return `Torch ${safeVersion(raw.version)} · 配置 ${configured} · 实际 ${actual} · CUDA ${raw.cuda_available === true ? "可用" : "不可用"}`;
   }
   if (id === "dedup") {
     const resources = isRecord(raw.configured_resources) ? raw.configured_resources : {};
@@ -97,15 +100,19 @@ export function sanitizeReadinessDiagnostics(value) {
   if (!isRecord(value) || typeof value.ready !== "boolean") throw new TypeError("就绪响应格式无效");
   const rawComponents = isRecord(value.components) ? value.components : {};
   const components = [];
+  const seen = new Set();
   for (const definition of COMPONENTS) {
+    if (seen.has(definition.id)) continue;
     const raw = rawComponents[definition.id];
     if (!isRecord(raw)) continue;
+    seen.add(definition.id);
     const status = safeStatus(raw.status);
     components.push(Object.freeze({
       id: definition.id,
+      domain: definition.domain,
       label: definition.label,
       status,
-      statusLabel: COMPONENT_STATUS_LABELS[status] || "异常",
+      statusLabel: COMPONENT_STATUS_LABELS[status],
       uiStatus: uiStatus(status),
       required: raw.required !== false,
       detail: componentDetail(definition.id, raw),
@@ -113,7 +120,7 @@ export function sanitizeReadinessDiagnostics(value) {
       targetApp: definition.app || "",
     }));
   }
-  return Object.freeze({ ready: value.ready, components });
+  return Object.freeze({ ready: value.ready, components: Object.freeze(components) });
 }
 
 export function sanitizeDiagnosticsConfig(value) {
@@ -124,18 +131,18 @@ export function sanitizeDiagnosticsConfig(value) {
     ? value.dedup.configured_device
     : "unknown";
   return Object.freeze({
-    loopbackOnly: Boolean(value.server?.loopback_only),
-    corsEnabled: Boolean(value.server?.cors_enabled),
-    privateTargetsEnabled: Boolean(value.server?.private_targets_enabled),
-    managedAuthCache: Boolean(value.gallery?.managed_auth_cache),
-    proxyEnabled: Boolean(value.proxy?.enabled),
-    proxyAutoStart: Boolean(value.proxy?.auto_start),
-    transportCoreEnabled: Boolean(value.proxy?.transport_core_enabled),
+    loopbackOnly: value.server?.loopback_only === true,
+    corsEnabled: value.server?.cors_enabled === true,
+    privateTargetsEnabled: value.server?.private_targets_enabled === true,
+    managedAuthCache: value.gallery?.managed_auth_cache === true,
+    proxyEnabled: value.proxy?.enabled === true,
+    proxyAutoStart: value.proxy?.auto_start === true,
+    transportCoreEnabled: value.proxy?.transport_core_enabled === true,
     schedulerCapacity: boundedCount(value.scheduler?.max_concurrent_tasks, 100_000),
-    dedupEnabled: Boolean(value.dedup?.enabled),
+    dedupEnabled: value.dedup?.enabled === true,
     configuredDevice,
-    sscdEnabled: Boolean(value.dedup?.sscd_enabled),
-    dinoEnabled: Boolean(value.dedup?.dino_enabled),
+    sscdEnabled: value.dedup?.sscd_enabled === true,
+    dinoEnabled: value.dedup?.dino_enabled === true,
   });
 }
 
@@ -144,11 +151,11 @@ export function sanitizeDiagnosticsScheduler(value) {
     throw new TypeError("任务调度数据无效");
   }
   return Object.freeze({
-    tasksRunning: Boolean(value.tasks?.running),
+    tasksRunning: value.tasks?.running === true,
     activeTasks: boundedCount(value.tasks?.active),
     maxConcurrent: boundedCount(value.tasks?.max_concurrent, 100_000),
     activeSiteCount: boundedCount(value.tasks?.active_site_count, 10_000),
-    crawlsRunning: Boolean(value.ordered_crawls?.running),
+    crawlsRunning: value.ordered_crawls?.running === true,
     activeBatches: boundedCount(value.ordered_crawls?.active_batches),
     executionOrder: value.ordered_crawls?.execution_order === "source_then_address"
       ? "按来源和地址顺序"
@@ -159,66 +166,173 @@ export function sanitizeDiagnosticsScheduler(value) {
   });
 }
 
-function outcomeData(outcome) {
-  if (!outcome || typeof outcome !== "object") return null;
-  if (outcome.data) return outcome.data;
-  return isRecord(outcome.error?.details) ? outcome.error.details : null;
-}
-
 function safeOutcomeError(outcome) {
   const error = outcome?.error;
-  if (!error || typeof error !== "object") return null;
-  const code = safeText(error.code, "request_failed", 128).replace(/[^A-Za-z0-9._:-]/g, "") || "request_failed";
-  const requestId = safeText(error.requestId, "", 128).replace(/[^A-Za-z0-9._:-]/g, "");
+  if (!isRecord(error)) return null;
+  const code = typeof error.code === "string" && SAFE_ERROR_CODE.test(error.code)
+    ? error.code
+    : "request_failed";
+  const requestId = typeof error.requestId === "string" && SAFE_ERROR_CODE.test(error.requestId)
+    ? error.requestId
+    : "";
   return Object.freeze({
-    status: Number.isInteger(error.status) && error.status >= 0 ? error.status : 0,
+    status: Number.isInteger(error.status) && error.status >= 0 && error.status <= 599 ? error.status : 0,
     code,
     requestId,
   });
 }
 
-export function buildDiagnosticsSnapshot({ health, readiness, config, scheduler, checkedAt = Date.now(), previous = null }) {
-  const errors = {
-    health: safeOutcomeError(health),
-    readiness: safeOutcomeError(readiness),
-    config: safeOutcomeError(config),
-    scheduler: safeOutcomeError(scheduler),
-  };
-  const connected = [health, readiness, config, scheduler].some((item) => item?.connected);
-  let safeHealth = null;
-  let safeReadiness = null;
-  let safeConfig = null;
-  let safeScheduler = null;
-  try { safeHealth = sanitizeHealthDiagnostics(outcomeData(health)); } catch { /* 拒绝采用无效响应。 */ }
-  try { safeReadiness = sanitizeReadinessDiagnostics(outcomeData(readiness)); } catch { /* 拒绝采用无效响应。 */ }
-  try { safeConfig = sanitizeDiagnosticsConfig(outcomeData(config)); } catch { /* 拒绝采用无效响应。 */ }
-  try { safeScheduler = sanitizeDiagnosticsScheduler(outcomeData(scheduler)); } catch { /* 拒绝采用无效响应。 */ }
+function outcomeData(outcome) {
+  if (!isRecord(outcome)) return null;
+  if (outcome.data !== null && outcome.data !== undefined) return outcome.data;
+  return outcome.connected === true && isRecord(outcome.response) ? outcome.response : null;
+}
 
-  const complete = Boolean(safeHealth && safeReadiness && safeConfig && safeScheduler);
-  const stale = !complete;
+function sanitizeSection(section, outcome) {
+  const data = outcomeData(outcome);
+  if (section === "health") return sanitizeHealthDiagnostics(data);
+  if (section === "readiness") return sanitizeReadinessDiagnostics(data);
+  if (section === "config") return sanitizeDiagnosticsConfig(data);
+  return sanitizeDiagnosticsScheduler(data);
+}
+
+export function buildDiagnosticsSnapshot({ health, readiness, config, scheduler, checkedAt = Date.now(), previous = null }) {
+  const outcomes = { health, readiness, config, scheduler };
   const previousSnapshot = isRecord(previous) ? previous : null;
-  return {
-    health: safeHealth || previousSnapshot?.health || null,
-    readiness: safeReadiness || previousSnapshot?.readiness || null,
-    config: safeConfig || previousSnapshot?.config || null,
-    scheduler: safeScheduler || previousSnapshot?.scheduler || null,
+  const sections = {};
+  const errors = {};
+  const freshSections = [];
+  const staleSections = [];
+
+  for (const section of SECTION_NAMES) {
+    errors[section] = safeOutcomeError(outcomes[section]);
+    let fresh = null;
+    try {
+      fresh = sanitizeSection(section, outcomes[section]);
+    } catch {
+      // 无效响应与请求失败一样按分区处理；绝不把原始 payload 放入快照。
+    }
+    if (fresh) {
+      sections[section] = fresh;
+      freshSections.push(section);
+    } else {
+      sections[section] = previousSnapshot?.[section] || null;
+      if (sections[section]) staleSections.push(section);
+      if (!errors[section]) {
+        errors[section] = Object.freeze({ status: 0, code: "invalid_response", requestId: "" });
+      }
+    }
+  }
+
+  const connected = SECTION_NAMES.some((section) => outcomes[section]?.connected === true);
+  const complete = freshSections.length === SECTION_NAMES.length;
+  return Object.freeze({
+    ...sections,
     connected,
     offline: !connected,
-    stale,
-    errors,
+    stale: !complete,
+    complete,
+    freshSections: Object.freeze(freshSections),
+    staleSections: Object.freeze(staleSections),
+    errors: Object.freeze(errors),
     lastCheckedAt: Math.max(0, Number(checkedAt) || 0),
-  };
+  });
+}
+
+function validateComponent(component, index) {
+  if (!isRecord(component) || typeof component.id !== "string") throw new TypeError("组件状态数据无效");
+  const definitionIndex = COMPONENTS.findIndex(({ id }) => id === component.id);
+  if (definitionIndex < 0 || definitionIndex < index) throw new TypeError("组件状态顺序无效");
+  return definitionIndex;
 }
 
 export function validateDiagnosticsSnapshot(value) {
   if (!isRecord(value) || typeof value.connected !== "boolean" || typeof value.offline !== "boolean" ||
-      typeof value.stale !== "boolean" || !isRecord(value.errors) || !Number.isFinite(value.lastCheckedAt)) {
+      typeof value.stale !== "boolean" || typeof value.complete !== "boolean" ||
+      !Array.isArray(value.freshSections) || !Array.isArray(value.staleSections) ||
+      !isRecord(value.errors) || !Number.isFinite(value.lastCheckedAt)) {
     throw new TypeError("诊断数据无效");
   }
-  if (value.readiness && !Array.isArray(value.readiness.components)) {
-    throw new TypeError("组件状态数据无效");
+  const validateSectionNames = (sections) => {
+    const seen = new Set();
+    let previousIndex = -1;
+    for (const section of sections) {
+      const index = SECTION_NAMES.indexOf(section);
+      if (index < 0 || index <= previousIndex || seen.has(section)) throw new TypeError("诊断分区状态无效");
+      seen.add(section);
+      previousIndex = index;
+    }
+  };
+  validateSectionNames(value.freshSections);
+  validateSectionNames(value.staleSections);
+  for (const section of SECTION_NAMES) {
+    const error = value.errors[section];
+    if (error !== null && (!isRecord(error) || !Number.isInteger(error.status) ||
+        !SAFE_ERROR_CODE.test(error.code || "") ||
+        (error.requestId !== "" && !SAFE_ERROR_CODE.test(error.requestId || "")))) {
+      throw new TypeError("诊断错误状态无效");
+    }
+  }
+  if (value.readiness) {
+    if (!Array.isArray(value.readiness.components)) throw new TypeError("组件状态数据无效");
+    let previousIndex = -1;
+    const seen = new Set();
+    for (const component of value.readiness.components) {
+      const index = validateComponent(component, previousIndex);
+      if (seen.has(component.id)) throw new TypeError("组件状态重复");
+      seen.add(component.id);
+      previousIndex = index;
+    }
   }
   return value;
+}
+
+export function deriveDiagnosticsWorkspacePresentation({ snapshot = null, refreshing = false } = {}) {
+  if (refreshing) {
+    return Object.freeze({ state: "refreshing", kind: "running", label: "正在刷新", message: "四项只读检查正在并发执行；当前安全快照继续可见。" });
+  }
+  if (!snapshot) {
+    return Object.freeze({ state: "loading", kind: "running", label: "正在加载", message: "正在读取连接、就绪、安全配置和任务调度状态。" });
+  }
+  const hasFacts = SECTION_NAMES.some((section) => Boolean(snapshot[section]));
+  if (snapshot.offline && !hasFacts) {
+    return Object.freeze({ state: "error", kind: "error", label: "首次检查失败", message: "服务当前不可连接，尚无可安全显示的诊断快照。" });
+  }
+  if (snapshot.offline) {
+    return Object.freeze({ state: "offline", kind: "error", label: "服务离线", message: "当前显示上次成功读取的分区；这些事实均已标记为陈旧。" });
+  }
+  if (snapshot.staleSections?.length) {
+    return Object.freeze({ state: "stale", kind: "warning", label: "部分快照陈旧", message: "失败分区保留上次安全快照；其余分区已更新。" });
+  }
+  if (snapshot.stale) {
+    return Object.freeze({ state: "partial", kind: "warning", label: "部分信息不可用", message: "首次检查未获得全部分区，不会补造缺失事实。" });
+  }
+  return Object.freeze({
+    state: "content",
+    kind: snapshot.readiness?.ready ? "ready" : "warning",
+    label: snapshot.readiness?.ready ? "系统已就绪" : "系统未完全就绪",
+    message: "连接、健康、就绪、安全配置和任务调度事实均已更新。",
+  });
+}
+
+export function createDiagnosticsRequestGate() {
+  let lifecycle = 0;
+  let sequence = 0;
+  let applied = 0;
+  return Object.freeze({
+    beginCycle() {
+      return Object.freeze({ lifecycle, sequence: ++sequence });
+    },
+    isCycleCurrent(ticket) {
+      const current = ticket?.lifecycle === lifecycle && ticket?.sequence === sequence && ticket.sequence >= applied;
+      if (current) applied = ticket.sequence;
+      return current;
+    },
+    advanceLifecycle() {
+      lifecycle += 1;
+      sequence += 1;
+    },
+  });
 }
 
 export function diagnosticsCopyText(snapshot) {
