@@ -68,6 +68,26 @@ function boundedInteger(value, minimum, maximum, fallback = minimum) {
   return Number.isInteger(number) && number >= minimum && number <= maximum ? number : fallback;
 }
 
+function validationResult(field = "", reason = "") {
+  return Object.freeze({ valid: !reason, reason, field });
+}
+
+function validProxyMode(value, { inherit = false } = {}) {
+  return (inherit && value === "") || PROXY_MODES.has(value);
+}
+
+function validateSourceOptions(value, selectedSites = [...SITE_IDS]) {
+  if (!isRecord(value)) return validationResult();
+  for (const site of selectedSites) {
+    const option = value[site];
+    if (option === undefined) continue;
+    if (!isRecord(option) || !validProxyMode(option.proxy_mode, { inherit: false })) {
+      return validationResult(`source-${site}`, "来源代理设置无效");
+    }
+  }
+  return validationResult();
+}
+
 function safeIdentifier(value, maximum = 128) {
   const text = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
   return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(text) && text.length <= maximum ? text : "";
@@ -422,7 +442,10 @@ export function deriveCrawlSearchPresentation({ snapshot, phase = "initial" }) {
   return Object.freeze({ state, hasResults, partialSourceCount, failedSourceCount });
 }
 
-export function deriveCrawlSubmitPresentation(snapshot, { busy = "", invalidReason = "" } = {}) {
+export function deriveCrawlSubmitPresentation(
+  snapshot,
+  { busy = "", staleReason = "", invalidReason = "" } = {},
+) {
   validateCrawlSnapshot(snapshot);
   const selectedSources = snapshot.sources.filter((source) =>
     source.addresses.some((candidate) => candidate.selected));
@@ -436,14 +459,138 @@ export function deriveCrawlSubmitPresentation(snapshot, { busy = "", invalidReas
   if (busy) {
     state = "busy";
     reason = busy === "crawl" ? "批次正在创建，请勿重复提交。" : "搜索进行中，请等待完成。";
+  } else if (staleReason) {
+    state = "stale";
+    reason = safeText(staleReason, "操作地址已安全清理，需要重新搜索。", 180);
   } else if (invalidReason) {
     state = "invalid";
-    reason = String(invalidReason).slice(0, 180);
+    reason = safeText(invalidReason, "批次设置无效，请修正标记项。", 180);
   } else if (!selectedAddressCount) {
     state = "disabled";
     reason = "请先选择至少一个候选地址。";
   }
   return Object.freeze({ state, selectedSourceCount, selectedAddressCount, reason });
+}
+
+export function validateSearchDraft({ keyword, sites, limit, proxyMode, sourceOptions = {} } = {}) {
+  const text = typeof keyword === "string" ? keyword.trim() : "";
+  if (!text || text.length > 1_000 || /[\u0000-\u001f\u007f]/.test(text)) {
+    return validationResult("keyword", "请输入长度不超过 1000 的有效关键词");
+  }
+  const requested = Array.isArray(sites) ? sites : [];
+  const orderedSites = SITE_DEFINITIONS.map((item) => item.id).filter((site) => requested.includes(site));
+  if (!orderedSites.length) return validationResult("sites", "至少选择一个搜索来源");
+  if (!Number.isInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > CRAWL_PAGE_LIMITS.search) {
+    return validationResult("search-limit", "结果上限需为 1–200 的整数");
+  }
+  if (!validProxyMode(proxyMode)) return validationResult("search-proxy", "搜索代理模式无效");
+  return validateSourceOptions(sourceOptions, orderedSites);
+}
+
+export function validateCrawlDraft({
+  concurrency,
+  maxTasks,
+  proxyMode,
+  outputDir = "",
+  outputDirInvalid = false,
+  sourceOptions = {},
+  ehDownload = { image_mode: "original", gp_policy: "stop" },
+} = {}) {
+  if (!Number.isInteger(Number(concurrency)) || Number(concurrency) < 1 || Number(concurrency) > 128) {
+    return validationResult("concurrency", "每个地址并发数需为 1–128 的整数");
+  }
+  if (!Number.isInteger(Number(maxTasks)) || Number(maxTasks) < 1 || Number(maxTasks) > CRAWL_PAGE_LIMITS.tasks) {
+    return validationResult("max-tasks", "最多任务数需为 1–100000 的整数");
+  }
+  if (!validProxyMode(proxyMode)) return validationResult("crawl-proxy", "下载代理模式无效");
+  const sourceValidation = validateSourceOptions(sourceOptions);
+  if (!sourceValidation.valid) return sourceValidation;
+  const rawOutput = typeof outputDir === "string" ? outputDir : "";
+  const output = rawOutput.trim();
+  if (outputDirInvalid || output.length > 2_048 || /[\u0000-\u001f\u007f]/.test(rawOutput)) {
+    return validationResult("output-dir", "输出目录格式无效");
+  }
+  const imageMode = ehDownload?.image_mode;
+  const gpPolicy = ehDownload?.gp_policy;
+  if (!["original", "resample"].includes(imageMode)) {
+    return validationResult("eh-image-mode", "EH 下载图像模式无效");
+  }
+  if (!["stop", "resized"].includes(gpPolicy) || (imageMode === "resample" && gpPolicy !== "stop")) {
+    return validationResult("eh-gp-policy", "EH 下载选项无效");
+  }
+  return validationResult();
+}
+
+function effectiveProxyModes(sourceDrafts, globalMode) {
+  const modes = [];
+  for (const source of Array.isArray(sourceDrafts) ? sourceDrafts : []) {
+    if (!source?.enabled || !SITE_IDS.has(source.site)) continue;
+    const mode = source.proxyMode || globalMode;
+    if (PROXY_MODES.has(mode)) modes.push(mode);
+  }
+  return modes;
+}
+
+export function deriveCrawlPreconditions({
+  readinessProxy = null,
+  authBySite = new Map(),
+  crawlSources = [],
+  sourceDrafts = [],
+  searchProxyMode = "required",
+  crawlProxyMode = "required",
+} = {}) {
+  const searchModes = effectiveProxyModes(sourceDrafts, searchProxyMode);
+  const selectedSites = new Set(
+    (Array.isArray(crawlSources) ? crawlSources : [])
+      .filter((source) => source?.addresses?.some((candidate) => candidate.selected))
+      .map((source) => source.site),
+  );
+  const crawlModes = (Array.isArray(sourceDrafts) ? sourceDrafts : [])
+    .filter((source) => source?.enabled && (!selectedSites.size || selectedSites.has(source.site)))
+    .map((source) => source.proxyMode || crawlProxyMode)
+    .filter((mode) => PROXY_MODES.has(mode));
+  const modes = [...searchModes, ...crawlModes];
+  const requiresProxy = modes.includes("required");
+  const prefersProxy = modes.includes("prefer");
+  let proxy = null;
+  if ((requiresProxy || prefersProxy) && (!readinessProxy || readinessProxy.status !== "ok" || !readinessProxy.running)) {
+    const state = !readinessProxy
+      ? "unknown"
+      : readinessProxy.status === "disabled"
+        ? "disabled"
+        : readinessProxy.status === "error"
+          ? "error"
+          : "stopped";
+    const requiredLabels = {
+      unknown: "代理状态未知，当前仅代理模式可能不可用",
+      disabled: "代理已禁用，当前仅代理模式不可用",
+      error: "代理状态异常，当前仅代理模式不可用",
+      stopped: "代理尚未运行，当前仅代理模式不可用",
+    };
+    const preferLabels = {
+      unknown: "代理状态未知，优先代理模式将尝试直连回退",
+      disabled: "代理已禁用，优先代理模式将使用直连回退",
+      error: "代理状态异常，优先代理模式将尝试直连回退",
+      stopped: "代理尚未运行，优先代理模式将尝试直连回退",
+    };
+    proxy = Object.freeze({
+      severity: requiresProxy ? "required" : "prefer",
+      state,
+      label: (requiresProxy ? requiredLabels : preferLabels)[state],
+      action: "open-proxy",
+    });
+  }
+
+  const authSites = [];
+  for (const site of ["twitter", "pixiv", "exhentai"]) {
+    const sourceAuth = (Array.isArray(crawlSources) ? crawlSources : []).find((source) => source.site === site)?.auth;
+    const vaultAuth = authBySite instanceof Map ? authBySite.get(site) : null;
+    const needsAuthorization = sourceAuth?.known
+      ? !sourceAuth.authorized && sourceAuth.state === "required"
+      : Boolean(vaultAuth && !vaultAuth.authorized);
+    if (needsAuthorization) authSites.push(site);
+  }
+  return Object.freeze({ proxy, authSites: Object.freeze(authSites) });
 }
 
 function strictProxyMode(value, fallback = "required") {
@@ -463,17 +610,15 @@ function strictSourceOptions(value, selectedSites) {
 }
 
 export function buildSearchPayload({ keyword, sites, limit, proxyMode, sourceOptions = {} }) {
-  const text = typeof keyword === "string" ? keyword.trim() : "";
-  if (!text || text.length > 1_000 || /[\u0000-\u001f\u007f]/.test(text)) {
-    throw new TypeError("请输入长度不超过 1000 的有效关键词");
-  }
-  const requested = Array.isArray(sites) ? sites : [];
-  const orderedSites = SITE_DEFINITIONS.map((item) => item.id).filter((site) => requested.includes(site));
-  if (!orderedSites.length) throw new TypeError("至少选择一个搜索来源");
+  const draft = { keyword, sites, limit, proxyMode, sourceOptions };
+  const validation = validateSearchDraft(draft);
+  if (!validation.valid) throw new TypeError(validation.reason);
+  const text = keyword.trim();
+  const orderedSites = SITE_DEFINITIONS.map((item) => item.id).filter((site) => sites.includes(site));
   return {
     keyword: text,
     sites: orderedSites,
-    limit: boundedInteger(limit, 1, 200, 0) || (() => { throw new TypeError("结果上限需为 1–200 的整数"); })(),
+    limit: Number(limit),
     proxy_mode: strictProxyMode(proxyMode),
     source_options: strictSourceOptions(sourceOptions, orderedSites),
   };
@@ -495,11 +640,22 @@ export function buildCrawlPayload({
   maxTasks,
   proxyMode,
   outputDir = "",
+  outputDirInvalid = false,
   sourceOptions = {},
   ehDownload = { image_mode: "original", gp_policy: "stop" },
 }) {
   validateCrawlSnapshot(snapshot);
   if (!(operations instanceof Map)) throw new TypeError("抓取地址映射无效");
+  const validation = validateCrawlDraft({
+    concurrency,
+    maxTasks,
+    proxyMode,
+    outputDir,
+    outputDirInvalid,
+    sourceOptions,
+    ehDownload,
+  });
+  if (!validation.valid) throw new TypeError(validation.reason);
   const selectedSources = [];
   for (const source of snapshot.sources) {
     const addresses = [];
@@ -537,8 +693,8 @@ export function buildCrawlPayload({
   if (!selectedSources.length) throw new TypeError("至少选择一个采集来源");
   const payload = {
     sources: selectedSources,
-    concurrency: boundedInteger(concurrency, 1, 128, 0) || (() => { throw new TypeError("每个地址并发数需为 1–128 的整数"); })(),
-    max_tasks: boundedInteger(maxTasks, 1, 100_000, 0) || (() => { throw new TypeError("最多任务数需为 1–100000 的整数"); })(),
+    concurrency: Number(concurrency),
+    max_tasks: Number(maxTasks),
     proxy_mode: strictProxyMode(proxyMode),
   };
   const output = strictOutputDir(outputDir);

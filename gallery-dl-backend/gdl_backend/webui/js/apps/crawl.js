@@ -93,12 +93,17 @@ export function createCrawlController(context, {
 
   const runSearch = async () => {
     if (!active || destroyed || busy) return false;
+    const validation = view.validateSearchDraft();
+    if (!validation.valid) {
+      view.refreshValidation("search", { announce: true });
+      view.setOperationMessage(validation.reason);
+      return false;
+    }
     let payload;
     try {
       payload = buildSearchPayload(view.readSearchDraft());
     } catch (error) {
-      showError({ code: "invalid_search", status: 422, message: error.message });
-      view.setSearchState(store.getState().crawl.sources.length ? "error" : "initial");
+      view.refreshValidation("search", { announce: true });
       view.setOperationMessage("请修正标记项后再搜索。");
       return false;
     }
@@ -123,6 +128,7 @@ export function createCrawlController(context, {
           operation !== operationSequence) return false;
       const projection = projectCrawlSearchResponse(response);
       addressOperations = projection.operations;
+      view.setOperationalAvailability(true);
       store.dispatch(actionCreators.crawlSearchReceived(response));
       view.normalizeActiveSource();
       view.clearError();
@@ -150,15 +156,27 @@ export function createCrawlController(context, {
 
   const createBatch = async () => {
     if (!active || destroyed || busy) return false;
+    const snapshot = store.getState().crawl;
+    if (snapshot.sources.length && addressOperations.size === 0) {
+      view.setOperationalAvailability(false);
+      view.setOperationMessage("操作地址已安全清理，需要重新搜索后才能创建批次。");
+      return false;
+    }
+    const validation = view.validateCrawlDraft();
+    if (!validation.valid) {
+      view.refreshValidation("crawl", { announce: true });
+      view.setOperationMessage(validation.reason);
+      return false;
+    }
     let payload;
     try {
       payload = buildCrawlPayload({
-        snapshot: store.getState().crawl,
+        snapshot,
         operations: addressOperations,
         ...view.readCrawlDraft(),
       });
     } catch (error) {
-      showError({ code: "invalid_crawl", status: 422, message: error.message });
+      view.refreshValidation("crawl", { announce: true });
       view.setOperationMessage("请修正标记项后再创建批次。");
       return false;
     }
@@ -238,7 +256,7 @@ export function createCrawlController(context, {
     }
     if (action === "clear-source-selection") {
       store.dispatch(actionCreators.crawlVisibleSelectionChanged(
-        view.visibleCandidateKeys(),
+        view.sourceCandidateKeys(view.activeSourceKey()),
         false,
       ));
       return;
@@ -296,7 +314,13 @@ export function createCrawlController(context, {
       store.dispatch(actionCreators.crawlWeakVisibilityChanged(target.checked));
       return;
     }
-    if (target instanceof HTMLSelectElement && ["search-proxy", "crawl-proxy"].includes(target.name)) {
+    if (
+      (target instanceof HTMLSelectElement && (
+        ["search-proxy", "crawl-proxy"].includes(target.name)
+        || target.name.startsWith("source-")
+      ))
+      || (target instanceof HTMLInputElement && target.name === "crawl-site")
+    ) {
       view.renderPreconditions();
     }
     if (target instanceof HTMLInputElement && target.name === "eh-image-mode") {
@@ -304,12 +328,34 @@ export function createCrawlController(context, {
       view.elements.gpPolicy.disabled = resample;
       if (resample) view.elements.gpPolicy.value = "stop";
     }
+    if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
+      view.refreshValidation("all");
+    }
+  };
+
+  const onBeforeInput = (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.name !== "output-dir") return;
+    const data = typeof event.data === "string" ? event.data : "";
+    if (/[\u0000-\u001f\u007f]/.test(data)) target.dataset.crawlControlInvalid = "true";
   };
 
   const onInput = (event) => {
     const target = event.target;
     if (target === view.elements.keyword) requestAutocomplete();
     if (target === view.elements.ehTagQuery) view.setEhQuery(target.value);
+    if (target instanceof HTMLInputElement && target.name === "output-dir" && !event.isTrusted) {
+      if (/[\u0000-\u001f\u007f]/.test(target.value)) target.dataset.crawlControlInvalid = "true";
+    }
+    if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
+      view.refreshValidation("all");
+    }
+  };
+
+  const onInvalid = (event) => {
+    if (!(event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement)) return;
+    event.preventDefault();
+    view.handleInvalid(event.target);
   };
 
   const onFocusOut = (event) => {
@@ -369,7 +415,9 @@ export function createCrawlController(context, {
   root.addEventListener("pointerdown", onPointerDown);
   root.addEventListener("click", onClick);
   root.addEventListener("change", onChange);
+  root.addEventListener("beforeinput", onBeforeInput);
   root.addEventListener("input", onInput);
+  root.addEventListener("invalid", onInvalid, true);
   root.addEventListener("focusout", onFocusOut);
   root.addEventListener("keydown", onKeyDown);
 
@@ -381,7 +429,11 @@ export function createCrawlController(context, {
       root.hidden = false;
       setElementInert(root, false);
       root.dataset.lifecycle = "active";
+      view.setOperationalAvailability(
+        store.getState().crawl.sources.length === 0 || addressOperations.size > 0,
+      );
       view.renderPreconditions();
+      view.refreshValidation("all");
       view.normalizeActiveSource();
       view.setSearchState(store.getState().crawl.sources.length ? "settled" : "initial");
       view.setOperationMessage(store.getState().crawl.sources.length
@@ -419,7 +471,9 @@ export function createCrawlController(context, {
       root.removeEventListener("pointerdown", onPointerDown);
       root.removeEventListener("click", onClick);
       root.removeEventListener("change", onChange);
+      root.removeEventListener("beforeinput", onBeforeInput);
       root.removeEventListener("input", onInput);
+      root.removeEventListener("invalid", onInvalid, true);
       root.removeEventListener("focusout", onFocusOut);
       root.removeEventListener("keydown", onKeyDown);
       view.destroy();
