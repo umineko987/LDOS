@@ -735,6 +735,45 @@ test("Diagnostics controller：deactivate/destroy abort 且旧 Promise.all cycle
   }
 });
 
+test("Diagnostics controller：deactivate 后立即 re-activate 时旧 cycle cleanup 不清除新 cycle gate", async () => {
+  const restoreDom = installDiagnosticsDom();
+  try {
+    const first = new Map(Object.values(DIAGNOSTICS_ENDPOINTS).map((endpoint) => [endpoint, deferred()]));
+    const second = new Map(Object.values(DIAGNOSTICS_ENDPOINTS).map((endpoint) => [endpoint, deferred()]));
+    let generation = 0;
+    const harness = controllerHarness({ apiGet: (url) => (generation === 0 ? first : second).get(url).promise });
+    harness.controller.activate();
+    const oldCycle = harness.polling.trigger("diagnostics.snapshot");
+    await flush();
+    harness.controller.deactivate();
+
+    generation = 1;
+    harness.controller.activate();
+    const poll = harness.polling.entries.get("diagnostics.snapshot");
+    const newCycle = poll.task(new AbortController().signal);
+    await flush();
+    assert.equal(harness.calls.length, 8);
+    second.get(DIAGNOSTICS_ENDPOINTS.health).resolve(rawHealth({ ok: false }));
+    second.get(DIAGNOSTICS_ENDPOINTS.readiness).resolve(rawReadiness());
+    second.get(DIAGNOSTICS_ENDPOINTS.config).resolve(rawConfig());
+    second.get(DIAGNOSTICS_ENDPOINTS.scheduler).resolve(rawScheduler());
+    await newCycle;
+    const committed = harness.store.getState().diagnostics.snapshot;
+    assert.equal(committed.health.ok, false);
+
+    first.get(DIAGNOSTICS_ENDPOINTS.health).resolve(rawHealth({ ok: true }));
+    first.get(DIAGNOSTICS_ENDPOINTS.readiness).resolve(rawReadiness());
+    first.get(DIAGNOSTICS_ENDPOINTS.config).resolve(rawConfig());
+    first.get(DIAGNOSTICS_ENDPOINTS.scheduler).resolve(rawScheduler());
+    await oldCycle;
+    await flush();
+    assert.equal(harness.store.getState().diagnostics.snapshot, committed);
+    harness.controller.destroy();
+  } finally {
+    restoreDom();
+  }
+});
+
 test("Diagnostics controller：非 2xx 安全响应体仍投影 health/ready，错误元数据保持安全", async () => {
   const restoreDom = installDiagnosticsDom();
   try {

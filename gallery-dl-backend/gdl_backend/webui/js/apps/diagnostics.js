@@ -129,9 +129,14 @@ export function createDiagnosticsController(context, {
       } finally {
         unlink();
         if (cycleController === controller) cycleController = null;
-        if (activeCyclePromise === promise) activeCyclePromise = null;
-        refreshing = false;
-        if (active && requestGate.isCycleCurrent(ticket)) setPresentation({ forceRefreshing: false });
+        const currentPromise = activeCyclePromise === promise;
+        if (currentPromise) {
+          activeCyclePromise = null;
+          refreshing = false;
+        }
+        if (currentPromise && active && requestGate.isCycleCurrent(ticket)) {
+          setPresentation({ forceRefreshing: false });
+        }
       }
     })();
     activeCyclePromise = promise;
@@ -217,6 +222,7 @@ export function createDiagnosticsController(context, {
       polling.stop(DIAGNOSTICS_POLL_KEY);
       cycleController?.abort();
       cycleController = null;
+      activeCyclePromise = null;
       view.setBusy(false);
       root.hidden = true;
       setElementInert(root, true);
@@ -232,6 +238,7 @@ export function createDiagnosticsController(context, {
       polling.stop(DIAGNOSTICS_POLL_KEY);
       cycleController?.abort();
       cycleController = null;
+      activeCyclePromise = null;
       root.removeEventListener("click", onClick);
       view.destroy();
       root.removeAttribute("data-lifecycle");
