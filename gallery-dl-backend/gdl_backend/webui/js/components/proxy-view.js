@@ -1,6 +1,7 @@
 import { createElement } from "../core/dom.js";
 import {
   deriveProxyControls,
+  deriveProxyWorkspacePresentation,
   formatInlineNodeSource,
   formatProxyStatus,
   formatRevisionPair,
@@ -8,6 +9,7 @@ import {
   formatSubscriptionSource,
   PROXY_NODE_RENDER_LIMIT,
   proxyErrorGuidance,
+  proxyInputValidationMessage,
 } from "../core/proxy-model.js";
 import { selectors } from "../core/store.js";
 import { createEmptyState } from "./empty-state.js";
@@ -26,7 +28,33 @@ export function createProxyView(context) {
   const { root, store } = context;
   const elements = buildProxyDom(context);
   let busy = "";
+  let workspacePhase = "idle";
   let renderedError = null;
+
+  const proxyFocusToken = () => {
+    const target = document.activeElement;
+    if (!(target instanceof HTMLElement) || !root.contains(target)) return null;
+    const card = target.closest("[data-source-id]");
+    return Object.freeze({
+      action: target.dataset.proxyAction || "",
+      form: target.closest("form")?.dataset.proxyForm || "",
+      sourceId: card?.dataset.sourceId || target.closest("form")?.dataset.sourceId || "",
+      secret: target.hasAttribute("data-proxy-secret"),
+    });
+  };
+
+  const restoreProxyFocus = (token) => {
+    if (!token) return;
+    const candidates = [...root.querySelectorAll("button, input, textarea, [tabindex]")];
+    const target = candidates.find((element) => !element.disabled && (
+      (token.action && element.dataset.proxyAction === token.action &&
+        (!token.sourceId || element.closest("[data-source-id]")?.dataset.sourceId === token.sourceId)) ||
+      (!token.secret && token.form && element.closest("form")?.dataset.proxyForm === token.form &&
+        (!token.sourceId || element.closest("form")?.dataset.sourceId === token.sourceId))
+    )) || candidates.find((element) => !element.disabled && element.dataset.proxyAction === "refresh") ||
+      elements.workspace;
+    target?.focus({ preventScroll: true });
+  };
 
   const currentStatus = () => store.getState().proxy.status;
   const currentSources = () => store.getState().proxy.sources;
@@ -71,23 +99,17 @@ export function createProxyView(context) {
   };
 
   const renderWaiting = () => {
-    const status = currentStatus();
-    const sources = currentSources();
-    const waiting = Boolean(status?.reload_required || sources?.reload_required);
+    const presentation = deriveProxyWorkspacePresentation({
+      status: currentStatus(),
+      sources: currentSources(),
+      phase: workspacePhase,
+    });
     elements.waitingHost.replaceChildren(
-      createStatusBadge(
-        waiting ? "warning" : sources ? "ready" : "disabled",
-        waiting ? "有配置待应用" : sources ? "配置已生效" : "正在加载节点来源",
-      ),
-      createElement("p", {
-        text: waiting
-          ? "节点来源已保存；点击“应用并重新加载”后生效。"
-          : sources
-            ? "保存节点来源不会自动启停或检测代理池。"
-            : "正在读取已保存和当前运行的配置版本。",
-      }),
+      createStatusBadge(presentation.kind, presentation.label),
+      createElement("p", { text: presentation.message }),
     );
-    elements.waitingHost.dataset.waiting = String(waiting);
+    elements.waitingHost.dataset.proxyWorkspaceState = presentation.state;
+    updateStatusBadge(elements.headerBadge, presentation.kind, presentation.label);
   };
 
   const renderRevisions = () => {
@@ -264,7 +286,13 @@ export function createProxyView(context) {
   ]);
 
   const renderSubscriptions = (sources) => {
+    const focusToken = proxyFocusToken();
+    const preserveSecretDraft = Boolean(focusToken?.secret && focusToken.form.startsWith("subscription"));
     const items = sources?.subscriptions || [];
+    if (preserveSecretDraft) {
+      elements.subscriptionCount.textContent = sources ? `${sources.counts.subscriptions} 项` : "待加载";
+      return;
+    }
     elements.subscriptionCount.textContent = sources ? `${sources.counts.subscriptions} 项` : "待加载";
     if (!sources || !items.length) {
       elements.subscriptionHost.replaceChildren(createEmptyState({
@@ -272,6 +300,7 @@ export function createProxyView(context) {
         title: sources ? "尚未配置订阅地址" : "订阅列表正在加载",
         message: "添加时请输入完整地址；保存后仅显示隐藏敏感信息的地址。",
       }));
+      restoreProxyFocus(focusToken);
       return;
     }
     const fragment = document.createDocumentFragment();
@@ -303,6 +332,7 @@ export function createProxyView(context) {
       ]));
     });
     elements.subscriptionHost.replaceChildren(fragment);
+    restoreProxyFocus(focusToken);
   };
 
   const renderNodeFile = (sources) => {
@@ -330,7 +360,13 @@ export function createProxyView(context) {
   };
 
   const renderInlineNodes = (sources) => {
+    const focusToken = proxyFocusToken();
+    const preserveSecretDraft = Boolean(focusToken?.secret && focusToken.form.startsWith("inline"));
     const items = sources?.inline_nodes || [];
+    if (preserveSecretDraft) {
+      elements.inlineCount.textContent = sources ? `${sources.counts.inline_nodes} 项` : "待加载";
+      return;
+    }
     elements.inlineCount.textContent = sources ? `${sources.counts.inline_nodes} 项` : "待加载";
     if (!sources || !items.length) {
       elements.inlineHost.replaceChildren(createEmptyState({
@@ -338,6 +374,7 @@ export function createProxyView(context) {
         title: sources ? "尚未配置手动节点" : "手动节点列表正在加载",
         message: "可一次粘贴多行；保存后仅显示协议、主机和隐藏敏感信息后的地址。",
       }));
+      restoreProxyFocus(focusToken);
       return;
     }
     const fragment = document.createDocumentFragment();
@@ -369,6 +406,7 @@ export function createProxyView(context) {
       ]));
     });
     elements.inlineHost.replaceChildren(fragment);
+    restoreProxyFocus(focusToken);
   };
 
   const renderSourceControls = () => {
@@ -458,6 +496,27 @@ export function createProxyView(context) {
     clearError,
     showError,
     setOperationMessage,
+    setWorkspacePhase(phase) {
+      workspacePhase = phase;
+      renderWaiting();
+    },
+    setInputValidation(input, result) {
+      if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) return;
+      const message = proxyInputValidationMessage(result);
+      input.setCustomValidity(message);
+      input.setAttribute("aria-invalid", String(Boolean(message)));
+      const validation = input.closest("form")?.querySelector("[data-proxy-validation]");
+      if (validation) validation.textContent = message;
+    },
+    clearInputValidation(scope = root) {
+      for (const input of scope.querySelectorAll("[data-proxy-secret]")) {
+        if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) continue;
+        input.setCustomValidity("");
+        input.setAttribute("aria-invalid", "false");
+        const validation = input.closest("form")?.querySelector("[data-proxy-validation]");
+        if (validation) validation.textContent = "";
+      }
+    },
     setBusy(kind) {
       busy = kind;
       renderAllControls();

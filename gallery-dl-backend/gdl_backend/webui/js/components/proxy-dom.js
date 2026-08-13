@@ -81,8 +81,13 @@ function createSourceForm({ kind, label, help, inputTag = "input", inputAttribut
   const helpId = `proxy-${kind}-help`;
   const input = secretControl(inputTag, {
     id: inputId,
-    "aria-describedby": `${helpId} proxy-error-host`,
+    "aria-describedby": `${helpId} ${inputId}-validation proxy-error-host`,
     ...inputAttributes,
+  });
+  const validation = createElement("p", {
+    className: "proxy-field-validation",
+    attributes: { id: `${inputId}-validation`, role: "status", "aria-live": "polite" },
+    dataset: { proxyValidation: "" },
   });
   const submit = sourceActionButton(kind, submitLabel, "正在保存…");
   submit.type = "submit";
@@ -95,9 +100,10 @@ function createSourceForm({ kind, label, help, inputTag = "input", inputAttribut
     createElement("label", { text: label, attributes: { for: inputId } }),
     input,
     helpText(helpId, help),
+    validation,
     createElement("div", { className: "proxy-form-actions" }, [submit]),
   ]);
-  return { form, input, submit };
+  return { form, input, submit, validation };
 }
 
 export function buildProxyDom(context) {
@@ -113,7 +119,11 @@ export function buildProxyDom(context) {
     className: "proxy-error-host",
     attributes: { id: "proxy-error-host", "aria-live": "assertive" },
   });
-  const waitingHost = createElement("div", { className: "proxy-waiting-host" });
+  const waitingHost = createElement("div", {
+    className: "proxy-waiting-host",
+    attributes: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
+    dataset: { proxyWorkspaceState: "loading" },
+  });
 
   const runtimeButtons = {
     start: operationButton("start", "启动代理池", "正在启动…"),
@@ -137,26 +147,48 @@ export function buildProxyDom(context) {
   const nodeCount = createElement("p", { className: "proxy-list-count", text: "节点待加载" });
   const nodeHost = createElement("div", { className: "proxy-node-grid" });
 
-  const runtimeSection = createElement("section", {
-    className: "proxy-panel proxy-runtime-panel",
+  const statusColumn = createElement("aside", {
+    className: "proxy-column proxy-column--status",
+    attributes: { "aria-labelledby": "proxy-status-heading" },
+  }, [
+    createElement("header", { className: "proxy-column-header" }, [
+      createElement("p", { className: "proxy-column-kicker", text: "01 · 状态" }),
+      createElement("h2", { text: "状态总览", attributes: { id: "proxy-status-heading" } }),
+      createElement("p", { text: "查看运行、健康、传输核心和配置版本关系。" }),
+    ]),
+    createElement("div", { className: "proxy-column-scroll" }, [
+      waitingHost,
+      errorHost,
+      metricsHost,
+      runtimeMetaHost,
+      transportHost,
+      revisionHost,
+    ]),
+  ]);
+
+  const runtimeColumn = createElement("main", {
+    className: "proxy-column proxy-column--runtime",
     attributes: { "aria-labelledby": "proxy-runtime-heading" },
   }, [
-    createElement("div", { className: "proxy-panel-heading" }, [
-      createElement("h2", { text: "代理池运行状态", attributes: { id: "proxy-runtime-heading" } }),
-      createElement("div", { className: "proxy-runtime-actions" }, Object.values(runtimeButtons)),
+    createElement("header", { className: "proxy-column-header" }, [
+      createElement("p", { className: "proxy-column-kicker", text: "02 · 运行池" }),
+      createElement("h2", { text: "运行池控制", attributes: { id: "proxy-runtime-heading" } }),
+      createElement("p", { text: "启动、停止、显式应用配置、探活，并检查节点事实。" }),
     ]),
-    controlReasons,
-    metricsHost,
-    createElement("div", { className: "proxy-runtime-details" }, [runtimeMetaHost, transportHost, revisionHost]),
-    createElement("section", {
-      className: "proxy-node-section",
-      attributes: { "aria-labelledby": "proxy-node-heading" },
-    }, [
-      createElement("div", { className: "proxy-subheading" }, [
-        createElement("h3", { text: "代理节点", attributes: { id: "proxy-node-heading" } }),
-        nodeCount,
+    createElement("div", { className: "proxy-column-scroll proxy-column-scroll--runtime" }, [
+      operationLive,
+      createElement("div", { className: "proxy-runtime-actions" }, Object.values(runtimeButtons)),
+      controlReasons,
+      createElement("section", {
+        className: "proxy-node-section",
+        attributes: { "aria-labelledby": "proxy-node-heading" },
+      }, [
+        createElement("div", { className: "proxy-subheading" }, [
+          createElement("h3", { text: "代理节点", attributes: { id: "proxy-node-heading" } }),
+          nodeCount,
+        ]),
+        nodeHost,
       ]),
-      nodeHost,
     ]),
   ]);
 
@@ -218,16 +250,18 @@ export function buildProxyDom(context) {
   });
   resetButton.setAttribute("aria-describedby", "proxy-reset-help");
 
-  const sourcesSection = createElement("section", {
-    className: "proxy-panel proxy-sources-panel",
+  const sourcesColumn = createElement("aside", {
+    className: "proxy-column proxy-column--sources",
     attributes: { "aria-labelledby": "proxy-sources-heading" },
   }, [
-    createElement("div", { className: "proxy-panel-heading" }, [
-      createElement("h2", { text: "节点来源", attributes: { id: "proxy-sources-heading" } }),
-      resetButton,
+    createElement("header", { className: "proxy-column-header" }, [
+      createElement("p", { className: "proxy-column-kicker", text: "03 · 来源" }),
+      createElement("h2", { text: "来源编辑", attributes: { id: "proxy-sources-heading" } }),
+      createElement("p", { text: "保存只更新配置草稿；显式应用后运行池才会改变。" }),
     ]),
-    sourceOverview,
-    sourceGuard,
+    createElement("div", { className: "proxy-column-scroll proxy-column-scroll--sources" }, [
+      sourceOverview,
+      sourceGuard,
     createElement("section", {
       className: "proxy-source-group",
       attributes: { "aria-labelledby": "proxy-subscriptions-heading" },
@@ -258,26 +292,36 @@ export function buildProxyDom(context) {
       inlineHost,
       inlineAdd.form,
     ]),
-    createElement("div", { className: "proxy-reset-copy" }, [resetHelp]),
+      createElement("section", { className: "proxy-danger-zone" }, [
+        createElement("h3", { text: "危险操作" }),
+        createElement("div", { className: "proxy-reset-copy" }, [resetHelp, resetButton]),
+      ]),
+    ]),
   ]);
+
+  const workspaceTrack = createElement("div", {
+    className: "proxy-workspace-track",
+  }, [statusColumn, runtimeColumn, sourcesColumn]);
+  const workspace = createElement("section", {
+    className: "proxy-workspace",
+    attributes: {
+      "aria-label": "代理管理三段工作区，可横向滚动查看状态总览、运行池控制和来源编辑",
+      tabindex: "0",
+    },
+    dataset: { proxyWorkspace: "" },
+  }, [workspaceTrack]);
 
   root.classList.add("app-view", "proxy-app");
   root.setAttribute("aria-labelledby", headingId);
   root.replaceChildren(
     createElement("header", { className: "app-header proxy-app-header" }, [
-      createElement("p", { className: "app-executable", text: app.windowTitle }),
-      createElement("h1", { text: app.label, attributes: { id: headingId } }),
+      createElement("div", {}, [
+        createElement("p", { className: "app-executable", text: app.windowTitle }),
+        createElement("h1", { text: app.label, attributes: { id: headingId } }),
+      ]),
       headerBadge,
-      createElement("p", {
-        className: "app-summary",
-        text: "查看代理池状态并管理节点来源。保存后需手动应用，运行中的代理池不会立即改变。",
-      }),
     ]),
-    waitingHost,
-    operationLive,
-    errorHost,
-    runtimeSection,
-    sourcesSection,
+    workspace,
   );
 
   return {
@@ -304,6 +348,8 @@ export function buildProxyDom(context) {
     inlineHost,
     inlineAdd,
     resetButton,
+    workspace,
+    workspaceTrack,
   };
 }
 
@@ -317,9 +363,14 @@ export function createReplaceForm(kind, sourceId, index, {
   const helpId = `${inputId}-help`;
   const input = secretControl(inputTag, {
     id: inputId,
-    "aria-describedby": `${helpId} proxy-error-host`,
+    "aria-describedby": `${helpId} ${inputId}-validation proxy-error-host`,
     required: "",
     ...inputAttributes,
+  });
+  const validation = createElement("p", {
+    className: "proxy-field-validation",
+    attributes: { id: `${inputId}-validation`, role: "status", "aria-live": "polite" },
+    dataset: { proxyValidation: "" },
   });
   const submit = sourceActionButton(kind, "保存替换", "正在保存…");
   submit.type = "submit";
@@ -333,7 +384,8 @@ export function createReplaceForm(kind, sourceId, index, {
     createElement("label", { text: label, attributes: { for: inputId } }),
     input,
     helpText(helpId, help),
+    validation,
     createElement("div", { className: "proxy-form-actions" }, [submit, cancel]),
   ]);
-  return { form, input };
+  return { form, input, validation };
 }

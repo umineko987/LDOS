@@ -6,6 +6,13 @@ const SOURCE_ID_PATTERNS = Object.freeze({
 const REVISION_PATTERN = /^[0-9a-f]{64}$/;
 const SAFE_TOKEN_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const SAFE_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]{0,23}$/;
+const SUBSCRIPTION_SCHEMES = new Set(["http", "https"]);
+const INLINE_NODE_SCHEMES = new Set([
+  "http", "https", "socks4", "socks5", "socks5h", "ss", "ssr",
+  "vless", "vmess", "trojan", "hysteria", "hysteria2", "hy2", "tuic",
+  "anytls", "mieru",
+]);
+const CONTROL_CHARACTER_TEST = /[\u0000-\u001f\u007f-\u009f]/;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]+/g;
 const URL_LIKE = /\bhttps?:\/\/[^\s]+/gi;
 const SENSITIVE_ASSIGNMENT = /\b(token|cookie|password|secret|authorization|uuid)\s*[:=]\s*[^\s,;]+/gi;
@@ -17,6 +24,7 @@ export const PROXY_STATUS_NODE_LIMIT = 500;
 export const PROXY_NODE_RENDER_LIMIT = 160;
 export const PROXY_SUBSCRIPTION_LIMIT = 128;
 export const PROXY_INLINE_NODE_LIMIT = 512;
+export const PROXY_STATUS_POLL_INTERVAL_MS = 10_000;
 
 function isRecord(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -394,6 +402,146 @@ export function formatInlineNodeSource(node) {
 export function splitInlineNodeInput(value) {
   if (typeof value !== "string") throw new TypeError("批量节点输入必须是字符串");
   return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function invalidInput(field, reason, index = null) {
+  return Object.freeze({ valid: false, field, reason, index });
+}
+
+function validInput(value) {
+  return Object.freeze({ valid: true, field: "", reason: "", index: null, value });
+}
+
+function validateSingleLine(value, field, maximum) {
+  if (typeof value !== "string") return invalidInput(field, "invalid_type");
+  const text = value.trim();
+  if (!text) return invalidInput(field, "empty");
+  if (text.length > maximum) return invalidInput(field, "too_long");
+  if (CONTROL_CHARACTER_TEST.test(text)) return invalidInput(field, "control_character");
+  return validInput(text);
+}
+
+export function validateSubscriptionInput(value) {
+  const base = validateSingleLine(value, "subscription", 4096);
+  if (!base.valid) return base;
+  try {
+    const parsed = new URL(base.value);
+    if (!SUBSCRIPTION_SCHEMES.has(parsed.protocol.slice(0, -1).toLowerCase())) {
+      return invalidInput("subscription", "unsupported_scheme");
+    }
+    if (!parsed.hostname) return invalidInput("subscription", "missing_host");
+  } catch {
+    return invalidInput("subscription", "malformed");
+  }
+  return base;
+}
+
+export function validateNodeFileInput(value) {
+  return validateSingleLine(value, "node_file", 4096);
+}
+
+export function validateInlineNodeInput(value, { multiple = false } = {}) {
+  if (typeof value !== "string") return invalidInput("inline_node", "invalid_type");
+  if (!value.trim()) return invalidInput("inline_node", "empty", multiple ? 0 : null);
+  if (value.length > 2 * 1024 * 1024) return invalidInput("inline_node", "total_too_large");
+  const rawLines = multiple ? value.split(/\r?\n/) : [value];
+  const nodes = [];
+  for (let index = 0; index < rawLines.length; index += 1) {
+    const text = rawLines[index].trim();
+    if (!text) continue;
+    if (text.length > 16 * 1024) return invalidInput("inline_node", "too_long", index);
+    if (CONTROL_CHARACTER_TEST.test(text)) {
+      return invalidInput("inline_node", "control_character", index);
+    }
+    const separator = text.indexOf(":");
+    const scheme = separator > 0 ? text.slice(0, separator).toLowerCase() : "";
+    if (!INLINE_NODE_SCHEMES.has(scheme)) {
+      return invalidInput("inline_node", "unsupported_scheme", index);
+    }
+    nodes.push(text);
+  }
+  if (!nodes.length) return invalidInput("inline_node", "empty", 0);
+  if (nodes.length > PROXY_INLINE_NODE_LIMIT) return invalidInput("inline_node", "too_many");
+  return validInput(multiple ? nodes : nodes[0]);
+}
+
+export function proxyInputValidationMessage(result) {
+  if (result?.valid) return "";
+  const line = Number.isInteger(result?.index) ? `第 ${result.index + 1} 行` : "当前字段";
+  const messages = {
+    empty: "不能为空",
+    too_long: "超过长度上限",
+    total_too_large: "总内容超过大小上限",
+    too_many: "节点数量超过上限",
+    control_character: "包含不允许的控制字符",
+    unsupported_scheme: "协议不受支持",
+    missing_host: "缺少主机名",
+    malformed: "格式无效",
+    invalid_type: "输入格式无效",
+  };
+  return `${line}：${messages[result?.reason] || "格式无效"}`;
+}
+
+export function deriveProxyWorkspacePresentation({ status = null, sources = null, phase = "idle" } = {}) {
+  if (phase === "writing") {
+    return Object.freeze({ state: "writing", kind: "running", label: "正在写入", message: "操作完成后将权威重读运行状态和节点来源。" });
+  }
+  if (phase === "error" && !status && !sources) {
+    return Object.freeze({ state: "error", kind: "error", label: "代理工作区读取失败", message: "未获得可显示的运行状态或节点来源。" });
+  }
+  if (!status && !sources) {
+    return Object.freeze({ state: "loading", kind: "running", label: "正在加载", message: "正在读取代理运行状态和节点来源。" });
+  }
+  if (!status || !sources || phase === "partial") {
+    return Object.freeze({ state: "partial", kind: "warning", label: "部分信息不可用", message: "保留已取得的安全事实；请刷新以补齐另一部分。" });
+  }
+  if (!status.enabled) {
+    return Object.freeze({ state: "disabled", kind: "disabled", label: "代理池已停用", message: "服务配置已停用代理池；节点来源仍可查看和保存。" });
+  }
+  if (status.reload_required || sources.reload_required) {
+    return Object.freeze({ state: "reload-required", kind: "warning", label: "有配置待应用", message: "节点来源已保存，但当前运行池尚未应用该版本。" });
+  }
+  if (status.running) {
+    return Object.freeze({ state: "running", kind: "running", label: "代理池运行中", message: "运行状态和节点来源均来自服务端权威读取。" });
+  }
+  return Object.freeze({ state: "stopped", kind: "warning", label: "代理池已停止", message: "节点来源已读取；可在运行池控制栏启动代理池。" });
+}
+
+export function createProxyRequestGate() {
+  let lifecycle = 0;
+  let write = 0;
+  let sequence = 0;
+  const applied = { status: 0, sources: 0 };
+  const normalizeKind = (kind) => {
+    if (kind !== "status" && kind !== "sources") throw new TypeError("代理读取类型无效");
+    return kind;
+  };
+  return Object.freeze({
+    beginRead(kind) {
+      const normalized = normalizeKind(kind);
+      return Object.freeze({ kind: normalized, lifecycle, write, sequence: ++sequence });
+    },
+    isReadCurrent(ticket) {
+      const kind = normalizeKind(ticket?.kind);
+      const current = ticket.lifecycle === lifecycle && ticket.write === write &&
+        ticket.sequence >= applied[kind];
+      if (current) applied[kind] = ticket.sequence;
+      return current;
+    },
+    beginWrite() {
+      write += 1;
+      return Object.freeze({ lifecycle, write });
+    },
+    isWriteCurrent(ticket) {
+      return ticket?.lifecycle === lifecycle && ticket?.write === write;
+    },
+    currentLifecycle() {
+      return lifecycle;
+    },
+    advanceLifecycle() {
+      lifecycle += 1;
+    },
+  });
 }
 
 function control(disabled, reason, label) {

@@ -1,6 +1,11 @@
 import { isAbortError } from "../core/api.js";
 import { setElementInert } from "../core/dom.js";
-import { splitInlineNodeInput } from "../core/proxy-model.js";
+import {
+  createProxyRequestGate,
+  validateInlineNodeInput,
+  validateNodeFileInput,
+  validateSubscriptionInput,
+} from "../core/proxy-model.js";
 import { actionCreators } from "../core/store.js";
 import { createProxyView } from "../components/proxy-view.js";
 
@@ -20,22 +25,20 @@ export const PROXY_ENDPOINTS = Object.freeze({
 const STATUS_POLL_KEY = "proxy.status";
 const STATUS_POLL_INTERVAL_MS = 10_000;
 
-function createProxyController(context) {
+export function createProxyController(context, {
+  createView = createProxyView,
+} = {}) {
   const { root, api, store, polling, dialogs } = context;
-  const view = createProxyView(context);
+  const view = createView(context);
+  if (!view || typeof view !== "object") throw new TypeError("代理视图无效");
+  const requestGate = createProxyRequestGate();
   let active = false;
   let destroyed = false;
   let busy = "";
-  let lifecycleVersion = 0;
-  let writeVersion = 0;
   let operationSequence = 0;
   let activeOperationController = null;
   let statusRead = null;
   let sourcesRead = null;
-  let statusSequence = 0;
-  let sourcesSequence = 0;
-  let appliedStatusSequence = 0;
-  let appliedSourcesSequence = 0;
 
   const currentStatus = () => store.getState().proxy.status;
   const currentSources = () => store.getState().proxy.sources;
@@ -66,18 +69,14 @@ function createProxyController(context) {
     }
     const controller = new AbortController();
     const unlink = linkSignal(externalSignal, controller);
-    const sequence = ++statusSequence;
-    const readLifecycle = lifecycleVersion;
-    const readWriteVersion = writeVersion;
+    const ticket = requestGate.beginRead("status");
     const promise = api.get(PROXY_ENDPOINTS.status, { signal: controller.signal })
       .then((payload) => {
         if (
           !active || destroyed || controller.signal.aborted ||
-          readLifecycle !== lifecycleVersion || readWriteVersion !== writeVersion ||
-          sequence < appliedStatusSequence
+          !requestGate.isReadCurrent(ticket)
         ) return false;
         store.dispatch(actionCreators.proxyStatusReceived(payload));
-        appliedStatusSequence = sequence;
         return true;
       })
       .catch((error) => {
@@ -107,18 +106,14 @@ function createProxyController(context) {
     }
     const controller = new AbortController();
     const unlink = linkSignal(externalSignal, controller);
-    const sequence = ++sourcesSequence;
-    const readLifecycle = lifecycleVersion;
-    const readWriteVersion = writeVersion;
+    const ticket = requestGate.beginRead("sources");
     const promise = api.get(PROXY_ENDPOINTS.sources, { signal: controller.signal })
       .then((payload) => {
         if (
           !active || destroyed || controller.signal.aborted ||
-          readLifecycle !== lifecycleVersion || readWriteVersion !== writeVersion ||
-          sequence < appliedSourcesSequence
+          !requestGate.isReadCurrent(ticket)
         ) return false;
         store.dispatch(actionCreators.proxySourcesReceived(payload));
-        appliedSourcesSequence = sequence;
         return true;
       })
       .catch((error) => {
@@ -139,7 +134,9 @@ function createProxyController(context) {
       readStatus(null, { replace: true, report }),
       readSources(null, { replace: true, report }),
     ]);
+    const fulfilled = outcomes.filter((outcome) => outcome.status === "fulfilled" && outcome.value).length;
     const rejection = outcomes.find((outcome) => outcome.status === "rejected");
+    view.setWorkspacePhase?.(rejection && fulfilled ? "partial" : rejection ? "error" : "idle");
     if (rejection) throw rejection.reason;
     return true;
   };
@@ -150,21 +147,23 @@ function createProxyController(context) {
   };
 
   const invalidateReadsForWrite = () => {
-    writeVersion += 1;
+    const ticket = requestGate.beginWrite();
     abortRead(statusRead);
     abortRead(sourcesRead);
+    return ticket;
   };
 
   const runOperation = async ({ kind, request, successMessage, writes = true }) => {
     if (!active || destroyed || busy) return false;
     const operation = ++operationSequence;
-    if (writes) invalidateReadsForWrite();
-    else {
+    const writeTicket = writes ? invalidateReadsForWrite() : null;
+    if (!writes) {
       abortRead(statusRead);
       abortRead(sourcesRead);
     }
     view.clearError();
     setBusy(kind);
+    view.setWorkspacePhase?.(writes ? "writing" : "loading");
     view.setOperationMessage(
       kind === "refresh" ? "正在刷新代理状态和节点来源……" : "正在执行代理操作，请勿重复提交……",
     );
@@ -172,10 +171,13 @@ function createProxyController(context) {
     activeOperationController = controller;
     try {
       if (request) await request(controller.signal);
-      if (!active || destroyed || controller.signal.aborted) return false;
+      if (!active || destroyed || controller.signal.aborted ||
+          (writeTicket && !requestGate.isWriteCurrent(writeTicket))) return false;
       await refreshBoth({ report: false });
-      if (!active || destroyed || controller.signal.aborted) return false;
+      if (!active || destroyed || controller.signal.aborted ||
+          (writeTicket && !requestGate.isWriteCurrent(writeTicket))) return false;
       view.clearError();
+      view.setWorkspacePhase?.("idle");
       view.setOperationMessage(successMessage);
       return true;
     } catch (error) {
@@ -186,6 +188,7 @@ function createProxyController(context) {
         // 保留原操作错误；刷新失败不能覆盖更有用的安全指引。
       }
       view.showError(error);
+      view.setWorkspacePhase?.(currentStatus() || currentSources() ? "partial" : "error");
       view.setOperationMessage("操作失败，当前列表已保留。请刷新后重试。");
       return false;
     } finally {
@@ -199,27 +202,20 @@ function createProxyController(context) {
     input,
     request,
     successMessage,
-    transform = (value) => value,
+    validate,
   }) => {
     let secret = input.value;
     let payload = null;
     let capturedPayload = null;
     input.value = "";
     try {
-      payload = transform(secret);
-      if (
-        (Array.isArray(payload) && !payload.length) ||
-        (!Array.isArray(payload) && !String(payload || "").trim())
-      ) {
-        view.showError({
-          code: kind === "inline-add" ? "invalid_proxy_inline_node" : "request_failed",
-          message: kind === "inline-add" ? "请至少输入一个非空节点" : "请输入完整的新值",
-          status: 422,
-          details: null,
-        });
-        view.setOperationMessage("请填写要保存的节点来源。");
+      const validation = validate(secret);
+      view.setInputValidation?.(input, validation);
+      if (!validation.valid) {
+        view.setOperationMessage("输入未通过本地校验；未发送请求，敏感输入已清空。");
         return false;
       }
+      payload = validation.value;
       capturedPayload = payload;
       secret = "";
       payload = null;
@@ -240,6 +236,7 @@ function createProxyController(context) {
       payload = null;
       capturedPayload = null;
       input.value = "";
+      view.clearInputValidation?.(input.closest("form") || input);
     }
   };
 
@@ -256,9 +253,16 @@ function createProxyController(context) {
   };
 
   const confirm = async (options) => {
+    const confirmLifecycle = requestGate.currentLifecycle();
     const choice = await dialogs.open(options);
+    if (!active || destroyed || requestGate.currentLifecycle() !== confirmLifecycle) {
+      view.clearSecretInputs();
+      view.clearInputValidation?.();
+      return false;
+    }
     if (choice !== "confirm") {
       view.clearSecretInputs();
+      view.clearInputValidation?.();
       view.setOperationMessage("已取消操作，敏感输入已清空。");
       return false;
     }
@@ -342,6 +346,7 @@ function createProxyController(context) {
     const form = card?.querySelector(".proxy-replace-form");
     if (!(form instanceof HTMLFormElement)) return;
     view.clearSecretInputs();
+    view.clearInputValidation?.();
     for (const other of root.querySelectorAll(".proxy-replace-form")) {
       if (other !== form) other.hidden = true;
     }
@@ -393,6 +398,7 @@ function createProxyController(context) {
       const form = button.closest("form");
       if (form) {
         view.clearSecretInputs(form);
+        view.clearInputValidation?.(form);
         form.hidden = true;
       }
       view.setOperationMessage("已取消替换，敏感输入已清空。");
@@ -419,6 +425,7 @@ function createProxyController(context) {
     const form = event.target;
     if (busy || !requireMutableSources()) {
       view.clearSecretInputs(form);
+      view.clearInputValidation?.(form);
       return;
     }
     const input = form.querySelector("[data-proxy-secret]");
@@ -429,8 +436,8 @@ function createProxyController(context) {
         kind,
         input,
         request: (url, signal) => api.post(PROXY_ENDPOINTS.subscriptions, { url }, { signal }),
-        successMessage: "订阅已保存；点击“应用并重新加载”后生效。",
-        transform: (value) => value.trim(),
+        successMessage: "订阅已保存；当前运行池尚未改变，点击“应用并重新加载”后生效。",
+        validate: validateSubscriptionInput,
       });
       return;
     }
@@ -444,8 +451,8 @@ function createProxyController(context) {
           { url },
           { signal },
         ),
-        successMessage: "订阅已更新；原地址不会重新显示，点击“应用并重新加载”后生效。",
-        transform: (value) => value.trim(),
+        successMessage: "订阅已更新；原地址不会重新显示，当前运行池尚未改变。",
+        validate: validateSubscriptionInput,
       });
       form.hidden = true;
       return;
@@ -455,8 +462,8 @@ function createProxyController(context) {
         kind,
         input,
         request: (path, signal) => api.put(PROXY_ENDPOINTS.nodeFile, { path }, { signal }),
-        successMessage: "节点文件已保存；点击“应用并重新加载”后生效。",
-        transform: (value) => value.trim(),
+        successMessage: "节点文件已保存；当前运行池尚未改变，点击“应用并重新加载”后生效。",
+        validate: validateNodeFileInput,
       });
       return;
     }
@@ -465,8 +472,8 @@ function createProxyController(context) {
         kind,
         input,
         request: (nodes, signal) => api.post(PROXY_ENDPOINTS.inlineNodes, { nodes }, { signal }),
-        successMessage: "手动节点已保存；完整节点信息已清空，点击“应用并重新加载”后生效。",
-        transform: splitInlineNodeInput,
+        successMessage: "手动节点已保存；完整节点信息已清空，当前运行池尚未改变。",
+        validate: (value) => validateInlineNodeInput(value, { multiple: true }),
       });
       return;
     }
@@ -480,21 +487,35 @@ function createProxyController(context) {
           { node },
           { signal },
         ),
-        successMessage: "手动节点已更新；原节点不会重新显示，点击“应用并重新加载”后生效。",
-        transform: (value) => value.trim(),
+        successMessage: "手动节点已更新；原节点不会重新显示，当前运行池尚未改变。",
+        validate: (value) => validateInlineNodeInput(value, { multiple: false }),
       });
       form.hidden = true;
     }
   };
 
+  const onInput = (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) ||
+        !input.hasAttribute("data-proxy-secret")) return;
+    const kind = input.closest("form")?.dataset.proxyForm || "";
+    const validation = kind.startsWith("subscription")
+      ? validateSubscriptionInput(input.value)
+      : kind === "node-file-set"
+        ? validateNodeFileInput(input.value)
+        : validateInlineNodeInput(input.value, { multiple: kind === "inline-add" });
+    view.setInputValidation?.(input, validation);
+  };
+
   root.addEventListener("click", onClick);
   root.addEventListener("submit", onSubmit);
+  root.addEventListener("input", onInput);
 
   return Object.freeze({
     activate() {
       if (destroyed || active) return;
       active = true;
-      lifecycleVersion += 1;
+      requestGate.advanceLifecycle();
       root.hidden = false;
       setElementInert(root, false);
       root.dataset.lifecycle = "active";
@@ -517,14 +538,16 @@ function createProxyController(context) {
     deactivate() {
       if (destroyed) return;
       active = false;
-      lifecycleVersion += 1;
+      requestGate.advanceLifecycle();
       operationSequence += 1;
       activeOperationController?.abort();
       activeOperationController = null;
       polling.stop(STATUS_POLL_KEY);
       abortRead(statusRead);
       abortRead(sourcesRead);
+      dialogs.destroy?.();
       view.clearSecretInputs();
+      view.clearInputValidation?.();
       busy = "";
       view.setBusy("");
       root.hidden = true;
@@ -536,15 +559,18 @@ function createProxyController(context) {
       if (destroyed) return;
       active = false;
       destroyed = true;
-      lifecycleVersion += 1;
+      requestGate.advanceLifecycle();
       operationSequence += 1;
       activeOperationController?.abort();
       polling.stop(STATUS_POLL_KEY);
       abortRead(statusRead);
       abortRead(sourcesRead);
+      dialogs.destroy?.();
       view.clearSecretInputs();
+      view.clearInputValidation?.();
       root.removeEventListener("click", onClick);
       root.removeEventListener("submit", onSubmit);
+      root.removeEventListener("input", onInput);
       view.destroy();
       root.removeAttribute("data-lifecycle");
     },
