@@ -670,6 +670,10 @@ test("4D DOM/CSS：panel/deck 全高比较舞台、固定 command/status 与细�
   assert.match(CSS_SOURCE, /\.review-app\[data-mode="panel"\][^\{]*\{[^}]*overflow-y:\s*auto/s);
   assert.match(CSS_SOURCE, /\.review-deck-stage\s*\{[^}]*min-height:\s*0[^}]*overflow:\s*hidden/s);
   assert.match(CSS_SOURCE, /\.review-deck-cards\s*\{[^}]*overflow:\s*auto/s);
+  assert.match(
+    CSS_SOURCE,
+    /\.review-image-media\s*>\s*img\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*0;[^}]*object-fit:\s*contain/s,
+  );
   assert.match(CSS_SOURCE, /--imageweave-surface-content-solid/);
   assert.match(CSS_SOURCE, /--imageweave-surface-navigation-solid/);
   assert.match(CSS_SOURCE, /forced-colors/);
