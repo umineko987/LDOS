@@ -1416,6 +1416,13 @@ test("4B target：Proxy 使用可聚焦三段工作区和独立滚动列", () =>
   assert.doesNotMatch([PROXY_APP_SOURCE, PROXY_MODEL_SOURCE, PROXY_VIEW_SOURCE, PROXY_DOM_SOURCE].join("\n"), /innerHTML/);
 });
 
+test("4B focus target：重绘后不聚焦隐藏替换表单，按同 source action 回退", () => {
+  assert.match(PROXY_VIEW_SOURCE, /closest\("\[hidden\]"\)/);
+  assert.match(PROXY_VIEW_SOURCE, /subscription-replace-open/);
+  assert.match(PROXY_VIEW_SOURCE, /inline-replace-open/);
+  assert.match(PROXY_VIEW_SOURCE, /elements\.workspace/);
+});
+
 test("4B static boundary：endpoint 集合固定且无旁路 I/O、storage、console、fixture 或秘密 DOM", () => {
   assert.deepEqual(PROXY_ENDPOINTS, {
     status: "/api/v1/proxy/status",

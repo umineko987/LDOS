@@ -46,12 +46,24 @@ export function createProxyView(context) {
   const restoreProxyFocus = (token) => {
     if (!token) return;
     const candidates = [...root.querySelectorAll("button, input, textarea, [tabindex]")];
-    const target = candidates.find((element) => !element.disabled && (
+    const available = (element) => !element.disabled && !element.closest("[hidden]");
+    let target = candidates.find((element) => available(element) && (
       (token.action && element.dataset.proxyAction === token.action &&
         (!token.sourceId || element.closest("[data-source-id]")?.dataset.sourceId === token.sourceId)) ||
       (!token.secret && token.form && element.closest("form")?.dataset.proxyForm === token.form &&
         (!token.sourceId || element.closest("form")?.dataset.sourceId === token.sourceId))
-    )) || candidates.find((element) => !element.disabled && element.dataset.proxyAction === "refresh") ||
+    ));
+    if (!target && token.sourceId) {
+      const fallbackAction = token.form.startsWith("subscription")
+        ? "subscription-replace-open"
+        : token.form.startsWith("inline")
+          ? "inline-replace-open"
+          : "";
+      target = candidates.find((element) => available(element) &&
+        element.dataset.proxyAction === fallbackAction &&
+        element.closest("[data-source-id]")?.dataset.sourceId === token.sourceId);
+    }
+    target ||= candidates.find((element) => available(element) && element.dataset.proxyAction === "refresh") ||
       elements.workspace;
     target?.focus({ preventScroll: true });
   };
