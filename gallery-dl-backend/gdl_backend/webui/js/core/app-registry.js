@@ -8,7 +8,7 @@ import diagnosticsApplication from "../apps/diagnostics.js";
 import personalizationApplication from "../apps/personalization.js";
 import galleryApplication from "../apps/gallery.js";
 import scheduleApplication from "../apps/schedule.js";
-import { createPlaceholderApplication } from "../apps/placeholder.js";
+import exportApplication from "../apps/export.js";
 import {
   applicationDefinitions,
   DEFAULT_APP_ID,
@@ -27,7 +27,7 @@ const controllers = [
   ["personalization", personalizationApplication],
   ["gallery", galleryApplication],
   ["schedule", scheduleApplication],
-  ["export", createPlaceholderApplication("将审核后的图片整理并导出为数据集。")],
+  ["export", exportApplication],
 ];
 
 const registry = createApplicationRegistry(applicationDefinitions, controllers);

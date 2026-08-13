@@ -1,0 +1,178 @@
+.window-body:has(> .export-app) { padding: 0; overflow: hidden; }
+
+.export-app {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-content-solid);
+}
+.export-app h1,
+.export-app h2,
+.export-app h3,
+.export-app p { margin-bottom: 0; overflow-wrap: anywhere; }
+.export-app h2,
+.export-app h3 { padding: 0; border: 0; }
+.export-app h2 { font-size: 1rem; }
+.export-app h3 { font-size: 0.9rem; }
+
+.export-app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 13px 18px 11px;
+  border-bottom: var(--imageweave-border-width) solid var(--imageweave-separator);
+  background: var(--imageweave-surface-content-solid);
+}
+.export-app-header h1 { font-size: 1.32rem; }
+.export-app-header .app-executable { margin: 0 0 2px; }
+
+.export-workspace {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+  background: var(--imageweave-surface-content-solid);
+}
+.export-workspace:focus-visible { outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring); outline-offset: calc(-1 * var(--imageweave-focus-width)); }
+.export-workspace-track {
+  display: grid;
+  grid-template-columns: minmax(350px, 1fr) minmax(410px, 1.15fr) minmax(340px, 0.96fr);
+  width: 100%;
+  min-width: 1100px;
+  height: 100%;
+  min-height: 100%;
+}
+
+.export-column {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: var(--imageweave-border-width) solid var(--imageweave-separator);
+  background: var(--imageweave-surface-content-solid);
+}
+.export-column:last-child { border-right: 0; }
+.export-column--sources { background: var(--imageweave-surface-navigation-solid); }
+.export-column-header { min-width: 0; padding: 13px 14px 11px; border-bottom: var(--imageweave-border-width) solid var(--imageweave-separator); background: inherit; }
+.export-column-header > p:last-child { margin-top: 4px; color: var(--imageweave-text-secondary); font-size: 0.74rem; }
+.export-column-kicker { margin: 0 0 3px; color: var(--imageweave-text-secondary); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.export-column-scroll { min-width: 0; min-height: 0; padding: 13px 13px 24px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+
+.export-workspace-state,
+.export-source-card,
+.export-selection-facts,
+.export-config-panel,
+.export-field,
+.export-destination-card,
+.export-disabled-reason,
+.export-progress-card,
+.export-actions {
+  min-width: 0;
+  border: var(--imageweave-border-width) solid var(--imageweave-separator);
+  border-radius: var(--imageweave-radius-card);
+  background: var(--imageweave-surface-content-solid);
+}
+.export-workspace-state { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: center; margin-bottom: 10px; padding: 10px; }
+.export-workspace-state > p { color: var(--imageweave-text-secondary); font-size: 0.74rem; font-weight: 700; }
+.export-workspace-state[data-export-workspace-state="loading"] { border-color: var(--imageweave-state-running); background: var(--imageweave-state-running-surface-solid); }
+.export-workspace-state[data-export-workspace-state="error"] { border-color: var(--imageweave-state-danger); background: var(--imageweave-state-danger-surface-solid); }
+.export-phase-host:empty { display: none; }
+.export-phase-host .empty-state { margin-bottom: 10px; }
+
+.export-source-list { display: grid; gap: 9px; }
+.export-source-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 10px; cursor: pointer; }
+.export-source-card[data-selected="true"] { border-color: var(--imageweave-accent); border-width: var(--imageweave-border-strong-width); box-shadow: inset 3px 0 0 var(--imageweave-accent); }
+.export-source-card input,
+.export-check input { width: 20px; height: 20px; margin: 0; accent-color: var(--imageweave-accent); }
+.export-source-card__copy { display: grid; gap: 3px; min-width: 0; }
+.export-source-card__copy strong,
+.export-source-card__copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-source-card__copy small { color: var(--imageweave-text-secondary); }
+.export-selection-facts { margin: 10px 0 0; padding: 9px; color: var(--imageweave-text-secondary); font-size: 0.74rem; }
+
+.export-config-panel { display: grid; gap: 10px; padding: 12px; }
+.export-field { display: grid; gap: 7px; padding: 9px; border-radius: var(--imageweave-radius-control); }
+.export-field > span { font-weight: 800; }
+.export-input,
+.export-select,
+.export-button {
+  min-height: 42px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-strong);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-control-solid);
+  box-shadow: var(--imageweave-shadow-control);
+  font: inherit;
+}
+.export-input,
+.export-select { width: 100%; min-width: 0; padding: 7px 10px; }
+.export-button { padding: 7px 10px; font-weight: 800; }
+.export-button--primary { color: var(--imageweave-text-inverse); background: var(--imageweave-accent); }
+.export-button:disabled { cursor: not-allowed; opacity: 0.66; }
+.export-input:focus-visible,
+.export-select:focus-visible,
+.export-button:focus-visible,
+.export-source-card:has(input:focus-visible) { outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring); outline-offset: 3px; }
+.export-check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: center; min-height: 42px; font-weight: 750; }
+.export-destination-card { display: grid; gap: 8px; padding: 10px; }
+.export-destination { margin: 0; color: var(--imageweave-text-secondary); font-size: 0.76rem; }
+.export-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; padding: 9px; }
+.export-disabled-reason { margin: 10px 0 0; padding: 9px; color: var(--imageweave-text-secondary); font-size: 0.74rem; }
+
+.export-progress-host { display: grid; gap: 10px; }
+.export-progress-card { display: grid; align-content: start; gap: 10px; padding: 12px; }
+.export-progress-card p { color: var(--imageweave-text-secondary); font-size: 0.76rem; }
+.export-progress-card--running { border-color: var(--imageweave-state-running); }
+.export-progress-card--success { border-color: var(--imageweave-state-success); }
+.export-progress-card--error { border-color: var(--imageweave-state-danger); }
+.export-progress-track { height: 12px; overflow: hidden; border: var(--imageweave-border-width) solid var(--imageweave-border-strong); border-radius: var(--imageweave-radius-pill); background: var(--imageweave-surface-control-solid); }
+.export-progress-fill { display: block; width: var(--export-progress); height: 100%; background: var(--imageweave-accent); transition: width var(--imageweave-transition-fast); }
+.export-progress-count { justify-self: end; font-family: var(--imageweave-font-mono); font-variant-numeric: tabular-nums; }
+
+.application-window[data-maximized] .export-workspace-track { min-width: 100%; }
+.application-window:not([data-maximized]) .export-workspace-track { grid-template-columns: 350px 410px 340px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .export-button,
+  .export-source-card,
+  .export-progress-fill { animation: none; transition: none; }
+}
+:root[data-motion="off"] .export-button,
+:root[data-motion="off"] .export-source-card,
+:root[data-motion="off"] .export-progress-fill { animation: none; transition: none; }
+
+@media (forced-colors: active) {
+  .export-app,
+  .export-app-header,
+  .export-workspace,
+  .export-workspace-track,
+  .export-column,
+  .export-column-header,
+  .export-workspace-state,
+  .export-source-card,
+  .export-selection-facts,
+  .export-config-panel,
+  .export-field,
+  .export-destination-card,
+  .export-disabled-reason,
+  .export-progress-card,
+  .export-actions { color: CanvasText; background: Canvas; box-shadow: none; }
+  .export-input,
+  .export-select,
+  .export-button { color: ButtonText; background: ButtonFace; box-shadow: none; }
+  .export-source-card[data-selected="true"] { border-color: Highlight; box-shadow: inset 3px 0 0 Highlight; }
+  .export-progress-fill { background: Highlight; }
+}
