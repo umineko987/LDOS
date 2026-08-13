@@ -80,7 +80,7 @@ const PIXIV_ACTIVE_STATES = new Set([
 ]);
 const PROXY_SOURCES = new Set(["runtime", "config", "none"]);
 const PROXY_SCHEMES = new Set(["http", "https", "socks4", "socks5", "socks5h"]);
-const VAULT_REQUEST_LANES = new Set(["status", "session"]);
+const VAULT_REQUEST_LANES = new Set(["status", "site", "session"]);
 const SESSION_ID_PATTERN = /^[0-9a-f]{32}$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
@@ -123,7 +123,22 @@ export function createVaultRequestGate() {
     && ticket.laneVersion === laneVersions.get(ticket.lane)
   );
 
-  return Object.freeze({ advanceLifecycle, beginWrite, beginRead, isReadCurrent });
+  const isWriteCurrent = (ticket) => Boolean(
+    ticket
+    && ticket.lifecycleVersion === lifecycleVersion
+    && ticket.writeVersion === writeVersion
+  );
+
+  const currentLifecycle = () => lifecycleVersion;
+
+  return Object.freeze({
+    advanceLifecycle,
+    beginWrite,
+    beginRead,
+    isReadCurrent,
+    isWriteCurrent,
+    currentLifecycle,
+  });
 }
 
 function isRecord(value) {
@@ -491,6 +506,87 @@ export function validateVaultSnapshot(value) {
   };
 }
 
+export function deriveVaultWorkspacePresentation({
+  snapshot = null,
+  siteId = SITE_ORDER[0],
+  phase = "idle",
+} = {}) {
+  const hasSnapshot = Boolean(
+    snapshot && (
+      snapshot.bySite instanceof Map && snapshot.bySite.size > 0 ||
+      snapshot.browserProfile || snapshot.authorizationProxy
+    ),
+  );
+  const siteCount = snapshot?.bySite instanceof Map ? snapshot.bySite.size : 0;
+  const complete = siteCount === SITE_ORDER.length &&
+    Boolean(snapshot?.browserProfile) && Boolean(snapshot?.authorizationProxy);
+  const site = snapshot?.bySite instanceof Map ? snapshot.bySite.get(siteId) || null : null;
+  if (phase === "writing") {
+    return Object.freeze({
+      state: "writing",
+      kind: "running",
+      label: "正在写入",
+      message: "操作完成后将权威重读当前站点和完整授权状态。",
+    });
+  }
+  if (phase === "error" && !hasSnapshot) {
+    return Object.freeze({
+      state: "error",
+      kind: "error",
+      label: "授权状态读取失败",
+      message: "未获得可显示的安全授权事实；请刷新后重试。",
+    });
+  }
+  if (!hasSnapshot) {
+    return Object.freeze({
+      state: "loading",
+      kind: "running",
+      label: "正在加载",
+      message: "正在读取五个站点、共享授权浏览器数据和登录代理状态。",
+    });
+  }
+  if (phase === "partial" || !complete || !site) {
+    return Object.freeze({
+      state: "partial",
+      kind: "warning",
+      label: "部分授权信息不可用",
+      message: "保留已取得的安全事实；请刷新以补齐当前站点与共享状态。",
+    });
+  }
+  if (site.session.active) {
+    return Object.freeze({
+      state: "authorizing",
+      kind: "running",
+      label: "授权进行中",
+      message: `${site.label} 正等待授权浏览器操作；仅当前站点会自动轮询。`,
+    });
+  }
+  if (site.method !== "anonymous" && site.authorized && site.materialValid) {
+    return Object.freeze({
+      state: "authorized",
+      kind: "ready",
+      label: "站点材料已保存",
+      message: `${site.label} 已有可供任务使用的托管授权材料。`,
+    });
+  }
+  if (site.method !== "anonymous") {
+    return Object.freeze({
+      state: "required",
+      kind: site.invalidated || site.configured ? "warning" : "disabled",
+      label: site.invalidated ? "需要重新授权" : "尚未授权",
+      message: site.invalidated
+        ? `${site.label} 的现有材料已失效，请重新授权。`
+        : `${site.label} 当前没有可供任务使用的托管授权材料。`,
+    });
+  }
+  return Object.freeze({
+    state: "ready",
+    kind: "ready",
+    label: "公开访问就绪",
+    message: `${site.label} 无需登录材料即可使用。`,
+  });
+}
+
 export function getVaultSiteDefinition(siteId) {
   return SITE_DEFINITIONS[siteId] || null;
 }
@@ -521,11 +617,12 @@ export function extractVaultSessionReference(value) {
   });
 }
 
-export function extractVaultSessionFromSnapshot(value) {
+export function extractVaultSessionFromSnapshot(value, siteId = "") {
   if (!isRecord(value) || !Array.isArray(value.items)) return null;
+  if (siteId && !SITE_DEFINITIONS[siteId]) return null;
   for (const item of value.items.slice(0, SITE_ORDER.length * 2)) {
     const reference = extractVaultSessionReference(item);
-    if (reference) return reference;
+    if (reference && (!siteId || reference.site === siteId)) return reference;
   }
   return null;
 }

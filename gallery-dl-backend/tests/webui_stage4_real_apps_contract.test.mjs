@@ -7,6 +7,7 @@ import proxyApplication, {
   createProxyController,
   PROXY_ENDPOINTS,
 } from "../gdl_backend/webui/js/apps/proxy.js";
+import * as vaultApplicationModule from "../gdl_backend/webui/js/apps/vault.js";
 import tasksApplication, {
   createTasksController,
   taskBatchPath,
@@ -46,6 +47,7 @@ import {
   validateNodeFileInput,
   validateSubscriptionInput,
 } from "../gdl_backend/webui/js/core/proxy-model.js";
+import * as vaultModelModule from "../gdl_backend/webui/js/core/vault-model.js";
 
 const SECRET = "stage4-task-cookie-token-secret-314159";
 const TASKS_APP_SOURCE = readFileSync(
@@ -84,12 +86,46 @@ const PROXY_CSS_SOURCE = readFileSync(
   new URL("../gdl_backend/webui/styles/apps/proxy.css", import.meta.url),
   "utf8",
 );
+const VAULT_APP_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/js/apps/vault.js", import.meta.url),
+  "utf8",
+);
+const VAULT_MODEL_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/js/core/vault-model.js", import.meta.url),
+  "utf8",
+);
+const VAULT_VIEW_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/js/components/vault-view.js", import.meta.url),
+  "utf8",
+);
+const VAULT_DOM_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/js/components/vault-dom.js", import.meta.url),
+  "utf8",
+);
+const VAULT_CSS_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/styles/apps/vault.css", import.meta.url),
+  "utf8",
+);
 
 const PROXY_SECRET = "stage4-proxy-cookie-token-password-secret-271828";
 const PROXY_CONFIGURED_REVISION = "a".repeat(64);
 const PROXY_ACTIVE_REVISION = "b".repeat(64);
 const PROXY_SUBSCRIPTION_ID = `sub_${"c".repeat(64)}`;
 const PROXY_INLINE_ID = `node_${"d".repeat(64)}`;
+const VAULT_SECRET = "stage4-vault-cookie-token-password-secret-161803";
+const VAULT_SESSION_ID = "e".repeat(32);
+const VAULT_SECOND_SESSION_ID = "f".repeat(32);
+const vaultApplication = vaultApplicationModule.default;
+const { createVaultController, VAULT_ENDPOINTS } = vaultApplicationModule;
+const {
+  buildAuthorizationProxyPayload,
+  createVaultRequestGate,
+  deriveVaultWorkspacePresentation,
+  extractVaultSessionReference,
+  sanitizeVaultStatus,
+  validateAuthorizationProxyInput,
+  VAULT_SITE_IDS,
+} = vaultModelModule;
 
 function rawProxyStatus(overrides = {}) {
   return {
@@ -178,6 +214,111 @@ function rawProxySources(overrides = {}) {
     secret: PROXY_SECRET,
     ...overrides,
   };
+}
+
+function rawVaultSite(site, overrides = {}) {
+  const definitions = {
+    danbooru: {
+      label: "Danbooru",
+      method: "anonymous",
+      state: "ready",
+      authorized: true,
+      actions: [],
+    },
+    twitter: {
+      label: "X / Twitter",
+      method: "managed_browser",
+      state: "authorized",
+      authorized: true,
+      updated_at: 1_700_000_000,
+      actions: ["managed_browser_login", "clear", `token=${VAULT_SECRET}`],
+      cookies: {
+        present: true,
+        valid: true,
+        cookie_count: 2,
+        updated_at: 1_700_000_000,
+        raw_cookie: VAULT_SECRET,
+      },
+      login: null,
+    },
+    pixiv: {
+      label: "Pixiv",
+      method: "oauth",
+      state: "required",
+      authorized: false,
+      updated_at: null,
+      actions: ["oauth", "clear"],
+      oauth: null,
+    },
+    exhentai: {
+      label: "EH",
+      method: "managed_browser",
+      state: "required",
+      authorized: false,
+      actions: ["managed_browser_login", "clear"],
+      cookies: { present: false, valid: false, cookie_count: 0 },
+      login: null,
+    },
+    pawchive: {
+      label: "Pawchive",
+      method: "anonymous",
+      state: "ready",
+      authorized: true,
+      actions: [],
+    },
+  };
+  return {
+    site,
+    summary: `Bearer ${VAULT_SECRET} at https://private.invalid/${VAULT_SECRET}`,
+    ...definitions[site],
+    ...overrides,
+  };
+}
+
+function rawVaultSnapshot(overrides = {}) {
+  return {
+    items: VAULT_SITE_IDS.map((site) => rawVaultSite(site)),
+    browser_profile: {
+      shared: true,
+      present: true,
+      running: false,
+      resetting: false,
+      path: `/private/${VAULT_SECRET}`,
+    },
+    authorization_proxy: {
+      proxy_url: "https://***@login-proxy.fixture.invalid:8443",
+      source: "runtime",
+      credentials_redacted: true,
+      browser_running: false,
+      restart_pending: false,
+      updated_at: 1_700_000_100,
+      raw_proxy_url: `https://user:${VAULT_SECRET}@private.invalid:8443`,
+    },
+    managed: true,
+    secrets_exposed: false,
+    response_profile: "vault",
+    raw: VAULT_SECRET,
+    ...overrides,
+  };
+}
+
+function vaultSnapshotWithActive(site = "pixiv", sessionId = VAULT_SESSION_ID) {
+  const snapshot = rawVaultSnapshot();
+  const index = VAULT_SITE_IDS.indexOf(site);
+  const method = site === "pixiv" ? "oauth" : "login";
+  snapshot.items[index] = rawVaultSite(site, {
+    state: "authorizing",
+    [method]: {
+      session_id: sessionId,
+      state: "awaiting_login",
+      created_at: 1_700_000_000,
+      expires_at: 1_700_000_600,
+      authorization_url: `https://private.invalid/?token=${VAULT_SECRET}`,
+      raw: VAULT_SECRET,
+    },
+  });
+  snapshot.browser_profile.running = true;
+  return snapshot;
 }
 
 function rawBatch(overrides = {}) {
@@ -409,6 +550,51 @@ class ProxyTestForm extends ProxyTestElement {
   }
 }
 
+class VaultTestElement extends TestElement {
+  constructor(tagName = "div") {
+    super(tagName);
+    this.value = "";
+    this.type = tagName === "input" ? "text" : "";
+  }
+
+  hasAttribute(name) {
+    return this.attributes.has(name);
+  }
+
+  closest(selector) {
+    let current = this;
+    while (current instanceof VaultTestElement) {
+      if (selector === "[data-vault-action]" && current.dataset.vaultAction !== undefined) return current;
+      if (selector === "form" && current instanceof VaultTestForm) return current;
+      current = current.parentNode;
+    }
+    return null;
+  }
+}
+
+class VaultTestButton extends VaultTestElement {
+  constructor(action = "") {
+    super("button");
+    if (action) this.dataset.vaultAction = action;
+  }
+}
+
+class VaultTestInput extends VaultTestElement {
+  constructor(value = "") {
+    super("input");
+    this.value = value;
+    this.type = "text";
+  }
+}
+
+class VaultTestForm extends VaultTestElement {
+  constructor(input) {
+    super("form");
+    this.input = input;
+    input.parentNode = this;
+  }
+}
+
 function installControllerDom() {
   const previous = new Map();
   const install = (name, value) => {
@@ -438,6 +624,25 @@ function installProxyControllerDom() {
   install("HTMLInputElement", ProxyTestInput);
   install("HTMLTextAreaElement", ProxyTestTextArea);
   install("HTMLFormElement", ProxyTestForm);
+  return () => {
+    for (const [name, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+    }
+  };
+}
+
+function installVaultControllerDom() {
+  const previous = new Map();
+  const install = (name, value) => {
+    previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  };
+  install("Element", VaultTestElement);
+  install("HTMLElement", VaultTestElement);
+  install("HTMLButtonElement", VaultTestButton);
+  install("HTMLInputElement", VaultTestInput);
+  install("HTMLFormElement", VaultTestForm);
   return () => {
     for (const [name, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
@@ -629,6 +834,123 @@ function proxyControllerHarness({
   return {
     root, store, calls, polling, dialogs, dialogOptions, view, viewLog,
     secretInputs, controller, submit, click,
+  };
+}
+
+function vaultControllerHarness({
+  apiGet,
+  apiPost,
+  apiPut,
+  apiDelete,
+  dialogChoice = "confirm",
+  initialSite = "danbooru",
+} = {}) {
+  const root = new VaultTestElement("main");
+  const store = createStore({ reportError: () => {} });
+  const calls = [];
+  const api = {
+    get(url, options) {
+      calls.push(["get", url, options]);
+      if (apiGet) return apiGet(url, options);
+      if (url === `${VAULT_ENDPOINTS.status}?view=vault`) return Promise.resolve(rawVaultSnapshot());
+      throw new Error(`unexpected GET ${url}`);
+    },
+    post(url, payload, options) {
+      calls.push(["post", url, payload, options]);
+      return apiPost ? apiPost(url, payload, options) : Promise.resolve({});
+    },
+    put(url, payload, options) {
+      calls.push(["put", url, payload, options]);
+      return apiPut ? apiPut(url, payload, options) : Promise.resolve({});
+    },
+    delete(url, options) {
+      calls.push(["delete", url, options]);
+      return apiDelete ? apiDelete(url, options) : Promise.resolve({});
+    },
+  };
+  const polling = createPollingHarness();
+  const dialogOptions = [];
+  const dialogLog = [];
+  const dialogs = {
+    async open(options) {
+      dialogOptions.push(options);
+      dialogLog.push(["open", options.title]);
+      return typeof dialogChoice === "function"
+        ? dialogChoice(options, dialogOptions.length - 1)
+        : dialogChoice;
+    },
+    destroy() {
+      dialogLog.push(["destroy"]);
+    },
+  };
+  const proxyInput = new VaultTestInput("");
+  proxyInput.setAttribute("data-vault-secret", "");
+  const proxyForm = new VaultTestForm(proxyInput);
+  let selectedSite = initialSite;
+  const viewLog = [];
+  const view = {
+    elements: { proxyInput, proxyForm },
+    selectedSite: () => selectedSite,
+    selectSite(siteId, options = {}) {
+      selectedSite = siteId;
+      viewLog.push(["select", siteId, Boolean(options.focus)]);
+    },
+    clearSensitiveInputs() {
+      proxyInput.value = "";
+      viewLog.push(["clear-sensitive"]);
+    },
+    clearError: () => viewLog.push(["clear-error"]),
+    showError(error) {
+      const safe = error && typeof error === "object"
+        ? { code: String(error.code || "request_failed"), status: Number(error.status || 0) }
+        : { code: "request_failed", status: 0 };
+      viewLog.push(["error", safe]);
+    },
+    setBusy: (kind) => viewLog.push(["busy", kind]),
+    setOperationMessage: (message) => viewLog.push(["message", message]),
+    setWorkspacePhase: (phase) => viewLog.push(["phase", phase]),
+    validateProxyInput() {
+      const result = validateAuthorizationProxyInput(proxyInput.value);
+      viewLog.push(["validation", result.valid, result.mode]);
+      return result.valid;
+    },
+    toggleProxyVisibility: () => viewLog.push(["toggle-proxy"]),
+    destroy: () => viewLog.push(["destroy"]),
+  };
+  const controller = createVaultController({
+    root,
+    api,
+    store,
+    polling,
+    dialogs,
+    pollingScope: "app:vault",
+    app: { id: "vault", label: "授权管理", windowTitle: "VAULT.CPL" },
+  }, { createView: () => view });
+  const click = (action) => {
+    const button = new VaultTestButton(action);
+    root.emit("click", button);
+    return button;
+  };
+  const submitProxy = (value) => {
+    proxyInput.value = value;
+    root.emit("submit", proxyForm);
+    return proxyInput;
+  };
+  return {
+    root,
+    store,
+    calls,
+    polling,
+    dialogs,
+    dialogOptions,
+    dialogLog,
+    proxyInput,
+    proxyForm,
+    view,
+    viewLog,
+    controller,
+    click,
+    submitProxy,
   };
 }
 
@@ -1456,4 +1778,613 @@ test("4B static boundary：endpoint 集合固定且无旁路 I/O、storage、con
     assert.equal(typeof proxyApplication[hook], "function");
   }
   assert.equal(typeof createProxyController, "function");
+});
+
+test("4B Vault model：五站固定顺序与安全投影不保留 secret、URL 或会话 ID", () => {
+  assert.deepEqual(VAULT_SITE_IDS, ["danbooru", "twitter", "pixiv", "exhentai", "pawchive"]);
+  const projected = sanitizeVaultStatus(vaultSnapshotWithActive("pixiv"));
+  assert.deepEqual([...projected.bySite.keys()], VAULT_SITE_IDS);
+  assert.equal(projected.bySite.get("twitter").cookieCount, 2);
+  assert.equal(projected.bySite.get("pixiv").session.active, true);
+  assert.equal(projected.authorizationProxy.displayEndpoint, "HTTPS · login-proxy.fixture.invalid:8443");
+  assert.deepEqual(Object.keys(projected.browserProfile).sort(), ["present", "resetting", "running", "shared"]);
+  const store = createStore({ reportError: () => {} });
+  store.dispatch(actionCreators.authStatusReceived(vaultSnapshotWithActive("pixiv")));
+  const serialized = JSON.stringify({
+    projected: {
+      ...projected,
+      bySite: [...projected.bySite],
+    },
+    store: {
+      ...store.getState().auth,
+      bySite: [...store.getState().auth.bySite],
+    },
+  });
+  for (const forbidden of [
+    VAULT_SECRET,
+    VAULT_SESSION_ID,
+    "private.invalid",
+    "authorization_url",
+    "raw_cookie",
+    "raw_proxy_url",
+    "proxy_url",
+    "session_id",
+  ]) assert.equal(serialized.includes(forbidden), false, forbidden);
+  assert.throws(() => sanitizeVaultStatus(rawVaultSnapshot({ secrets_exposed: true })), TypeError);
+});
+
+test("4B Vault model：proxy validation/payload、工作区七态和 request gate", () => {
+  const secretProxy = `https://user:${VAULT_SECRET}@proxy.fixture.invalid:8443`;
+  assert.deepEqual(validateAuthorizationProxyInput(secretProxy), {
+    valid: true,
+    mode: "proxy",
+    error: "",
+  });
+  assert.deepEqual(buildAuthorizationProxyPayload(secretProxy), { proxy_url: secretProxy });
+  assert.deepEqual(buildAuthorizationProxyPayload(""), { proxy_url: "" });
+  for (const invalid of [
+    "http://proxy.invalid",
+    "file:///private/proxy",
+    "https://proxy.invalid:443/path",
+    "https://proxy.invalid:443?token=x",
+    "socks5://user:pass@proxy.invalid:1080",
+    `http://proxy.invalid:8080\n${VAULT_SECRET}`,
+  ]) {
+    assert.equal(validateAuthorizationProxyInput(invalid).valid, false, invalid);
+    assert.throws(() => buildAuthorizationProxyPayload(invalid), TypeError);
+  }
+
+  const snapshot = sanitizeVaultStatus(rawVaultSnapshot());
+  const active = sanitizeVaultStatus(vaultSnapshotWithActive());
+  assert.equal(deriveVaultWorkspacePresentation({
+    snapshot: { bySite: new Map(), browserProfile: null, authorizationProxy: null },
+  }).state, "loading");
+  const cases = [
+    ["loading", {}],
+    ["ready", { snapshot }],
+    ["authorized", { snapshot, siteId: "twitter" }],
+    ["required", { snapshot, siteId: "pixiv" }],
+    ["authorizing", { snapshot: active, siteId: "pixiv" }],
+    ["partial", { snapshot: { ...snapshot, bySite: new Map([["twitter", snapshot.bySite.get("twitter")]]) }, phase: "partial" }],
+    ["error", { phase: "error" }],
+    ["writing", { snapshot, phase: "writing" }],
+  ];
+  for (const [expected, input] of cases) {
+    const presentation = deriveVaultWorkspacePresentation(input);
+    assert.equal(presentation.state, expected);
+    assert.equal(Boolean(presentation.label), true);
+    assert.equal(Boolean(presentation.message), true);
+  }
+
+  const gate = createVaultRequestGate();
+  const oldStatus = gate.beginRead("status");
+  const currentStatus = gate.beginRead("status");
+  const session = gate.beginRead("session");
+  assert.equal(gate.isReadCurrent(oldStatus), false);
+  assert.equal(gate.isReadCurrent(currentStatus), true);
+  assert.equal(gate.isReadCurrent(session), true);
+  const beforeWrite = gate.beginRead("status");
+  const write = gate.beginWrite();
+  assert.equal(gate.isReadCurrent(beforeWrite), false);
+  assert.equal(gate.isWriteCurrent(write), true);
+  gate.advanceLifecycle();
+  assert.equal(gate.isWriteCurrent(write), false);
+});
+
+test("4B Vault session reference：仅严格活动 opaque ID 可用于请求，恶意值永不进入 DOM/Store", () => {
+  const active = vaultSnapshotWithActive("twitter");
+  assert.deepEqual(extractVaultSessionReference(active.items[1]), {
+    site: "twitter",
+    kind: "managed_browser",
+    sessionId: VAULT_SESSION_ID,
+  });
+  const invalidValues = [
+    `../${VAULT_SECRET}`,
+    VAULT_SECRET,
+    "A".repeat(32),
+    "0".repeat(31),
+    "0".repeat(33),
+  ];
+  for (const sessionId of invalidValues) {
+    const raw = vaultSnapshotWithActive("twitter", sessionId).items[1];
+    assert.equal(extractVaultSessionReference(raw), null, sessionId);
+  }
+  const terminal = vaultSnapshotWithActive("twitter").items[1];
+  terminal.login.state = "authorized";
+  assert.equal(extractVaultSessionReference(terminal), null);
+  assert.doesNotMatch(VAULT_VIEW_SOURCE + VAULT_DOM_SOURCE, /sessionId|session_id|authorization_url/);
+  assert.doesNotMatch(VAULT_VIEW_SOURCE + VAULT_DOM_SOURCE, /dataset\.[A-Za-z0-9_]*(?:session|token|cookie)/i);
+});
+
+test("4B Vault controller：initial full read 后只对活动会话以 800ms 前台频率轮询", async () => {
+  const restore = installVaultControllerDom();
+  try {
+    const initial = vaultSnapshotWithActive("twitter");
+    const harness = vaultControllerHarness({
+      initialSite: "twitter",
+      apiGet(url) {
+        if (url === `${VAULT_ENDPOINTS.status}?view=vault`) return Promise.resolve(initial);
+        if (url === `${VAULT_ENDPOINTS.status}/twitter/login/${VAULT_SESSION_ID}?view=vault`) {
+          return Promise.resolve({ status: initial.items[1], session: initial.items[1].login });
+        }
+        throw new Error(`unexpected GET ${url}`);
+      },
+    });
+    harness.controller.activate();
+    await flush();
+    assert.deepEqual(harness.calls.filter((call) => call[0] === "get").map(getCallUrl), [
+      `${VAULT_ENDPOINTS.status}?view=vault`,
+    ]);
+    const poll = harness.polling.entries.get("vault.authorization");
+    assert.equal(poll.intervalMs, 800);
+    assert.equal(poll.scope, "app:vault");
+    assert.equal(poll.alwaysFocusRate, true);
+    assert.equal(poll.immediate, false);
+    await poll.task(new AbortController().signal);
+    assert.equal(harness.calls.at(-1)[1], `${VAULT_ENDPOINTS.status}/twitter/login/${VAULT_SESSION_ID}?view=vault`);
+    assert.equal(JSON.stringify(harness.store.getState()).includes(VAULT_SECRET), false);
+    harness.controller.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test("4B Vault controller：poll 观察 complete 后停止并按 full+site 权威重读", async () => {
+  const restore = installVaultControllerDom();
+  try {
+    let fullReads = 0;
+    let siteReads = 0;
+    let firstFull = true;
+    const harness = vaultControllerHarness({
+      initialSite: "twitter",
+      apiGet(url) {
+        if (url === `${VAULT_ENDPOINTS.status}?view=vault`) {
+          fullReads += 1;
+          if (firstFull) {
+            firstFull = false;
+            return Promise.resolve(vaultSnapshotWithActive("twitter"));
+          }
+          return Promise.resolve(rawVaultSnapshot());
+        }
+        if (url === `${VAULT_ENDPOINTS.status}/twitter/login/${VAULT_SESSION_ID}?view=vault`) {
+          return Promise.resolve({ status: rawVaultSite("twitter", { login: null }) });
+        }
+        if (url === `${VAULT_ENDPOINTS.status}/twitter?view=vault`) {
+          siteReads += 1;
+          return Promise.resolve(rawVaultSite("twitter", { login: null }));
+        }
+        throw new Error(`unexpected GET ${url}`);
+      },
+    });
+    harness.controller.activate();
+    await flush();
+    const poll = harness.polling.entries.get("vault.authorization");
+    const before = { fullReads, siteReads };
+    await poll.task(new AbortController().signal);
+    await flush();
+    assert.equal(harness.polling.entries.has("vault.authorization"), false);
+    assert.equal(fullReads, before.fullReads + 1);
+    assert.equal(siteReads, before.siteReads + 1);
+    harness.controller.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test("4B Vault controller：session 结束、换站、deactivate/destroy 均立即停止 polling", async () => {
+  const restore = installVaultControllerDom();
+  try {
+    let initial = vaultSnapshotWithActive("twitter");
+    let sessionResponse = { status: initial.items[1], session: initial.items[1].login };
+    const harness = vaultControllerHarness({
+      initialSite: "twitter",
+      apiGet(url) {
+        if (url === `${VAULT_ENDPOINTS.status}?view=vault`) return Promise.resolve(initial);
+        if (url.includes("/twitter/login/")) return Promise.resolve(sessionResponse);
+        throw new Error(`unexpected GET ${url}`);
+      },
+    });
+    harness.controller.activate();
+    await flush();
+    let poll = harness.polling.entries.get("vault.authorization");
+    sessionResponse = { status: rawVaultSite("twitter", { login: null }) };
+    initial = rawVaultSnapshot();
+    await poll.task(new AbortController().signal);
+    await flush();
+    assert.equal(harness.polling.entries.has("vault.authorization"), false);
+
+    initial = vaultSnapshotWithActive("twitter", VAULT_SECOND_SESSION_ID);
+    harness.click("site:twitter");
+    await flush();
+    assert.equal(harness.polling.entries.has("vault.authorization"), true);
+    harness.click("site:pixiv");
+    await flush();
+    assert.equal(harness.polling.entries.has("vault.authorization"), false);
+
+    harness.controller.deactivate();
+    assert.equal(harness.polling.entries.has("vault.authorization"), false);
+    harness.controller.activate();
+    await flush();
+    poll = harness.polling.entries.get("vault.authorization");
+    assert.equal(Boolean(poll), false, "非活动站点上的旧会话不能恢复轮询");
+    harness.controller.destroy();
+    assert.equal(harness.polling.entries.has("vault.authorization"), false);
+  } finally {
+    restore();
+  }
+});
+
+test("4B Vault controller：start/complete/close 与换站路径只使用固定 auth view 集合", async () => {
+  const restore = installVaultControllerDom();
+  try {
+    let snapshot = rawVaultSnapshot();
+    const harness = vaultControllerHarness({
+      initialSite: "twitter",
+      apiGet(url) {
+        if (url === `${VAULT_ENDPOINTS.status}?view=vault`) return Promise.resolve(snapshot);
+        throw new Error(`unexpected GET ${url}`);
+      },
+      apiPost(url) {
+        if (url.includes("/twitter/login/start")) {
+          snapshot = vaultSnapshotWithActive("twitter");
+          return Promise.resolve({ status: snapshot.items[1], session: snapshot.items[1].login, raw: VAULT_SECRET });
+        }
+        if (url === `${VAULT_ENDPOINTS.pixivOAuthStart}?view=vault`) {
+          snapshot = vaultSnapshotWithActive("pixiv");
+          return Promise.resolve({ ...snapshot.items[2].oauth, raw: VAULT_SECRET });
+        }
+        throw new Error(`unexpected POST ${url}`);
+      },
+      apiDelete(url) {
+        if (url.includes("/twitter/login/")) {
+          snapshot = rawVaultSnapshot();
+          return Promise.resolve({ status: snapshot.items[1], raw: VAULT_SECRET });
+        }
+        if (url === `${VAULT_ENDPOINTS.pixivOAuthSession}?view=vault`) {
+          snapshot = rawVaultSnapshot();
+          return Promise.resolve(snapshot.items[2]);
+        }
+        throw new Error(`unexpected DELETE ${url}`);
+      },
+    });
+    harness.controller.activate();
+    await flush();
+    harness.click("authorize:twitter");
+    await flush();
+    assert.equal(harness.calls.some((call) => call[0] === "post" && call[1] === `${VAULT_ENDPOINTS.status}/twitter/login/start?view=vault`), true);
+    assert.equal(harness.polling.entries.has("vault.authorization"), true);
+
+    snapshot = rawVaultSnapshot();
+    harness.click("cancel:twitter");
+    await flush();
+    assert.equal(harness.calls.some((call) => call[0] === "delete" && call[1] === `${VAULT_ENDPOINTS.status}/twitter/login/${VAULT_SESSION_ID}?view=vault`), true);
+    assert.equal(harness.polling.entries.has("vault.authorization"), false);
+
+    harness.click("site:pixiv");
+    harness.click("authorize:pixiv");
+    await flush();
+    assert.equal(harness.calls.some((call) => call[0] === "post" && call[1] === `${VAULT_ENDPOINTS.pixivOAuthStart}?view=vault`), true);
+    harness.click("cancel:pixiv");
+    await flush();
+    assert.equal(harness.calls.some((call) => call[0] === "delete" && call[1] === `${VAULT_ENDPOINTS.pixivOAuthSession}?view=vault`), true);
+    assert.equal(JSON.stringify(harness.store.getState()).includes(VAULT_SESSION_ID), false);
+    assert.equal(JSON.stringify(harness.viewLog).includes(VAULT_SECRET), false);
+    harness.controller.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test("4B Vault controller：未信任 session 响应不发请求、不进 Store/DOM/dataset/log", async () => {
+  const restore = installVaultControllerDom();
+  try {
+    for (const sessionId of [VAULT_SECRET, `../${VAULT_SECRET}`, "A".repeat(32)]) {
+      const harness = vaultControllerHarness({
+        initialSite: "twitter",
+        apiGet(url) {
+          if (url === `${VAULT_ENDPOINTS.status}?view=vault`) {
+            return Promise.resolve(vaultSnapshotWithActive("twitter", sessionId));
+          }
+          throw new Error(`unexpected GET ${url}`);
+        },
+      });
+      harness.controller.activate();
+      await flush();
+      assert.equal(harness.polling.entries.has("vault.authorization"), false, sessionId);
+      assert.deepEqual(harness.calls.filter((call) => call[0] === "get").map(getCallUrl), [
+        `${VAULT_ENDPOINTS.status}?view=vault`,
+      ]);
+      assert.equal(JSON.stringify(harness.store.getState()).includes(sessionId), false);
+      assert.equal(JSON.stringify(harness.viewLog).includes(sessionId), false);
+      assert.equal(VAULT_VIEW_SOURCE.includes(sessionId), false);
+      assert.equal(VAULT_DOM_SOURCE.includes(sessionId), false);
+      harness.controller.destroy();
+    }
+  } finally {
+    restore();
+  }
+});
+
+test("4B Vault controller：site material confirm deny/allow，busy 单飞且写后 full+site 权威重读", async () => {
+  const restore = installVaultControllerDom();
+  try {
+    const deny = vaultControllerHarness({ dialogChoice: "cancel", initialSite: "twitter" });
+    deny.controller.activate();
+    await flush();
+    deny.click("clear:twitter");
+    await flush();
+    assert.equal(deny.dialogOptions[0].dangerous, true);
+    assert.equal(deny.calls.some((call) => call[0] === "delete"), false);
+    deny.controller.destroy();
+
+    let fullReads = 0;
+    let siteReads = 0;
+    const write = deferred();
+    const allow = vaultControllerHarness({
+      initialSite: "twitter",
+      apiGet(url) {
+        if (url === `${VAULT_ENDPOINTS.status}?view=vault`) {
+          fullReads += 1;
+          return Promise.resolve(rawVaultSnapshot());
+        }
+        if (url === `${VAULT_ENDPOINTS.status}/twitter?view=vault`) {
+          siteReads += 1;
+          return Promise.resolve(rawVaultSite("twitter", { authorized: false, cookies: { present: false, valid: false, cookie_count: 0 } }));
+        }
+        throw new Error(`unexpected GET ${url}`);
+      },
+      apiDelete: () => write.promise,
+    });
+    allow.controller.activate();
+    await flush();
+    const before = { fullReads, siteReads };
+    allow.click("clear:twitter");
+    allow.click("clear:twitter");
+    await flush();
+    assert.equal(allow.calls.filter((call) => call[0] === "delete").length, 1);
+    write.resolve({ status: rawVaultSite("twitter"), secret: VAULT_SECRET });
+    await flush();
+    assert.equal(fullReads, before.fullReads + 1);
+    assert.equal(siteReads, before.siteReads + 1);
+    assert.equal(JSON.stringify(allow.store.getState()).includes(VAULT_SECRET), false);
+    allow.controller.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test("4B Vault controller：危险 proxy/profile 动作 confirm deny 时不写入且清 raw", async () => {
+  const restore = installVaultControllerDom();
+  try {
+    const deny = vaultControllerHarness({ dialogChoice: "cancel", initialSite: "twitter" });
+    deny.controller.activate();
+    await flush();
+    for (const action of ["proxy-reset", "profile-clear"]) {
+      deny.proxyInput.value = VAULT_SECRET;
+      const writesBefore = deny.calls.filter((call) => call[0] !== "get").length;
+      deny.click(action);
+      await flush();
+      assert.equal(deny.proxyInput.value, "");
+      assert.equal(deny.dialogOptions.at(-1).dangerous, true);
+      assert.equal(deny.calls.filter((call) => call[0] !== "get").length, writesBefore);
+    }
+    assert.equal(JSON.stringify(deny.viewLog).includes(VAULT_SECRET), false);
+    deny.controller.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test("4B Vault controller：proxy save/direct/reset 与 profile clear 均确认/重读且秘密立即清空", async () => {
+  const restore = installVaultControllerDom();
+  try {
+    const secretProxy = `https://user:${VAULT_SECRET}@proxy.fixture.invalid:8443`;
+    let snapshot = rawVaultSnapshot();
+    let fullReads = 0;
+    const harness = vaultControllerHarness({
+      initialSite: "twitter",
+      apiGet(url) {
+        if (url === `${VAULT_ENDPOINTS.status}?view=vault`) {
+          fullReads += 1;
+          return Promise.resolve(snapshot);
+        }
+        if (url === `${VAULT_ENDPOINTS.proxy}?view=vault`) return Promise.resolve(snapshot.authorization_proxy);
+        if (url === `${VAULT_ENDPOINTS.browserProfile}?view=vault`) return Promise.resolve(snapshot.browser_profile);
+        if (url === `${VAULT_ENDPOINTS.status}/twitter?view=vault`) return Promise.resolve(snapshot.items[1]);
+        throw new Error(`unexpected GET ${url}`);
+      },
+      apiPut(url, payload) {
+        assert.equal(url, `${VAULT_ENDPOINTS.proxy}?view=vault`);
+        assert.deepEqual(payload, { proxy_url: secretProxy });
+        return Promise.resolve({ raw: VAULT_SECRET });
+      },
+      apiDelete(url) {
+        if (url === `${VAULT_ENDPOINTS.proxy}?view=vault`) return Promise.resolve({ source: "config", raw: VAULT_SECRET });
+        if (url === `${VAULT_ENDPOINTS.browserProfile}?view=vault`) return Promise.resolve({ raw: VAULT_SECRET });
+        throw new Error(`unexpected DELETE ${url}`);
+      },
+    });
+    harness.controller.activate();
+    await flush();
+    const beforeSave = fullReads;
+    const input = harness.submitProxy(secretProxy);
+    assert.equal(input.value, "");
+    await flush();
+    assert.equal(input.value, "");
+    assert.equal(fullReads, beforeSave + 1);
+    assert.equal(harness.calls.some((call) => call[0] === "get" && call[1] === `${VAULT_ENDPOINTS.status}/twitter?view=vault`), true);
+
+    const beforeDirect = fullReads;
+    harness.submitProxy("");
+    await flush();
+    assert.equal(harness.dialogOptions.some((options) => /直连/.test(options.title)), true);
+    assert.equal(harness.calls.some((call) => call[0] === "put" && call[2]?.proxy_url === ""), true);
+    assert.equal(fullReads, beforeDirect + 1);
+
+    const beforeReset = fullReads;
+    harness.click("proxy-reset");
+    await flush();
+    assert.equal(harness.calls.some((call) => call[0] === "delete" && call[1] === `${VAULT_ENDPOINTS.proxy}?view=vault`), true);
+    assert.equal(fullReads, beforeReset + 1);
+
+    const beforeProfile = fullReads;
+    harness.click("profile-clear");
+    await flush();
+    assert.equal(harness.calls.some((call) => call[0] === "delete" && call[1] === `${VAULT_ENDPOINTS.browserProfile}?view=vault`), true);
+    assert.equal(fullReads, beforeProfile + 1);
+    assert.equal(JSON.stringify(harness.viewLog).includes(VAULT_SECRET), false);
+    harness.controller.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test("4B Vault controller：proxy 失败与 direct confirm cancel 均立即清 raw 且不回显错误秘密", async () => {
+  const restore = installVaultControllerDom();
+  try {
+    const secretProxy = `https://user:${VAULT_SECRET}@proxy.fixture.invalid:8443`;
+    const failed = vaultControllerHarness({
+      initialSite: "twitter",
+      apiPut: () => Promise.reject(Object.assign(new Error(VAULT_SECRET), {
+        code: "invalid_authorization_proxy",
+        status: 422,
+        details: { token: VAULT_SECRET },
+      })),
+    });
+    failed.controller.activate();
+    await flush();
+    failed.submitProxy(secretProxy);
+    assert.equal(failed.proxyInput.value, "");
+    await flush();
+    assert.equal(failed.proxyInput.value, "");
+    assert.equal(JSON.stringify(failed.store.getState()).includes(VAULT_SECRET), false);
+    assert.equal(JSON.stringify(failed.viewLog).includes(VAULT_SECRET), false);
+    failed.controller.destroy();
+
+    const cancelled = vaultControllerHarness({ dialogChoice: "cancel", initialSite: "twitter" });
+    cancelled.controller.activate();
+    await flush();
+    cancelled.submitProxy("");
+    await flush();
+    assert.equal(cancelled.proxyInput.value, "");
+    assert.equal(cancelled.calls.some((call) => call[0] === "put"), false);
+    assert.equal(cancelled.dialogOptions.at(-1).dangerous, true);
+    cancelled.controller.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test("4B Vault controller：失败、confirm cancel、换站、deactivate/destroy 清 raw；旧 read/write/lifecycle 不提交", async () => {
+  const restore = installVaultControllerDom();
+  try {
+    const initial = deferred();
+    let fullReadCount = 0;
+    const harness = vaultControllerHarness({
+      initialSite: "twitter",
+      apiGet(url) {
+        if (url === `${VAULT_ENDPOINTS.status}?view=vault`) {
+          fullReadCount += 1;
+          return fullReadCount === 1 ? initial.promise : new Promise(() => {});
+        }
+        if (url === `${VAULT_ENDPOINTS.status}/pixiv?view=vault`) return new Promise(() => {});
+        throw new Error(`unexpected GET ${url}`);
+      },
+      apiPut: () => Promise.reject(Object.assign(new Error(VAULT_SECRET), {
+        code: "invalid_authorization_proxy",
+        status: 422,
+        details: { token: VAULT_SECRET },
+      })),
+    });
+    harness.controller.activate();
+    harness.proxyInput.value = VAULT_SECRET;
+    harness.click("site:pixiv");
+    assert.equal(harness.proxyInput.value, "");
+    initial.resolve(vaultSnapshotWithActive("twitter"));
+    await flush();
+    assert.equal(harness.store.getState().auth.bySite.size, 0, "换站推进读取世代，旧 full response 不提交");
+
+    harness.proxyInput.value = VAULT_SECRET;
+    harness.controller.deactivate();
+    assert.equal(harness.proxyInput.value, "");
+    harness.controller.activate();
+    await flush();
+    harness.proxyInput.value = VAULT_SECRET;
+    harness.controller.destroy();
+    assert.equal(harness.proxyInput.value, "");
+    assert.equal(JSON.stringify(harness.store.getState()).includes(VAULT_SECRET), false);
+    assert.equal(JSON.stringify(harness.viewLog).includes(VAULT_SECRET), false);
+  } finally {
+    restore();
+  }
+});
+
+test("4B Vault DOM/CSS：固定三栏导航/材料/恢复布局，普通窗横滚、最大化独立纵滚且无移动单列", () => {
+  for (const contract of [
+    /vault-workspace-track/,
+    /className:\s*"vault-workspace"[\s\S]*tabindex:\s*"0"/,
+    /01 · 站点/,
+    /02 · 材料与会话/,
+    /03 · 共享与恢复/,
+    /createElement\("nav"/,
+    /data.*vault.*site|vaultSite/,
+    /共享授权浏览器数据/,
+    /登录代理/,
+    /危险操作/,
+  ]) assert.match(VAULT_DOM_SOURCE, contract);
+  assert.match(VAULT_CSS_SOURCE, /\.window-body:has\(> \.vault-app\)/);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-workspace\s*\{[^}]*overflow-x\s*:\s*auto/s);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-workspace-track\s*\{[^}]*grid-template-columns\s*:[^;]*minmax[^;]*minmax[^;]*minmax[^;]*;/s);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-workspace-track\s*\{[^}]*min-width\s*:\s*(?:1080|1100|1120|1140|1160)px/s);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-column-scroll\s*\{[^}]*overflow-y\s*:\s*auto/s);
+  assert.match(VAULT_CSS_SOURCE, /\.application-window\[data-maximized\] \.vault-workspace-track\s*\{[^}]*min-width\s*:\s*100%/s);
+  assert.match(VAULT_CSS_SOURCE, /--imageweave-surface-content-solid/);
+  assert.match(VAULT_CSS_SOURCE, /forced-colors/);
+  assert.match(VAULT_CSS_SOURCE, /prefers-reduced-motion|data-motion/);
+  assert.doesNotMatch(VAULT_CSS_SOURCE, /@media\s*\(max-width\s*:/);
+  assert.doesNotMatch(VAULT_CSS_SOURCE, /backdrop-filter/);
+});
+
+test("4B Vault focus/state：站点和 action 重绘保持稳定焦点，显式非颜色状态进入 aria-live", () => {
+  assert.match(VAULT_VIEW_SOURCE, /vaultFocusToken/);
+  assert.match(VAULT_VIEW_SOURCE, /restoreVaultFocus/);
+  assert.match(VAULT_VIEW_SOURCE, /elements\.workspace/);
+  assert.match(VAULT_VIEW_SOURCE, /data.*vault.*workspace.*state|vaultWorkspaceState/);
+  assert.match(VAULT_VIEW_SOURCE, /deriveVaultWorkspacePresentation/);
+  assert.match(VAULT_DOM_SOURCE, /aria-live/);
+  for (const state of ["loading", "ready", "authorized", "required", "authorizing", "partial", "error", "writing"]) {
+    assert.match(VAULT_MODEL_SOURCE + VAULT_VIEW_SOURCE, new RegExp(`\\b${state}\\b`));
+  }
+  assert.doesNotMatch(VAULT_DOM_SOURCE + VAULT_VIEW_SOURCE, /type:\s*"password"|\.type\s*=\s*"password"/);
+  assert.match(VAULT_DOM_SOURCE, /autocomplete:\s*"off"/);
+});
+
+test("4B Vault static boundary：endpoint/query 集合固定，无旁路 I/O/storage/console/innerHTML/fixture", () => {
+  assert.deepEqual(VAULT_ENDPOINTS, {
+    status: "/api/v1/auth",
+    proxy: "/api/v1/auth/proxy",
+    browserProfile: "/api/v1/auth/browser-profile",
+    pixivOAuthStart: "/api/v1/auth/pixiv/oauth/start",
+    pixivOAuthSession: "/api/v1/auth/pixiv/oauth/session",
+  });
+  assert.equal((VAULT_APP_SOURCE.match(/"\/api\/v1\//g) || []).length, 5);
+  assert.equal((VAULT_APP_SOURCE.match(/view=vault/g) || []).length, 1);
+  const combined = [VAULT_APP_SOURCE, VAULT_MODEL_SOURCE, VAULT_VIEW_SOURCE, VAULT_DOM_SOURCE].join("\n");
+  for (const forbidden of [
+    /\bfetch\s*\(/,
+    /globalThis\.fetch/,
+    /XMLHttpRequest/,
+    /localStorage|sessionStorage|indexedDB/,
+    /console\./,
+    /innerHTML/,
+    /tests\/fixtures|fixtures\/webui/,
+  ]) assert.doesNotMatch(combined, forbidden);
+  assert.match(VAULT_APP_SOURCE, /createVaultRequestGate/);
+  assert.match(VAULT_APP_SOURCE, /AbortController/);
+  assert.match(VAULT_APP_SOURCE, /alwaysFocusRate:\s*true/);
+  assert.match(VAULT_APP_SOURCE, /intervalMs:\s*AUTHORIZATION_POLL_INTERVAL_MS/);
+  for (const hook of ["mount", "activate", "deactivate", "unmount"]) {
+    assert.equal(typeof vaultApplication[hook], "function");
+  }
+  assert.equal(typeof createVaultController, "function");
 });

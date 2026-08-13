@@ -37,9 +37,12 @@ function sameSession(left, right) {
     left.sessionId === right.sessionId);
 }
 
-function createVaultController(context) {
+export function createVaultController(context, {
+  createView = createVaultView,
+} = {}) {
   const { root, api, store, polling, dialogs } = context;
-  const view = createVaultView(context);
+  const view = createView(context);
+  if (!view || typeof view !== "object") throw new TypeError("授权视图无效");
   let active = false;
   let destroyed = false;
   let busy = "";
@@ -48,6 +51,7 @@ function createVaultController(context) {
   let activeSession = null;
   let activeOperationController = null;
   let statusRead = null;
+  let siteRead = null;
   let sessionRead = null;
 
   const linkSignal = (externalSignal, controller) => {
@@ -65,7 +69,11 @@ function createVaultController(context) {
   };
 
   const syncAuthorizationPolling = () => {
-    if (!active || destroyed || !activeSession) {
+    const selectedSite = view.selectedSite?.() || "";
+    if (
+      !active || destroyed || !activeSession ||
+      (selectedSite && selectedSite !== activeSession.site)
+    ) {
       stopAuthorizationPolling();
       return;
     }
@@ -86,16 +94,27 @@ function createVaultController(context) {
 
   const applySnapshot = (payload) => {
     const action = actionCreators.authStatusReceived(payload);
-    const reference = extractVaultSessionFromSnapshot(payload);
+    const selectedSite = view.selectedSite?.() || "";
+    const reference = extractVaultSessionFromSnapshot(payload, selectedSite);
     store.dispatch(action);
-    activeSession = reference;
+    if (reference && (!selectedSite || reference.site === selectedSite)) {
+      activeSession = reference;
+    } else if (!activeSession || !selectedSite || activeSession.site === selectedSite) {
+      activeSession = null;
+    }
     syncAuthorizationPolling();
   };
 
   const applySiteStatus = (payload, { syncPolling = true } = {}) => {
     const status = payload?.status && typeof payload.status === "object" ? payload.status : payload;
     store.dispatch(actionCreators.authSiteStatusReceived(status));
-    activeSession = extractVaultSessionReference(payload);
+    const reference = extractVaultSessionReference(payload);
+    const selectedSite = view.selectedSite?.() || "";
+    if (reference && (!selectedSite || reference.site === selectedSite)) {
+      activeSession = reference;
+    } else if (!activeSession || !selectedSite || activeSession.site === status?.site) {
+      activeSession = null;
+    }
     if (syncPolling) syncAuthorizationPolling();
   };
 
@@ -103,13 +122,16 @@ function createVaultController(context) {
     if (!active || destroyed) return false;
     if (statusRead) {
       if (!replace) return statusRead.promise;
-      abortRead(statusRead);
-      try {
-        await statusRead.promise;
-      } catch {
-        // 被替换的读取由原调用方处理。
+      const replaced = statusRead;
+      abortRead(replaced);
+      if (!replaced.controller.signal.aborted) {
+        try {
+          await replaced.promise;
+        } catch {
+          // 被替换的读取由原调用方处理。
+        }
       }
-      if (!active || destroyed) return false;
+      if (!active || destroyed || statusRead !== replaced) return false;
     }
     const controller = new AbortController();
     const unlink = linkSignal(externalSignal, controller);
@@ -136,6 +158,49 @@ function createVaultController(context) {
     return promise;
   };
 
+  const readSite = async (siteId, externalSignal, { replace = false, report = true } = {}) => {
+    if (!active || destroyed || !getVaultSiteDefinition(siteId)) return false;
+    if (siteRead) {
+      if (!replace && siteRead.siteId === siteId) return siteRead.promise;
+      const replaced = siteRead;
+      abortRead(replaced);
+      if (!replaced.controller.signal.aborted) {
+        try {
+          await replaced.promise;
+        } catch {
+          // 被替换的站点读取由原调用方处理。
+        }
+      }
+      if (!active || destroyed || siteRead !== replaced) return false;
+    }
+    const controller = new AbortController();
+    const unlink = linkSignal(externalSignal, controller);
+    const ticket = requestGate.beginRead("site");
+    const promise = api.get(vaultViewUrl(siteAuthPath(siteId)), {
+      signal: controller.signal,
+    })
+      .then((payload) => {
+        if (
+          !active || destroyed || controller.signal.aborted ||
+          !requestGate.isReadCurrent(ticket) ||
+          (view.selectedSite?.() && view.selectedSite() !== siteId)
+        ) return false;
+        applySiteStatus(payload);
+        return true;
+      })
+      .catch((error) => {
+        if (isAbortError(error) || controller.signal.aborted) return false;
+        if (active && report) view.showError(error);
+        throw error;
+      })
+      .finally(() => {
+        unlink();
+        if (siteRead?.promise === promise) siteRead = null;
+      });
+    siteRead = { controller, promise, siteId };
+    return promise;
+  };
+
   const pollActiveSession = async (externalSignal) => {
     if (!active || destroyed || !activeSession) return false;
     if (sessionRead) return sessionRead.promise;
@@ -154,8 +219,13 @@ function createVaultController(context) {
         ) return false;
         applySiteStatus(payload, { syncPolling: false });
         if (!activeSession && active && !destroyed) {
-          view.setOperationMessage("授权窗口已关闭，请刷新并确认登录状态。");
-          await readStatus(controller.signal, { replace: false, report: false });
+          requestGate.beginWrite();
+          stopAuthorizationPolling();
+          view.setOperationMessage("授权会话已结束，正在确认站点与完整授权状态。");
+          await Promise.allSettled([
+            readStatus(null, { replace: true, report: false }),
+            readSite(reference.site, null, { report: false }),
+          ]);
         } else {
           syncAuthorizationPolling();
         }
@@ -180,9 +250,11 @@ function createVaultController(context) {
   };
 
   const invalidateReadsForWrite = () => {
-    requestGate.beginWrite();
+    const ticket = requestGate.beginWrite();
     abortRead(statusRead);
+    abortRead(siteRead);
     abortRead(sessionRead);
+    return ticket;
   };
 
   const processOperationPayload = (payload) => {
@@ -203,16 +275,19 @@ function createVaultController(context) {
     successMessage,
     writes = true,
     processPayload = false,
+    rereadSite = "",
   }) => {
     if (!active || destroyed || busy) return false;
     const operation = ++operationSequence;
-    if (writes) invalidateReadsForWrite();
-    else {
+    const writeTicket = writes ? invalidateReadsForWrite() : null;
+    if (!writes) {
       abortRead(statusRead);
+      abortRead(siteRead);
       abortRead(sessionRead);
     }
     view.clearError();
     setBusy(kind);
+    view.setWorkspacePhase?.(writes ? "writing" : "loading");
     view.setOperationMessage(
       kind === "refresh"
         ? "正在刷新授权状态……"
@@ -220,23 +295,41 @@ function createVaultController(context) {
     );
     const controller = new AbortController();
     activeOperationController = controller;
+    const isCurrent = () => Boolean(
+      active && !destroyed && !controller.signal.aborted &&
+      (!writeTicket || requestGate.isWriteCurrent(writeTicket))
+    );
+    const refreshAuthoritative = async () => {
+      const outcomes = await Promise.allSettled([
+        readStatus(null, { replace: true, report: false }),
+        ...(rereadSite ? [readSite(rereadSite, null, { replace: true, report: false })] : []),
+      ]);
+      const rejected = outcomes.filter((outcome) => outcome.status === "rejected");
+      const incomplete = outcomes.filter((outcome) =>
+        outcome.status === "fulfilled" && outcome.value !== true);
+      if (rejected.length === outcomes.length) throw rejected[0].reason;
+      if (rejected.length || incomplete.length) view.setWorkspacePhase?.("partial");
+      return rejected.length === 0 && incomplete.length === 0;
+    };
     try {
       const payload = request ? await request(controller.signal) : null;
-      if (!active || destroyed || controller.signal.aborted) return false;
+      if (!isCurrent()) return false;
       if (processPayload && payload) processOperationPayload(payload);
-      await readStatus(null, { replace: true, report: false });
-      if (!active || destroyed || controller.signal.aborted) return false;
+      const complete = await refreshAuthoritative();
+      if (!isCurrent()) return false;
       view.clearError();
+      view.setWorkspacePhase?.(complete ? "idle" : "partial");
       view.setOperationMessage(successMessage);
       return true;
     } catch (error) {
       if (isAbortError(error) || controller.signal.aborted || !active) return false;
       try {
-        await readStatus(null, { replace: true, report: false });
+        await refreshAuthoritative();
       } catch {
         // 保留原操作错误，失败刷新不能覆盖受控指引。
       }
       view.showError(error);
+      view.setWorkspacePhase?.(store.getState().auth.bySite.size ? "partial" : "error");
       view.setOperationMessage("操作失败，其他站点的上次状态已保留。请刷新后重试。");
       return false;
     } finally {
@@ -251,19 +344,23 @@ function createVaultController(context) {
     let secret = input.value;
     let payload = null;
     let capturedPayload = null;
+    input.value = "";
     try {
       payload = buildAuthorizationProxyPayload(secret);
-      input.value = "";
-      secret = "";
       capturedPayload = payload;
+      secret = "";
       payload = null;
       return await runOperation({
         kind: "proxy-save",
         request: (signal) => {
-          const body = capturedPayload;
-          capturedPayload = null;
-          return api.put(vaultViewUrl(VAULT_ENDPOINTS.proxy), body, { signal });
+          try {
+            return api.put(vaultViewUrl(VAULT_ENDPOINTS.proxy), capturedPayload, { signal });
+          } finally {
+            // context.api 已同步完成 JSON 序列化；不要让局部原始输入等待权威重读。
+            capturedPayload = null;
+          }
         },
+        rereadSite: view.selectedSite?.() || "",
         successMessage: "登录代理设置已保存。",
       });
     } catch (error) {
@@ -288,16 +385,20 @@ function createVaultController(context) {
 
   const confirm = async (options) => {
     // 对话框期间暂停会重建目标卡片的会话轮询，确保关闭后焦点返回原触发按钮。
+    const lifecycle = requestGate.currentLifecycle();
     abortRead(sessionRead);
     stopAuthorizationPolling();
     const choice = await dialogs.open(options);
     view.clearSensitiveInputs();
-    if (active && !destroyed) syncAuthorizationPolling();
+    if (
+      !active || destroyed || requestGate.currentLifecycle() !== lifecycle
+    ) return false;
+    syncAuthorizationPolling();
     if (choice !== "confirm") {
       view.setOperationMessage("已取消操作，敏感输入已清空，授权状态未改变。");
       return false;
     }
-    return active && !destroyed;
+    return true;
   };
 
   const authorizeSite = async (siteId) => {
@@ -310,6 +411,7 @@ function createVaultController(context) {
       kind: `authorize:${siteId}`,
       request: (signal) => api.post(vaultViewUrl(path), undefined, { signal }),
       processPayload: true,
+      rereadSite: siteId,
       successMessage: `${definition.label} 授权已开始，请在打开的浏览器中完成登录。`,
     });
   };
@@ -332,6 +434,7 @@ function createVaultController(context) {
       kind: `cancel:${siteId}`,
       request: (signal) => api.delete(vaultViewUrl(path), { signal }),
       processPayload: true,
+      rereadSite: siteId,
       successMessage: `${definition.label} 授权标签页已关闭，已保存凭证保持不变。`,
     });
   };
@@ -350,6 +453,7 @@ function createVaultController(context) {
       kind: `clear:${siteId}`,
       request: (signal) => api.delete(vaultViewUrl(siteAuthPath(siteId)), { signal }),
       processPayload: true,
+      rereadSite: siteId,
       successMessage: `${definition.label} 站点凭证已删除，授权浏览器数据保持不变。`,
     });
   };
@@ -365,6 +469,7 @@ function createVaultController(context) {
     await runOperation({
       kind: "profile-clear",
       request: (signal) => api.delete(vaultViewUrl(VAULT_ENDPOINTS.browserProfile), { signal }),
+      rereadSite: view.selectedSite?.() || "",
       successMessage: "授权浏览器数据已清除，各站点已保存凭证保持不变。",
     });
   };
@@ -380,6 +485,7 @@ function createVaultController(context) {
     await runOperation({
       kind: "proxy-reset",
       request: (signal) => api.delete(vaultViewUrl(VAULT_ENDPOINTS.proxy), { signal }),
+      rereadSite: view.selectedSite?.() || "",
       successMessage: "登录代理已恢复默认设置，授权状态已刷新。",
     });
   };
@@ -393,12 +499,32 @@ function createVaultController(context) {
       await runOperation({
         kind: "refresh",
         writes: false,
+        rereadSite: view.selectedSite?.() || "",
         successMessage: "站点授权、授权浏览器数据和登录代理状态已刷新。",
       });
       return;
     }
-    if (action === "proxy-reveal") {
-      view.toggleProxyVisibility();
+    if (action === "site:danbooru" || action === "site:twitter" || action === "site:pixiv" ||
+        action === "site:exhentai" || action === "site:pawchive") {
+      const siteId = action.slice("site:".length);
+      view.clearSensitiveInputs();
+      requestGate.beginWrite();
+      abortRead(statusRead);
+      abortRead(siteRead);
+      abortRead(sessionRead);
+      activeSession = null;
+      stopAuthorizationPolling();
+      view.selectSite?.(siteId, { focus: true });
+      view.setWorkspacePhase?.("loading");
+      const outcomes = await Promise.allSettled([
+        readStatus(null, { replace: true, report: false }),
+        readSite(siteId, null, { replace: true, report: true }),
+      ]);
+      if (active && !destroyed) {
+        const failed = outcomes.some((outcome) =>
+          outcome.status === "rejected" || outcome.value !== true);
+        view.setWorkspacePhase?.(failed ? "partial" : "idle");
+      }
       return;
     }
     if (action === "profile-clear") {
@@ -460,10 +586,14 @@ function createVaultController(context) {
       setElementInert(root, false);
       root.dataset.lifecycle = "active";
       view.clearSensitiveInputs();
+      view.setWorkspacePhase?.("loading");
       view.setOperationMessage("正在加载授权状态……");
       void readStatus(null, { replace: true, report: true })
         .then((loaded) => {
-          if (loaded && active) view.setOperationMessage("授权状态已加载，可随时刷新。");
+          if (loaded && active) {
+            view.setWorkspacePhase?.("idle");
+            view.setOperationMessage("授权状态已加载，可随时刷新。");
+          }
         })
         .catch(() => {});
     },
@@ -477,6 +607,7 @@ function createVaultController(context) {
       activeOperationController?.abort();
       activeOperationController = null;
       abortRead(statusRead);
+      abortRead(siteRead);
       abortRead(sessionRead);
       activeSession = null;
       stopAuthorizationPolling();
@@ -497,6 +628,7 @@ function createVaultController(context) {
       dialogs.destroy();
       activeOperationController?.abort();
       abortRead(statusRead);
+      abortRead(siteRead);
       abortRead(sessionRead);
       activeSession = null;
       stopAuthorizationPolling();

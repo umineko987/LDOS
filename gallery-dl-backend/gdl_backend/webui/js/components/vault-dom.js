@@ -1,5 +1,4 @@
 import { createElement } from "../core/dom.js";
-import { createIcon } from "./icons.js";
 import { createStatusBadge } from "./status.js";
 
 export function vaultButton(action, label, pendingLabel = label, {
@@ -36,6 +35,20 @@ export function vaultDefinitionList(items, className = "vault-definition-list") 
   return list;
 }
 
+function createColumn(tagName, className, kicker, heading, headingId, summary, children) {
+  return createElement(tagName, {
+    className: `vault-column ${className}`,
+    attributes: { "aria-labelledby": headingId },
+  }, [
+    createElement("header", { className: "vault-column-header" }, [
+      createElement("p", { className: "vault-column-kicker", text: kicker }),
+      createElement("h2", { text: heading, attributes: { id: headingId } }),
+      createElement("p", { text: summary }),
+    ]),
+    createElement("div", { className: "vault-column-scroll" }, children),
+  ]);
+}
+
 export function buildVaultDom(context) {
   const { root, app } = context;
   const headingId = "vault-heading";
@@ -50,28 +63,42 @@ export function buildVaultDom(context) {
     className: "vault-error-host",
     attributes: { id: "vault-error-host", "aria-live": "assertive" },
   });
+  const waitingHost = createElement("div", {
+    className: "vault-waiting-host",
+    attributes: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
+    dataset: { vaultWorkspaceState: "loading" },
+  });
 
-  const siteHost = createElement("div", { className: "vault-site-grid" });
-  const sitesSection = createElement("section", {
-    className: "vault-panel vault-sites-panel",
-    attributes: { "aria-labelledby": "vault-sites-heading" },
-  }, [
-    createElement("div", { className: "vault-panel-heading" }, [
-      createElement("div", {}, [
-        createElement("h2", { text: "站点授权", attributes: { id: "vault-sites-heading" } }),
-        createElement("p", {
-          text: "Danbooru 和 Pawchive 无需登录；X、Pixiv 和 EH 共用一个独立的授权浏览器。",
-        }),
-      ]),
-      refreshButton,
-    ]),
-    siteHost,
-  ]);
+  const siteNav = createElement("nav", {
+    className: "vault-site-nav",
+    attributes: { "aria-label": "五个授权站点" },
+    dataset: { vaultSiteNavigation: "" },
+  });
+  const navigationColumn = createColumn(
+    "aside",
+    "vault-column--navigation",
+    "01 · 站点",
+    "授权目标",
+    "vault-sites-heading",
+    "固定顺序查看五个站点；切换站点会清空登录代理输入。",
+    [waitingHost, errorHost, siteNav],
+  );
+
+  const siteDetailHost = createElement("div", { className: "vault-site-detail" });
+  const materialColumn = createColumn(
+    "main",
+    "vault-column--material",
+    "02 · 材料与会话",
+    "当前站点",
+    "vault-material-heading",
+    "查看安全的材料事实，并开始、完成或关闭托管浏览器 / OAuth 会话。",
+    [operationLive, siteDetailHost],
+  );
 
   const profileStatusHost = createElement("div", { className: "vault-profile-status" });
   const profileClearButton = vaultButton(
     "profile-clear",
-    "清除授权浏览器数据",
+    "清除共享授权浏览器数据",
     "正在清空…",
     { dangerous: true },
   );
@@ -85,17 +112,12 @@ export function buildVaultDom(context) {
     attributes: { "aria-labelledby": "vault-profile-heading" },
   }, [
     createElement("div", { className: "vault-panel-heading" }, [
-      createElement("div", {}, [
-        createElement("h2", { text: "授权浏览器数据", attributes: { id: "vault-profile-heading" } }),
-        createElement("p", {
-          text: "X、Pixiv 和 EH 共用一份独立的授权浏览器数据，不会读取日常浏览器资料。",
-        }),
-      ]),
+      createElement("h3", { text: "共享授权浏览器数据", attributes: { id: "vault-profile-heading" } }),
       profileClearButton,
     ]),
     createElement("p", {
       className: "vault-impact-note",
-      text: "清除后会关闭活动授权并删除浏览器登录状态，但不会删除各站点已保存的 Cookie 或 Pixiv Token。",
+      text: "X、Pixiv 与 EH 共用独立浏览器资料。清除会关闭活动授权并删除浏览器登录状态，但不会删除已导出的站点材料。",
       attributes: { id: "vault-profile-impact" },
     }),
     profileReasons,
@@ -108,26 +130,18 @@ export function buildVaultDom(context) {
     attributes: {
       id: "vault-proxy-input",
       name: "authorization-proxy-replacement",
-      type: "password",
+      type: "text",
       maxlength: "300",
-      autocomplete: "new-password",
+      autocomplete: "off",
       spellcheck: "false",
       autocapitalize: "none",
       inputmode: "url",
-      placeholder: "输入完整新代理；留空表示直连",
+      placeholder: "协议://主机:端口；留空表示直连",
       "aria-describedby": "vault-proxy-help vault-proxy-validation vault-error-host",
       "aria-errormessage": "vault-proxy-validation",
     },
     dataset: { vaultSecret: "" },
   });
-  const revealButton = vaultButton("proxy-reveal", "显示代理输入", "显示代理输入", {
-    className: "vault-button--reveal",
-  });
-  revealButton.removeAttribute("data-operation-kind");
-  revealButton.setAttribute("aria-controls", "vault-proxy-input");
-  revealButton.setAttribute("aria-pressed", "false");
-  revealButton.setAttribute("aria-label", "显示登录代理输入");
-
   const proxyValidation = createElement("p", {
     className: "vault-field-error",
     attributes: { id: "vault-proxy-validation", role: "alert" },
@@ -152,72 +166,84 @@ export function buildVaultDom(context) {
   });
   proxySaveButton.setAttribute("aria-describedby", "vault-proxy-help vault-proxy-reason");
   proxyResetButton.setAttribute("aria-describedby", "vault-proxy-reset-help vault-proxy-reason");
-
   const proxyForm = createElement("form", {
     className: "vault-proxy-form",
     attributes: { autocomplete: "off", novalidate: "" },
     dataset: { vaultForm: "proxy" },
   }, [
-    createElement("fieldset", {}, [
-      createElement("legend", { text: "设置登录代理" }),
-      createElement("label", {
-        text: "完整代理地址",
-        attributes: { for: "vault-proxy-input" },
-      }),
-      createElement("div", { className: "vault-secret-row" }, [proxyInput, revealButton]),
-      createElement("p", {
-        className: "vault-field-help",
-        text: "格式：协议://主机:端口。支持 HTTP(S)、SOCKS4、SOCKS5 和 SOCKS5H；地址不能包含路径或查询参数。HTTP(S) 可包含账号密码，SOCKS 不支持。",
-        attributes: { id: "vault-proxy-help" },
-      }),
-      proxyValidation,
-      createElement("div", { className: "vault-form-actions" }, [
-        proxySaveButton,
-        proxyResetButton,
-      ]),
-      createElement("p", {
-        className: "vault-field-help",
-        text: "留空保存表示始终直连；“恢复默认设置”则重新采用配置文件中的值。",
-        attributes: { id: "vault-proxy-reset-help" },
-      }),
-      proxyReasons,
-    ]),
+    createElement("label", {
+      text: "完整新登录代理地址",
+      attributes: { for: "vault-proxy-input" },
+    }),
+    proxyInput,
+    createElement("p", {
+      className: "vault-field-help",
+      text: "支持 HTTP(S)、SOCKS4、SOCKS5 与 SOCKS5H。输入在提交、失败、取消、换站和离开时清空；页面不会回填原值。",
+      attributes: { id: "vault-proxy-help" },
+    }),
+    proxyValidation,
+    createElement("div", { className: "vault-form-actions" }, [proxySaveButton, proxyResetButton]),
+    createElement("p", {
+      className: "vault-field-help",
+      text: "留空保存表示始终直连；恢复默认设置则重新采用服务配置。",
+      attributes: { id: "vault-proxy-reset-help" },
+    }),
+    proxyReasons,
   ]);
-
   const proxySection = createElement("section", {
     className: "vault-panel vault-proxy-panel",
     attributes: { "aria-labelledby": "vault-proxy-heading" },
   }, [
-    createElement("div", { className: "vault-panel-heading" }, [
-      createElement("div", {}, [
-        createElement("h2", { text: "登录代理", attributes: { id: "vault-proxy-heading" } }),
-        createElement("p", {
-          text: "仅用于授权浏览器和 Pixiv Token 交换，与图片采集使用的代理池相互独立。",
-        }),
-      ]),
-      createIcon("network", { size: 28, strokeWidth: 1.8, className: "vault-panel-icon" }),
-    ]),
+    createElement("h3", { text: "登录代理", attributes: { id: "vault-proxy-heading" } }),
+    createElement("p", {
+      className: "vault-panel-copy",
+      text: "仅用于授权浏览器与 Pixiv Token 交换，不改变采集代理池。状态只显示协议、主机、端口和隐藏事实。",
+    }),
     proxyStatusHost,
     proxyForm,
   ]);
+  const dangerSection = createElement("section", {
+    className: "vault-danger-zone",
+    attributes: { "aria-labelledby": "vault-danger-heading" },
+  }, [
+    createElement("h3", { text: "危险操作", attributes: { id: "vault-danger-heading" } }),
+    createElement("p", {
+      text: "清除浏览器数据、恢复代理默认值、关闭会话和删除站点材料都会先要求确认。",
+    }),
+  ]);
+  const recoveryColumn = createColumn(
+    "aside",
+    "vault-column--recovery",
+    "03 · 共享与恢复",
+    "共享配置与危险恢复",
+    "vault-recovery-heading",
+    "管理共享授权浏览器数据、authorization proxy 与受确认保护的恢复动作。",
+    [profileSection, proxySection, dangerSection],
+  );
+
+  const workspaceTrack = createElement("div", {
+    className: "vault-workspace-track",
+  }, [navigationColumn, materialColumn, recoveryColumn]);
+  const workspace = createElement("section", {
+    className: "vault-workspace",
+    attributes: {
+      "aria-label": "授权管理三段工作区，可横向滚动查看站点导航、当前材料与会话、共享配置与危险恢复",
+      tabindex: "0",
+    },
+    dataset: { vaultWorkspace: "" },
+  }, [workspaceTrack]);
 
   root.classList.add("app-view", "vault-app");
   root.setAttribute("aria-labelledby", headingId);
   root.replaceChildren(
     createElement("header", { className: "app-header vault-app-header" }, [
-      createElement("p", { className: "app-executable", text: app.windowTitle }),
-      createElement("h1", { text: app.label, attributes: { id: headingId } }),
-      headerBadge,
-      createElement("p", {
-        className: "app-summary",
-        text: "查看各站授权状态，打开独立浏览器完成登录，并管理登录凭证和登录代理。",
-      }),
+      createElement("div", {}, [
+        createElement("p", { className: "app-executable", text: app.windowTitle }),
+        createElement("h1", { text: app.label, attributes: { id: headingId } }),
+      ]),
+      createElement("div", { className: "vault-header-actions" }, [headerBadge, refreshButton]),
     ]),
-    operationLive,
-    errorHost,
-    sitesSection,
-    profileSection,
-    proxySection,
+    workspace,
   );
 
   return {
@@ -225,17 +251,20 @@ export function buildVaultDom(context) {
     refreshButton,
     operationLive,
     errorHost,
-    siteHost,
+    waitingHost,
+    siteNav,
+    siteDetailHost,
     profileStatusHost,
     profileClearButton,
     profileReasons,
     proxyStatusHost,
     proxyForm,
     proxyInput,
-    revealButton,
     proxyValidation,
     proxySaveButton,
     proxyResetButton,
     proxyReasons,
+    workspace,
+    workspaceTrack,
   };
 }
