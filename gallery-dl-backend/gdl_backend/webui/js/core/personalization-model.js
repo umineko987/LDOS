@@ -429,7 +429,10 @@ export function derivePersonalizationPreview(value) {
       requireStrictBoolean(customDescriptors, key, `本地壁纸 ${key} 状态`),
     ]),
   ));
-  if (custom.selectedReady && !custom.pending && !custom.saved) {
+  if (
+    custom.available !== (custom.pending || custom.saved)
+    || custom.selectedReady && !custom.available
+  ) {
     throw new TypeError("本地壁纸预览状态不一致");
   }
 
@@ -448,8 +451,12 @@ export function derivePersonalizationPreview(value) {
   const systemReduced = dataValue(motionDescriptors, "systemReduced");
   const effective = dataValue(motionDescriptors, "effective");
   const limitedBySystem = dataValue(motionDescriptors, "limitedBySystem");
-  if (limitedBySystem !== (draft.animations === "on" && systemReduced)) {
-    throw new TypeError("动效系统限制状态不一致");
+  if (
+    motionUserMode !== draft.animations
+    || limitedBySystem !== (draft.animations === "on" && systemReduced)
+    || effective !== (draft.animations === "on" && !systemReduced)
+  ) {
+    throw new TypeError("动效预览状态不一致");
   }
 
   const customStatus = previewCustomStatus(custom);
