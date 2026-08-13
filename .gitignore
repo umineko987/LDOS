@@ -69,3 +69,4 @@ Desktop.ini
 # 本机文档默认只保留在本地；架构约定作为维护者文档提交
 /docs/*
 !/docs/ARCHITECTURE.md
+!/docs/gallery-dl-backend.md
