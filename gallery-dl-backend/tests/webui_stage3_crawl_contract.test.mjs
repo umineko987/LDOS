@@ -666,6 +666,22 @@ test("3A model：代理/授权前置条件投影全局、来源覆盖和 readine
     searchProxyMode: "prefer",
     crawlProxyMode: "direct",
   }).proxy.severity, "prefer");
+  assert.equal(deriveCrawlPreconditions({
+    readinessProxy: null,
+    authBySite: new Map(),
+    crawlSources: [],
+    sourceDrafts,
+    searchProxyMode: "required",
+    crawlProxyMode: "direct",
+  }).proxy.state, "unknown");
+  assert.equal(deriveCrawlPreconditions({
+    readinessProxy: { status: "ok", running: false, healthy: 0, sourceCount: 1 },
+    authBySite: new Map(),
+    crawlSources: [],
+    sourceDrafts,
+    searchProxyMode: "required",
+    crawlProxyMode: "direct",
+  }).proxy.state, "stopped");
   assert.deepEqual(deriveCrawlPreconditions({
     readinessProxy: running,
     authBySite: new Map([["pixiv", { authorized: false }]]),
@@ -674,6 +690,14 @@ test("3A model：代理/授权前置条件投影全局、来源覆盖和 readine
     searchProxyMode: "direct",
     crawlProxyMode: "direct",
   }).authSites, ["pixiv"]);
+  assert.deepEqual(deriveCrawlPreconditions({
+    readinessProxy: running,
+    authBySite: new Map([["pixiv", { authorized: true }]]),
+    crawlSources: [],
+    sourceDrafts,
+    searchProxyMode: "direct",
+    crawlProxyMode: "direct",
+  }).authSites, []);
   assert.deepEqual(deriveCrawlPreconditions({
     readinessProxy: null,
     authBySite: new Map([["pixiv", { authorized: false }]]),
