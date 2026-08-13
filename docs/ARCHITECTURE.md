@@ -271,14 +271,23 @@ WAL reader 只能看到已提交快照。事务内需要观察本次写入时，
 
 WebUI 使用后端直接提供的原生 ES modules，不需要单独前端构建流程。模块边界由 Node 行为测试和 Python 静态 import 图共同守护。
 
-### 8.1 应用元数据与 registry
+### 8.1 五层桌面壳层、应用元数据与 registry
 
-`core/app-definitions.js` 是以下信息的唯一来源：
+当前桌面壳层分为壁纸、顶部菜单栏、窗口层、应用中心和 Dock 五层。裸 `/ui/` 是空桌面，不自动
+打开应用；合法 `#/应用ID` 深链接只打开一个目标窗口。应用中心、Dock、菜单中的窗口列表都只是
+中央 definitions/Store 窗口栈的纯投影，不拥有第二份应用清单、运行状态、焦点或 z-order。
+`components/taskbar-summary.js` 与 `components/taskbar-windows.js` 的文件名是兼容 seam；前者实际
+服务菜单栏系统摘要，后者拥有 Dock 的纯投影和激活函数，不表示旧任务栏仍存在。
 
-- `id`、`label`、`icon`、`route`；
-- `windowTitle`、`availability`、`defaultWindowState`；
+`core/app-definitions.js` 是 11 个应用以下信息的唯一来源：
+
+- `id`、`label`、`icon`、`route`、分组、说明与应用中心顺序；
+- 自然语言 `windowTitle`、`availability`、`defaultWindowState`；
 - `DEFAULT_APP_ID` 和 `DEFAULT_ROUTE`。
 
+`availability` 只接受 `ready | preview`：8 个真实应用为 `ready`，图片库、定时任务和数据集导出为
+`preview`。3 个 preview 各有独立 controller/model/view，正式 adapter 只返回 unavailable 且发送
+0 个对应业务 API；内容、加载和错误状态只由 `tests/fixtures/webui/` 的显式 tests-only host 注入。
 `app-registry-factory.js` 只负责按 ID 将 controller 与元数据一对一合并。新增应用时必须：
 
 - 添加唯一 ID 和 route；
@@ -310,9 +319,12 @@ WebUI 使用后端直接提供的原生 ES modules，不需要单独前端构建
 
 reducer 不得访问 DOM、storage、网络或应用 controller。嵌套 dispatch、通知阶段 dispatch 和 subscriber 异常隔离语义必须保持。
 
-### 8.3 Storage
+### 8.3 Storage 与启动语义
 
-`core/storage.js` 保持薄 facade。纯快照、布局和偏好投影与显式 persistence adapter 分开。
+`core/storage.js` 保持薄 facade。纯快照、布局和偏好投影与显式 persistence adapter 分开。新页面
+不会以 session current app 或旧工作区为启动权威，Store 的运行窗口栈、焦点和最小化状态从空值
+开始。`imageweave.window-placements.v2` 只按应用保存经过边界校验的 normal rect 和可选 maximized
+偏好；旧 v1 记录只能严格迁移成位置提示，不恢复 running/focused/minimized，也不自动打开窗口。
 
 修改持久化时必须保持：
 
@@ -332,7 +344,7 @@ reducer 不得访问 DOM、storage、网络或应用 controller。嵌套 dispatc
 - DOM `zIndex` 只是 render plan 的投影；
 - pointermove 只做临时 DOM 反馈，不持续写 store；
 - pointer interaction 结束时统一提交一次；
-- mobile viewport 变化会取消不再有效的 interaction；
+- window-layer 工作区变化会取消不再有效的 interaction；低于 1180×720 时壳层显示桌面环境 blocker；
 - async `beforeHide` 去重并阻止 stale completion；
 - mount 失败会清理半创建 DOM；
 - `destroy()` 幂等。
@@ -385,7 +397,7 @@ token、cookie、密码、API key、代理凭据和代理订阅原文不得进�
 - API 响应字段白名单；
 - task 状态机和 attempt 顺序；
 - SQLite 事务与 reader 可见性；
-- WebUI action type、facade export、snapshot 和 storage key；
+- 仍在使用的 WebUI action type、facade export、snapshot 和 storage key；已删除的 START action/state/selector/facade 不得重新引入；
 - 应用 lifecycle 与默认 route/window state；
 - proxy required/prefer 语义；
 - discovery 候选顺序、别名、重试和公开错误分类。

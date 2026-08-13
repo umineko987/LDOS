@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const REPOSITORY = new URL("../", import.meta.url);
+const REPOSITORY = new URL("../../", import.meta.url);
 const BACKEND = new URL("../", import.meta.url);
 const WEBUI = new URL("../gdl_backend/webui/", import.meta.url);
 
@@ -161,7 +161,7 @@ test("Stage 6 README screenshot has fixed safe production provenance", () => {
   assert.equal(metadata.schema_version, 1);
   assert.equal(metadata.file, "example.png");
   assert.equal(metadata.source, "production-create-app");
-  assert.equal(metadata.route, "#/crawl");
+  assert.equal(metadata.route, "#/tasks");
   assert.equal(metadata.runtime_data, false);
   assert.deepEqual(metadata.viewport, { width: 1440, height: 900, device_scale_factor: 1 });
   assert.equal(image.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
