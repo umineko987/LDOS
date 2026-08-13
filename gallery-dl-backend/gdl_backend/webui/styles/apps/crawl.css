@@ -89,14 +89,23 @@
 }
 
 .crawl-workspace {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+  background: var(--imageweave-surface-content-solid);
+}
+
+.crawl-workspace-track {
   display: grid;
   grid-template-columns: minmax(230px, 0.82fr) minmax(430px, 1.58fr) minmax(270px, 1fr);
   width: 100%;
   min-width: 1020px;
-  min-height: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  background: var(--imageweave-surface-content-solid);
+  min-height: 100%;
+  height: 100%;
 }
 
 .crawl-column {
@@ -206,6 +215,12 @@
   gap: 8px;
   min-height: var(--imageweave-control-height-compact);
   font-weight: 750;
+}
+
+.crawl-source-definition__proxy-label {
+  color: var(--imageweave-text-secondary);
+  font-size: 0.7rem;
+  font-weight: 650;
 }
 
 .crawl-source-definition input,
@@ -348,7 +363,8 @@
 .crawl-precondition,
 .crawl-source-warning,
 .crawl-eh-summary,
-.crawl-submit-reason {
+.crawl-submit-reason,
+.crawl-validation-message {
   margin: 10px 0 0;
   padding: 9px 10px;
   border: var(--imageweave-border-width) solid var(--imageweave-separator);
@@ -365,7 +381,8 @@
 
 .crawl-search-state > p,
 .crawl-precondition > p,
-.crawl-submit-reason {
+.crawl-submit-reason,
+.crawl-validation-message {
   color: var(--imageweave-text-secondary);
   font-size: 0.74rem;
 }
@@ -387,6 +404,17 @@
 
 .crawl-preconditions {
   margin-top: 12px;
+}
+
+.crawl-validation-message {
+  margin: 0;
+  border-color: var(--imageweave-state-danger);
+  background: var(--imageweave-state-danger-surface-solid);
+}
+
+.crawl-app [aria-invalid="true"] {
+  border-color: var(--imageweave-state-danger);
+  box-shadow: 0 0 0 2px var(--imageweave-state-danger-surface-solid);
 }
 
 .crawl-precondition {
@@ -719,22 +747,12 @@
   margin: 0;
 }
 
-.application-window[data-maximized] .crawl-workspace {
+.application-window[data-maximized] .crawl-workspace-track {
   min-width: 100%;
 }
 
-.application-window:not([data-maximized]) .crawl-app {
-  width: max(100%, 1020px);
-}
-
-.application-window:not([data-maximized]) .crawl-workspace {
+.application-window:not([data-maximized]) .crawl-workspace-track {
   grid-template-columns: minmax(215px, 0.8fr) minmax(400px, 1.5fr) minmax(260px, 1fr);
-}
-
-@media (max-width: 1180px) {
-  .crawl-workspace {
-    min-width: 1020px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -751,6 +769,7 @@
   .crawl-app,
   .crawl-app-header,
   .crawl-workspace,
+  .crawl-workspace-track,
   .crawl-column,
   .crawl-column-header,
   .crawl-column-scroll,

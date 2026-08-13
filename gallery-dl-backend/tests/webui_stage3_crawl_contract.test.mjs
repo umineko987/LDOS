@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import * as crawlModel from "../gdl_backend/webui/js/core/crawl-model.js";
 import { actionCreators, createStore } from "../gdl_backend/webui/js/core/store.js";
 import crawlApplication, * as crawlControllerModule from "../gdl_backend/webui/js/apps/crawl.js";
+import * as crawlViewModule from "../gdl_backend/webui/js/components/crawl-view.js";
 import {
   createCrawlView,
   createSourceErrorWarning,
@@ -17,6 +18,9 @@ const {
   buildCrawlPayload,
   buildSearchPayload,
   candidateMatchesEhFilter,
+  deriveCrawlPreconditions,
+  validateCrawlDraft,
+  validateSearchDraft,
   crawlCandidateVisible,
   crawlErrorGuidance,
   deriveCrawlSearchPresentation,
@@ -189,6 +193,7 @@ class TestElement {
     this.checked = false;
     this.disabled = false;
     this.hidden = false;
+    this.name = "";
     this.listeners = new Map();
   }
   setAttribute(name, value) {
@@ -196,6 +201,7 @@ class TestElement {
     this.attributes.set(name, text);
     if (name === "hidden") this.hidden = true;
     if (name === "disabled") this.disabled = true;
+    if (name === "name") this.name = text;
     if (name.startsWith("data-")) this.dataset[selectorDataName(name)] = text;
   }
   getAttribute(name) { return this.attributes.get(name) ?? null; }
@@ -212,11 +218,11 @@ class TestElement {
     else this.removeAttribute(name);
     return enabled;
   }
-  addEventListener(type, listener) {
+  addEventListener(type, listener, _options) {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set());
     this.listeners.get(type).add(listener);
   }
-  removeEventListener(type, listener) { this.listeners.get(type)?.delete(listener); }
+  removeEventListener(type, listener, _options) { this.listeners.get(type)?.delete(listener); }
   emit(type, target = this, init = {}) {
     const event = {
       type,
@@ -384,7 +390,19 @@ function controllerHarness({ apiOverrides = {}, initialSearch = null } = {}) {
       return suggestionButtons.find((item) => item === globalThis.document.activeElement)?.dataset.suggestionValue || "";
     },
     visibleCandidateKeys: () => [],
+    sourceCandidateKeys: (sourceKey) => store.getState().crawl.sources
+      .find((source) => source.key === sourceKey)?.addresses.map((item) => item.key) || [],
     sourceVisibleKeys: () => [],
+    activeSourceKey: () => store.getState().crawl.sources[0]?.key || "",
+    validateSearchDraft() {
+      return view.searchValidation || { valid: true, reason: "", field: "" };
+    },
+    validateCrawlDraft() {
+      return view.crawlValidation || { valid: true, reason: "", field: "" };
+    },
+    setOperationalAvailability: (available) => viewLog.push(["operational", available]),
+    refreshValidation: () => { viewLog.push(["validation"]); return view.searchValidation || view.crawlValidation || { valid: true, reason: "", field: "" }; },
+    handleInvalid: () => viewLog.push(["invalid"]),
     normalizeActiveSource: () => viewLog.push(["normalize-source"]),
     setActiveSource: (key) => viewLog.push(["active-source", key]),
     setEhQuery: () => {},
@@ -563,6 +581,101 @@ test("3A model：EH include/exclude、筛选外已选、弱证据与下载 fallb
   }), /EH 下载选项无效/);
 });
 
+test("3A model：共享草稿验证覆盖搜索、创建、控制字符与 EH 组合", () => {
+  const validSearch = {
+    keyword: "stage 3",
+    sites: ["danbooru"],
+    limit: 20,
+    proxyMode: "required",
+    sourceOptions: {},
+  };
+  assert.deepEqual(validateSearchDraft(validSearch), { valid: true, reason: "", field: "" });
+  assert.equal(validateSearchDraft({ ...validSearch, keyword: "" }).field, "keyword");
+  assert.equal(validateSearchDraft({ ...validSearch, keyword: `safe\n${SECRET}` }).field, "keyword");
+  assert.equal(validateSearchDraft({ ...validSearch, sites: [] }).field, "sites");
+  assert.equal(validateSearchDraft({ ...validSearch, limit: 201 }).field, "search-limit");
+  assert.equal(validateSearchDraft({ ...validSearch, proxyMode: "secret" }).field, "search-proxy");
+
+  const validCrawl = {
+    concurrency: 20,
+    maxTasks: 1000,
+    proxyMode: "required",
+    outputDir: "stage3/output",
+    sourceOptions: {},
+    ehDownload: { image_mode: "original", gp_policy: "stop" },
+  };
+  assert.deepEqual(validateCrawlDraft(validCrawl), { valid: true, reason: "", field: "" });
+  assert.equal(validateCrawlDraft({ ...validCrawl, concurrency: 0 }).field, "concurrency");
+  assert.equal(validateCrawlDraft({ ...validCrawl, maxTasks: 100001 }).field, "max-tasks");
+  assert.equal(validateCrawlDraft({ ...validCrawl, outputDir: `safe\n${SECRET}` }).field, "output-dir");
+  assert.equal(validateCrawlDraft({
+    ...validCrawl,
+    ehDownload: { image_mode: "resample", gp_policy: "resized" },
+  }).field, "eh-gp-policy");
+  for (const validation of [
+    validateSearchDraft({ ...validSearch, keyword: `safe\n${SECRET}` }),
+    validateCrawlDraft({ ...validCrawl, outputDir: `/private/${SECRET}\n` }),
+  ]) {
+    assert.equal(JSON.stringify(validation).includes(SECRET), false);
+    assert.equal(JSON.stringify(validation).includes("/private/"), false);
+  }
+});
+
+test("3A model：代理/授权前置条件投影全局、来源覆盖和 readiness", () => {
+  const disabled = { status: "disabled", running: false, healthy: 0, sourceCount: 0 };
+  const error = { status: "error", running: false, healthy: 0, sourceCount: 0 };
+  const running = { status: "ok", running: true, healthy: 2, sourceCount: 3 };
+  const sourceDrafts = CRAWL_SITE_DEFINITIONS.map(({ id }) => ({ site: id, enabled: true, proxyMode: "" }));
+
+  assert.deepEqual(deriveCrawlPreconditions({
+    readinessProxy: disabled,
+    authBySite: new Map(),
+    crawlSources: [],
+    sourceDrafts,
+    searchProxyMode: "required",
+    crawlProxyMode: "required",
+  }).proxy, {
+    severity: "required",
+    state: "disabled",
+    label: "代理已禁用，当前仅代理模式不可用",
+    action: "open-proxy",
+  });
+  assert.equal(deriveCrawlPreconditions({
+    readinessProxy: running,
+    authBySite: new Map(),
+    crawlSources: [],
+    sourceDrafts,
+    searchProxyMode: "direct",
+    crawlProxyMode: "direct",
+  }).proxy, null);
+  assert.equal(deriveCrawlPreconditions({
+    readinessProxy: error,
+    authBySite: new Map(),
+    crawlSources: [],
+    sourceDrafts: sourceDrafts.map((item) => item.site === "pixiv"
+      ? { ...item, proxyMode: "required" }
+      : item),
+    searchProxyMode: "direct",
+    crawlProxyMode: "direct",
+  }).proxy.severity, "required");
+  assert.equal(deriveCrawlPreconditions({
+    readinessProxy: disabled,
+    authBySite: new Map(),
+    crawlSources: [],
+    sourceDrafts,
+    searchProxyMode: "prefer",
+    crawlProxyMode: "direct",
+  }).proxy.severity, "prefer");
+  assert.deepEqual(deriveCrawlPreconditions({
+    readinessProxy: running,
+    authBySite: new Map([["pixiv", { authorized: false }]]),
+    crawlSources: [],
+    sourceDrafts,
+    searchProxyMode: "direct",
+    crawlProxyMode: "direct",
+  }).authSites, ["pixiv"]);
+});
+
 test("3A model：创建参数校验、0 选择禁用原因与显式搜索状态", () => {
   const projected = projectCrawlSearchResponse(completeSearchResponse());
   for (const invalid of [
@@ -594,8 +707,11 @@ test("3A model：创建参数校验、0 选择禁用原因与显式搜索状态"
   assert.deepEqual(deriveCrawlSubmitPresentation(projected.snapshot, { busy: "" }), {
     state: "disabled", selectedSourceCount: 0, selectedAddressCount: 0, reason: "请先选择至少一个候选地址。",
   });
-  assert.equal(deriveCrawlSubmitPresentation(selectCandidate(projected.snapshot, 0, 0), { busy: "crawl" }).state, "busy");
-  assert.equal(deriveCrawlSubmitPresentation(selectCandidate(projected.snapshot, 0, 0), { busy: "" }).state, "ready");
+  const selected = selectCandidate(projected.snapshot, 0, 0);
+  assert.equal(deriveCrawlSubmitPresentation(selected, { busy: "crawl", invalidReason: "失效" }).state, "busy");
+  assert.equal(deriveCrawlSubmitPresentation(selected, { busy: "", staleReason: "操作地址已安全清理" }).state, "stale");
+  assert.equal(deriveCrawlSubmitPresentation(selected, { busy: "", invalidReason: "并发数无效" }).state, "invalid");
+  assert.equal(deriveCrawlSubmitPresentation(selected, { busy: "" }).state, "ready");
 });
 
 test("3A model：422/409/transport/auth/proxy 错误只给安全恢复动作", () => {
@@ -746,6 +862,101 @@ test("3A controller：loading/error/recovery 保留权威 Store，busy 阻止重
   }
 });
 
+test("3A controller：原生 invalid 与实时草稿验证在 0 请求前更新 UI", async () => {
+  const restore = installControllerDom();
+  try {
+    const harness = controllerHarness({ initialSearch: completeSearchResponse() });
+    const searchForm = new TestForm();
+    searchForm.dataset.crawlForm = "search";
+    const invalidInput = new TestInput();
+    invalidInput.name = "search-limit";
+    harness.view.searchValidation = {
+      valid: false,
+      reason: "结果上限需为 1–200 的整数",
+      field: "search-limit",
+    };
+    harness.controller.activate();
+    harness.root.emit("input", invalidInput);
+    harness.root.emit("change", invalidInput);
+    harness.root.emit("invalid", invalidInput, { preventDefault() { this.defaultPrevented = true; } });
+    harness.root.emit("submit", searchForm);
+    await flush();
+    assert.equal(harness.calls.filter((item) => item[0] === "post").length, 0);
+    assert.equal(harness.viewLog.some((item) => item[0] === "validation"), true);
+    assert.equal(harness.viewLog.some((item) => item[0] === "invalid"), true);
+    harness.controller.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test("3A controller：关闭重开无 operational URL 时禁用，fresh search 后恢复", async () => {
+  const restore = installControllerDom();
+  try {
+    const search = completeSearchResponse();
+    const first = controllerHarness({ initialSearch: search });
+    const key = first.store.getState().crawl.sources[0].addresses[0].key;
+    first.store.dispatch(actionCreators.crawlCandidateSelectionChanged(key, true));
+    first.controller.activate();
+    assert.deepEqual(first.viewLog.filter((item) => item[0] === "operational").at(-1), ["operational", true]);
+    first.controller.destroy();
+
+    const refreshed = deferred();
+    const reopened = controllerHarness({
+      apiOverrides: {
+        post(url) {
+          assert.equal(url, CRAWL_ENDPOINTS.search);
+          return refreshed.promise;
+        },
+      },
+    });
+    reopened.store.dispatch(actionCreators.crawlSearchReceived(search));
+    reopened.store.dispatch(actionCreators.crawlCandidateSelectionChanged(key, true));
+    reopened.controller.activate();
+    assert.deepEqual(reopened.viewLog.filter((item) => item[0] === "operational").at(-1), ["operational", false]);
+    const createForm = new TestForm();
+    createForm.dataset.crawlForm = "submit";
+    reopened.root.emit("submit", createForm);
+    await flush();
+    assert.equal(reopened.calls.filter((item) => item[0] === "post").length, 0);
+    assert.equal(reopened.viewLog.some((item) => item[0] === "error"), false);
+
+    const searchForm = new TestForm();
+    searchForm.dataset.crawlForm = "search";
+    reopened.root.emit("submit", searchForm);
+    await flush();
+    refreshed.resolve(search);
+    await flush();
+    assert.deepEqual(reopened.viewLog.filter((item) => item[0] === "operational").at(-1), ["operational", true]);
+    reopened.controller.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test("3A controller：清空当前来源包含筛选外候选", () => {
+  const restore = installControllerDom();
+  try {
+    const harness = controllerHarness({ initialSearch: completeSearchResponse() });
+    const source = harness.store.getState().crawl.sources[3];
+    const selected = source.addresses[0];
+    harness.store.dispatch(actionCreators.crawlCandidateSelectionChanged(selected.key, true));
+    harness.view.sourceCandidateKeys = () => source.addresses.map((item) => item.key);
+    harness.controller.activate();
+    const sourceHost = new TestElement("section");
+    sourceHost.dataset.sourceKey = source.key;
+    const clear = new TestButton();
+    clear.dataset.crawlAction = "clear-source-selection";
+    sourceHost.append(clear);
+    harness.root.append(sourceHost);
+    harness.root.emit("click", clear);
+    assert.equal(harness.store.getState().crawl.sources[3].addresses[0].selected, false);
+    harness.controller.destroy();
+  } finally {
+    restore();
+  }
+});
+
 test("3A controller：create 幂等、单次 active batch/导航、失败保留选择且清敏感引用", async () => {
   const restore = installControllerDom();
   try {
@@ -858,10 +1069,65 @@ test("3A view：三段语义工作区、来源 override、权威摘要和局部 
   assert.doesNotMatch(CRAWL_VIEW_SOURCE, /GALLERY|SCHEDULE|EXPORT|TASKMGR|VAULT\.CPL/);
 });
 
-test("3A CSS：三栏受控滚动、内容高不透明、无 767px 单列移动分支", () => {
+test("3A view：来源和候选重绘按稳定 token 恢复焦点", () => {
+  const restore = installControllerDom();
+  try {
+    assert.equal(typeof crawlViewModule.captureCrawlFocusToken, "function");
+    assert.equal(typeof crawlViewModule.restoreCrawlFocus, "function");
+
+    const root = new TestElement("main");
+    const oldSource = new TestElement("section");
+    oldSource.dataset.sourceKey = "source:pawchive:4";
+    const oldMove = new TestButton();
+    oldMove.dataset.crawlAction = "source-up";
+    oldSource.append(oldMove);
+    root.append(oldSource);
+    oldMove.focus();
+
+    const token = crawlViewModule.captureCrawlFocusToken(root);
+    const newSource = new TestElement("section");
+    newSource.dataset.sourceKey = "source:pawchive:4";
+    const newActivate = new TestButton();
+    newActivate.dataset.crawlAction = "source-activate";
+    const newMove = new TestButton();
+    newMove.dataset.crawlAction = "source-up";
+    newSource.append(newActivate, newMove);
+    root.replaceChildren(newSource);
+
+    assert.equal(crawlViewModule.restoreCrawlFocus(root, token, newActivate), true);
+    assert.equal(globalThis.document.activeElement, newMove);
+
+    newMove.disabled = true;
+    globalThis.document.activeElement = oldMove;
+    assert.equal(crawlViewModule.restoreCrawlFocus(root, token, newActivate), true);
+    assert.equal(globalThis.document.activeElement, newActivate);
+
+    const oldTag = new TestButton();
+    oldTag.dataset.crawlAction = "eh-cycle";
+    oldTag.dataset.tagKey = "artist:stage3";
+    root.replaceChildren(oldTag);
+    oldTag.focus();
+    const tagToken = crawlViewModule.captureCrawlFocusToken(root);
+    const newTag = new TestButton();
+    newTag.dataset.crawlAction = "eh-cycle";
+    newTag.dataset.tagKey = "artist:stage3";
+    root.replaceChildren(newTag);
+    assert.equal(crawlViewModule.restoreCrawlFocus(root, tagToken, null), true);
+    assert.equal(globalThis.document.activeElement, newTag);
+  } finally {
+    restore();
+  }
+});
+
+test("3A CSS：普通窗口由真实工作区拥有横向滚动，最大化仍保持三栏", () => {
+  assert.match(CRAWL_VIEW_SOURCE, /crawl-workspace-track/);
   assert.match(CRAWL_CSS_SOURCE, /grid-template-columns\s*:[^;]*(?:260|280|300|clamp|minmax)[^;]*;/);
-  assert.match(CRAWL_CSS_SOURCE, /\.crawl-workspace/);
-  assert.match(CRAWL_CSS_SOURCE, /overflow(?:-y)?\s*:\s*(?:auto|hidden)/);
+  assert.match(CRAWL_CSS_SOURCE, /\.crawl-workspace\s*\{[^}]*overflow-x\s*:\s*auto/s);
+  assert.match(CRAWL_CSS_SOURCE, /\.crawl-workspace-track\s*\{[^}]*min-width\s*:\s*1020px/s);
+  assert.doesNotMatch(
+    CRAWL_CSS_SOURCE,
+    /\.application-window:not\(\[data-maximized\]\)\s+\.crawl-app\s*\{[^}]*width\s*:\s*max/s,
+  );
   assert.match(CRAWL_CSS_SOURCE, /--imageweave-surface-content(?:-solid)?/);
   assert.match(CRAWL_CSS_SOURCE, /forced-colors/);
   assert.match(CRAWL_CSS_SOURCE, /prefers-reduced-motion|data-motion/);

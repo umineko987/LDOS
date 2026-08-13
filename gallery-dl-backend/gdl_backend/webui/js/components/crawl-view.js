@@ -2,10 +2,12 @@ import { createElement } from "../core/dom.js";
 import {
   CRAWL_SITE_DEFINITIONS,
   crawlCandidateVisible,
+  deriveCrawlPreconditions,
   deriveCrawlSearchPresentation,
   deriveCrawlSubmitPresentation,
+  validateCrawlDraft,
+  validateSearchDraft,
 } from "../core/crawl-model.js";
-import { selectors } from "../core/store.js";
 import { createEmptyState } from "./empty-state.js";
 import { createErrorView } from "./error-view.js";
 import { createStatusBadge } from "./status.js";
@@ -92,23 +94,50 @@ function selectedSites(elements) {
     .map((input) => input.value);
 }
 
-function focusToken(root) {
+function crawlControlToken(target) {
+  if (target.dataset.crawlWeakToggle !== undefined) return "weak-toggle";
+  if (target.dataset.crawlEhQuery !== undefined) return "eh-query";
+  return target.getAttribute("name") || target.id || "";
+}
+
+export function captureCrawlFocusToken(root) {
   const target = document.activeElement;
   if (!(target instanceof HTMLElement) || !root.contains(target)) return null;
-  return {
+  const token = {
     action: target.dataset.crawlAction || "",
     candidate: target.closest("[data-candidate-key]")?.dataset.candidateKey || "",
     source: target.closest("[data-source-key]")?.dataset.sourceKey || "",
+    tag: target.dataset.tagKey || "",
+    control: crawlControlToken(target),
   };
+  return Object.values(token).some(Boolean) ? Object.freeze(token) : null;
 }
 
-function restoreFocus(root, token, fallback) {
-  if (!token) return;
-  const target = [...root.querySelectorAll("button, input, select, textarea, [tabindex]")].find((element) =>
-    (!token.action || element.dataset.crawlAction === token.action)
+export function restoreCrawlFocus(root, token, fallback = null) {
+  if (!token) return false;
+  const controls = [...root.querySelectorAll("button, input, select, textarea, [tabindex]")];
+  const exact = controls.find((element) =>
+    !element.disabled
+    && (!token.action || element.dataset.crawlAction === token.action)
     && (!token.candidate || element.closest("[data-candidate-key]")?.dataset.candidateKey === token.candidate)
-    && (!token.source || element.closest("[data-source-key]")?.dataset.sourceKey === token.source));
-  (target || fallback)?.focus({ preventScroll: true });
+    && (!token.source || element.closest("[data-source-key]")?.dataset.sourceKey === token.source)
+    && (!token.tag || element.dataset.tagKey === token.tag)
+    && (!token.control || crawlControlToken(element) === token.control));
+  const candidateFallback = token.candidate
+    ? controls.find((element) => !element.disabled
+      && element.closest("[data-candidate-key]")?.dataset.candidateKey === token.candidate)
+    : null;
+  const sourceFallback = token.source
+    ? controls.find((element) => !element.disabled
+      && element.closest("[data-source-key]")?.dataset.sourceKey === token.source)
+    : null;
+  const controlFallback = token.control
+    ? controls.find((element) => !element.disabled && crawlControlToken(element) === token.control)
+    : null;
+  const target = exact || candidateFallback || sourceFallback || controlFallback || (fallback?.disabled ? null : fallback);
+  if (!target) return false;
+  target.focus({ preventScroll: true });
+  return true;
 }
 
 function buildDom(context) {
@@ -168,19 +197,34 @@ function buildDom(context) {
   ]);
   const sourceOverrides = createElement("div", { className: "crawl-source-overrides" });
   for (const site of CRAWL_SITE_DEFINITIONS) {
+    const toggleId = `crawl-site-${site.id}`;
+    const overrideId = `crawl-source-${site.id}`;
     const input = createElement("input", {
-      attributes: { type: "checkbox", name: "crawl-site", value: site.id, checked: "" },
+      attributes: {
+        id: toggleId,
+        type: "checkbox",
+        name: "crawl-site",
+        value: site.id,
+        checked: "",
+        "aria-label": `启用 ${site.label} 搜索来源`,
+      },
     });
     input.checked = true;
     const override = selectProxyMode(`source-${site.id}`, "", {
       inherit: true,
       label: `${site.label} 搜索代理覆盖`,
     });
-    const sourceToggle = createElement("label", { className: "crawl-source-definition" }, [
-      createElement("span", { className: "crawl-source-definition__toggle" }, [
+    override.id = overrideId;
+    const sourceToggle = createElement("div", { className: "crawl-source-definition" }, [
+      createElement("div", { className: "crawl-source-definition__toggle" }, [
         input,
-        createElement("strong", { text: site.label }),
+        createElement("label", { text: site.label, attributes: { for: toggleId } }),
       ]),
+      createElement("label", {
+        className: "crawl-source-definition__proxy-label",
+        text: `${site.label} 代理覆盖`,
+        attributes: { for: overrideId },
+      }),
       override,
     ]);
     sitePicker.append(sourceToggle);
@@ -227,6 +271,7 @@ function buildDom(context) {
 
   const preconditions = createElement("div", {
     className: "crawl-preconditions",
+    attributes: { "aria-live": "polite" },
     dataset: { crawlPreconditions: "" },
   });
   const sourceColumn = createElement("aside", {
@@ -355,6 +400,7 @@ function buildDom(context) {
   const submitReason = createElement("p", {
     className: "crawl-submit-reason",
     text: "请先选择至少一个候选地址。",
+    attributes: { role: "status", "aria-live": "polite" },
     dataset: { crawlSubmitReason: "" },
   });
   const startButton = createElement("button", {
@@ -408,6 +454,16 @@ function buildDom(context) {
     createElement("div", { className: "crawl-column-scroll crawl-column-scroll--submit" }, [submitForm]),
   ]);
 
+  const searchValidation = createElement("p", {
+    className: "crawl-validation-message",
+    attributes: { id: "crawl-search-validation", role: "status", "aria-live": "polite", hidden: "" },
+    dataset: { crawlSearchValidation: "" },
+  });
+  searchForm.append(searchValidation);
+  keyword.setAttribute("aria-describedby", "crawl-search-validation");
+  searchLimit.setAttribute("aria-describedby", "crawl-search-validation");
+  searchProxy.setAttribute("aria-describedby", "crawl-search-validation");
+
   const errorHost = createElement("div", { className: "crawl-error-host", dataset: { crawlError: "" } });
   const operationLive = createElement("p", {
     className: "crawl-operation-live",
@@ -415,11 +471,17 @@ function buildDom(context) {
     attributes: { "aria-live": "polite" },
     dataset: { crawlLive: "" },
   });
+  const workspaceTrack = createElement("div", {
+    className: "crawl-workspace-track",
+  }, [sourceColumn, discoveryColumn, submitColumn]);
   const workspace = createElement("section", {
     className: "crawl-workspace",
-    attributes: { "aria-label": "图片采集三段工作区" },
+    attributes: {
+      "aria-label": "图片采集三段工作区，可横向滚动查看全部三栏",
+      tabindex: "0",
+    },
     dataset: { crawlWorkspace: "" },
-  }, [sourceColumn, discoveryColumn, submitColumn]);
+  }, [workspaceTrack]);
 
   root.classList.add("app-view", "crawl-app");
   root.setAttribute("aria-labelledby", headingId);
@@ -469,6 +531,7 @@ function buildDom(context) {
     gpPolicy,
     ehOptions,
     submitForm,
+    searchValidation,
     submitBadge,
     submitReason,
     selectionSummary,
@@ -477,6 +540,8 @@ function buildDom(context) {
     preconditions,
     errorHost,
     operationLive,
+    workspace,
+    workspaceTrack,
   };
 }
 
@@ -488,6 +553,16 @@ export function createCrawlView(context) {
   let ehQuery = "";
   let activeSourceKey = "";
   let searchPhase = store.getState().crawl.sources.length ? "settled" : "initial";
+  let operationalAvailable = store.getState().crawl.sources.length === 0;
+  let crawlValidation = validateCrawlDraft({
+    concurrency: Number(elements.concurrency.value),
+    maxTasks: Number(elements.maxTasks.value),
+    proxyMode: elements.crawlProxy.value,
+    outputDir: elements.outputDir.value,
+    outputDirInvalid: Boolean(elements.outputDir.dataset.crawlControlInvalid),
+    sourceOptions: readCrawlSourceOptions(elements),
+    ehDownload: { image_mode: "original", gp_policy: "stop" },
+  });
 
   const clearError = () => {
     renderedError?.destroy();
@@ -536,29 +611,38 @@ export function createCrawlView(context) {
       .map((candidate) => candidate.key)
     : [];
 
+  const sourceDrafts = () => CRAWL_SITE_DEFINITIONS.map((site) => ({
+    site: site.id,
+    enabled: Boolean(elements.sitePicker.querySelector(`input[name="crawl-site"][value="${site.id}"]`)?.checked),
+    proxyMode: elements.sitePicker.querySelector(`[name="source-${site.id}"]`)?.value || "",
+  }));
+
   const renderPreconditions = () => {
     const state = store.getState();
     const notices = [];
-    const authBySite = state.auth?.bySite instanceof Map ? state.auth.bySite : new Map();
-    const required = ["twitter", "pixiv", "exhentai"].filter((site) => {
-      const sourceAuth = state.crawl.sources.find((source) => source.site === site)?.auth;
-      const vaultAuth = authBySite.get(site);
-      return sourceAuth?.known
-        ? !sourceAuth.authorized && sourceAuth.state === "required"
-        : Boolean(vaultAuth && !vaultAuth.authorized);
+    const presentation = deriveCrawlPreconditions({
+      readinessProxy: state.system.readiness?.proxy || null,
+      authBySite: state.auth?.bySite instanceof Map ? state.auth.bySite : new Map(),
+      crawlSources: state.crawl.sources,
+      sourceDrafts: sourceDrafts(),
+      searchProxyMode: elements.searchProxy.value,
+      crawlProxyMode: elements.crawlProxy.value,
     });
-    if (required.length) {
-      const labels = required.map((site) => CRAWL_SITE_DEFINITIONS.find((item) => item.id === site)?.label || site);
+    if (presentation.authSites.length) {
+      const labels = presentation.authSites.map((site) =>
+        CRAWL_SITE_DEFINITIONS.find((item) => item.id === site)?.label || site);
       notices.push(createElement("section", { className: "crawl-precondition" }, [
         createStatusBadge("warning", `待授权：${labels.join("、")}`),
+        createElement("p", { text: "启用的来源需要先完成授权。" }),
         button("open-vault", "打开授权管理", { small: true }),
       ]));
     }
-    const proxy = state.system.readiness?.proxy;
-    const proxyNeeded = elements.searchProxy.value !== "direct" || elements.crawlProxy.value !== "direct";
-    if (proxyNeeded && proxy && !proxy.running && proxy.status !== "disabled") {
-      notices.push(createElement("section", { className: "crawl-precondition" }, [
-        createStatusBadge("warning", "代理池尚未运行"),
+    if (presentation.proxy) {
+      notices.push(createElement("section", {
+        className: `crawl-precondition crawl-precondition--${presentation.proxy.severity}`,
+      }, [
+        createStatusBadge("warning", presentation.proxy.severity === "required" ? "代理前置条件" : "代理回退提示"),
+        createElement("p", { text: presentation.proxy.label }),
         button("open-proxy", "打开代理管理", { small: true }),
       ]));
     }
@@ -637,6 +721,7 @@ export function createCrawlView(context) {
   };
 
   const renderSourceNavigation = (snapshot) => {
+    const token = captureCrawlFocusToken(root);
     normalizeActiveSource(snapshot);
     const entries = snapshot.sources.map((source, index) => {
       const selected = source.addresses.filter((candidate) => candidate.selected).length;
@@ -677,10 +762,15 @@ export function createCrawlView(context) {
       return entry;
     });
     elements.leftSourceHost.replaceChildren(...entries);
+    queueMicrotask(() => restoreCrawlFocus(
+      root,
+      token,
+      elements.leftSourceHost.querySelector('[aria-current="page"]'),
+    ));
   };
 
   const renderCurrentSource = (snapshot) => {
-    const token = focusToken(root);
+    const token = captureCrawlFocusToken(root);
     const source = activeSource(snapshot);
     if (!source) {
       elements.currentSourceTitle.textContent = "尚无来源结果";
@@ -764,12 +854,23 @@ export function createCrawlView(context) {
     });
     elements.sourceHost.replaceChildren(...rows);
     renderProfiles(snapshot.relatedProfiles);
-    queueMicrotask(() => restoreFocus(root, token, elements.leftSourceHost.querySelector('[aria-current="page"]')));
+    queueMicrotask(() => restoreCrawlFocus(
+      root,
+      token,
+      elements.leftSourceHost.querySelector('[aria-current="page"]'),
+    ));
     elements.resultSummary.textContent = `${visible.length} 个当前显示 · ${selected} 个已选 · 尝试 ${source.attempts}`;
   };
 
   const renderSummary = (snapshot) => {
-    const presentation = deriveCrawlSubmitPresentation(snapshot, { busy });
+    const staleReason = snapshot.sources.length && !operationalAvailable
+      ? "操作地址已安全清理，需要重新搜索后才能创建批次。"
+      : "";
+    const presentation = deriveCrawlSubmitPresentation(snapshot, {
+      busy,
+      staleReason,
+      invalidReason: crawlValidation.reason,
+    });
     elements.selectionSummary.replaceChildren(
       createElement("strong", { text: `${presentation.selectedSourceCount} 个来源` }),
       createElement("span", { text: `${presentation.selectedAddressCount} 个地址` }),
@@ -796,7 +897,7 @@ export function createCrawlView(context) {
       ? "ready"
       : presentation.state === "busy"
         ? "running"
-        : presentation.state === "invalid"
+        : ["invalid", "stale"].includes(presentation.state)
           ? "error"
           : "disabled";
     elements.submitBadge.replaceChildren(
@@ -821,6 +922,7 @@ export function createCrawlView(context) {
   };
 
   const render = (snapshot) => {
+    const token = captureCrawlFocusToken(root);
     normalizeActiveSource(snapshot);
     elements.weakToggle.checked = snapshot.showWeakEvidence;
     renderSearchState(snapshot);
@@ -829,9 +931,119 @@ export function createCrawlView(context) {
     renderEhFilter(snapshot);
     renderSummary(snapshot);
     renderPreconditions();
+    queueMicrotask(() => restoreCrawlFocus(
+      root,
+      token,
+      elements.leftSourceHost.querySelector('[aria-current="page"]') || elements.keyword,
+    ));
   };
 
-  const unsubscribe = store.subscribe(selectors.crawl, render, { fireImmediately: true });
+  const setFieldValidity = (control, invalid, messageId) => {
+    if (!(control instanceof HTMLElement)) return;
+    control.setAttribute("aria-invalid", invalid ? "true" : "false");
+    if (messageId) control.setAttribute("aria-describedby", messageId);
+  };
+
+  const markValidationField = (validation, formKind) => {
+    const searchControls = [elements.keyword, elements.searchLimit, elements.searchProxy];
+    const crawlControls = [
+      elements.concurrency,
+      elements.maxTasks,
+      elements.crawlProxy,
+      elements.outputDir,
+      elements.imageOriginal,
+      elements.imageResample,
+      elements.gpPolicy,
+    ];
+    for (const control of formKind === "search" ? searchControls : crawlControls) {
+      setFieldValidity(control, false, formKind === "search" ? "crawl-search-validation" : "crawl-submit-reason");
+    }
+    for (const select of elements.sitePicker.querySelectorAll('select[name^="source-"]')) {
+      setFieldValidity(select, false, formKind === "search" ? "crawl-search-validation" : "crawl-submit-reason");
+    }
+    for (const checkbox of elements.sitePicker.querySelectorAll('input[name="crawl-site"]')) {
+      setFieldValidity(checkbox, false, "crawl-search-validation");
+    }
+    const fieldName = validation.field;
+    const control = fieldName === "sites"
+      ? elements.sitePicker.querySelector('input[name="crawl-site"]')
+      : elements.sitePicker.querySelector(`[name="${fieldName}"]`)
+        || root.querySelector(`[name="${fieldName}"]`);
+    setFieldValidity(control, !validation.valid, formKind === "search" ? "crawl-search-validation" : "crawl-submit-reason");
+  };
+
+  const refreshValidation = (formKind = "all", { announce = false } = {}) => {
+    let searchValidation = validationResultForView();
+    if (formKind === "all" || formKind === "search") {
+      searchValidation = validateSearchDraft({
+        keyword: elements.keyword.value,
+        sites: selectedSites(elements),
+        limit: Number(elements.searchLimit.value),
+        proxyMode: elements.searchProxy.value,
+        sourceOptions: readCrawlSourceOptions(elements),
+      });
+      markValidationField(searchValidation, "search");
+      elements.searchValidation.hidden = searchValidation.valid;
+      elements.searchValidation.textContent = searchValidation.valid ? "" : searchValidation.reason;
+      elements.searchButton.disabled = Boolean(busy) || !searchValidation.valid;
+      if (announce && !searchValidation.valid) setOperationMessage(searchValidation.reason);
+    }
+    if (formKind === "all" || formKind === "crawl") {
+      crawlValidation = validateCrawlDraft({
+        concurrency: Number(elements.concurrency.value),
+        maxTasks: Number(elements.maxTasks.value),
+        proxyMode: elements.crawlProxy.value,
+        outputDir: elements.outputDir.value,
+        outputDirInvalid: Boolean(elements.outputDir.dataset.crawlControlInvalid),
+        sourceOptions: readCrawlSourceOptions(elements),
+        ehDownload: {
+          image_mode: elements.imageResample.checked ? "resample" : "original",
+          gp_policy: elements.gpPolicy.value,
+        },
+      });
+      markValidationField(crawlValidation, "crawl");
+      renderSummary(store.getState().crawl);
+      if (announce && !crawlValidation.valid) setOperationMessage(crawlValidation.reason);
+    }
+    return formKind === "crawl" ? crawlValidation : searchValidation;
+  };
+
+  const handleInvalid = (target) => {
+    const formKind = target?.closest?.('[data-crawl-form="submit"]') ? "crawl" : "search";
+    const validation = refreshValidation(formKind, { announce: true });
+    if (!validation.valid) return validation;
+    const fallback = formKind === "crawl"
+      ? { valid: false, field: target?.name || "", reason: "批次设置无效，请修正标记项。" }
+      : { valid: false, field: target?.name || "", reason: "搜索设置无效，请修正标记项。" };
+    markValidationField(fallback, formKind);
+    if (formKind === "search") {
+      elements.searchValidation.hidden = false;
+      elements.searchValidation.textContent = fallback.reason;
+    } else {
+      crawlValidation = fallback;
+      renderSummary(store.getState().crawl);
+    }
+    setOperationMessage(fallback.reason);
+    return fallback;
+  };
+
+  function validationResultForView() {
+    return { valid: true, reason: "", field: "" };
+  }
+
+  const unsubscribe = store.subscribe((state) => ({
+    crawl: state.crawl,
+    readinessProxy: state.system.readiness?.proxy || null,
+    authBySite: state.auth.bySite,
+  }), ({ crawl }) => render(crawl), {
+    fireImmediately: true,
+    equality: (left, right) => Boolean(
+      left && right
+      && left.crawl === right.crawl
+      && left.readinessProxy === right.readinessProxy
+      && left.authBySite === right.authBySite
+    ),
+  });
 
   return Object.freeze({
     elements,
@@ -850,10 +1062,11 @@ export function createCrawlView(context) {
         maxTasks: Number(elements.maxTasks.value),
         proxyMode: elements.crawlProxy.value,
         outputDir: elements.outputDir.value,
+        outputDirInvalid: Boolean(elements.outputDir.dataset.crawlControlInvalid),
         sourceOptions: readCrawlSourceOptions(elements),
         ehDownload: {
           image_mode: elements.imageResample.checked ? "resample" : "original",
-          gp_policy: elements.imageResample.checked ? "stop" : elements.gpPolicy.value,
+          gp_policy: elements.gpPolicy.value,
         },
       };
     },
@@ -864,6 +1077,39 @@ export function createCrawlView(context) {
     sourceVisibleKeys(sourceKey) {
       const snapshot = store.getState().crawl;
       return visibleKeysForSource(snapshot, snapshot.sources.find((source) => source.key === sourceKey));
+    },
+    sourceCandidateKeys(sourceKey) {
+      const source = store.getState().crawl.sources.find((item) => item.key === sourceKey);
+      return source ? source.addresses.map((candidate) => candidate.key) : [];
+    },
+    validateSearchDraft() {
+      return validateSearchDraft({
+        keyword: elements.keyword.value,
+        sites: selectedSites(elements),
+        limit: Number(elements.searchLimit.value),
+        proxyMode: elements.searchProxy.value,
+        sourceOptions: readCrawlSourceOptions(elements),
+      });
+    },
+    validateCrawlDraft() {
+      return validateCrawlDraft({
+        concurrency: Number(elements.concurrency.value),
+        maxTasks: Number(elements.maxTasks.value),
+        proxyMode: elements.crawlProxy.value,
+        outputDir: elements.outputDir.value,
+        outputDirInvalid: Boolean(elements.outputDir.dataset.crawlControlInvalid),
+        sourceOptions: readCrawlSourceOptions(elements),
+        ehDownload: {
+          image_mode: elements.imageResample.checked ? "resample" : "original",
+          gp_policy: elements.gpPolicy.value,
+        },
+      });
+    },
+    refreshValidation,
+    handleInvalid,
+    setOperationalAvailability(available) {
+      operationalAvailable = Boolean(available);
+      renderSummary(store.getState().crawl);
     },
     normalizeActiveSource,
     activeSourceKey() {
@@ -938,16 +1184,17 @@ export function createCrawlView(context) {
         : "";
     },
     setEhQuery(value) {
+      const token = captureCrawlFocusToken(root);
       ehQuery = String(value || "").slice(0, 160);
       renderEhFilter(store.getState().crawl);
+      queueMicrotask(() => restoreCrawlFocus(root, token, elements.ehTagQuery));
     },
     setBusy(kind) {
       busy = kind;
       root.toggleAttribute("aria-busy", Boolean(kind));
-      elements.searchButton.disabled = Boolean(kind);
       elements.searchButton.textContent = kind === "search" ? "正在搜索…" : "搜索来源";
       elements.startButton.textContent = kind === "crawl" ? "正在创建批次…" : "创建批次";
-      renderSummary(store.getState().crawl);
+      refreshValidation("all");
     },
     setSearchState(phase) {
       if (!["initial", "loading", "settled", "error", "recovery"].includes(phase)) {
@@ -958,6 +1205,8 @@ export function createCrawlView(context) {
     },
     clearOutputInput() {
       elements.outputDir.value = "";
+      delete elements.outputDir.dataset.crawlControlInvalid;
+      refreshValidation("crawl");
     },
     clearError,
     showError,
