@@ -675,7 +675,7 @@ test("4D DOM/CSS：panel/deck 全高比较舞台、固定 command/status 与细�
   assert.match(CSS_SOURCE, /forced-colors/);
   assert.match(CSS_SOURCE, /prefers-reduced-motion/);
   assert.match(CSS_SOURCE, /data-motion="off"/);
-  assert.doesNotMatch(CSS_SOURCE, /@media\s*\(max-width|max-height|backdrop-filter/);
+  assert.doesNotMatch(CSS_SOURCE, /@media\s*\((?:max-width|max-height)|backdrop-filter/);
   assert.doesNotMatch(CSS_SOURCE, /border-style:\s*(?:double|dashed|dotted)|outline:\s*6px\s+double/);
   assert.doesNotMatch(`${VIEW_SOURCE}\n${CSS_SOURCE}`, /review-deck-inspector|review-metrics|pseudo-terminal|raw logs/i);
 });

@@ -1300,7 +1300,7 @@ test("应用 registry 保持 11 项元数据、默认路由与生命周期基线
   assert.deepEqual(
     applications.filter((application) => typeof application.beforeWindowHide === "function")
       .map((application) => application.id),
-    ["policy", "personalization"],
+    ["review", "policy", "personalization"],
   );
 });
 
@@ -8402,9 +8402,9 @@ test("REVIEW deck 底部只有两按钮和三行提示，镜片按钮独立声�
   ]) {
     assert.equal(viewSource.includes(fingerprint), true, fingerprint);
   }
-  assert.match(cssSource, /\.review-image-card\[data-active="true"\] \{[\s\S]*?opacity: 1;[\s\S]*?outline: 6px double/);
+  assert.match(cssSource, /\.review-image-card\[data-active="true"\] \{[\s\S]*?opacity: 1;[\s\S]*?outline: 3px solid var\(--imageweave-focus-ring\)/);
   assert.match(cssSource, /\.review-image-card\[data-active="true"\] \.review-image-active-marker \{\s*display: block;/);
-  assert.match(cssSource, /\.review-image-active-marker \{[\s\S]*?color: var\(--imageweave-surface\);[\s\S]*?background: var\(--imageweave-accent\);/);
+  assert.match(cssSource, /\.review-image-active-marker \{[\s\S]*?color: var\(--imageweave-surface-content-solid\);[\s\S]*?background: var\(--imageweave-focus-ring\);/);
 
   for (const fingerprint of [
     'command === "previous-group"',

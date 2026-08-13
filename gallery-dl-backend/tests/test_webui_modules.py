@@ -696,7 +696,7 @@ class WebUiModuleTests(unittest.TestCase):
             self.assertIn(fingerprint, review_view)
         self.assertRegex(
             review_css,
-            r'\.review-image-card\[data-active="true"\]\s*\{[^}]*opacity:\s*1;[^}]*outline:\s*6px double',
+            r'\.review-image-card\[data-active="true"\]\s*\{[^}]*opacity:\s*1;[^}]*outline:\s*3px solid var\(--imageweave-focus-ring\)',
         )
         self.assertRegex(
             review_css,

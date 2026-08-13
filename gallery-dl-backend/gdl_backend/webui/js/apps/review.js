@@ -43,9 +43,12 @@ function reviewWorkspacePath(batchId, filter) {
   return `${reviewPath(batchId)}?all=true${kind}`;
 }
 
-function createReviewController(context) {
+export function createReviewController(context, {
+  createView = createReviewView,
+} = {}) {
   const { root, api, store, polling, actions, dialogs } = context;
-  const view = createReviewView(context);
+  const view = createView(context);
+  if (!view || typeof view !== "object") throw new TypeError("审核视图无效");
   const requestGate = createReviewRequestGate();
   let active = false;
   let destroyed = false;
@@ -71,9 +74,15 @@ function createReviewController(context) {
       if (!active || destroyed) return false;
     }
     const controller = new AbortController();
+    const ticket = requestGate.beginRead("recent");
     const promise = api.get(`${REVIEW_ENDPOINTS.crawls}?limit=30`, { signal: controller.signal })
       .then((response) => {
-        if (!active || destroyed || controller.signal.aborted) return false;
+        if (!active || destroyed || controller.signal.aborted || !requestGate.isReadCurrent(ticket, {
+          channel: "recent",
+          batchId: "",
+          filter: "",
+          offset: 0,
+        })) return false;
         store.dispatch(actionCreators.recentBatchesReceived(response));
         return true;
       })
@@ -135,10 +144,11 @@ function createReviewController(context) {
     const abort = () => controller.abort();
     if (externalSignal?.aborted) abort();
     else externalSignal?.addEventListener("abort", abort, { once: true });
-    const ticket = requestGate.beginRead(batchId, filter, offset);
+    const ticket = requestGate.beginRead("page", batchId, filter, offset);
     const promise = api.get(reviewWorkspacePath(batchId, filter), { signal: controller.signal })
       .then((response) => {
         if (!active || destroyed || controller.signal.aborted || !requestGate.isReadCurrent(ticket, {
+          channel: "page",
           batchId: reviewState().batchId || batchId,
           filter,
           offset,
@@ -163,9 +173,17 @@ function createReviewController(context) {
   };
 
   const refreshSummaryOnly = async (batchId, signal) => {
+    const filter = reviewState().filter;
+    const ticket = requestGate.beginRead("summary", batchId, filter, 0);
     try {
-      const response = await api.get(reviewWorkspacePath(batchId, reviewState().filter), { signal });
-      if (!signal.aborted && active && reviewState().batchId === batchId) {
+      const response = await api.get(reviewWorkspacePath(batchId, filter), { signal });
+      if (!signal.aborted && active && reviewState().batchId === batchId &&
+          reviewState().filter === filter && requestGate.isReadCurrent(ticket, {
+            channel: "summary",
+            batchId,
+            filter,
+            offset: 0,
+          })) {
         store.dispatch(actionCreators.reviewSummaryReceived(
           batchId,
           sanitizeReviewSummary(response, batchId),
@@ -204,7 +222,7 @@ function createReviewController(context) {
       return false;
     }
     if (active) view.setOperationMessage("正在保存待提交的审核决策……");
-    requestGate.beginWrite();
+    const writeTicket = requestGate.beginWrite();
     abortRead(pageRead);
     const controller = new AbortController();
     operationController = controller;
@@ -217,7 +235,8 @@ function createReviewController(context) {
           await api.put(reviewPath(batchId, "/decisions"), chunk, { signal: controller.signal });
         }
         captured = null;
-        if (destroyed || controller.signal.aborted || reviewState().batchId !== batchId) return false;
+        if (destroyed || controller.signal.aborted || reviewState().batchId !== batchId ||
+            !requestGate.isWriteCurrent(writeTicket)) return false;
         const loaded = await readPage({
           batchId,
           filter: reviewState().filter,
@@ -225,9 +244,8 @@ function createReviewController(context) {
           replace: true,
           report: false,
         });
-        if (!loaded || destroyed || controller.signal.aborted || reviewState().batchId !== batchId) {
-          return false;
-        }
+        if (!loaded || destroyed || controller.signal.aborted || reviewState().batchId !== batchId ||
+            !requestGate.isWriteCurrent(writeTicket)) return false;
         if (announce && active) view.setOperationMessage("审核决策已保存，并已重新读取权威快照。");
         return true;
       } catch (error) {
@@ -618,12 +636,27 @@ function createReviewController(context) {
   root.addEventListener("keydown", onKeyDown);
   globalThis.addEventListener?.("beforeunload", onBeforeUnload);
 
+  const onReviewStateChanged = (review) => {
+    if (!active || destroyed) return;
+    if (review.dirty) polling.stop(REVIEW_POLL_KEY);
+    else syncPolling();
+  };
+  const unsubscribeReview = store.subscribe((state) => state.review, onReviewStateChanged);
+
+  const saveBeforeVisibilityChange = async (message) => {
+    if (!reviewState().dirty) return true;
+    if (busy && !leaveSave) return false;
+    view.setOperationMessage(message);
+    return Boolean(await persistPendingGroups({ announce: false }));
+  };
+
   return Object.freeze({
-    async beforeLeave() {
-      if (!reviewState().dirty) return true;
-      if (busy && leaveSave) return Boolean(await leaveSave);
-      view.setOperationMessage("正在保存待提交组，完成前不会切换页面……");
-      return Boolean(await persistPendingGroups({ announce: false }));
+    beforeLeave() {
+      return saveBeforeVisibilityChange("正在保存待提交组，完成前不会切换页面……");
+    },
+    beforeWindowHide(visibility) {
+      const purpose = visibility === "closed" ? "关闭窗口" : "最小化窗口";
+      return saveBeforeVisibilityChange(`正在保存待提交组，完成前不会${purpose}……`);
     },
     activate() {
       if (destroyed || active) return;
@@ -697,6 +730,7 @@ function createReviewController(context) {
       root.removeEventListener("change", onChange);
       root.removeEventListener("keydown", onKeyDown);
       globalThis.removeEventListener?.("beforeunload", onBeforeUnload);
+      unsubscribeReview();
       view.destroy();
       root.removeAttribute("data-lifecycle");
     },
@@ -715,6 +749,9 @@ export default Object.freeze({
   },
   beforeLeave() {
     return controller?.beforeLeave() ?? true;
+  },
+  beforeWindowHide(_context, visibility) {
+    return controller?.beforeWindowHide(visibility) ?? true;
   },
   deactivate() {
     controller?.deactivate();

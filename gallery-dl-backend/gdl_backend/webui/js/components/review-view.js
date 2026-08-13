@@ -317,6 +317,27 @@ function findByDataset(container, selector, key, value) {
   return [...container.querySelectorAll(selector)].find((element) => element.dataset[key] === value) || null;
 }
 
+function reviewFocusToken(root) {
+  const active = root.ownerDocument?.activeElement || null;
+  if (!(active instanceof Element) || !root.contains(active)) return null;
+  const image = active.closest("[data-review-image]");
+  if (image && root.contains(image)) {
+    return Object.freeze({ type: "image", value: image.dataset.reviewImage || "" });
+  }
+  const action = active.closest("[data-review-action]");
+  if (action && root.contains(action)) {
+    return Object.freeze({
+      type: "action",
+      value: action.dataset.reviewAction || "",
+      filter: action.dataset.reviewFilter || "",
+    });
+  }
+  if (active.matches?.("[data-review-group-select]")) return Object.freeze({ type: "group", value: "" });
+  if (active.matches?.("[data-review-batch-select]")) return Object.freeze({ type: "batch", value: "" });
+  if (active.matches?.("[data-review-stage]")) return Object.freeze({ type: "stage", value: "" });
+  return Object.freeze({ type: "workspace", value: "" });
+}
+
 function nonDeckState(summary) {
   const presentations = {
     not_started: ["等待开始", "尚未开始去重分析", "开始后会先分析相似图片，再进入人工审核。"],
@@ -374,6 +395,28 @@ export function createReviewView(context) {
 
   const reviewState = () => store.getState().review;
   const workspaceKey = (review) => `${review.batchId}\u0000${review.filter}`;
+  const captureReviewFocus = () => reviewFocusToken(root);
+  const restoreReviewFocus = (token) => {
+    if (!token) return false;
+    let target = null;
+    if (token.type === "image") {
+      target = findByDataset(elements.stage, "[data-review-image]", "reviewImage", token.value);
+    } else if (token.type === "action") {
+      target = [...root.querySelectorAll("[data-review-action]")].find((element) => (
+        element.dataset.reviewAction === token.value &&
+        (element.dataset.reviewFilter || "") === token.filter
+      )) || null;
+    } else if (token.type === "group") target = elements.groupSelect;
+    else if (token.type === "batch") target = elements.batchSelect;
+    else if (token.type === "stage") target = elements.stage;
+    target ??= elements.deck.hidden ? elements.batchSelect : elements.stage;
+    if (!target || target.hidden || target.disabled) return false;
+    queueMicrotask(() => {
+      if (!root.contains(target) || target.hidden || target.disabled) return;
+      try { target.focus({ preventScroll: true }); } catch { target.focus(); }
+    });
+    return true;
+  };
   const editable = (review = reviewState()) => review.summary?.status === "ready" && !busy && Boolean(
     currentGroup(review, focusedIndex)?.images.length,
   );
@@ -1052,6 +1095,7 @@ export function createReviewView(context) {
   };
 
   const renderReview = (review, previous, metadata) => {
+    const focusToken = captureReviewFocus();
     const hasReview = Boolean(review.batchId && review.summary);
     const deckMode = hasReview && reviewCanList(review.summary);
     root.dataset.mode = deckMode ? "deck" : "panel";
@@ -1072,6 +1116,7 @@ export function createReviewView(context) {
       loupeAvailable = false;
       releaseImages();
       syncControlAvailability(review);
+      restoreReviewFocus(focusToken);
       return;
     }
 
@@ -1084,6 +1129,7 @@ export function createReviewView(context) {
       renderNonDeckState(review);
       elements.operationLive.dataset.reviewDirty = String(review.dirty);
       syncControlAvailability(review);
+      restoreReviewFocus(focusToken);
       return;
     }
 
@@ -1115,6 +1161,7 @@ export function createReviewView(context) {
     }
     elements.operationLive.dataset.reviewDirty = String(review.dirty);
     syncControlAvailability(review);
+    restoreReviewFocus(focusToken);
   };
 
   const focusStage = () => {

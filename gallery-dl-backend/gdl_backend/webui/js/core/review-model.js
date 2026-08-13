@@ -82,20 +82,35 @@ export function deckStepTarget(direction, position) {
   return Object.freeze({ type: "group", index });
 }
 
+const DANGEROUS_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+
 function isRecord(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
-function safeText(value, fallback = "", maximum = 120) {
-  if (typeof value !== "string" && typeof value !== "number") return fallback;
-  const normalized = String(value)
-    .replace(/[\u0000-\u001f\u007f]+/g, " ")
-    .replace(/https?:\/\/[^\s]+/gi, "[地址已隐藏]")
-    .replace(/\b(token|cookie|password|secret|authorization|oauth|session)\s*[:=]\s*[^\s,;]+/gi, "$1=[已隐藏]")
-    .replace(/(^|[\s(])(?:[A-Za-z]:[\\/]|\/)[^\s,;，；)]+/g, "$1[路径已隐藏]")
-    .replace(/\s+/g, " ")
-    .trim();
-  return normalized ? normalized.slice(0, maximum) : fallback;
+function assertSafeRecord(value, label) {
+  if (!isRecord(value)) throw new TypeError(`${label}格式无效`);
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string" || DANGEROUS_KEYS.has(key)) {
+      throw new TypeError(`${label}包含危险对象键`);
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || typeof descriptor.get === "function" || typeof descriptor.set === "function") {
+      throw new TypeError(`${label}不得包含访问器`);
+    }
+  }
+  return value;
+}
+
+function ownValue(value, key, fallback = undefined) {
+  if (!isRecord(value) || !Object.prototype.hasOwnProperty.call(value, key)) return fallback;
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (!descriptor || typeof descriptor.get === "function" || typeof descriptor.set === "function") {
+    return fallback;
+  }
+  return descriptor.value;
 }
 
 function safeId(value) {
@@ -103,9 +118,20 @@ function safeId(value) {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(text) ? text : "";
 }
 
-function boundedCount(value, maximum = 1_000_000_000) {
-  const number = Number(value);
-  return Number.isInteger(number) && number >= 0 && number <= maximum ? number : 0;
+function strictCount(value, label, maximum = 1_000_000_000) {
+  if (!Number.isInteger(value) || value < 0 || value > maximum) {
+    throw new TypeError(`${label}无效`);
+  }
+  return value;
+}
+
+function strictBoolean(value, label) {
+  if (typeof value !== "boolean") throw new TypeError(`${label}无效`);
+  return value;
+}
+
+function projectedCount(value, maximum = 1_000_000_000) {
+  return Number.isInteger(value) && value >= 0 && value <= maximum ? value : 0;
 }
 
 function safeStatus(value) {
@@ -121,25 +147,28 @@ function statusKind(status) {
 }
 
 function sanitizeImage(raw, imageIndex) {
-  if (!isRecord(raw)) return null;
+  assertSafeRecord(raw, "审核图片");
   const id = safeId(raw.id);
-  if (!id) return null;
-  const metadata = isRecord(raw.metadata) ? raw.metadata : {};
+  if (!id) throw new TypeError("审核图片 ID 无效");
+  const metadata = Object.prototype.hasOwnProperty.call(raw, "metadata")
+    ? assertSafeRecord(raw.metadata, "审核图片元数据")
+    : {};
+  const ordinal = strictCount(raw.ordinal, "审核图片序号", 100_000);
   return Object.freeze({
     id,
-    ordinal: boundedCount(raw.ordinal, 100_000) || imageIndex + 1,
-    readable: Boolean(raw.readable),
-    recommended: Boolean(raw.recommended),
-    selected: Boolean(raw.selected),
-    width: boundedCount(metadata.w, 1_000_000),
-    height: boundedCount(metadata.h, 1_000_000),
+    ordinal: ordinal || imageIndex + 1,
+    readable: strictBoolean(raw.readable, "审核图片读取状态"),
+    recommended: strictBoolean(raw.recommended, "审核图片推荐状态"),
+    selected: strictBoolean(raw.selected, "审核图片选择状态"),
+    width: strictCount(metadata.w, "审核图片宽度", 1_000_000),
+    height: strictCount(metadata.h, "审核图片高度", 1_000_000),
   });
 }
 
 function sanitizeGroup(raw, groupIndex) {
-  if (!isRecord(raw)) return null;
+  assertSafeRecord(raw, "审核组");
   const id = safeId(raw.id);
-  if (!id) return null;
+  if (!id) throw new TypeError("审核组 ID 无效");
   const kind = typeof raw.kind === "string" && GROUP_KINDS.has(raw.kind) ? raw.kind : "single";
   if (!Array.isArray(raw.images) || raw.images.length > 1_000) {
     throw new TypeError("审核组图片列表无效");
@@ -148,30 +177,42 @@ function sanitizeGroup(raw, groupIndex) {
   const imageIds = new Set();
   for (const item of raw.images) {
     const image = sanitizeImage(item, images.length);
-    if (!image || imageIds.has(image.id)) throw new TypeError("审核组包含无效或重复图片 ID");
+    if (imageIds.has(image.id)) throw new TypeError("审核组包含重复图片 ID");
     imageIds.add(image.id);
     images.push(image);
   }
+  const ordinal = strictCount(raw.ordinal, "审核组序号", 100_000);
   return Object.freeze({
     id,
-    ordinal: boundedCount(raw.ordinal, 100_000) || groupIndex + 1,
+    ordinal: ordinal || groupIndex + 1,
     kind,
-    decided: Boolean(raw.decided),
+    decided: strictBoolean(raw.decided, "审核组确认状态"),
     imageCount: images.length,
     selectedImageCount: images.filter((image) => image.selected).length,
-    images,
+    images: Object.freeze(images),
   });
 }
 
-export function sanitizeReviewSummary(value, batchId = value?.batch_id || value?.batchId) {
-  if (!isRecord(value)) throw new TypeError("审核摘要格式无效");
-  const safeBatchId = safeId(batchId);
+export function sanitizeReviewSummary(value, batchId = undefined) {
+  assertSafeRecord(value, "审核摘要");
+  const resolvedBatchId = batchId ?? ownValue(value, "batch_id", ownValue(value, "batchId", ""));
+  const safeBatchId = safeId(resolvedBatchId);
   if (!safeBatchId) throw new TypeError("审核批次 ID 无效");
   const status = safeStatus(value.status);
   const projected = Object.prototype.hasOwnProperty.call(value, "totalImageCount");
-  const count = (legacyName, projectedName) => boundedCount(
-    projected ? value[projectedName] : value[legacyName],
-  );
+  const count = (legacyName, projectedName) => {
+    const sourceName = projected ? projectedName : legacyName;
+    const raw = Object.prototype.hasOwnProperty.call(value, sourceName) ? value[sourceName] : 0;
+    return strictCount(raw, `审核摘要 ${projectedName}`);
+  };
+  let hasError;
+  if (projected) {
+    hasError = strictBoolean(value.hasError, "审核摘要错误状态");
+  } else {
+    const rawError = ownValue(value, "error", "");
+    if (typeof rawError !== "string") throw new TypeError("审核摘要错误状态无效");
+    hasError = rawError.length > 0;
+  }
   return Object.freeze({
     batchId: safeBatchId,
     status,
@@ -188,25 +229,24 @@ export function sanitizeReviewSummary(value, batchId = value?.batch_id || value?
     keptImageCount: count("kept_image_count", "keptImageCount"),
     rejectedImageCount: count("rejected_image_count", "rejectedImageCount"),
     failedImageCount: count("failed_image_count", "failedImageCount"),
-    hasError: projected ? Boolean(value.hasError) : Boolean(safeText(value.error, "", 8)),
+    hasError,
   });
 }
 
 export function sanitizeReviewPage(value, { batchId, filter = "", requestedOffset = 0 } = {}) {
-  if (!isRecord(value) || !isRecord(value.groups) || !Array.isArray(value.groups.items)) {
-    throw new TypeError("审核全量快照格式无效");
-  }
+  assertSafeRecord(value, "审核全量快照");
+  const groupsValue = assertSafeRecord(value.groups, "审核全量分组");
+  if (!Array.isArray(groupsValue.items)) throw new TypeError("审核全量快照格式无效");
   const safeBatchId = safeId(batchId || value.batch_id);
   if (!safeBatchId || !FILTERS.has(filter) || requestedOffset !== 0) {
     throw new TypeError("审核全量快照参数无效");
   }
-  const items = value.groups.items;
-  const offset = Number(value.groups.offset);
-  const total = Number(value.groups.total);
-  const responseLimit = Number(value.groups.limit);
-  if (!Number.isInteger(offset) || offset !== 0 || !Number.isInteger(total) || total < 0 ||
-      total > REVIEW_GROUP_LIMIT || items.length > REVIEW_GROUP_LIMIT || total !== items.length ||
-      !Number.isInteger(responseLimit) || responseLimit !== items.length) {
+  const items = groupsValue.items;
+  const offset = strictCount(groupsValue.offset, "审核全量偏移", REVIEW_GROUP_LIMIT);
+  const total = strictCount(groupsValue.total, "审核全量总数", REVIEW_GROUP_LIMIT);
+  const responseLimit = strictCount(groupsValue.limit, "审核全量上限", REVIEW_GROUP_LIMIT);
+  if (offset !== 0 || items.length > REVIEW_GROUP_LIMIT || total !== items.length ||
+      responseLimit !== items.length) {
     throw new TypeError("审核全量快照边界无效");
   }
   const summary = sanitizeReviewSummary(value, safeBatchId);
@@ -228,7 +268,7 @@ export function sanitizeReviewPage(value, { batchId, filter = "", requestedOffse
   return Object.freeze({
     batchId: safeBatchId,
     summary,
-    groups,
+    groups: Object.freeze(groups),
     filter,
     offset: 0,
     limit: responseLimit,
@@ -399,8 +439,8 @@ export function reviewCompletionPresentation(summary, filter = "") {
   if (!isRecord(summary) || !FILTERS.has(filter)) {
     throw new TypeError("审核完成态参数无效");
   }
-  const total = boundedCount(summary.totalGroupCount);
-  const decided = Math.min(total, boundedCount(summary.decidedGroupCount));
+  const total = projectedCount(summary.totalGroupCount);
+  const decided = Math.min(total, projectedCount(summary.decidedGroupCount));
   const remaining = Math.max(0, total - decided);
   if (remaining) {
     const filterLabel = REVIEW_FILTERS.find((item) => item.id === filter)?.label || "当前";
@@ -428,9 +468,16 @@ export function reviewImageUrl(batchId, imageId) {
 }
 
 export function reviewErrorGuidance(error) {
-  const code = safeText(error?.code, "request_failed", 128).replace(/[^A-Za-z0-9._:-]/g, "") || "request_failed";
-  const status = Number.isInteger(error?.status) ? error.status : 0;
-  const requestId = safeId(error?.requestId);
+  const rawCode = ownValue(error, "code", "request_failed");
+  const candidateCode = typeof rawCode === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(rawCode)
+    ? rawCode
+    : "request_failed";
+  const code = /(?:token|cookie|password|secret|authorization|oauth|session)/i.test(candidateCode)
+    ? "request_failed"
+    : candidateCode;
+  const rawStatus = ownValue(error, "status", 0);
+  const status = Number.isInteger(rawStatus) && rawStatus >= 0 && rawStatus <= 599 ? rawStatus : 0;
+  const requestId = safeId(ownValue(error, "requestId", ""));
   const conflict = status === 409 || code === "review_state_conflict" || code === "crawl_not_finished";
   const missing = status === 404;
   return Object.freeze({
@@ -449,32 +496,46 @@ export function reviewErrorGuidance(error) {
 }
 
 export function createReviewRequestGate() {
+  const channels = new Set(["page", "recent", "summary"]);
   let lifecycle = 0;
   let write = 0;
   let sequence = 0;
-  let applied = 0;
+  const applied = new Map();
   return Object.freeze({
-    beginRead(batchId, filter, offset) {
-      const ticket = Object.freeze({
+    beginRead(channel, batchId = "", filter = "", offset = 0) {
+      if (!channels.has(channel)) throw new TypeError("未知审核请求通道");
+      const safeBatchId = batchId ? safeId(batchId) : "";
+      if ((channel === "page" || channel === "summary") && !safeBatchId) {
+        throw new TypeError("审核读取 ID 无效");
+      }
+      if (!FILTERS.has(filter) || !Number.isInteger(offset) || offset < 0 || offset > 1_000_000) {
+        throw new TypeError("审核读取参数无效");
+      }
+      return Object.freeze({
         lifecycle,
         write,
         sequence: ++sequence,
-        batchId: safeId(batchId),
-        filter: FILTERS.has(filter) ? filter : "",
-        offset: boundedCount(offset, 1_000_000),
+        channel,
+        batchId: safeBatchId,
+        filter,
+        offset,
       });
-      if (!ticket.batchId) throw new TypeError("审核读取 ID 无效");
-      return ticket;
     },
-    isReadCurrent(ticket, { batchId, filter, offset }) {
-      const current = ticket?.lifecycle === lifecycle && ticket?.write === write &&
-        ticket?.sequence >= applied && ticket?.batchId === safeId(batchId) &&
-        ticket?.filter === filter && ticket?.offset === boundedCount(offset, 1_000_000);
-      if (current) applied = ticket.sequence;
+    isReadCurrent(ticket, { channel, batchId = "", filter = "", offset = 0 }) {
+      const safeBatchId = batchId ? safeId(batchId) : "";
+      const current = channels.has(channel) && ticket?.lifecycle === lifecycle &&
+        ticket?.write === write && ticket?.sequence >= (applied.get(channel) || 0) &&
+        ticket?.channel === channel && ticket?.batchId === safeBatchId &&
+        ticket?.filter === filter && ticket?.offset === offset;
+      if (current) applied.set(channel, ticket.sequence);
       return current;
     },
     beginWrite() {
       write += 1;
+      return Object.freeze({ lifecycle, write });
+    },
+    isWriteCurrent(ticket) {
+      return ticket?.lifecycle === lifecycle && ticket?.write === write;
     },
     advanceLifecycle() {
       lifecycle += 1;
