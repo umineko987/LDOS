@@ -5299,7 +5299,11 @@ test("G2 主题低对比即时预览应用，格式与 setter 失败仍安全阻
     );
 
     const beforeExternalPublish = maskStrengthOutput.textContentWrites;
-    runtime.preview({ ...runtime.getState().draft, animations: "off" });
+    runtime.preview({
+      ...runtime.getState().draft,
+      animations: "off",
+      windowOpacity: "soft",
+    });
     assert.equal(
       maskStrengthOutput.textContentWrites,
       beforeExternalPublish + 1,
@@ -5323,7 +5327,7 @@ test("G2 主题低对比即时预览应用，格式与 setter 失败仍安全阻
     );
     assert.equal(runtime.getState().draft.themeAccent, "#0065D1");
     assert.equal(runtime.getState().draft.themeSurface, "#7E6425");
-    assert.equal(runtime.getState().draft.windowOpacity, "soft");
+    assert.equal(runtime.getState().draft.windowOpacity, "solid");
     assert.equal(runtime.getState().draft.animations, "on");
     assert.deepEqual(themeRoot.snapshot(), {
       themeAccent: "#0065D1",
@@ -5347,7 +5351,7 @@ test("G2 主题低对比即时预览应用，格式与 setter 失败仍安全阻
     assert.deepEqual(preferenceStorage.writes[0], runtime.getState().committed);
     assert.equal(preferenceStorage.writes[0].themeAccent, "#0065D1");
     assert.equal(preferenceStorage.writes[0].themeSurface, "#7E6425");
-    assert.equal(preferenceStorage.writes[0].windowOpacity, "soft");
+    assert.equal(preferenceStorage.writes[0].windowOpacity, "solid");
 
     const committedTheme = themeRoot.snapshot();
     themeRoot.failNext("setProperty:--imageweave-surface");
@@ -5377,10 +5381,14 @@ test("G2 主题低对比即时预览应用，格式与 setter 失败仍安全阻
     assert.equal(accent.value, "#F4F1EA", "外部 publish 仍保留 preview error 表单颜色");
     root.emit("click", cancel);
 
+    accent.value = "#101010";
     accent.failNextValueWrite = true;
-    windowOpacity.value = "solid";
+    windowOpacity.value = "soft";
     root.emit("change", windowOpacity);
-    assert.deepEqual(themeRoot.snapshot(), committedTheme, "表单 setter 失败保留安全界面");
+    assert.deepEqual(themeRoot.snapshot(), {
+      ...committedTheme,
+      themeAccent: "#101010",
+    }, "setter 失败不得破坏已成功应用的安全主题值");
     assert.equal(runtime.getState().draft.windowOpacity, "solid");
     assert.equal(preferenceStorage.writes.length, 1);
     assert.equal(apply.disabled, true, "受控 DOM 回显错误不得继续提交");
@@ -5415,8 +5423,12 @@ test("G2 主题低对比即时预览应用，格式与 setter 失败仍安全阻
     assert.equal(accent.value, "#0065D1", "确认离开恢复已提交主题");
     assert.equal(surfaceInput.value, "#7E6425");
 
-    windowOpacity.value = "solid";
-    root.emit("change", windowOpacity);
+    runtime.preview({
+      ...runtime.getState().draft,
+      wallpaperColor: runtime.getState().draft.wallpaperColor === "forest"
+        ? "graphite"
+        : "forest",
+    });
     assert.equal(runtime.getState().dirty, true);
     accent.value = "#101010";
     root.emit("input", accent);

@@ -1265,6 +1265,14 @@ export function createPersonalizationView({ root, app }) {
       localThemeInvalid = false;
       themePreviewError = false;
       renderThemeDraft(state);
+      renderPreview({
+        ...state,
+        draft: {
+          ...state.draft,
+          themeAccent: themeAccent.input.value,
+          themeSurface: themeSurface.input.value,
+        },
+      });
     },
     clearLocalThemeDraft() {
       localThemeDraft = false;
