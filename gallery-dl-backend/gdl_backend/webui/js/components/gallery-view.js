@@ -357,7 +357,13 @@ export function createGalleryView({ root, app }, { onStateChange = () => {}, onM
     closeQuickLook({ restore: false, notify: false });
     releaseMedia();
     currentState = state;
-    uiState = updateGalleryUiState(nextUi, { quickLookId: "" }, state.items);
+    const itemIds = new Set(state.items.map((item) => item.id));
+    const compatibleUi = {
+      ...nextUi,
+      selectedIds: nextUi.selectedIds.filter((id) => itemIds.has(id)),
+      quickLookId: "",
+    };
+    uiState = updateGalleryUiState(compatibleUi, {}, state.items);
     const presentation = galleryPresentation(state);
     workspaceState.dataset.galleryWorkspaceState = presentation.state;
     const stateBadge = workspaceState.children[0];
@@ -390,6 +396,7 @@ export function createGalleryView({ root, app }, { onStateChange = () => {}, onM
       selectionFact.textContent = "未选择媒体。";
       quickLookButton.disabled = true;
       quickLookButton.setAttribute("aria-describedby", "gallery-write-reason");
+      quickLookButton.title = DISABLED_REASON;
       restoreFocus(root, token, workspace);
       return;
     }
@@ -407,8 +414,13 @@ export function createGalleryView({ root, app }, { onStateChange = () => {}, onM
     const selected = state.items.filter((item) => uiState.selectedIds.includes(item.id));
     selectionFact.textContent = selected.length ? `已选择 ${selected.length} 项安全媒体事实。` : "未选择媒体。";
     quickLookButton.disabled = selected.length === 0;
-    if (quickLookButton.disabled) quickLookButton.setAttribute("aria-describedby", "gallery-write-reason");
-    else quickLookButton.removeAttribute("aria-describedby");
+    if (quickLookButton.disabled) {
+      quickLookButton.setAttribute("aria-describedby", "gallery-write-reason");
+      quickLookButton.title = "请先选择一项媒体，再打开 Quick Look。";
+    } else {
+      quickLookButton.removeAttribute("aria-describedby");
+      quickLookButton.removeAttribute("title");
+    }
     inspectorHost.replaceChildren(...(selected.length ? selected.map((item) => createElement("article", {
       className: "gallery-inspector-card",
       dataset: { galleryInspectorItem: item.id },

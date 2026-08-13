@@ -97,8 +97,14 @@ export function projectScheduleState(raw) {
     if (new Set(plans.map((plan) => plan.id)).size !== plans.length) throw new TypeError("计划 ID 重复");
     return Object.freeze({ phase, plans: Object.freeze(plans), error: null });
   }
-  if (phase === "error") return Object.freeze({ phase, plans: Object.freeze([]), error: safeFailure(value.error) });
-  if (value.plans !== undefined || value.error !== undefined) throw new TypeError("定时任务状态字段与状态不匹配");
+  if (phase === "error") {
+    if (value.plans !== undefined && (!Array.isArray(value.plans) || value.plans.length !== 0)) throw new TypeError("错误状态不得包含计划");
+    return Object.freeze({ phase, plans: Object.freeze([]), error: safeFailure(value.error) });
+  }
+  if (
+    (value.plans !== undefined && (!Array.isArray(value.plans) || value.plans.length !== 0))
+    || (value.error !== undefined && value.error !== null)
+  ) throw new TypeError("定时任务状态字段与状态不匹配");
   return Object.freeze({ phase, plans: Object.freeze([]), error: null });
 }
 

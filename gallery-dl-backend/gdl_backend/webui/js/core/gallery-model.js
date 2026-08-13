@@ -125,9 +125,15 @@ export function projectGalleryState(raw) {
     return Object.freeze({ phase, items: Object.freeze(items), error: null });
   }
   if (phase === "error") {
+    if (value.items !== undefined && (!Array.isArray(value.items) || value.items.length !== 0)) {
+      throw new TypeError("图片库错误状态不得包含媒体");
+    }
     return Object.freeze({ phase, items: Object.freeze([]), error: safeFailure(value.error) });
   }
-  if (value.items !== undefined || value.error !== undefined) throw new TypeError("图片库状态字段与状态不匹配");
+  if (
+    (value.items !== undefined && (!Array.isArray(value.items) || value.items.length !== 0))
+    || (value.error !== undefined && value.error !== null)
+  ) throw new TypeError("图片库状态字段与状态不匹配");
   return Object.freeze({ phase, items: Object.freeze([]), error: null });
 }
 

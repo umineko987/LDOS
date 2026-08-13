@@ -27,8 +27,7 @@ export function createGalleryController(context, {
   let destroyed = false;
   let lifecycle = 0;
   let view;
-  const applyUiState = (uiState) => view?.render(state, uiState);
-  view = createView(context, { onStateChange: applyUiState });
+  view = createView(context);
   if (!view || typeof view !== "object" || typeof view.render !== "function") {
     throw new TypeError("图片库视图无效");
   }

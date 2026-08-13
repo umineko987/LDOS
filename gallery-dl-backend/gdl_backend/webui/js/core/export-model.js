@@ -128,8 +128,17 @@ export function projectExportState(raw) {
       error: null,
     });
   }
-  if (phase === "error") return Object.freeze({ phase, sources: Object.freeze([]), config: null, progress: null, error: safeFailure(value.error) });
-  if (value.sources !== undefined || value.config !== undefined || value.progress !== undefined || value.error !== undefined) throw new TypeError("导出状态字段与状态不匹配");
+  if (phase === "error") {
+    if (value.sources !== undefined && (!Array.isArray(value.sources) || value.sources.length !== 0)) throw new TypeError("错误状态不得包含来源");
+    if ((value.config !== undefined && value.config !== null) || (value.progress !== undefined && value.progress !== null)) throw new TypeError("错误状态不得包含导出事实");
+    return Object.freeze({ phase, sources: Object.freeze([]), config: null, progress: null, error: safeFailure(value.error) });
+  }
+  if (
+    (value.sources !== undefined && (!Array.isArray(value.sources) || value.sources.length !== 0))
+    || (value.config !== undefined && value.config !== null)
+    || (value.progress !== undefined && value.progress !== null)
+    || (value.error !== undefined && value.error !== null)
+  ) throw new TypeError("导出状态字段与状态不匹配");
   return Object.freeze({ phase, sources: Object.freeze([]), config: null, progress: null, error: null });
 }
 
