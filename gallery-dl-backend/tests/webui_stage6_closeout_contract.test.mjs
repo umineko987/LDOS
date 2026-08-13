@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const REPOSITORY = new URL("../../", import.meta.url);
+const REPOSITORY = existsSync(new URL("../README.md", import.meta.url))
+  ? new URL("../", import.meta.url)
+  : new URL("../../", import.meta.url);
 const BACKEND = new URL("../", import.meta.url);
 const WEBUI = new URL("../gdl_backend/webui/", import.meta.url);
 
