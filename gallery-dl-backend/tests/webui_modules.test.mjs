@@ -4716,14 +4716,15 @@ test("E2 设置视图聚合回显禁用语义，并严格读取完整可读性�
         loading: false,
         saved: false,
         pending: false,
+        available: customWallpaper.pending === true || customWallpaper.saved === true,
         selectedReady: false,
         storageAvailable: true,
         ...customWallpaper,
       },
       motion: {
-        userMode: "on",
+        userMode: draft.animations ?? PERSONALIZATION_DEFAULTS.animations,
         systemReduced: false,
-        effective: true,
+        effective: (draft.animations ?? PERSONALIZATION_DEFAULTS.animations) === "on",
         limitedBySystem: false,
       },
     });

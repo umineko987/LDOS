@@ -179,7 +179,6 @@ function createPersonalizationController(context) {
       }
       if (hadLocalThemeDraft) view.acceptThemeDraft(next);
       else render(next);
-      view.renderPreviewFromState(next);
       showDraftStatus(next);
       return next;
     } catch {

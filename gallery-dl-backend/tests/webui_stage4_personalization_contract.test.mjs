@@ -315,29 +315,53 @@ test("Personalization DOM：全高三栏顺序、实时桌面语义、仅两个 
 
     const originalAccent = elements.themeAccentInput;
     elements.themeAccentInput.focus();
-    const forestState = state({ dirty: true, draft: { wallpaperColor: "forest" } });
+    const forestState = state({
+      dirty: true,
+      draft: {
+        wallpaperColor: "forest",
+        wallpaperFit: "contain",
+        wallpaperPosition: "bottom-right",
+        windowOpacity: "soft",
+        themeAccent: "#ABCDEF",
+        themeSurface: "#101010",
+      },
+    });
     view.renderState(forestState);
-    view.renderPreviewFromState(forestState);
     assert.equal(elements.themeAccentInput, originalAccent);
     assert.equal(globalThis.document.activeElement, originalAccent, "原位更新不得丢失 color focus");
     assert.equal(elements.previewDesktop.dataset.personalizationWallpaper, "forest");
+    assert.equal(elements.previewDesktop.dataset.personalizationWindowOpacity, "soft");
     assert.equal(elements.previewState.dataset.personalizationPreviewState, "dirty");
+    assert.match(elements.previewThemeFact.textContent, /#ABCDEF.*#101010/);
+    assert.match(elements.previewToneFact.textContent, /深色界面/);
+    assert.match(elements.previewBackgroundFact.textContent, /深林.*适应.*右下/);
     assert.equal(view.scrollWorkspace(1), true);
     assert.equal(elements.workspace.lastScrollBy.left > 0, true);
     assert.equal(view.scrollWorkspace(-1), true);
     assert.equal(elements.workspace.lastScrollBy.left < 0, true);
 
+    const restoredState = state();
+    view.renderState(restoredState);
+    assert.equal(elements.previewDesktop.dataset.personalizationWallpaper, "graphite");
+    assert.equal(elements.previewState.dataset.personalizationPreviewState, "clean");
+    assert.match(elements.previewThemeFact.textContent, /#46515D.*#F4F1EA/);
+    assert.match(elements.previewToneFact.textContent, /浅色界面/);
+    assert.match(elements.previewBackgroundFact.textContent, /石墨.*填充.*居中/);
+
     const customState = state({
+      dirty: true,
       draft: { wallpaperKind: "custom", animations: "on" },
       customWallpaper: { pending: true, available: true, selectedReady: true },
       motion: { systemReduced: true, effective: false, limitedBySystem: true },
     });
     view.renderState(customState);
-    view.renderPreviewFromState(customState);
     assert.equal(elements.previewDesktop.dataset.personalizationWallpaper, "custom");
+    assert.equal(elements.previewDesktop.dataset.personalizationMotion, "system-limited");
+    assert.equal(elements.previewState.dataset.personalizationPreviewState, "dirty");
     assert.match(elements.previewWallpaperStatus.textContent, /本地图片正在桌面预览/);
     assert.match(elements.previewMotionFact.textContent, /系统.*限制|减少动态效果/);
     assert.equal(JSON.stringify(elements.previewDesktop.dataset).includes("blob:"), false);
+    assert.equal("renderPreviewFromState" in view, false, "preview 不再暴露二次渲染入口");
   } finally {
     view?.destroy();
     dom.restore();

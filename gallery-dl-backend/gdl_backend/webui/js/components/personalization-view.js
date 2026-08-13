@@ -1021,10 +1021,6 @@ export function createPersonalizationView({ root, app }) {
     return theme;
   };
 
-  const renderPreviewFromState = (state) => {
-    renderPreview(state);
-  };
-
   const renderState = (state, { preserveDraftValues = false } = {}) => {
     latestState = state;
     const preserveFormDraft = localThemeDraft || preserveDraftValues;
@@ -1161,6 +1157,7 @@ export function createPersonalizationView({ root, app }) {
     deleteButton.textContent = busyAction === "delete"
       ? "正在删除…"
       : "删除已保存图片";
+    renderPreview(state);
   };
 
   return Object.freeze({
@@ -1282,7 +1279,6 @@ export function createPersonalizationView({ root, app }) {
       return localThemeDraft || state?.dirty === true;
     },
     renderState,
-    renderPreviewFromState,
     scrollWorkspace(direction) {
       if (direction !== -1 && direction !== 1) return false;
       const amount = Math.max(240, Math.round((workspace.clientWidth || 720) * 0.72));
