@@ -18,7 +18,7 @@ export const APPLICATION_GROUPS = Object.freeze([
 ]);
 
 const APPLICATION_GROUP_IDS = new Set(APPLICATION_GROUPS.map((group) => group.id));
-const AVAILABILITIES = new Set(["ready", "preview", "placeholder"]);
+const AVAILABILITIES = new Set(["ready", "preview"]);
 const DEFAULT_WINDOW_STATES = new Set(["normal", "maximized"]);
 
 export function validateApplicationDefinitions(items) {

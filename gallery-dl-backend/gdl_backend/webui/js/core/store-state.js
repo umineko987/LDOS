@@ -178,14 +178,10 @@ export const actionCreators = Object.freeze({
   windowStateChanged(appId, windowState) {
     return action(ACTION_TYPES.UI_WINDOW_STATE_CHANGED, { appId, windowState });
   },
-  startMenuChanged(open) {
-    return action(ACTION_TYPES.UI_START_MENU_CHANGED, { open });
-  },
 });
 
 export const selectors = Object.freeze({
   focusedAppId: (state) => state.ui.focusedAppId,
-  startMenuOpen: (state) => state.ui.startMenuOpen,
   taskbarSummary: (state) => state.system.summary,
   diagnostics: (state) => state.diagnostics.snapshot,
   proxyStatus: (state) => state.proxy.status,

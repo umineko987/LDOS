@@ -1593,7 +1593,6 @@ test("store action 字符串、creator/selector shape 与初始 snapshot 保持�
     UI_WINDOW_FOCUSED: "ui/windowFocused",
     UI_WINDOW_MOVED: "ui/windowMoved",
     UI_WINDOW_STATE_CHANGED: "ui/windowStateChanged",
-    UI_START_MENU_CHANGED: "ui/startMenuChanged",
   });
   assert.equal(Object.isFrozen(ACTION_TYPES), true);
   assert.deepEqual(Object.keys(actionCreators), [
@@ -1607,10 +1606,10 @@ test("store action 字符串、creator/selector shape 与初始 snapshot 保持�
     "reviewWorkspaceReceived", "reviewSummaryReceived",
     "reviewImageSelectionChanged", "reviewGroupConfirmed", "reviewPageSaved",
     "reviewCleared", "windowOpened", "windowClosed", "windowFocused",
-    "windowMoved", "windowStateChanged", "startMenuChanged",
+    "windowMoved", "windowStateChanged",
   ]);
   assert.deepEqual(Object.keys(selectors), [
-    "focusedAppId", "startMenuOpen", "taskbarSummary", "diagnostics",
+    "focusedAppId", "taskbarSummary", "diagnostics",
     "proxyStatus", "proxySources", "policyConfig", "authSites",
     "authBrowserProfile", "authAuthorizationProxy", "crawl", "activeBatchId",
     "activeBatch", "batchTasks", "recentBatches", "review", "windowStack",
@@ -1654,7 +1653,7 @@ test("store action 字符串、creator/selector shape 与初始 snapshot 保持�
       dirty: false,
       dirtyGroupIds: [],
     },
-    ui: { windows: [], focusedAppId: null, startMenuOpen: false },
+    ui: { windows: [], focusedAppId: null },
   });
 
   const rect = windowRect({ x: 7, y: 8, w: 640, h: 360 });
@@ -1672,10 +1671,6 @@ test("store action 字符串、creator/selector shape 与初始 snapshot 保持�
   assert.deepEqual(actionCreators.windowMoved("crawl", rect), {
     type: ACTION_TYPES.UI_WINDOW_MOVED,
     payload: { appId: "crawl", rect },
-  });
-  assert.deepEqual(actionCreators.startMenuChanged(true), {
-    type: ACTION_TYPES.UI_START_MENU_CHANGED,
-    payload: { open: true },
   });
 });
 
@@ -1740,10 +1735,10 @@ test("store contract/state/business/window/root/factory 各层可独立导入和
   assert.equal(factoryStore.getState().ui.focusedAppId, "crawl");
 
   const dangerous = JSON.parse(
-    '{"open":true,"constructor":{"prototype":{"polluted":true}}}',
+    '{"appId":"crawl","constructor":{"prototype":{"polluted":true}}}',
   );
   assert.throws(
-    () => rootReducer(initial, { type: ACTION_TYPES.UI_START_MENU_CHANGED, payload: dangerous }),
+    () => rootReducer(initial, { type: ACTION_TYPES.UI_WINDOW_OPENED, payload: dangerous }),
     TypeError,
   );
   assert.equal({}.polluted, undefined);
@@ -1792,7 +1787,7 @@ test("store runtime 拒绝危险键、循环与不支持对象，并深度只读
     reducer: (_state, action) => ({ payload: action.payload }),
     reportError: () => {},
   });
-  const safeType = ACTION_TYPES.UI_START_MENU_CHANGED;
+  const safeType = ACTION_TYPES.UI_WINDOW_OPENED;
   for (const key of ["__proto__", "prototype", "constructor"]) {
     const payload = JSON.parse(`{"${key}":{"polluted":true}}`);
     assert.throws(() => store.dispatch({ type: safeType, payload }), TypeError);
@@ -1827,30 +1822,30 @@ test("store 订阅快照、比较器、退订和 reducing/notifying 嵌套边界
   const events = [];
   let unsubscribeSecond = () => {};
   let installedLate = false;
-  store.subscribe(selectors.startMenuOpen, (selected, previous, action) => {
+  store.subscribe(selectors.focusedAppId, (selected, previous, action) => {
     events.push(["first", selected, previous, action.type, Object.isFrozen(action)]);
     unsubscribeSecond();
     if (!installedLate) {
       installedLate = true;
-      store.subscribe(selectors.startMenuOpen, (value) => events.push(["late", value]));
+      store.subscribe(selectors.focusedAppId, (value) => events.push(["late", value]));
     }
   });
   unsubscribeSecond = store.subscribe(
-    selectors.startMenuOpen,
+    selectors.focusedAppId,
     (value) => events.push(["second", value]),
   );
-  store.subscribe(selectors.startMenuOpen, () => events.push(["equal-never"]), {
+  store.subscribe(selectors.focusedAppId, () => events.push(["equal-never"]), {
     equality: () => true,
   });
 
-  const receipt = store.dispatch(actionCreators.startMenuChanged(true));
-  assert.deepEqual(receipt, { type: ACTION_TYPES.UI_START_MENU_CHANGED });
+  const receipt = store.dispatch(actionCreators.windowOpened("crawl"));
+  assert.deepEqual(receipt, { type: ACTION_TYPES.UI_WINDOW_OPENED });
   assert.equal(Object.isFrozen(receipt), true);
   assert.deepEqual(events, [[
-    "first", true, false, ACTION_TYPES.UI_START_MENU_CHANGED, true,
+    "first", "crawl", null, ACTION_TYPES.UI_WINDOW_OPENED, true,
   ]]);
-  store.dispatch(actionCreators.startMenuChanged(false));
-  assert.deepEqual(events.at(-1), ["late", false]);
+  store.dispatch(actionCreators.windowClosed("crawl"));
+  assert.deepEqual(events.at(-1), ["late", null]);
   assert.equal(events.some(([name]) => name === "second" || name === "equal-never"), false);
 
   let reducingStore;
@@ -1859,15 +1854,15 @@ test("store 订阅快照、比较器、退订和 reducing/notifying 嵌套边界
     initialState: { count: 0 },
     reducer(state, action) {
       try {
-        reducingStore.dispatch(actionCreators.startMenuChanged(false));
+        reducingStore.dispatch(actionCreators.windowClosed("crawl"));
       } catch (error) {
         nestedError = error;
       }
-      return { count: state.count + (action.payload?.open === true ? 1 : 0) };
+      return { count: state.count + (action.payload?.appId === "crawl" ? 1 : 0) };
     },
     reportError: (event) => reports.push(event),
   });
-  reducingStore.dispatch(actionCreators.startMenuChanged(true));
+  reducingStore.dispatch(actionCreators.windowOpened("crawl"));
   assert.match(nestedError.message, /不得嵌套 dispatch/);
   assert.equal(reducingStore.getState().count, 1);
   assert.deepEqual(reports, []);
@@ -1899,7 +1894,7 @@ test("store 仅通过已知 action 更新，selector 避免无关通知", () => 
   const store = createStore({ reportError: (event) => reports.push(event) });
   let focusNotifications = 0;
   store.subscribe(selectors.focusedAppId, () => { focusNotifications += 1; });
-  store.dispatch(actionCreators.startMenuChanged(true));
+  store.dispatch(actionCreators.shellSummaryUpdated(shellSnapshot()));
   assert.equal(focusNotifications, 0);
   store.dispatch(actionCreators.windowOpened("review"));
   assert.equal(focusNotifications, 1);
@@ -1927,27 +1922,27 @@ test("store 克隆 action payload，订阅者异常与嵌套 dispatch 不阻断�
   assert.equal(store.getState().system.summary.api.label, "API 已就绪");
 
   let secondSubscriberRan = false;
-  store.subscribe(selectors.startMenuOpen, () => {
-    store.dispatch(actionCreators.startMenuChanged(false));
+  store.subscribe(selectors.focusedAppId, () => {
+    store.dispatch(actionCreators.windowClosed("crawl"));
   });
-  store.subscribe(selectors.startMenuOpen, () => {
+  store.subscribe(selectors.focusedAppId, () => {
     secondSubscriberRan = true;
     assert.throws(() => { store.getState().ui.focusedAppId = "proxy"; }, TypeError);
   });
-  store.dispatch(actionCreators.startMenuChanged(true));
+  store.dispatch(actionCreators.windowOpened("crawl"));
   assert.equal(reportCount, 1);
   assert.equal(secondSubscriberRan, true);
-  assert.equal(store.getState().ui.startMenuOpen, true);
+  assert.equal(store.getState().ui.focusedAppId, "crawl");
 });
 
 test("store 初次订阅渲染期间同样禁止嵌套 dispatch", () => {
   let reportCount = 0;
   const store = createStore({ reportError: () => { reportCount += 1; } });
-  store.subscribe(selectors.startMenuOpen, () => {
-    store.dispatch(actionCreators.startMenuChanged(true));
+  store.subscribe(selectors.focusedAppId, () => {
+    store.dispatch(actionCreators.windowOpened("crawl"));
   }, { fireImmediately: true });
   assert.equal(reportCount, 1);
-  assert.equal(store.getState().ui.startMenuOpen, false);
+  assert.equal(store.getState().ui.focusedAppId, null);
 });
 
 test("跨应用 action 先调用 router，只有路由结果才能更新 focusedAppId", () => {
@@ -2081,8 +2076,6 @@ test("focusedAppId 始终为栈顶非 minimized 窗口", () => {
   );
   assertDerivedFocus();
   store.dispatch(actionCreators.windowStateChanged("crawl", "minimized"));
-  assertDerivedFocus();
-  store.dispatch(actionCreators.startMenuChanged(true));
   assertDerivedFocus();
 });
 
@@ -3392,33 +3385,6 @@ test("菜单打开应用中心先关闭 menu 并把可见 trigger 作为返回�
   }
 });
 
-test("应用中心空启动列表时只把 panel 纳入 Tab 环", () => {
-  const fixture = installWindowManagerDomFixture();
-  const host = new FakeDomHtmlElement("div");
-  fixture.documentObject.documentElement.append(host);
-  let center = null;
-  try {
-    center = createApplicationCenter({
-      host,
-      definitions: applications.map((definition) => ({
-        ...definition,
-        availability: "placeholder",
-      })),
-      onLaunch() {},
-      documentObject: fixture.documentObject,
-    });
-    assert.equal(center.open(), true);
-    const panel = host.querySelector("[data-application-center-panel]");
-    assert.equal(fixture.documentObject.activeElement, panel);
-    const tab = fixture.documentObject.emit("keydown", { key: "Tab", target: panel });
-    assert.equal(tab.defaultPrevented, true);
-    assert.equal(fixture.documentObject.activeElement, panel);
-  } finally {
-    center?.destroy();
-    fixture.restore();
-  }
-});
-
 test("应用中心 Tab/Shift+Tab 环绕且 Escape 只关闭顶层并恢复触发器", () => {
   const fixture = installWindowManagerDomFixture();
   const host = new FakeDomHtmlElement("div");
@@ -3937,8 +3903,8 @@ test("store 聚焦适配器只投影窗口 scope 与 open/minimized/closed 状�
 
   const notifications = [];
   const unsubscribe = source.subscribe((snapshot) => notifications.push(snapshot));
-  store.dispatch(actionCreators.startMenuChanged(true));
-  assert.equal(notifications.length, 0, "无关 UI 状态不得触发聚焦重排");
+  store.dispatch(actionCreators.shellSummaryUpdated(shellSnapshot()));
+  assert.equal(notifications.length, 0, "无关业务状态不得触发聚焦重排");
   store.dispatch(actionCreators.windowOpened("review"));
   assert.equal(notifications.length, 1);
   assert.equal(notifications.at(-1).focusedScope, "app:review");
@@ -7547,7 +7513,7 @@ test("VAULT Store action 只接收安全投影并保持 selector 与其他 slice
   assert.equal(JSON.stringify([...stored.bySite.values()]).includes(VAULT_FIXTURE_SECRET), false);
   assert.throws(() => stored.bySite.set("other", {}), TypeError);
 
-  store.dispatch(actionCreators.startMenuChanged(true));
+  store.dispatch(actionCreators.shellSummaryUpdated(shellSnapshot()));
   assert.deepEqual(
     [sitesNotifications, profileNotifications, proxyNotifications],
     [1, 1, 1],
@@ -7961,7 +7927,7 @@ test("POLICY Store action 二次投影、不可变且与 auth/proxy selector 隔
     stored.bySite.get("pixiv").policy.max_concurrency = 99;
   }, TypeError);
 
-  store.dispatch(actionCreators.startMenuChanged(true));
+  store.dispatch(actionCreators.shellSummaryUpdated(shellSnapshot()));
   assert.deepEqual([policyNotifications, authNotifications, proxyNotifications], [1, 0, 0]);
   assert.throws(
     () => store.dispatch({ type: "policy/configReceived", payload: rawPolicySnapshot() }),

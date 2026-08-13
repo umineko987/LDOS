@@ -31,7 +31,6 @@ export const ACTION_TYPES = Object.freeze({
   UI_WINDOW_FOCUSED: "ui/windowFocused",
   UI_WINDOW_MOVED: "ui/windowMoved",
   UI_WINDOW_STATE_CHANGED: "ui/windowStateChanged",
-  UI_START_MENU_CHANGED: "ui/startMenuChanged",
 });
 
 const KNOWN_ACTION_TYPES = new Set(Object.values(ACTION_TYPES));

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const REPOSITORY = new URL("../../", import.meta.url);
+const REPOSITORY = new URL("../", import.meta.url);
 const BACKEND = new URL("../", import.meta.url);
 const WEBUI = new URL("../gdl_backend/webui/", import.meta.url);
 
@@ -106,7 +106,7 @@ test("Stage 6 user-visible production text uses natural application names", () =
   const failures = [...webuiSources, ...backendSources]
     .map((path) => [path, read(path)])
     .filter(([, source]) => executableName.test(source))
-    .map(([path]) => path.pathname.split("/gallery-dl-backend/")[1]);
+    .map(([path]) => path.pathname.split("/gallery-dl-backend/").at(-1));
   assert.deepEqual(failures, []);
 });
 

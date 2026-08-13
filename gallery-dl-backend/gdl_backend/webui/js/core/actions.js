@@ -156,9 +156,6 @@ export function createShellActions({
     navigateToApp,
     routeResolved,
     desktopResolved,
-    setStartMenuOpen(open) {
-      store.dispatch(actionCreators.startMenuChanged(Boolean(open)));
-    },
     minimizeWindow(appId, { syncRoute = true } = {}) {
       const record = targetWindow(appId);
       if (!record || record.windowState === "minimized") return false;

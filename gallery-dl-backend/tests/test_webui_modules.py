@@ -446,9 +446,7 @@ class WebUiModuleTests(unittest.TestCase):
             for hook in ("mount", "activate", "deactivate", "unmount"):
                 self.assertIn(f"{hook}(", source, name)
 
-        placeholder = app_sources["placeholder.js"]
-        self.assertNotIn("/api/", placeholder)
-        self.assertIn("createPlaceholderShell", placeholder)
+        self.assertNotIn("placeholder.js", app_sources)
 
         business_paths = [
             *(webui / "js" / "apps").glob("*.js"),
@@ -1235,13 +1233,8 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn("animation: none", image_layer)
         self.assertIn("transition: none", image_layer)
 
-        self.assertIn(
-            ".desktop-wallpaper--custom ~ .desktop-icons .desktop-icon",
-            desktop_css,
-        )
-        self.assertIn("text-shadow:", desktop_css)
-        self.assertIn(".desktop-icon:focus-visible", desktop_css)
-        self.assertIn('.desktop-icon[aria-current="page"]', desktop_css)
+        self.assertNotIn(".desktop-icons", desktop_css)
+        self.assertNotIn(".desktop-icon", desktop_css)
 
         subtle = css_block(
             desktop_css,
@@ -1265,9 +1258,9 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn("border-color: CanvasText", forced_colors)
         self.assertIn("background: Canvas !important", forced_colors)
 
-        # 透明背景不使用元素 opacity，因此这些实体表面仍保持实色。
-        self.assertIn("background: var(--imageweave-surface)", css_block(desktop_css, ".start-menu"))
-        self.assertIn("background: var(--imageweave-surface)", css_block(desktop_css, ".taskbar"))
+        # 透明背景不使用元素 opacity，因此当前实体表面仍保持实色。
+        self.assertIn("background: var(--imageweave-surface-environment-solid)", css_block(desktop_css, ".menu-bar"))
+        self.assertIn("background: var(--imageweave-surface-environment-solid)", css_block(desktop_css, ".dock__items"))
         self.assertIn(
             "background: var(--imageweave-surface)",
             css_block(dialog_css, ".imageweave-dialog"),

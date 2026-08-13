@@ -9,15 +9,9 @@ const WINDOW_ACTION_TYPES = new Set([
   ACTION_TYPES.UI_WINDOW_FOCUSED,
   ACTION_TYPES.UI_WINDOW_MOVED,
   ACTION_TYPES.UI_WINDOW_STATE_CHANGED,
-  ACTION_TYPES.UI_START_MENU_CHANGED,
 ]);
 
 export const DEFAULT_WINDOW_RECT = Object.freeze({ x: 160, y: 64, w: 800, h: 560 });
-
-function requireBoolean(value, label) {
-  if (typeof value !== "boolean") throw new TypeError(`${label}必须是布尔值`);
-  return value;
-}
 
 function requireAppId(value) {
   if (typeof value !== "string" || !getApplicationDefinitionById(value)) {
@@ -93,7 +87,6 @@ export function createInitialUiState(windows = []) {
   return {
     windows: normalizedWindows,
     focusedAppId: deriveFocusedAppId(normalizedWindows),
-    startMenuOpen: false,
   };
 }
 
@@ -156,7 +149,7 @@ export function reduceWindowState(state, action) {
       windows.push(opened);
       return {
         ...state,
-        ui: { ...state.ui, windows, startMenuOpen: false },
+        ui: { ...state.ui, windows },
       };
     }
     case ACTION_TYPES.UI_WINDOW_CLOSED: {
@@ -197,14 +190,6 @@ export function reduceWindowState(state, action) {
       });
       return changed ? { ...state, ui: { ...state.ui, windows } } : state;
     }
-    case ACTION_TYPES.UI_START_MENU_CHANGED:
-      return {
-        ...state,
-        ui: {
-          ...state.ui,
-          startMenuOpen: requireBoolean(action.payload?.open, "START 菜单状态"),
-        },
-      };
     default:
       throw new UnknownActionError(action.type);
   }

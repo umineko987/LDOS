@@ -6,7 +6,6 @@ import { createStatusBadge } from "./status.js";
 const AVAILABILITY_PRESENTATION = Object.freeze({
   ready: Object.freeze({ status: "ready", label: "可用", launchable: true }),
   preview: Object.freeze({ status: "warning", label: "前端预览", launchable: true }),
-  placeholder: Object.freeze({ status: "disabled", label: "不可用", launchable: false }),
 });
 
 function projectDefinition(definition) {

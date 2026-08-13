@@ -825,7 +825,6 @@ class ApiTests(unittest.TestCase):
             "/ui/js/apps/review.js",
             "/ui/js/apps/diagnostics.js",
             "/ui/js/apps/personalization.js",
-            "/ui/js/apps/placeholder.js",
         ]
         for path in static_assets:
             response = self.client.get(path)
@@ -882,7 +881,6 @@ class ApiTests(unittest.TestCase):
             "/ui/js/apps/policy.js",
             "/ui/js/apps/diagnostics.js",
             "/ui/js/apps/personalization.js",
-            "/ui/js/apps/placeholder.js",
         ]
         combined_javascript = "\n".join(
             self.client.get(path).text for path in javascript_paths
@@ -967,7 +965,6 @@ class ApiTests(unittest.TestCase):
             "/ui/js/apps/policy.js",
             "/ui/js/apps/diagnostics.js",
             "/ui/js/apps/personalization.js",
-            "/ui/js/apps/placeholder.js",
         ]
         module_sources = {
             path: self.client.get(path).text
@@ -1099,7 +1096,7 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("dataset", personalization_runtime_source)
         self.assertNotIn('image.src = ""', wallpaper_import_source)
         self.assertIn("WALLPAPER_COLOR_CLASSES", personalization_runtime_source)
-        self.assertIn(
+        self.assertNotIn(
             "context.actions.navigateToApp",
             module_sources["/ui/js/components/empty-state.js"],
         )
