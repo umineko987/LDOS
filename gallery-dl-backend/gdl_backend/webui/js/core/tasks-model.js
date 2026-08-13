@@ -1,6 +1,6 @@
 const BATCH_STATUSES = new Set([
-  "queued", "planning", "running", "succeeded", "completed_with_errors",
-  "cancelling", "cancelled",
+  "queued", "pending", "planning", "starting", "running", "succeeded",
+  "completed_with_errors", "cancelling", "cancelled", "failed",
 ]);
 const TASK_STATUSES = new Set([
   "queued", "pending", "starting", "running", "succeeded", "failed",
@@ -32,7 +32,7 @@ export const TERMINAL_BATCH_STATUSES = TERMINAL_BATCHES;
 
 const RECENT_FILTERS = new Set(["all", "active", "attention", "terminal"]);
 const ACTIVE_BATCH_STATUSES = new Set([
-  "queued", "planning", "running", "cancelling",
+  "queued", "pending", "planning", "starting", "running", "cancelling",
 ]);
 const ERROR_CATEGORY_DEFINITIONS = Object.freeze({
   authentication: Object.freeze({

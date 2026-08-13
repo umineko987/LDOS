@@ -370,11 +370,15 @@ test("4A model：批次、地址、任务、错误分类与文件事实均为安
 test("4A model：最近批次筛选、活动/终态与七种显式工作区状态", () => {
   const recent = sanitizeRecentBatches({ items: [
     rawBatch({ id: "batch-running", status: "running" }),
+    rawBatch({ id: "batch-pending", status: "pending" }),
+    rawBatch({ id: "batch-starting", status: "starting" }),
     rawBatch({ id: "batch-errors", status: "completed_with_errors", resumable: true }),
     rawBatch({ id: "batch-done", status: "succeeded" }),
     rawBatch({ id: "batch-cancelled", status: "cancelled" }),
   ] });
-  assert.deepEqual(filterRecentBatches(recent, "active").map((item) => item.id), ["batch-running"]);
+  assert.deepEqual(filterRecentBatches(recent, "active").map((item) => item.id), [
+    "batch-running", "batch-pending", "batch-starting",
+  ]);
   assert.deepEqual(filterRecentBatches(recent, "attention").map((item) => item.id), [
     "batch-errors", "batch-cancelled",
   ]);
