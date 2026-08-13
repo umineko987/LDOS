@@ -930,7 +930,8 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn('windowTitle: "站点设置"', definitions)
         self.assertIn('group: "connections"', definitions)
         self.assertIn('description: "配置各站点的并发、重试和代理策略。"', definitions)
-        self.assertIn('createElement("legend", { text: "选择站点" })', policy_dom)
+        self.assertIn('createElement("nav", {', policy_dom)
+        self.assertIn('attributes: { "aria-label": "五个站点的设置状态" }', policy_dom)
         for label in (
             "最大并发数",
             "重试次数",

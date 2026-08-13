@@ -229,12 +229,16 @@ function sanitizePolicyItem(value) {
     return null;
   }
   const supported = value.supported === true;
-  const selectionMode = SELECTION_MODES.has(value.selection_mode) ? value.selection_mode : "per_request";
-  const availability = AVAILABILITY_MODES.has(value.availability) ? value.availability : "not_probed";
+  const selectionModeValid = SELECTION_MODES.has(value.selection_mode);
+  const availabilityValid = AVAILABILITY_MODES.has(value.availability);
+  const selectionMode = selectionModeValid ? value.selection_mode : "per_request";
+  const availability = availabilityValid ? value.availability : "not_probed";
   const inherited = value.inherited === true;
   const hasOverride = value.has_override === true;
   const state = sanitizePolicyState(value, "invalid_response");
-  const shapeValid = supported && inherited !== hasOverride;
+  const shapeValid = supported && selectionModeValid && availabilityValid &&
+    typeof value.inherited === "boolean" && typeof value.has_override === "boolean" &&
+    inherited !== hasOverride;
   return {
     site: definition.id,
     label: definition.label,
@@ -530,6 +534,115 @@ export function derivePolicyControls(item, {
   });
 }
 
+function policyPresentation(state, kind, label, message) {
+  return Object.freeze({ state, kind, label, message });
+}
+
+export function derivePolicyWorkspacePresentation({
+  snapshot = null,
+  item = null,
+  phase = "idle",
+  busy = "",
+  dirty = false,
+  valid = true,
+} = {}) {
+  if (busy || phase === "saving" || phase === "writing") {
+    return policyPresentation(
+      "saving",
+      "running",
+      busy === "reset" ? "正在恢复默认设置" : "正在保存设置",
+      "操作完成并重新读取服务中的权威设置前，请勿关闭窗口。",
+    );
+  }
+  if (phase === "partial") {
+    return policyPresentation(
+      "partial",
+      "warning",
+      "保存结果待确认",
+      "写入已经完成，但尚未重新读取到权威设置；草稿仍保留。",
+    );
+  }
+  if (phase === "error") {
+    return policyPresentation(
+      "error",
+      "error",
+      "站点设置操作失败",
+      "页面没有采用未确认的数据；草稿仍保留，可检查后重试。",
+    );
+  }
+  if (phase === "saved") {
+    return policyPresentation(
+      "saved",
+      "ready",
+      "设置已保存",
+      "服务已返回最新权威设置，后续新建请求与任务将采用它。",
+    );
+  }
+  if (!snapshot) {
+    return policyPresentation(
+      "loading",
+      "disabled",
+      "正在加载站点设置",
+      "正在读取五个站点的完整设置快照。",
+    );
+  }
+  if (!item?.editable || !item.policy) {
+    return policyPresentation(
+      "readonly",
+      "error",
+      "当前站点只读",
+      item?.hasOverride
+        ? "当前自定义设置无法安全读取；仍可删除覆盖并恢复默认设置。"
+        : "当前设置无法安全读取，页面不会猜测或提交替代值。",
+    );
+  }
+  if (!valid) {
+    return policyPresentation(
+      "invalid",
+      "error",
+      "草稿需要修正",
+      "标记字段不符合允许范围，保存请求尚未发送。",
+    );
+  }
+  if (dirty) {
+    return policyPresentation(
+      "dirty",
+      "warning",
+      "有未保存的更改",
+      "切换站点、离开应用、最小化或关闭窗口前会要求确认。",
+    );
+  }
+  return policyPresentation(
+    "ready",
+    "ready",
+    item.hasOverride ? "自定义设置已加载" : "默认设置已加载",
+    item.hasOverride
+      ? "当前站点使用单独保存的四字段设置。"
+      : "当前站点继承服务默认的四字段设置。",
+  );
+}
+
+export function derivePolicyEditorPresentation(item) {
+  if (!item) return Object.freeze({
+    source: "等待设置来源",
+    message: "站点设置尚未加载。",
+    scope: "尚未确定影响范围。",
+  });
+  const source = item.hasOverride ? "站点自定义覆盖" : "继承服务默认设置";
+  const message = !item.editable
+    ? item.hasOverride
+      ? "自定义设置包含无法安全采用的内容，因此编辑器保持只读。"
+      : "服务没有提供可安全编辑的完整四字段设置，因此编辑器保持只读。"
+    : item.hasOverride
+      ? "四个字段均来自该站点单独保存的设置。"
+      : "四个字段均来自当前服务默认设置；首次保存会建立站点覆盖。";
+  return Object.freeze({
+    source,
+    message,
+    scope: "保存或恢复只影响后续新建的搜索请求与采集任务；既有任务不变。",
+  });
+}
+
 export function formatPolicySource(item) {
   if (!item) return Object.freeze({
     badge: Object.freeze({ status: "disabled", label: "正在加载" }),
@@ -709,6 +822,10 @@ export function createPolicyRequestGate() {
     isReadCurrent(ticket) {
       return Boolean(ticket && ticket.lifecycleVersion === lifecycleVersion &&
         ticket.writeVersion === writeVersion && ticket.readVersion === readVersion);
+    },
+    isWriteCurrent(ticket) {
+      return Boolean(ticket && ticket.lifecycleVersion === lifecycleVersion &&
+        ticket.writeVersion === writeVersion);
     },
   });
 }

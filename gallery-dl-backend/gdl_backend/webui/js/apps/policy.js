@@ -23,9 +23,9 @@ function policySitePath(siteId) {
   return `${POLICY_ENDPOINTS.policies}/${encodeURIComponent(siteId)}`;
 }
 
-function createPolicyController(context) {
+export function createPolicyController(context, dependencies = {}) {
   const { root, api, store, dialogs } = context;
-  const view = createPolicyView(context);
+  const view = (dependencies.createView || createPolicyView)(context);
   const requestGate = createPolicyRequestGate();
   let active = false;
   let destroyed = false;
@@ -33,6 +33,7 @@ function createPolicyController(context) {
   let operationSequence = 0;
   let activeOperationController = null;
   let configRead = null;
+  let discardRequest = null;
 
   const linkSignal = (externalSignal, controller) => {
     if (!externalSignal) return () => {};
@@ -87,16 +88,19 @@ function createPolicyController(context) {
   };
 
   const invalidateReadsForWrite = () => {
-    requestGate.beginWrite();
+    const ticket = requestGate.beginWrite();
     abortRead();
+    return ticket;
   };
 
   const runOperation = async ({ kind, request, successMessage }) => {
     if (!active || destroyed || busy) return false;
     const operation = ++operationSequence;
-    invalidateReadsForWrite();
+    const writeTicket = invalidateReadsForWrite();
+    const preservedDraft = view.isDirty() ? view.readDraft() : null;
     view.clearError();
     setBusy(kind);
+    view.setWorkspacePhase?.("saving");
     view.setOperationMessage(
       kind === "save" ? "正在保存站点设置……" : "正在恢复默认设置……",
     );
@@ -104,23 +108,28 @@ function createPolicyController(context) {
     activeOperationController = controller;
     try {
       await request(controller.signal);
-      if (!active || destroyed || controller.signal.aborted) return false;
+      if (!active || destroyed || controller.signal.aborted ||
+          !requestGate.isWriteCurrent(writeTicket)) return false;
       const loaded = await readConfig(null, { replace: true, report: false });
-      if (!loaded || !active || destroyed || controller.signal.aborted) return false;
+      if (!loaded || !active || destroyed || controller.signal.aborted ||
+          !requestGate.isWriteCurrent(writeTicket)) return false;
       view.clearError();
+      view.setWorkspacePhase?.("saved");
       view.setOperationMessage(successMessage);
       return true;
     } catch (error) {
-      if (isAbortError(error) || controller.signal.aborted || !active) return false;
-      const preservedDraft = view.isDirty() ? view.readDraft() : null;
+      if (isAbortError(error) || controller.signal.aborted || !active || destroyed ||
+          !requestGate.isWriteCurrent(writeTicket)) return false;
       try {
         const loaded = await readConfig(null, { replace: true, report: false });
-        if (!active || destroyed || controller.signal.aborted) return false;
+        if (!active || destroyed || controller.signal.aborted ||
+            !requestGate.isWriteCurrent(writeTicket)) return false;
         if (loaded && preservedDraft) view.restoreDraft(preservedDraft);
       } catch (readError) {
-        if (isAbortError(readError) || controller.signal.aborted || !active) return false;
+        if (isAbortError(readError) || controller.signal.aborted || !active || destroyed) return false;
         // 保留原操作错误和当前表单，不展示第二个原始错误。
       }
+      view.setWorkspacePhase?.("error");
       view.showError(error);
       view.setOperationMessage("操作失败，修改已保留。请检查后重试。");
       return false;
@@ -134,28 +143,49 @@ function createPolicyController(context) {
   };
 
   const confirm = async (options) => {
-    const choice = await dialogs.open(options);
-    return choice === "confirm" && active && !destroyed;
-  };
-
-  const confirmDiscard = async (purpose) => {
-    if (busy) {
-      view.setOperationMessage("请等待当前操作完成后再离开。");
+    try {
+      const choice = await dialogs.open(options);
+      return choice === "confirm" && active && !destroyed;
+    } catch {
       return false;
     }
-    if (!view.isDirty()) return true;
-    const confirmed = await confirm({
-      title: "放弃未保存的更改？",
-      message: `当前站点有未保存的更改，${purpose}后将丢失。`,
-      confirmLabel: "放弃更改并继续",
-      dangerous: true,
-      confirmationText: "已保存的设置和运行中的任务不受影响。",
-    });
-    if (!confirmed) {
-      view.restoreSourceSelection();
-      view.setOperationMessage("已取消，未保存的更改继续保留。");
+  };
+
+  const confirmDiscard = (purpose) => {
+    if (discardRequest) return discardRequest;
+    if (busy) {
+      view.setOperationMessage("请等待当前操作完成后再离开。");
+      return Promise.resolve(false);
     }
-    return confirmed;
+    if (!view.isDirty()) return Promise.resolve(true);
+    const focusToken = view.captureFocusToken?.() || null;
+    const request = (async () => {
+      const confirmed = await confirm({
+        title: "放弃未保存的更改？",
+        message: `当前站点有未保存的更改，${purpose}后将丢失。`,
+        confirmLabel: "放弃更改并继续",
+        dangerous: true,
+        confirmationText: "已保存的设置和运行中的任务不受影响。",
+      });
+      if (!confirmed) {
+        if (active && !destroyed) {
+          view.restoreSourceSelection();
+          view.restoreFocusToken?.(focusToken);
+          view.setOperationMessage("已取消，未保存的更改继续保留。");
+        }
+        return false;
+      }
+      if (!active || destroyed) return false;
+      view.reloadDraft();
+      view.setWorkspacePhase?.("ready");
+      view.setOperationMessage("已放弃未保存的更改。");
+      return true;
+    })();
+    const trackedRequest = request.finally(() => {
+      if (discardRequest === trackedRequest) discardRequest = null;
+    });
+    discardRequest = trackedRequest;
+    return trackedRequest;
   };
 
   const save = async () => {
@@ -186,22 +216,21 @@ function createPolicyController(context) {
     const item = view.getCurrentItem();
     const hasLocalChanges = view.isDirty();
     if (!item || (!item.hasOverride && !hasLocalChanges)) return;
-    if (!await confirm({
-      title: `恢复 ${item.label} 的默认设置？`,
-      message: item.hasOverride
-        ? "将删除该站点的自定义设置并恢复默认值。"
-        : "将清除本页未保存的更改。",
-      confirmLabel: "恢复默认设置",
-      dangerous: true,
-      confirmationText: "已创建和运行中的任务不受影响。",
-    })) return;
     if (!item.hasOverride) {
       view.reloadDraft();
       view.clearError();
+      view.setWorkspacePhase?.("ready");
       view.setOperationMessage("已清除本页更改，继续使用默认设置。");
       view.focusAfterOperation("reset");
       return;
     }
+    if (!await confirm({
+      title: `恢复 ${item.label} 的默认设置？`,
+      message: "将删除该站点的自定义设置并恢复默认值。",
+      confirmLabel: "恢复默认设置",
+      dangerous: true,
+      confirmationText: "已创建和运行中的任务不受影响。",
+    })) return;
     await runOperation({
       kind: "reset",
       request: (signal) => api.delete(policyViewUrl(policySitePath(item.site)), { signal }),
@@ -222,13 +251,11 @@ function createPolicyController(context) {
 
   const onClick = async (event) => {
     if (!(event.target instanceof Element)) return;
-    const sourceOption = event.target.closest(".policy-source-option");
-    if (sourceOption) {
-      const radio = sourceOption.querySelector("[data-policy-site]");
-      if (!(radio instanceof HTMLInputElement) || radio.disabled) return;
-      if (event.target === radio) return;
+    const sourceOption = event.target.closest("[data-policy-site]");
+    if (sourceOption instanceof HTMLButtonElement) {
+      if (sourceOption.disabled) return;
       event.preventDefault();
-      await switchSite(radio.value);
+      await switchSite(sourceOption.dataset.policySite || "");
       return;
     }
     const button = event.target.closest("[data-policy-action]");
@@ -288,12 +315,18 @@ function createPolicyController(context) {
       root.dataset.lifecycle = "active";
       view.clearDraft();
       view.clearError();
+      view.setWorkspacePhase?.("loading");
       view.setOperationMessage("正在加载站点设置……");
       void readConfig(null, { replace: true, report: true })
         .then((loaded) => {
-          if (loaded && active) view.setOperationMessage("站点设置已加载。");
+          if (loaded && active) {
+            view.setWorkspacePhase?.("ready");
+            view.setOperationMessage("站点设置已加载。");
+          }
         })
-        .catch(() => {});
+        .catch(() => {
+          if (active && !destroyed) view.setWorkspacePhase?.("error");
+        });
     },
 
     deactivate() {

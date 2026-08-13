@@ -48,6 +48,8 @@ import {
   validateSubscriptionInput,
 } from "../gdl_backend/webui/js/core/proxy-model.js";
 import * as vaultModelModule from "../gdl_backend/webui/js/core/vault-model.js";
+import * as policyApplicationModule from "../gdl_backend/webui/js/apps/policy.js";
+import * as policyModelModule from "../gdl_backend/webui/js/core/policy-model.js";
 
 const SECRET = "stage4-task-cookie-token-secret-314159";
 const TASKS_APP_SOURCE = readFileSync(
@@ -2387,4 +2389,780 @@ test("4B Vault static boundary：endpoint/query 集合固定，无旁路 I/O/sto
     assert.equal(typeof vaultApplication[hook], "function");
   }
   assert.equal(typeof createVaultController, "function");
+});
+
+const POLICY_SECRET = "stage4-policy-cookie-token-path-secret-141421";
+const policyApplication = policyApplicationModule.default;
+const {
+  createPolicyController,
+  POLICY_ENDPOINTS,
+} = policyApplicationModule;
+const {
+  buildPolicyPayload,
+  createPolicyRequestGate,
+  derivePolicyControls,
+  derivePolicyEditorPresentation,
+  derivePolicyWorkspacePresentation,
+  isPolicyDirty,
+  POLICY_SITE_IDS,
+  policyConfigToDraft,
+  policyErrorGuidance,
+  sanitizePolicyResponse,
+  validatePolicyDraft,
+} = policyModelModule;
+
+const POLICY_APP_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/js/apps/policy.js", import.meta.url),
+  "utf8",
+);
+const POLICY_MODEL_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/js/core/policy-model.js", import.meta.url),
+  "utf8",
+);
+const POLICY_VIEW_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/js/components/policy-view.js", import.meta.url),
+  "utf8",
+);
+const POLICY_DOM_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/js/components/policy-dom.js", import.meta.url),
+  "utf8",
+);
+const POLICY_CSS_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/styles/apps/policy.css", import.meta.url),
+  "utf8",
+);
+
+function rawPolicyConfig(overrides = {}) {
+  return {
+    max_concurrency: 20,
+    retry_limit: 2,
+    backoff_base_seconds: 2,
+    proxy_mode: "prefer",
+    ...overrides,
+  };
+}
+
+const POLICY_SITES = Object.freeze([
+  ["danbooru", "Danbooru", "anonymous"],
+  ["twitter", "X / Twitter", "managed_browser"],
+  ["pixiv", "Pixiv", "oauth"],
+  ["exhentai", "EH", "managed_browser_for_private_content"],
+  ["pawchive", "Pawchive", "anonymous"],
+]);
+
+function rawPolicySnapshot({ overrides = {}, corruptSite = "", extraItems = [] } = {}) {
+  const defaultPolicy = rawPolicyConfig();
+  return {
+    response_profile: "policy",
+    secrets_exposed: false,
+    effect_scope: "new_requests_and_tasks",
+    concurrency_protection: "none",
+    default_source: "startup_snapshot",
+    persistence: "sqlite_atomic",
+    default: { editable: true, reason: "", policy: { ...defaultPolicy } },
+    items: [
+      ...POLICY_SITES.map(([site, label, authorization]) => {
+        const override = overrides[site] || null;
+        const item = {
+          site,
+          label,
+          supported: true,
+          authorization,
+          selection_mode: "per_request",
+          availability: "not_probed",
+          inherited: !override,
+          has_override: Boolean(override),
+          editable: true,
+          reason: "",
+          updated_at: override ? 1_700_000_000 : null,
+          policy: { ...(override || defaultPolicy) },
+        };
+        if (site === corruptSite) {
+          item.policy = {
+            ...item.policy,
+            request_body: `token=${POLICY_SECRET}`,
+          };
+        }
+        return item;
+      }),
+      ...extraItems,
+    ],
+    unknown_override_count: 0,
+  };
+}
+
+class PolicyTestElement extends TestElement {
+  constructor(tagName = "div") {
+    super(tagName);
+    this.value = "";
+    this.checked = false;
+    this.validationMessage = "";
+  }
+
+  hasAttribute(name) {
+    return this.attributes.has(name);
+  }
+
+  matches(selector) {
+    if (selector === "[data-policy-site]") return this.dataset.policySite !== undefined;
+    if (selector === "[data-policy-field]") return this.dataset.policyField !== undefined;
+    return false;
+  }
+
+  setCustomValidity(message) {
+    this.validationMessage = String(message);
+  }
+
+  closest(selector) {
+    let current = this;
+    while (current instanceof PolicyTestElement) {
+      if (selector === "[data-policy-site]" && current.dataset.policySite !== undefined) return current;
+      if (selector === "[data-policy-action]" && current.dataset.policyAction !== undefined) return current;
+      if (selector === "form" && current instanceof PolicyTestForm) return current;
+      current = current.parentNode;
+    }
+    return null;
+  }
+}
+
+class PolicyTestButton extends PolicyTestElement {
+  constructor({ action = "", site = "" } = {}) {
+    super("button");
+    if (action) this.dataset.policyAction = action;
+    if (site) {
+      this.dataset.policySite = site;
+      this.value = site;
+    }
+  }
+}
+
+class PolicyTestInput extends PolicyTestElement {
+  constructor(field = "", value = "") {
+    super("input");
+    if (field) this.dataset.policyField = field;
+    this.value = value;
+  }
+}
+
+class PolicyTestForm extends PolicyTestElement {
+  constructor() {
+    super("form");
+  }
+}
+
+function installPolicyControllerDom() {
+  const previous = new Map();
+  const install = (name, value) => {
+    previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  };
+  const windowListeners = new Map();
+  install("Element", PolicyTestElement);
+  install("HTMLElement", PolicyTestElement);
+  install("HTMLButtonElement", PolicyTestButton);
+  install("HTMLInputElement", PolicyTestInput);
+  install("HTMLFormElement", PolicyTestForm);
+  install("addEventListener", (type, listener) => {
+    if (!windowListeners.has(type)) windowListeners.set(type, new Set());
+    windowListeners.get(type).add(listener);
+  });
+  install("removeEventListener", (type, listener) => windowListeners.get(type)?.delete(listener));
+  return {
+    emitWindow(type, event) {
+      for (const listener of [...(windowListeners.get(type) || [])]) listener(event);
+    },
+    restore() {
+      for (const [name, descriptor] of previous) {
+        if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+        else delete globalThis[name];
+      }
+    },
+  };
+}
+
+function policyControllerHarness({
+  initialSnapshot = rawPolicySnapshot(),
+  apiGet,
+  apiPut,
+  apiDelete,
+  dialogChoice = "confirm",
+  initialSite = "danbooru",
+} = {}) {
+  const root = new PolicyTestElement("main");
+  const form = new PolicyTestForm();
+  form.parentNode = root;
+  const store = createStore({ reportError: () => {} });
+  const calls = [];
+  const api = {
+    get(url, options) {
+      calls.push(["get", url, options]);
+      return apiGet ? apiGet(url, options) : Promise.resolve(initialSnapshot);
+    },
+    put(url, payload, options) {
+      calls.push(["put", url, payload, options]);
+      return apiPut ? apiPut(url, payload, options) : Promise.resolve({});
+    },
+    delete(url, options) {
+      calls.push(["delete", url, options]);
+      return apiDelete ? apiDelete(url, options) : Promise.resolve({});
+    },
+  };
+  const dialogOptions = [];
+  const dialogs = {
+    open(options) {
+      dialogOptions.push(options);
+      return typeof dialogChoice === "function"
+        ? dialogChoice(options, dialogOptions.length - 1)
+        : Promise.resolve(dialogChoice);
+    },
+    destroy() {},
+  };
+  let selectedSite = initialSite;
+  let draft = policyConfigToDraft(rawPolicyConfig());
+  const viewLog = [];
+  const item = () => store.getState().policy.config?.bySite.get(selectedSite) || null;
+  const loadCurrentDraft = () => {
+    const current = item();
+    if (current?.editable && current.policy) draft = policyConfigToDraft(current.policy);
+  };
+  const view = {
+    elements: { form },
+    getSelectedSite: () => selectedSite,
+    getCurrentItem: item,
+    readDraft: () => ({ ...draft }),
+    validateDraft: () => validatePolicyDraft(draft),
+    isDirty: () => Boolean(item()?.policy && isPolicyDirty(item().policy, draft)),
+    selectSite(siteId) {
+      selectedSite = siteId;
+      loadCurrentDraft();
+      viewLog.push(["select", siteId]);
+    },
+    restoreSourceSelection: () => viewLog.push(["restore-selection", selectedSite]),
+    captureFocusToken: () => Object.freeze({ siteId: selectedSite, field: "", action: "" }),
+    restoreFocusToken: (token) => viewLog.push(["restore-focus", token?.siteId || ""]),
+    focusAfterOperation: (kind) => viewLog.push(["focus", kind]),
+    reloadDraft() {
+      loadCurrentDraft();
+      viewLog.push(["reload-draft", selectedSite]);
+      return true;
+    },
+    restoreDraft(value) {
+      draft = { ...value };
+      viewLog.push(["restore-draft", selectedSite]);
+      return true;
+    },
+    clearDraft: () => viewLog.push(["clear-draft"]),
+    clearError: () => viewLog.push(["clear-error"]),
+    showError(error) {
+      viewLog.push(["error", policyErrorGuidance(error)]);
+    },
+    setOperationMessage: (message) => viewLog.push(["message", message]),
+    setBusy: (kind) => viewLog.push(["busy", kind]),
+    setWorkspacePhase: (phase) => viewLog.push(["phase", phase]),
+    renderDraftState: () => viewLog.push(["draft-state"]),
+    destroy: () => viewLog.push(["destroy"]),
+  };
+  const controller = createPolicyController({
+    root,
+    api,
+    store,
+    dialogs,
+    app: { id: "policy", label: "站点设置", windowTitle: "站点设置" },
+  }, { createView: () => view });
+  const setDraft = (changes) => {
+    draft = { ...draft, ...changes };
+    return { ...draft };
+  };
+  const getDraft = () => ({ ...draft });
+  const clickSite = (siteId) => root.emit("click", new PolicyTestButton({ site: siteId }));
+  const clickAction = (action) => root.emit("click", new PolicyTestButton({ action }));
+  const submit = () => root.emit("submit", form);
+  return {
+    root,
+    form,
+    store,
+    calls,
+    dialogs,
+    dialogOptions,
+    view,
+    viewLog,
+    controller,
+    setDraft,
+    getDraft,
+    clickSite,
+    clickAction,
+    submit,
+    selectedSite: () => selectedSite,
+  };
+}
+
+function latestPolicyCall(harness, method) {
+  return harness.calls.filter((call) => call[0] === method).at(-1);
+}
+
+test("4C model：工作区/编辑器纯投影覆盖全状态，按钮采用 busy > readonly/invalid > clean > dirty", () => {
+  const snapshot = sanitizePolicyResponse(rawPolicySnapshot({
+    overrides: { pixiv: rawPolicyConfig({ max_concurrency: 8 }) },
+    corruptSite: "twitter",
+  }));
+  const inherited = snapshot.bySite.get("danbooru");
+  const custom = snapshot.bySite.get("pixiv");
+  const readonly = snapshot.bySite.get("twitter");
+  const states = [
+    ["loading", {}],
+    ["ready", { snapshot, item: inherited }],
+    ["dirty", { snapshot, item: inherited, dirty: true }],
+    ["invalid", { snapshot, item: inherited, dirty: true, valid: false }],
+    ["saving", { snapshot, item: inherited, busy: "save" }],
+    ["saved", { snapshot, item: custom, phase: "saved" }],
+    ["readonly", { snapshot, item: readonly }],
+    ["error", { snapshot, item: inherited, phase: "error" }],
+    ["partial", { snapshot, item: inherited, phase: "partial" }],
+  ];
+  for (const [expected, input] of states) {
+    const presentation = derivePolicyWorkspacePresentation(input);
+    assert.equal(presentation.state, expected);
+    assert.equal(Boolean(presentation.label), true);
+    assert.equal(Boolean(presentation.message), true);
+    assert.equal(["ready", "running", "warning", "error", "disabled"].includes(presentation.kind), true);
+  }
+  assert.match(derivePolicyEditorPresentation(inherited).source, /默认|继承/);
+  assert.match(derivePolicyEditorPresentation(custom).source, /自定义|覆盖/);
+  assert.match(derivePolicyEditorPresentation(readonly).message, /无法|只读/);
+
+  let controls = derivePolicyControls(inherited, { busy: "save", dirty: true, valid: false });
+  assert.match(controls.save.reason, /等待/);
+  controls = derivePolicyControls(readonly, { dirty: true, valid: false });
+  assert.match(controls.save.reason, /无法编辑/);
+  controls = derivePolicyControls(inherited, { dirty: true, valid: false });
+  assert.match(controls.save.reason, /修正/);
+  controls = derivePolicyControls(inherited, { dirty: false, valid: true });
+  assert.match(controls.save.reason, /没有变化/);
+  controls = derivePolicyControls(inherited, { dirty: true, valid: true });
+  assert.equal(controls.save.disabled, false);
+});
+
+test("4C model/Store：五站固定顺序、严格四字段 payload、危险/未知/损坏数据只读且错误安全", () => {
+  assert.deepEqual(POLICY_SITE_IDS, POLICY_SITES.map(([site]) => site));
+  const raw = rawPolicySnapshot({
+    corruptSite: "twitter",
+    extraItems: [{
+      site: "unknown",
+      label: POLICY_SECRET,
+      authorization: "anonymous",
+      policy: { token: POLICY_SECRET, path: `/private/${POLICY_SECRET}` },
+    }],
+  });
+  raw.items[0].unknown = `https://private.invalid/?token=${POLICY_SECRET}`;
+  const snapshot = sanitizePolicyResponse(raw);
+  assert.deepEqual([...snapshot.bySite.keys()], POLICY_SITE_IDS);
+  assert.equal(snapshot.bySite.get("twitter").editable, false);
+  assert.equal(snapshot.bySite.get("twitter").policy, null);
+  assert.equal(JSON.stringify([...snapshot.bySite]).includes(POLICY_SECRET), false);
+
+  const store = createStore({ reportError: () => {} });
+  store.dispatch(actionCreators.policyConfigReceived(raw));
+  assert.equal(JSON.stringify([...store.getState().policy.config.bySite]).includes(POLICY_SECRET), false);
+  const dangerous = JSON.parse(`{"response_profile":"policy","__proto__":{"token":"${POLICY_SECRET}"}}`);
+  assert.throws(() => sanitizePolicyResponse(dangerous), TypeError);
+  assert.equal({}.token, undefined);
+
+  const payload = buildPolicyPayload({
+    max_concurrency: "12",
+    retry_limit: "3",
+    backoff_base_seconds: "1.5",
+    proxy_mode: "required",
+  });
+  assert.deepEqual(Object.keys(payload), [
+    "max_concurrency", "retry_limit", "backoff_base_seconds", "proxy_mode",
+  ]);
+  assert.deepEqual(payload, {
+    max_concurrency: 12,
+    retry_limit: 3,
+    backoff_base_seconds: 1.5,
+    proxy_mode: "required",
+  });
+  assert.equal(validatePolicyDraft({ ...payload, token: POLICY_SECRET }).valid, false);
+
+  const guidance = policyErrorGuidance({
+    code: "invalid_policy",
+    status: 422,
+    message: `token=${POLICY_SECRET}`,
+    details: {
+      field: "retry_limit",
+      reason: "less_than_equal",
+      body: `https://private.invalid/${POLICY_SECRET}`,
+      path: `/private/${POLICY_SECRET}`,
+    },
+  });
+  const serialized = JSON.stringify(guidance);
+  assert.equal(serialized.includes(POLICY_SECRET), false);
+  assert.equal(serialized.includes("private.invalid"), false);
+  assert.equal(serialized.includes("/private/"), false);
+});
+
+test("4C request gate：旧 read、写前 read、旧 write 与生命周期响应不可提交", () => {
+  const gate = createPolicyRequestGate();
+  const first = gate.beginRead();
+  const second = gate.beginRead();
+  assert.equal(gate.isReadCurrent(first), false);
+  assert.equal(gate.isReadCurrent(second), true);
+  const beforeWrite = gate.beginRead();
+  const write = gate.beginWrite();
+  assert.equal(gate.isReadCurrent(beforeWrite), false);
+  assert.equal(gate.isWriteCurrent(write), true);
+  gate.advanceLifecycle();
+  assert.equal(gate.isWriteCurrent(write), false);
+});
+
+test("4C controller：activate 单次 GET 无轮询，save 精确 PUT→GET，reset DELETE→GET", async () => {
+  const globals = installPolicyControllerDom();
+  try {
+    let server = rawPolicySnapshot();
+    const harness = policyControllerHarness({
+      apiGet: () => Promise.resolve(server),
+      apiPut(url, payload) {
+        server = rawPolicySnapshot({ overrides: { danbooru: { ...payload } } });
+        return Promise.resolve({ ignored: POLICY_SECRET });
+      },
+      apiDelete() {
+        server = rawPolicySnapshot();
+        return Promise.resolve({ ignored: POLICY_SECRET });
+      },
+    });
+    harness.controller.activate();
+    harness.controller.activate();
+    await flush();
+    assert.deepEqual(harness.calls.map((call) => call[0]), ["get"]);
+    assert.equal(harness.calls[0][1], "/api/v1/sites/policies?view=policy");
+
+    harness.setDraft({
+      max_concurrency: "9",
+      retry_limit: "4",
+      backoff_base_seconds: "1.25",
+      proxy_mode: "required",
+    });
+    harness.submit();
+    harness.submit();
+    await flush();
+    const put = latestPolicyCall(harness, "put");
+    assert.equal(put[1], "/api/v1/sites/policies/danbooru?view=policy");
+    assert.deepEqual(put[2], {
+      max_concurrency: 9,
+      retry_limit: 4,
+      backoff_base_seconds: 1.25,
+      proxy_mode: "required",
+    });
+    assert.deepEqual(harness.calls.map((call) => call[0]), ["get", "put", "get"]);
+    assert.equal(harness.store.getState().policy.config.bySite.get("danbooru").hasOverride, true);
+    assert.equal(harness.viewLog.some((entry) => entry[0] === "phase" && entry[1] === "saved"), true);
+
+    harness.clickAction("reset");
+    await flush();
+    assert.equal(harness.dialogOptions.at(-1).dangerous, true);
+    assert.equal(latestPolicyCall(harness, "delete")[1], "/api/v1/sites/policies/danbooru?view=policy");
+    assert.deepEqual(harness.calls.map((call) => call[0]), ["get", "put", "get", "delete", "get"]);
+    assert.equal(harness.store.getState().policy.config.bySite.get("danbooru").hasOverride, false);
+    harness.controller.destroy();
+  } finally {
+    globals.restore();
+  }
+});
+
+test("4C controller：native/realtime 共用 validation，非法草稿零请求；无 override reset 仅清本地", async () => {
+  const globals = installPolicyControllerDom();
+  try {
+    const harness = policyControllerHarness();
+    harness.controller.activate();
+    await flush();
+    const reads = harness.calls.length;
+    harness.setDraft({ max_concurrency: "999", proxy_mode: "required" });
+    harness.root.emit("input", new PolicyTestInput("max_concurrency", "999"));
+    harness.submit();
+    await flush();
+    assert.equal(harness.calls.length, reads);
+    assert.equal(harness.viewLog.some((entry) => entry[0] === "error"), true);
+
+    harness.setDraft({ max_concurrency: "8" });
+    const beforeReset = harness.calls.length;
+    const dialogsBefore = harness.dialogOptions.length;
+    harness.clickAction("reset");
+    await flush();
+    assert.equal(harness.calls.length, beforeReset);
+    assert.equal(harness.dialogOptions.length, dialogsBefore);
+    assert.deepEqual(harness.getDraft(), policyConfigToDraft(rawPolicyConfig()));
+    harness.controller.destroy();
+  } finally {
+    globals.restore();
+  }
+});
+
+test("4C controller：旧读取、写前读取、deactivate/destroy 后 read/write 均不提交", async () => {
+  const globals = installPolicyControllerDom();
+  try {
+    const oldRead = deferred();
+    const write = deferred();
+    let getCount = 0;
+    const fresh = rawPolicySnapshot({ overrides: {
+      danbooru: rawPolicyConfig({ max_concurrency: 7 }),
+    } });
+    const harness = policyControllerHarness({
+      apiGet() {
+        getCount += 1;
+        return getCount === 1 ? oldRead.promise : Promise.resolve(fresh);
+      },
+      apiPut: () => write.promise,
+    });
+    harness.store.dispatch(actionCreators.policyConfigReceived(rawPolicySnapshot()));
+    harness.controller.activate();
+    harness.setDraft({ max_concurrency: "7" });
+    harness.submit();
+    await flush();
+    assert.equal(harness.calls.filter((call) => call[0] === "put").length, 1);
+    oldRead.resolve(rawPolicySnapshot({ overrides: {
+      danbooru: rawPolicyConfig({ max_concurrency: 99 }),
+    } }));
+    write.resolve({ raw: POLICY_SECRET });
+    await flush();
+    assert.equal(harness.store.getState().policy.config.bySite.get("danbooru").policy.max_concurrency, 7);
+
+    const staleWrite = deferred();
+    const stale = policyControllerHarness({ apiPut: () => staleWrite.promise });
+    stale.controller.activate();
+    await flush();
+    const before = stale.store.getState().policy.config;
+    stale.setDraft({ max_concurrency: "6" });
+    stale.submit();
+    await flush();
+    const callsBeforeDeactivate = stale.calls.length;
+    stale.controller.deactivate();
+    staleWrite.resolve({ raw: POLICY_SECRET });
+    await flush();
+    assert.equal(stale.calls.length, callsBeforeDeactivate);
+    assert.equal(stale.store.getState().policy.config, before);
+    stale.controller.destroy();
+    harness.controller.destroy();
+  } finally {
+    globals.restore();
+  }
+});
+
+test("4C controller：dirty 切站 deny/allow 保留或丢弃草稿，destroy 后 stale confirm 不切站", async () => {
+  const globals = installPolicyControllerDom();
+  try {
+    const choices = ["cancel", "confirm"];
+    const harness = policyControllerHarness({
+      dialogChoice: () => Promise.resolve(choices.shift()),
+    });
+    harness.controller.activate();
+    await flush();
+    harness.setDraft({ max_concurrency: "7" });
+    const original = harness.getDraft();
+    harness.clickSite("pixiv");
+    await flush();
+    assert.equal(harness.selectedSite(), "danbooru");
+    assert.deepEqual(harness.getDraft(), original);
+    assert.equal(harness.viewLog.some((entry) => entry[0] === "restore-focus"), true);
+
+    harness.clickSite("pixiv");
+    await flush();
+    assert.equal(harness.selectedSite(), "pixiv");
+    assert.deepEqual(harness.getDraft(), policyConfigToDraft(rawPolicyConfig()));
+    harness.controller.destroy();
+
+    const pending = deferred();
+    const stale = policyControllerHarness({ dialogChoice: () => pending.promise });
+    stale.controller.activate();
+    await flush();
+    stale.setDraft({ retry_limit: "5" });
+    stale.clickSite("twitter");
+    await flush();
+    stale.controller.destroy();
+    pending.resolve("confirm");
+    await flush();
+    assert.equal(stale.selectedSite(), "danbooru");
+  } finally {
+    globals.restore();
+  }
+});
+
+test("4C controller：leave/minimize/close 共用 discard promise 单飞，beforeunload 同步保护 dirty", async () => {
+  const globals = installPolicyControllerDom();
+  try {
+    const choice = deferred();
+    const harness = policyControllerHarness({ dialogChoice: () => choice.promise });
+    harness.controller.activate();
+    await flush();
+    harness.setDraft({ retry_limit: "6" });
+    const leave = harness.controller.beforeLeave();
+    const minimize = harness.controller.beforeWindowHide("minimized");
+    const close = harness.controller.beforeWindowHide("closed");
+    assert.equal(leave, minimize);
+    assert.equal(minimize, close);
+    assert.equal(harness.dialogOptions.length, 1);
+
+    const unload = { prevented: false, returnValue: null, preventDefault() { this.prevented = true; } };
+    globals.emitWindow("beforeunload", unload);
+    assert.equal(unload.prevented, true);
+    assert.equal(unload.returnValue, "");
+
+    choice.resolve("cancel");
+    assert.deepEqual(await Promise.all([leave, minimize, close]), [false, false, false]);
+    assert.equal(harness.controller.beforeWindowHide("closed") instanceof Promise, true);
+    await flush();
+    assert.equal(harness.dialogOptions.length, 2);
+    harness.controller.destroy();
+
+    const allow = policyControllerHarness({ dialogChoice: "confirm" });
+    allow.controller.activate();
+    await flush();
+    allow.setDraft({ retry_limit: "6" });
+    assert.equal(await allow.controller.beforeLeave(), true);
+    assert.deepEqual(allow.getDraft(), policyConfigToDraft(rawPolicyConfig()));
+    allow.controller.destroy();
+  } finally {
+    globals.restore();
+  }
+});
+
+test("4C controller：reset confirm cancel/allow 与失败均保留正确草稿，write 全程单飞", async () => {
+  const globals = installPolicyControllerDom();
+  try {
+    const override = rawPolicyConfig({ max_concurrency: 6 });
+    const snapshot = rawPolicySnapshot({ overrides: { danbooru: override } });
+    const deny = policyControllerHarness({ initialSnapshot: snapshot, dialogChoice: "cancel" });
+    deny.controller.activate();
+    await flush();
+    deny.setDraft({ max_concurrency: "7" });
+    const deniedDraft = deny.getDraft();
+    deny.clickAction("reset");
+    await flush();
+    assert.equal(deny.calls.some((call) => call[0] === "delete"), false);
+    assert.deepEqual(deny.getDraft(), deniedDraft);
+    deny.controller.destroy();
+
+    const write = deferred();
+    const failed = policyControllerHarness({
+      initialSnapshot: snapshot,
+      apiGet: () => Promise.resolve(snapshot),
+      apiDelete: () => write.promise,
+    });
+    failed.controller.activate();
+    await flush();
+    failed.setDraft({ max_concurrency: "7", retry_limit: "4" });
+    const failedDraft = failed.getDraft();
+    failed.clickAction("reset");
+    failed.clickAction("reset");
+    await flush();
+    assert.equal(failed.calls.filter((call) => call[0] === "delete").length, 1);
+    write.reject(Object.assign(new Error(POLICY_SECRET), {
+      code: "policy_store_error",
+      status: 500,
+      message: `token=${POLICY_SECRET}`,
+      details: { body: POLICY_SECRET, url: `https://private.invalid/${POLICY_SECRET}` },
+    }));
+    await flush();
+    assert.deepEqual(failed.getDraft(), failedDraft);
+    assert.equal(JSON.stringify(failed.viewLog).includes(POLICY_SECRET), false);
+    failed.controller.destroy();
+  } finally {
+    globals.restore();
+  }
+});
+
+test("4C controller：failed PUT 权威重读后恢复原 draft，错误不回显提交体/URL/token/path/secret", async () => {
+  const globals = installPolicyControllerDom();
+  try {
+    const snapshot = rawPolicySnapshot();
+    const harness = policyControllerHarness({
+      apiGet: () => Promise.resolve(snapshot),
+      apiPut: () => Promise.reject(Object.assign(new Error(`token=${POLICY_SECRET}`), {
+        code: "invalid_policy",
+        status: 422,
+        details: {
+          field: "max_concurrency",
+          reason: "less_than_equal",
+          body: `token=${POLICY_SECRET}`,
+          url: `https://private.invalid/${POLICY_SECRET}`,
+          path: `/private/${POLICY_SECRET}`,
+        },
+      })),
+    });
+    harness.controller.activate();
+    await flush();
+    harness.setDraft({ max_concurrency: "7", retry_limit: "5", proxy_mode: "direct" });
+    const original = harness.getDraft();
+    harness.submit();
+    await flush();
+    assert.deepEqual(harness.getDraft(), original);
+    assert.deepEqual(harness.calls.map((call) => call[0]), ["get", "put", "get"]);
+    const log = JSON.stringify(harness.viewLog);
+    for (const forbidden of [POLICY_SECRET, "private.invalid", "/private/"]) {
+      assert.equal(log.includes(forbidden), false, forbidden);
+    }
+    assert.equal(harness.viewLog.some((entry) => entry[0] === "phase" && entry[1] === "error"), true);
+    harness.controller.destroy();
+  } finally {
+    globals.restore();
+  }
+});
+
+test("4C DOM/CSS：三栏、真实横向 owner、四字段语义、aria-live、稳定焦点 token 与纵向列滚动", () => {
+  for (const contract of [
+    /policy-workspace-track/,
+    /className:\s*"policy-workspace"[\s\S]*tabindex:\s*"0"/,
+    /01 · 站点/,
+    /02 · 当前站点/,
+    /03 · 状态与操作/,
+    /createElement\("nav"/,
+    /policy-column-scroll/,
+    /max_concurrency/,
+    /retry_limit/,
+    /backoff_base_seconds/,
+    /proxy_mode/,
+    /aria-live/,
+    /恢复默认设置/,
+    /影响范围/,
+  ]) assert.match(POLICY_DOM_SOURCE, contract);
+  assert.match(POLICY_VIEW_SOURCE, /policyFocusToken/);
+  assert.match(POLICY_VIEW_SOURCE, /restorePolicyFocus/);
+  assert.match(POLICY_VIEW_SOURCE, /setCustomValidity/);
+  assert.match(POLICY_VIEW_SOURCE, /validatePolicyDraft/);
+  assert.match(POLICY_VIEW_SOURCE, /aria-invalid/);
+  assert.match(POLICY_VIEW_SOURCE, /elements\.workspace/);
+  assert.match(POLICY_CSS_SOURCE, /\.window-body:has\(> \.policy-app\)/);
+  assert.match(POLICY_CSS_SOURCE, /\.policy-workspace\s*\{[^}]*overflow-x\s*:\s*auto/s);
+  assert.match(POLICY_CSS_SOURCE, /\.policy-workspace-track\s*\{[^}]*grid-template-columns\s*:[^;]*minmax[^;]*minmax[^;]*minmax[^;]*;/s);
+  assert.match(POLICY_CSS_SOURCE, /\.policy-workspace-track\s*\{[^}]*min-width\s*:\s*(?:1080|1100|1120|1140|1160)px/s);
+  assert.match(POLICY_CSS_SOURCE, /\.policy-column-scroll\s*\{[^}]*overflow-y\s*:\s*auto/s);
+  assert.match(POLICY_CSS_SOURCE, /\.application-window\[data-maximized\] \.policy-workspace-track\s*\{[^}]*min-width\s*:\s*100%/s);
+  assert.match(POLICY_CSS_SOURCE, /--imageweave-surface-content-solid/);
+  assert.match(POLICY_CSS_SOURCE, /forced-colors/);
+  assert.match(POLICY_CSS_SOURCE, /prefers-reduced-motion|data-motion/);
+  assert.doesNotMatch(POLICY_CSS_SOURCE, /@media\s*\(max-width\s*:/);
+  assert.doesNotMatch(POLICY_CSS_SOURCE, /backdrop-filter/);
+});
+
+test("4C static boundary：唯一 Policy endpoint/view，无 polling/旁路 I/O/storage/console/innerHTML/fixture 且四生命周期", () => {
+  assert.deepEqual(POLICY_ENDPOINTS, { policies: "/api/v1/sites/policies" });
+  assert.equal((POLICY_APP_SOURCE.match(/"\/api\/v1\//g) || []).length, 1);
+  assert.equal((POLICY_APP_SOURCE.match(/view=policy/g) || []).length, 1);
+  const combined = [POLICY_APP_SOURCE, POLICY_MODEL_SOURCE, POLICY_VIEW_SOURCE, POLICY_DOM_SOURCE].join("\n");
+  for (const forbidden of [
+    /\bfetch\s*\(/,
+    /globalThis\.fetch/,
+    /XMLHttpRequest/,
+    /localStorage|sessionStorage|indexedDB/,
+    /console\./,
+    /innerHTML/,
+    /tests\/fixtures|fixtures\/webui/,
+    /polling\.start|setInterval|setTimeout/,
+  ]) assert.doesNotMatch(combined, forbidden);
+  assert.match(POLICY_APP_SOURCE, /AbortController/);
+  assert.match(POLICY_APP_SOURCE, /createPolicyRequestGate/);
+  assert.match(POLICY_APP_SOURCE, /discardRequest/);
+  for (const hook of ["mount", "activate", "deactivate", "unmount"]) {
+    assert.equal(typeof policyApplication[hook], "function");
+  }
+  assert.equal(typeof createPolicyController, "function");
 });

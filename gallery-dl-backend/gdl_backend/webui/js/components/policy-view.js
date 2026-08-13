@@ -1,6 +1,8 @@
 import { createElement } from "../core/dom.js";
 import {
   derivePolicyControls,
+  derivePolicyEditorPresentation,
+  derivePolicyWorkspacePresentation,
   formatPolicySource,
   getPolicySiteDefinition,
   isPolicyDirty,
@@ -11,7 +13,7 @@ import {
 } from "../core/policy-model.js";
 import { selectors } from "../core/store.js";
 import { createErrorView } from "./error-view.js";
-import { buildPolicyDom } from "./policy-dom.js";
+import { buildPolicyDom, policyButton } from "./policy-dom.js";
 import { createStatusBadge, updateStatusBadge } from "./status.js";
 
 const FIELD_NAMES = Object.freeze({
@@ -55,6 +57,7 @@ export function createPolicyView(context) {
   const { root, store } = context;
   const elements = buildPolicyDom(context);
   let busy = "";
+  let workspacePhase = "loading";
   let selectedSite = POLICY_SITE_IDS[0];
   let renderedError = null;
   let formLoaded = false;
@@ -62,6 +65,32 @@ export function createPolicyView(context) {
 
   const currentSnapshot = () => store.getState().policy.config;
   const currentItem = () => currentSnapshot()?.bySite.get(selectedSite) || null;
+
+  const policyFocusToken = () => {
+    const target = document.activeElement;
+    if (!(target instanceof HTMLElement) || !root.contains(target)) return null;
+    return Object.freeze({
+      siteId: target.dataset.policySite || selectedSite,
+      field: target.dataset.policyField || "",
+      action: target.dataset.policyAction || target.dataset.operationKind || "",
+    });
+  };
+
+  const restorePolicyFocus = (token) => {
+    if (!token) return;
+    const candidates = [...root.querySelectorAll("button, input, select, [tabindex]")];
+    const available = (element) => !element.disabled && !element.closest("[hidden]");
+    let target = candidates.find((element) => available(element) && (
+      (token.field && element.dataset.policyField === token.field) ||
+      (token.action && (
+        element.dataset.policyAction === token.action || element.dataset.operationKind === token.action
+      )) ||
+      (token.siteId && element.dataset.policySite === token.siteId)
+    ));
+    target ||= candidates.find((element) => available(element) &&
+      element.dataset.policySite === selectedSite) || elements.workspace;
+    target?.focus({ preventScroll: true });
+  };
 
   const clearError = () => {
     renderedError?.destroy();
@@ -88,6 +117,7 @@ export function createPolicyView(context) {
       }));
     }
     elements.errorHost.replaceChildren(renderedError.element);
+    workspacePhase = "error";
     renderFormState();
   };
 
@@ -119,10 +149,7 @@ export function createPolicyView(context) {
   const dirty = () => {
     const item = currentItem();
     return Boolean(
-      formLoaded
-      && item?.editable
-      && item.policy
-      && isPolicyDirty(item.policy, readDraft())
+      formLoaded && item?.editable && item.policy && isPolicyDirty(item.policy, readDraft())
     );
   };
 
@@ -137,50 +164,45 @@ export function createPolicyView(context) {
     }
   };
 
-  const renderHeader = () => {
-    const snapshot = currentSnapshot();
-    if (!snapshot) {
-      updateStatusBadge(elements.headerBadge, "disabled", "正在加载");
-      return;
-    }
-    const items = [...snapshot.bySite.values()];
-    const unavailable = items.filter((item) => !item.editable).length;
-    const customized = items.filter((item) => item.hasOverride).length;
-    if (unavailable) {
-      updateStatusBadge(elements.headerBadge, "error", `${unavailable} 个站点暂时无法设置`);
-    } else if (customized) {
-      updateStatusBadge(elements.headerBadge, "running", `${customized} 个站点使用自定义设置`);
-    } else {
-      updateStatusBadge(elements.headerBadge, "ready", "全部使用默认设置");
-    }
+  const renderWorkspaceState = (validation = currentValidation(), isDirty = dirty()) => {
+    const presentation = derivePolicyWorkspacePresentation({
+      snapshot: currentSnapshot(),
+      item: currentItem(),
+      phase: workspacePhase,
+      busy,
+      dirty: isDirty,
+      valid: validation.valid,
+    });
+    elements.waitingHost.replaceChildren(
+      createStatusBadge(presentation.kind, presentation.label),
+      createElement("p", { text: presentation.message }),
+    );
+    elements.waitingHost.dataset.policyWorkspaceState = presentation.state;
+    updateStatusBadge(elements.headerBadge, presentation.kind, presentation.label);
   };
 
   const renderSources = () => {
+    const focusToken = policyFocusToken();
     const snapshot = currentSnapshot();
+    const controls = derivePolicyControls(currentItem(), {
+      busy,
+      dirty: dirty(),
+      valid: currentValidation().valid,
+    });
     const fragment = document.createDocumentFragment();
     for (const siteId of POLICY_SITE_IDS) {
       const definition = getPolicySiteDefinition(siteId);
       const item = snapshot?.bySite.get(siteId) || null;
       const model = formatPolicySource(item);
-      const id = `policy-source-${siteId}`;
-      const radio = createElement("input", {
-        attributes: {
-          id,
-          type: "radio",
-          name: "policy-source",
-          value: siteId,
-          "aria-describedby": "policy-source-help",
-        },
-        dataset: { policySite: siteId },
-      });
-      radio.checked = siteId === selectedSite;
-      radio.disabled = Boolean(busy || !snapshot);
-      const label = createElement("label", {
+      const button = policyButton(`site:${siteId}`, definition.label, definition.label, {
         className: "policy-source-option",
-        attributes: { for: id },
-        dataset: { policyState: model.badge.status },
-      }, [
-        radio,
+      });
+      button.dataset.policySite = siteId;
+      button.dataset.policyState = model.badge.status;
+      button.setAttribute("aria-current", String(siteId === selectedSite));
+      button.setAttribute("aria-label", `${definition.label}：${model.badge.label}`);
+      button.disabled = Boolean(!snapshot || controls.siteSelect.disabled);
+      button.replaceChildren(
         createElement("span", {
           className: "policy-source-mark",
           text: definition.mark,
@@ -191,30 +213,37 @@ export function createPolicyView(context) {
           createElement("small", { text: model.policyState }),
         ]),
         createStatusBadge(model.badge.status, model.badge.label, { compact: true }),
-      ]);
-      fragment.append(label);
+      );
+      fragment.append(button);
     }
     elements.sourceHost.replaceChildren(fragment);
-    elements.sourceFieldset.disabled = Boolean(busy || !snapshot);
+    restorePolicyFocus(focusToken);
   };
 
   const setFormValues = (draft) => {
     for (const [name, element] of Object.entries(elements.fields)) {
       element.value = draft[name] ?? "";
+      element.setCustomValidity("");
       element.setAttribute("aria-invalid", "false");
     }
   };
 
-  const clearDraft = () => {
-    for (const element of Object.values(elements.fields)) {
-      element.value = "";
+  const clearValidation = () => {
+    elements.validation.textContent = "";
+    for (const [name, element] of Object.entries(elements.fields)) {
+      element.setCustomValidity("");
       element.setAttribute("aria-invalid", "false");
+      elements.fieldErrors[name].textContent = "";
     }
+  };
+
+  const clearDraft = () => {
+    for (const element of Object.values(elements.fields)) element.value = "";
     formLoaded = false;
     validationAnnounced = false;
-    elements.validation.textContent = "";
+    clearValidation();
     elements.dirtyLive.dataset.dirty = "false";
-    elements.dirtyLive.textContent = "所有更改均已保存。";
+    elements.dirtyLive.textContent = "设置正在加载。";
   };
 
   const loadSelectedDraft = () => {
@@ -233,17 +262,22 @@ export function createPolicyView(context) {
   };
 
   const renderValidation = (validation) => {
-    for (const element of Object.values(elements.fields)) {
-      element.setAttribute("aria-invalid", "false");
+    clearValidation();
+    if (!validationAnnounced || validation.valid) return;
+    const message = validationText(validation);
+    elements.validation.textContent = message;
+    const field = elements.fields[validation.field];
+    if (field) {
+      field.setCustomValidity(message);
+      field.setAttribute("aria-invalid", "true");
+      elements.fieldErrors[validation.field].textContent = message;
     }
-    if (!validationAnnounced) {
-      elements.validation.textContent = "";
-      return;
-    }
-    elements.validation.textContent = validationText(validation);
-    if (!validation.valid && elements.fields[validation.field]) {
-      elements.fields[validation.field].setAttribute("aria-invalid", "true");
-    }
+  };
+
+  const renderEditorSource = () => {
+    const presentation = derivePolicyEditorPresentation(currentItem());
+    elements.sourceTitle.textContent = presentation.source;
+    elements.sourceMessage.textContent = `${presentation.message} ${presentation.scope}`;
   };
 
   const renderFormState = () => {
@@ -264,25 +298,30 @@ export function createPolicyView(context) {
     elements.dirtyLive.dataset.dirty = String(isDirty);
     elements.dirtyLive.textContent = !formLoaded
       ? item?.hasOverride && !item.editable
-        ? "该站点的自定义设置无法读取，可以恢复默认设置。"
+        ? "该站点的自定义设置无法安全读取；可恢复默认设置。"
         : "该站点设置暂时无法编辑。"
       : !validation.valid
-        ? "请修正标记项。"
+        ? "草稿无效：请修正标记字段，尚未发送请求。"
         : isDirty
-          ? "有未保存的更改。"
+          ? "有未保存的更改。离开、最小化或关闭前会要求确认。"
           : item?.hasOverride
-            ? "正在使用站点自定义设置。"
-            : "正在使用默认设置。";
+            ? "正在使用站点自定义设置；所有更改均已保存。"
+            : "正在继承默认设置；所有更改均已保存。";
+    elements.actionReason.textContent = controls.save.reason || controls.reset.reason ||
+      "保存会提交完整四字段；恢复默认只影响当前站点。";
     renderValidation(validation);
+    renderEditorSource();
     renderBusyAttributes();
+    renderWorkspaceState(validation, isDirty);
   };
 
   const renderSnapshot = () => {
+    const focusToken = policyFocusToken();
     const snapshot = currentSnapshot();
     if (snapshot && !snapshot.bySite.has(selectedSite)) selectedSite = POLICY_SITE_IDS[0];
-    renderHeader();
     renderSources();
     loadSelectedDraft();
+    restorePolicyFocus(focusToken);
   };
 
   const unsubscribe = store.subscribe(selectors.policyConfig, renderSnapshot, {
@@ -301,19 +340,19 @@ export function createPolicyView(context) {
       return validation;
     },
     isDirty: dirty,
+    captureFocusToken: policyFocusToken,
+    restoreFocusToken: restorePolicyFocus,
     selectSite(siteId) {
       if (!getPolicySiteDefinition(siteId)) throw new TypeError("站点无效");
+      const focusToken = { siteId, field: "", action: "" };
       selectedSite = siteId;
-      for (const radio of elements.sourceHost.querySelectorAll("[data-policy-site]")) {
-        if (radio instanceof HTMLInputElement) radio.checked = radio.value === selectedSite;
-      }
+      renderSources();
       loadSelectedDraft();
-      elements.sourceHost.querySelector(`[data-policy-site="${siteId}"]`)
-        ?.focus({ preventScroll: true });
+      restorePolicyFocus(focusToken);
     },
     restoreSourceSelection() {
-      for (const radio of elements.sourceHost.querySelectorAll("[data-policy-site]")) {
-        if (radio instanceof HTMLInputElement) radio.checked = radio.value === selectedSite;
+      for (const button of elements.sourceHost.querySelectorAll("[data-policy-site]")) {
+        button.setAttribute("aria-current", String(button.dataset.policySite === selectedSite));
       }
     },
     focusAfterOperation(action) {
@@ -322,8 +361,7 @@ export function createPolicyView(context) {
         preferred.focus({ preventScroll: true });
         return;
       }
-      elements.sourceHost.querySelector(`[data-policy-site="${selectedSite}"]`)
-        ?.focus({ preventScroll: true });
+      restorePolicyFocus({ siteId: selectedSite, field: "", action: "" });
     },
     reloadDraft() {
       return loadSelectedDraft();
@@ -346,8 +384,13 @@ export function createPolicyView(context) {
       renderSources();
       renderFormState();
     },
+    setWorkspacePhase(phase) {
+      workspacePhase = phase;
+      renderFormState();
+    },
     renderDraftState({ announce = false } = {}) {
       if (announce) validationAnnounced = true;
+      if (workspacePhase === "saved" || workspacePhase === "error") workspacePhase = "ready";
       renderFormState();
     },
     destroy() {
