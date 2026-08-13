@@ -310,7 +310,7 @@
 }
 
 .vault-site-card[data-site-state="disabled"] {
-  border-style: dashed;
+  border-style: solid;
 }
 
 .vault-site-headline {
@@ -377,7 +377,7 @@
 }
 
 .vault-button[aria-busy="true"] {
-  border-style: dashed;
+  border-style: solid;
 }
 
 .vault-site-actions .vault-button,
@@ -404,7 +404,7 @@
 }
 
 .vault-proxy-form {
-  border-style: dashed;
+  border-style: solid;
   border-radius: var(--imageweave-radius-control);
 }
 

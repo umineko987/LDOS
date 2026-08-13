@@ -15,37 +15,6 @@ button[aria-disabled="true"] {
   opacity: 0.58;
 }
 
-.window-actions button {
-  display: grid;
-  width: var(--imageweave-window-action-size);
-  height: var(--imageweave-window-action-size);
-  padding: 0;
-  place-items: center;
-  border: var(--imageweave-border-width) solid transparent;
-  border-radius: var(--imageweave-radius-control);
-  color: var(--imageweave-text-inverse);
-  background: rgb(255 255 255 / 0.12);
-  box-shadow: none;
-}
-
-.window-actions button:hover:not(:disabled) {
-  border-color: rgb(255 255 255 / 0.48);
-  background: rgb(255 255 255 / 0.22);
-}
-
-.window-actions button[data-window-close]:hover:not(:disabled) {
-  border-color: var(--imageweave-state-danger);
-  color: #FFFFFF;
-  background: #B42318;
-}
-
-.window-actions button:focus-visible {
-  color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-control-solid);
-  outline-color: var(--imageweave-focus-ring);
-  outline-offset: 2px;
-}
-
 .app-view {
   width: 100%;
   max-width: 960px;
@@ -76,7 +45,6 @@ button[aria-disabled="true"] {
 }
 
 .app-view :is(
-  .deferred-panel,
   .crawl-panel,
   .tasks-panel,
   .proxy-panel,
@@ -91,30 +59,6 @@ button[aria-disabled="true"] {
   background: var(--imageweave-surface-content-solid);
   background: var(--imageweave-surface-content);
   box-shadow: var(--imageweave-shadow-card);
-}
-
-.deferred-panel {
-  padding: clamp(15px, 2.5vw, 24px);
-  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
-  border-radius: var(--imageweave-radius-card);
-  background: var(--imageweave-surface-content-solid);
-  background: var(--imageweave-surface-content);
-  box-shadow: var(--imageweave-shadow-card);
-}
-
-.deferred-capabilities {
-  display: grid;
-  grid-template-columns: repeat(var(--application-panel-columns, 1), minmax(0, 1fr));
-  gap: 10px 24px;
-  margin: 0;
-  padding-left: 24px;
-}
-
-.deferred-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 24px;
 }
 
 :is(button, a):is(
@@ -318,7 +262,7 @@ button[aria-disabled="true"] {
   .personalization-button
 )[aria-busy="true"] {
   background-image: none;
-  border-style: dashed;
+  border-style: solid;
   box-shadow: none;
   cursor: progress;
 }
@@ -465,28 +409,8 @@ button[aria-disabled="true"] {
   accent-color: var(--imageweave-accent);
 }
 
-.start-button,
-.task-window-button,
-.task-window-overflow-button,
-.taskbar-summary-action {
-  border-color: var(--imageweave-border-strong);
-  border-radius: var(--imageweave-radius-control);
-  color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-control-solid);
-  background: var(--imageweave-surface-control);
-}
-
-.task-window-button[aria-pressed="true"],
-.task-window-overflow-button[aria-expanded="true"],
-.start-button[aria-expanded="true"] {
-  color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-control-active);
-  box-shadow: inset 0 0 0 var(--imageweave-border-width) var(--imageweave-border-strong);
-}
-
 @media (forced-colors: active) {
   .app-view :is(
-    .deferred-panel,
     .crawl-panel,
     .tasks-panel,
     .proxy-panel,
@@ -495,8 +419,7 @@ button[aria-disabled="true"] {
     .policy-panel,
     .diagnostics-panel,
     .personalization-panel
-  ),
-  .deferred-panel {
+  ) {
     border-color: CanvasText;
     color: CanvasText;
     background: Canvas;
@@ -514,11 +437,7 @@ button[aria-disabled="true"] {
     .diagnostics-button,
     .personalization-button
   ),
-  .start-button,
-  .task-window-button,
-  .task-window-overflow-button,
   .taskbar-summary-action,
-  .window-actions button,
   .app-view :is(input, select, textarea) {
     border-color: ButtonText;
     color: ButtonText;
@@ -561,7 +480,7 @@ button[aria-disabled="true"] {
     .policy-button--dangerous,
     .personalization-button--dangerous
   ) {
-    border: var(--imageweave-border-strong-width) double CanvasText;
+    border: var(--imageweave-border-strong-width) solid CanvasText;
   }
 
   :is(button, a):is(

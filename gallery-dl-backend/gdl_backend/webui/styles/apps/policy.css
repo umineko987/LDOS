@@ -384,7 +384,7 @@
 }
 
 .policy-button[aria-busy="true"] {
-  border-style: dashed;
+  border-style: solid;
 }
 
 .application-window[data-maximized] .policy-workspace-track {

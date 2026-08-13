@@ -185,7 +185,7 @@ class TaskRepository:
         return queued
 
     def mark_task_credentials_unavailable(self, task_id: str, site: str) -> bool:
-        message = "站点托管授权已失效，等待在 VAULT.CPL 重新授权"
+        message = "站点托管授权已失效，等待在授权管理中重新授权"
         now = self._clock()
         with self._transaction() as conn:
             updated = conn.execute(

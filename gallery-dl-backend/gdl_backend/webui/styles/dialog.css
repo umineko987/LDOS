@@ -141,7 +141,7 @@
   }
 
   .imageweave-dialog__actions .dialog-confirm--dangerous {
-    border: var(--imageweave-border-strong-width) double CanvasText;
+    border: var(--imageweave-border-strong-width) solid CanvasText;
     color: CanvasText;
     background: Canvas;
   }

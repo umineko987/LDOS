@@ -387,7 +387,7 @@ let controller = null;
 
 export default Object.freeze({
   mount(context) {
-    if (controller) throw new Error("POLICY.CPL 已挂载");
+    if (controller) throw new Error("站点设置已挂载");
     controller = createPolicyController(context);
   },
   activate() {

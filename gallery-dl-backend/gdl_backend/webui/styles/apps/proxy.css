@@ -282,7 +282,7 @@
 }
 
 .proxy-button[aria-busy="true"] {
-  border-style: dashed;
+  border-style: solid;
 }
 
 .proxy-control-reasons {
@@ -434,7 +434,7 @@
 .proxy-render-limit {
   margin: 0;
   padding: 9px;
-  border-style: dashed;
+  border-style: solid;
   font-size: 0.72rem;
   font-weight: 700;
 }
@@ -471,7 +471,7 @@
 
 .proxy-source-form,
 .proxy-replace-form {
-  border-style: dashed;
+  border-style: solid;
   border-radius: var(--imageweave-radius-control);
 }
 

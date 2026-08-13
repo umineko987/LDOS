@@ -409,7 +409,7 @@ let controller = null;
 
 export default Object.freeze({
   mount(context) {
-    if (controller) throw new Error("TASKMGR.EXE 已挂载");
+    if (controller) throw new Error("批次管理已挂载");
     controller = createTasksController(context);
   },
   activate() {

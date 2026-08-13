@@ -49,14 +49,14 @@
 
 .status-badge[data-status="warning"] {
   border-color: var(--imageweave-state-warning);
-  border-style: dashed;
+  border-style: solid;
   color: var(--imageweave-state-warning);
   background: var(--imageweave-state-warning-surface-solid);
   background: var(--imageweave-state-warning-surface);
 }
 
 .status-badge[data-status="error"] {
-  border: var(--imageweave-border-strong-width) double var(--imageweave-state-danger);
+  border: var(--imageweave-border-strong-width) solid var(--imageweave-state-danger);
   color: var(--imageweave-state-danger);
   background: var(--imageweave-state-danger-surface-solid);
   background: var(--imageweave-state-danger-surface);
@@ -64,7 +64,7 @@
 
 .status-badge[data-status="disabled"] {
   border-color: var(--imageweave-state-disabled);
-  border-style: dotted;
+  border-style: solid;
   color: var(--imageweave-state-disabled);
   background: var(--imageweave-state-disabled-surface-solid);
   background: var(--imageweave-state-disabled-surface);
@@ -78,7 +78,7 @@ section.empty-state {
   min-height: 132px;
   padding: clamp(18px, 3vw, 28px);
   align-content: center;
-  border: var(--imageweave-border-width) dashed var(--imageweave-border-subtle);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
   border-radius: var(--imageweave-radius-card);
   color: var(--imageweave-text-primary);
   background: var(--imageweave-surface);
@@ -176,26 +176,26 @@ section.error-view {
   }
 
   .status-badge[data-status="running"] {
-    border-style: double;
+    border-style: solid;
   }
 
   .status-badge[data-status="warning"] {
-    border-style: dashed;
+    border-style: solid;
   }
 
   .status-badge[data-status="error"] {
-    border-style: double;
+    border-style: solid;
     border-width: var(--imageweave-border-strong-width);
   }
 
   .status-badge[data-status="disabled"] {
     border-color: GrayText;
-    border-style: dotted;
+    border-style: solid;
     color: GrayText;
   }
 
   section.error-view {
-    border-style: double;
+    border-style: solid;
   }
 
   section.empty-state p,

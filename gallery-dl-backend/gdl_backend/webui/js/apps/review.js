@@ -741,7 +741,7 @@ let controller = null;
 
 export default Object.freeze({
   mount(context) {
-    if (controller) throw new Error("REVIEW.EXE 已挂载");
+    if (controller) throw new Error("去重审核已挂载");
     controller = createReviewController(context);
   },
   activate() {

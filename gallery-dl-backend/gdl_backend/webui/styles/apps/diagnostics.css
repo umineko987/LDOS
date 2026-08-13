@@ -257,7 +257,7 @@
 }
 
 .diagnostics-button[aria-busy="true"] {
-  border-style: dashed;
+  border-style: solid;
 }
 
 .diagnostics-note,

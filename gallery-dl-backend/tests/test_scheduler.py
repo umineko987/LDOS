@@ -872,7 +872,7 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task["last_error_class"], "credentials_unavailable")
         self.assertEqual(
             task["last_error"],
-            "站点托管授权已失效，等待在 VAULT.CPL 重新授权",
+            "站点托管授权已失效，等待在授权管理中重新授权",
         )
         self.assertEqual(task["status"], "queued")
         self.assertEqual(task["attempt_count"], 0)

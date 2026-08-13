@@ -575,7 +575,7 @@ def mihomo_component(settings: AppSettings, *, include_version: bool = False) ->
 
 
 def diagnostics_config_snapshot(settings: AppSettings) -> dict[str, Any]:
-    """返回 DIAG.EXE 可读取的最小配置能力投影，不公开任何主机路径或秘密。"""
+    """返回系统诊断可读取的最小配置能力投影，不公开任何主机路径或秘密。"""
 
     return {
         "response_profile": "diagnostics",

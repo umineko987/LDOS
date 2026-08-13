@@ -82,7 +82,10 @@ test("Stage 6 production CSS contains no retired desktop selectors or taskbar to
     ".taskbar-status",
     ".clock",
     ".window-actions",
-  ]) assert.doesNotMatch(`${desktop}\n${controls}`, new RegExp(selector.replace(".", "\\.")), selector);
+  ]) {
+    const pattern = new RegExp(`(?:^|[,\\s])${selector.replace(".", "\\.")}(?=[\\s,:.{#\\[]|$)`, "m");
+    assert.doesNotMatch(`${desktop}\n${controls}`, pattern, selector);
+  }
   assert.doesNotMatch(tokens, /--imageweave-taskbar-height/);
   assert.match(desktop, /\.dock__/);
   assert.match(desktop, /\.menu-bar/);

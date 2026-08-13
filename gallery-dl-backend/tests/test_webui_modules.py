@@ -1260,7 +1260,10 @@ class WebUiModuleTests(unittest.TestCase):
 
         # 透明背景不使用元素 opacity，因此当前实体表面仍保持实色。
         self.assertIn("background: var(--imageweave-surface-environment-solid)", css_block(desktop_css, ".menu-bar"))
-        self.assertIn("background: var(--imageweave-surface-environment-solid)", css_block(desktop_css, ".dock__items"))
+        self.assertIn(
+            "background: var(--imageweave-surface-environment-solid)",
+            css_block(desktop_css, ".dock__items {"),
+        )
         self.assertIn(
             "background: var(--imageweave-surface)",
             css_block(dialog_css, ".imageweave-dialog"),

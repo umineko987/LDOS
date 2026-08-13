@@ -490,7 +490,7 @@ let controller = null;
 
 export default Object.freeze({
   mount(context) {
-    if (controller) throw new Error("CRAWL.EXE 已挂载");
+    if (controller) throw new Error("图片采集已挂载");
     controller = createCrawlController(context);
   },
   activate() {

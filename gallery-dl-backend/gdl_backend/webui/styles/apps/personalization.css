@@ -237,12 +237,12 @@
 
 .personalization-theme-color[aria-invalid="true"] {
   border-color: var(--imageweave-state-danger);
-  border-style: double;
+  border-style: solid;
   border-width: 4px;
 }
 
 .personalization-theme-color:disabled {
-  border-style: dashed;
+  border-style: solid;
   cursor: not-allowed;
 }
 
@@ -501,7 +501,7 @@
 }
 
 .personalization-button[aria-busy="true"] {
-  border-style: dashed;
+  border-style: solid;
 }
 
 .personalization-control-grid {
@@ -542,7 +542,7 @@
 .personalization-select:disabled,
 .personalization-range:disabled,
 .personalization-position-fieldset:disabled .personalization-position-choice {
-  border-style: dashed;
+  border-style: solid;
   cursor: not-allowed;
 }
 

@@ -38,7 +38,7 @@ function createPersonalizationController(context) {
     || typeof personalization.deleteCustomWallpaper !== "function"
     || typeof personalization.subscribe !== "function"
   ) {
-    throw new TypeError("DESKTOP.CPL 缺少全局个性化运行时");
+    throw new TypeError("外观设置缺少全局个性化运行时");
   }
 
   const view = createPersonalizationView(context);
@@ -666,7 +666,7 @@ let controller = null;
 
 export default Object.freeze({
   mount(context) {
-    if (controller) throw new Error("DESKTOP.CPL 已挂载");
+    if (controller) throw new Error("外观设置已挂载");
     controller = createPersonalizationController(context);
   },
   activate() {

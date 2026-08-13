@@ -250,7 +250,7 @@ let controller = null;
 
 export default Object.freeze({
   mount(context) {
-    if (controller) throw new Error("DIAG.EXE 已挂载");
+    if (controller) throw new Error("系统诊断已挂载");
     controller = createDiagnosticsController(context);
   },
   activate() {
