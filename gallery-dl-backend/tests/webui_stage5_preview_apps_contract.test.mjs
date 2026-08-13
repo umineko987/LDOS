@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import galleryApplication, { createGalleryController } from "../gdl_backend/webui/js/apps/gallery.js";
 import scheduleApplication, { createScheduleController } from "../gdl_backend/webui/js/apps/schedule.js";
 import exportApplication, { createExportController } from "../gdl_backend/webui/js/apps/export.js";
+import { createPlaceholderApplication } from "../gdl_backend/webui/js/apps/placeholder.js";
 import {
   createGalleryUiState,
   galleryPresentation,
@@ -280,6 +281,10 @@ test("Stage 5 controllers use unavailable adapters, make zero API calls, and sta
 });
 
 test("Stage 5 applications expose complete lifecycle and production registry has zero placeholder use", () => {
+  const retainedForPhaseSix = createPlaceholderApplication("仅用于兼容测试");
+  for (const hook of ["mount", "activate", "deactivate", "unmount"]) {
+    assert.equal(typeof retainedForPhaseSix[hook], "function", `placeholder.${hook}`);
+  }
   for (const [appId, application] of Object.entries(APP_MODULES)) {
     for (const hook of ["mount", "activate", "deactivate", "unmount"]) assert.equal(typeof application[hook], "function", `${appId}.${hook}`);
   }
