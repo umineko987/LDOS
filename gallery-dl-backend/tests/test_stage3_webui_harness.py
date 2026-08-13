@@ -65,6 +65,24 @@ class Stage3WebUiHarnessTests(unittest.TestCase):
             "artist",
         )
 
+        injected = self.client.post(
+            "/api/v1/search",
+            json={
+                "keyword": "server-422",
+                "sites": ["danbooru"],
+                "limit": 20,
+                "proxy_mode": "direct",
+            },
+        )
+        self.assertEqual(injected.status_code, 422, injected.text)
+        self.assertEqual(injected.json()["error"]["code"], "invalid_search_fault")
+        facts = self.client.get("/__stage3__/facts").json()
+        self.assertEqual(facts["search_requests"][-1]["keyword"], "server-422")
+        self.assertNotIn(
+            "server-422",
+            [item["keyword"] for item in facts["search_calls"]],
+        )
+
     def test_real_crawl_schema_idempotency_and_database_write(self):
         body = {
             "sources": [

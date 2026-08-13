@@ -57,6 +57,7 @@ class Stage3DiscoveryHarness:
         self._lock = threading.Lock()
         self.search_calls: list[dict[str, Any]] = []
         self.autocomplete_calls: list[dict[str, Any]] = []
+        self.search_requests: list[dict[str, Any]] = []
 
     @staticmethod
     def _delay(keyword: str) -> float:
@@ -256,12 +257,40 @@ def build_harness(root: Path, port: int):
     container = Stage3Container(settings)
     app = create_app(settings, container=container, start_background=False)
 
+    @app.middleware("http")
+    async def stage3_search_faults(request, call_next):
+        if request.url.path == "/api/v1/search" and request.method == "POST":
+            raw = await request.body()
+            try:
+                body = json.loads(raw or b"{}")
+            except (TypeError, ValueError):
+                body = {}
+            container.stage3_discovery.search_requests.append({
+                "keyword": str(body.get("keyword") or ""),
+                "limit": body.get("limit"),
+                "sites": list(body.get("sites") or []),
+            })
+            if body.get("keyword") == "server-422":
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "error": {
+                            "code": "invalid_search_fault",
+                            "message": "synthetic test-only 422",
+                            "request_id": "stage3-search-422",
+                        }
+                    },
+                )
+        return await call_next(request)
+
     @app.get("/__stage3__/facts", include_in_schema=False)
     async def stage3_facts():
         batches = container.db.list_crawl_batches(limit=50, offset=0)
         return {
             "batches": [container.db.get_crawl_batch(item["id"]) for item in batches],
             "search_calls": list(container.stage3_discovery.search_calls),
+            "search_requests": list(container.stage3_discovery.search_requests),
             "autocomplete_calls": list(container.stage3_discovery.autocomplete_calls),
             "background_started": False,
         }
