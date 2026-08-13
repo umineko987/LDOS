@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { dirname, extname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -24,6 +26,21 @@ function productionFiles(directory, suffixes) {
   };
   visit(directory);
   return result;
+}
+
+function localMarkdownTargets(markdownUrl) {
+  const source = read(markdownUrl);
+  const sourcePath = fileURLToPath(markdownUrl);
+  const targets = [];
+  for (const match of source.matchAll(/!?(?:\[[^\]]*\])\(([^)]+)\)/g)) {
+    const rawTarget = match[1].trim().replace(/^<|>$/g, "");
+    const targetWithoutTitle = rawTarget.split(/\s+["']/u, 1)[0];
+    if (!targetWithoutTitle || /^[a-z][a-z0-9+.-]*:/iu.test(targetWithoutTitle) || targetWithoutTitle.startsWith("#")) continue;
+    const decodedTarget = decodeURIComponent(targetWithoutTitle.split(/[?#]/u, 1)[0]);
+    if (extname(decodedTarget).toLowerCase() !== ".md") continue;
+    targets.push(resolve(dirname(sourcePath), decodedTarget));
+  }
+  return targets;
 }
 
 test("Stage 6 removes the retired START Store action, state, selector, and shell facade", () => {
@@ -70,9 +87,8 @@ test("Stage 6 availability metadata is exactly ready or preview", () => {
 });
 
 test("Stage 6 production CSS contains no retired desktop selectors or taskbar token", () => {
-  const desktop = read(new URL("styles/desktop.css", WEBUI));
-  const controls = read(new URL("styles/controls.css", WEBUI));
-  const tokens = read(new URL("styles/tokens.css", WEBUI));
+  const cssFiles = productionFiles(new URL("styles/", WEBUI), [".css"]);
+  const productionCss = cssFiles.map((path) => read(path)).join("\n");
   for (const selector of [
     ".desktop-icons",
     ".desktop-icon",
@@ -84,14 +100,31 @@ test("Stage 6 production CSS contains no retired desktop selectors or taskbar to
     ".taskbar-status",
     ".clock",
     ".window-actions",
+    ".taskbar-summary-action",
+    ".crawl-panel",
+    ".tasks-panel",
+    ".proxy-panel-heading",
   ]) {
     const pattern = new RegExp(`(?:^|[,\\s])${selector.replace(".", "\\.")}(?=[\\s,:.{#\\[]|$)`, "m");
-    assert.doesNotMatch(`${desktop}\n${controls}`, pattern, selector);
+    assert.doesNotMatch(productionCss, pattern, selector);
   }
-  assert.doesNotMatch(tokens, /--imageweave-taskbar-height/);
-  assert.match(desktop, /\.dock__/);
-  assert.match(desktop, /\.menu-bar/);
-  assert.match(desktop, /\.window-traffic-light/);
+  for (const token of [
+    "--imageweave-taskbar-height",
+    "--imageweave-window-action-size",
+  ]) assert.doesNotMatch(productionCss, new RegExp(token), token);
+  assert.match(productionCss, /\.dock__/);
+  assert.match(productionCss, /\.menu-bar/);
+  assert.match(productionCss, /\.window-traffic-light/);
+});
+
+test("Stage 6 forced-colors styles the real menu summary actions with visible focus", () => {
+  const controls = read(new URL("styles/controls.css", WEBUI));
+  const forcedColors = controls.split("@media (forced-colors: active)", 2)[1] || "";
+  assert.match(forcedColors, /\.menu-bar__summary-action/);
+  assert.match(forcedColors, /border\s*:\s*[^;\n]*\bButtonText\b/);
+  assert.match(forcedColors, /color\s*:\s*ButtonText/);
+  assert.match(forcedColors, /transition\s*:\s*none\s*!important/);
+  assert.match(forcedColors, /\.menu-bar__summary-action:focus-visible[\s\S]*outline\s*:[^;\n]*\bHighlight\b/);
 });
 
 test("Stage 6 production CSS uses thin modern state borders", () => {
@@ -135,6 +168,23 @@ test("Stage 6 README and current WebUI docs describe the final shell and preview
     assert.match(source, /3[^\n]*preview|3[^\n]*前端预览/i);
     assert.match(source, /0[^\n]*业务 API/);
   }
+  const repositoryPath = resolve(fileURLToPath(REPOSITORY));
+  const backendDocTargets = localMarkdownTargets(new URL("docs/gallery-dl-backend.md", REPOSITORY));
+  assert.deepEqual(
+    backendDocTargets
+      .filter((target) => !existsSync(target))
+      .map((target) => target.replace(`${repositoryPath}/`, "")),
+    [],
+  );
+  assert.equal(
+    backendDocTargets.some((target) => {
+      const relative = target.replace(`${repositoryPath}/`, "");
+      return relative === target || relative.startsWith("../") || relative.startsWith("..\\");
+    }),
+    false,
+  );
+  assert.match(backendDoc, /真实凭据和代理节点的 EH\s*烟雾脚本不属于当前仓库的提交内容/);
+  assert.doesNotMatch(backendDoc, /gallery-dl-backend-scripts\.md/);
   assert.match(backendDoc, /不[^\n]*恢复[^\n]*(?:运行|焦点|最小化|窗口)/);
   assert.match(architecture, /五层|five-layer/i);
   assert.doesNotMatch(fixtureReadme, /intentionally\s+(?:a\s+)?red|phase\s*0[^\n]*red|coverage suite remains/i);

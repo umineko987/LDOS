@@ -375,7 +375,6 @@
   background: var(--imageweave-state-danger-surface-solid);
 }
 
-.proxy-panel-heading,
 .proxy-subheading,
 .proxy-card-heading {
   display: flex;

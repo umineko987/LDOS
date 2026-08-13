@@ -1356,7 +1356,6 @@ class WebUiModuleTests(unittest.TestCase):
             "--imageweave-menubar-height:",
             "--imageweave-dock-height:",
             "--imageweave-window-title-height:",
-            "--imageweave-window-action-size:",
             "--imageweave-control-height:",
             "--imageweave-desktop-min-width:",
             "--imageweave-desktop-min-height:",
@@ -1367,10 +1366,31 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn("font-family: var(--imageweave-font-sans)", base)
         self.assertIn("font-family: var(--imageweave-font-mono)", controls)
 
-        # 共享 selector 覆盖全部八个真实应用，不要求重写其 DOM 或布局。
+        # 共享 selector 覆盖全部八个真实应用按钮；面板只要求生产 DOM 中实际存在的六类。
         for app_id in app_ids:
             self.assertIn(f".{app_id}-button", controls, app_id)
+        for app_id in (
+            "proxy",
+            "vault",
+            "review",
+            "policy",
+            "diagnostics",
+            "personalization",
+        ):
             self.assertIn(f".{app_id}-panel", controls, app_id)
+        for retired_selector in (
+            ".crawl-panel",
+            ".tasks-panel",
+            ".taskbar-summary-action",
+            ".proxy-panel-heading",
+        ):
+            self.assertNotIn(retired_selector, production_css)
+        self.assertNotIn("--imageweave-window-action-size:", tokens)
+        forced_controls = controls.split("@media (forced-colors: active)", 1)[1]
+        self.assertIn(".menu-bar__summary-action", forced_controls)
+        self.assertIn("transition: none !important", forced_controls)
+        self.assertIn("color: ButtonText", forced_controls)
+        self.assertIn("solid Highlight !important", forced_controls)
         for selector in ("input[type=\"search\"]", "select", "textarea"):
             self.assertIn(selector, controls)
         self.assertIn("[aria-invalid=\"true\"]", controls)

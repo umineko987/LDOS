@@ -527,4 +527,4 @@ python -m unittest discover -s tests -v
 ```
 
 测试默认使用本地夹具、mock 或 gallery-dl `--version`。需要真实凭据和代理节点的 EH
-烟雾脚本见 [`gallery-dl-backend-scripts.md`](./gallery-dl-backend-scripts.md)。
+烟雾脚本不属于当前仓库的提交内容；如需运行此类检查，应在受控本地环境中单独维护。

@@ -18,6 +18,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "gallery-dl-backend"
 SOURCE_WEBUI = BACKEND / "gdl_backend" / "webui"
+SOURCE_DOCS = (
+    "ARCHITECTURE.md",
+    "gallery-dl-backend.md",
+)
+SOURCE_ASSETS = (
+    "example.json",
+    "example.png",
+)
 SOURCE_TESTS = (
     BACKEND / "tests" / "webui_modules.test.mjs",
     BACKEND / "tests" / "webui_phase2_contract.test.mjs",
@@ -59,8 +67,12 @@ def _node_version(node: str) -> str:
 def _prepare_tree(root: Path) -> None:
     shutil.copytree(BACKEND / "gdl_backend", root / "gdl_backend")
     shutil.copy2(ROOT / "README.md", root / "README.md")
-    shutil.copytree(ROOT / "docs", root / "docs", ignore=shutil.ignore_patterns("2026-08-12-glass-desktop-webui-refactor-plan.md"))
-    shutil.copytree(ROOT / "assets", root / "assets")
+    (root / "docs").mkdir()
+    for name in SOURCE_DOCS:
+        shutil.copy2(ROOT / "docs" / name, root / "docs" / name)
+    (root / "assets").mkdir()
+    for name in SOURCE_ASSETS:
+        shutil.copy2(ROOT / "assets" / name, root / "assets" / name)
     (root / "tests").mkdir()
     for source_test in SOURCE_TESTS:
         shutil.copy2(source_test, root / "tests" / source_test.name)

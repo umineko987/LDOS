@@ -45,8 +45,6 @@ button[aria-disabled="true"] {
 }
 
 .app-view :is(
-  .crawl-panel,
-  .tasks-panel,
   .proxy-panel,
   .vault-panel,
   .review-panel,
@@ -411,8 +409,6 @@ button[aria-disabled="true"] {
 
 @media (forced-colors: active) {
   .app-view :is(
-    .crawl-panel,
-    .tasks-panel,
     .proxy-panel,
     .vault-panel,
     .review-panel,
@@ -437,14 +433,20 @@ button[aria-disabled="true"] {
     .diagnostics-button,
     .personalization-button
   ),
-  .taskbar-summary-action,
+  .menu-bar__summary-action,
   .app-view :is(input, select, textarea) {
-    border-color: ButtonText;
+    transition: none !important;
+    border: var(--imageweave-border-width) solid ButtonText;
     color: ButtonText;
-    background: ButtonFace;
+    background: ButtonFace !important;
     background-image: none;
     box-shadow: none;
-    forced-color-adjust: auto;
+    forced-color-adjust: none;
+  }
+
+  .menu-bar__summary-action:focus-visible {
+    outline: var(--imageweave-focus-width) solid Highlight !important;
+    outline-offset: 2px;
   }
 
   :is(button, a):is(
