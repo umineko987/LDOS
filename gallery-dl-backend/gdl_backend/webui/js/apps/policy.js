@@ -107,31 +107,46 @@ export function createPolicyController(context, dependencies = {}) {
     const controller = new AbortController();
     activeOperationController = controller;
     try {
-      await request(controller.signal);
-      if (!active || destroyed || controller.signal.aborted ||
-          !requestGate.isWriteCurrent(writeTicket)) return false;
-      const loaded = await readConfig(null, { replace: true, report: false });
-      if (!loaded || !active || destroyed || controller.signal.aborted ||
-          !requestGate.isWriteCurrent(writeTicket)) return false;
-      view.clearError();
-      view.setWorkspacePhase?.("saved");
-      view.setOperationMessage(successMessage);
-      return true;
-    } catch (error) {
-      if (isAbortError(error) || controller.signal.aborted || !active || destroyed ||
+      let writeCompleted = false;
+      let operationError = null;
+      try {
+        await request(controller.signal);
+        writeCompleted = true;
+        if (!active || destroyed || controller.signal.aborted ||
+            !requestGate.isWriteCurrent(writeTicket)) return false;
+        const loaded = await readConfig(null, { replace: true, report: false });
+        if (!loaded || !active || destroyed || controller.signal.aborted ||
+            !requestGate.isWriteCurrent(writeTicket)) return false;
+        view.clearError();
+        view.setWorkspacePhase?.("saved");
+        view.setOperationMessage(successMessage);
+        return true;
+      } catch (error) {
+        operationError = error;
+      }
+
+      if (isAbortError(operationError) || controller.signal.aborted || !active || destroyed ||
           !requestGate.isWriteCurrent(writeTicket)) return false;
       try {
         const loaded = await readConfig(null, { replace: true, report: false });
         if (!active || destroyed || controller.signal.aborted ||
             !requestGate.isWriteCurrent(writeTicket)) return false;
+        if (loaded && writeCompleted) {
+          view.clearError();
+          view.setWorkspacePhase?.("saved");
+          view.setOperationMessage(successMessage);
+          return true;
+        }
         if (loaded && preservedDraft) view.restoreDraft(preservedDraft);
       } catch (readError) {
         if (isAbortError(readError) || controller.signal.aborted || !active || destroyed) return false;
         // 保留原操作错误和当前表单，不展示第二个原始错误。
       }
-      view.setWorkspacePhase?.("error");
-      view.showError(error);
-      view.setOperationMessage("操作失败，修改已保留。请检查后重试。");
+      view.setWorkspacePhase?.(writeCompleted ? "partial" : "error");
+      view.showError(operationError);
+      view.setOperationMessage(writeCompleted
+        ? "写入已完成，但尚未读取到权威设置；草稿仍保留。"
+        : "操作失败，修改已保留。请检查后重试。");
       return false;
     } finally {
       if (activeOperationController === controller) activeOperationController = null;
@@ -246,6 +261,7 @@ export function createPolicyController(context, dependencies = {}) {
     if (!await confirmDiscard("切换站点")) return;
     view.selectSite(siteId);
     view.clearError();
+    view.setWorkspacePhase?.("ready");
     view.setOperationMessage("已切换站点；保存后仅影响新建任务。");
   };
 
