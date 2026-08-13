@@ -480,6 +480,14 @@ test("Diagnostics model：四响应只保留严格白名单，组件按定义排
   assert.deepEqual(componentOrder, [...componentOrder].sort((a, b) => a - b));
   assert.equal(readiness.components.some(({ id }) => id === "unknown_component"), false);
   assert.equal(new Set(readiness.components.map(({ id }) => id)).size, readiness.components.length);
+  const snapshot = completeSnapshot();
+  assert.throws(() => actionCreators.diagnosticsReceived({
+    ...snapshot,
+    readiness: {
+      ...snapshot.readiness,
+      components: [snapshot.readiness.components[0], snapshot.readiness.components[0]],
+    },
+  }), /重复/);
   const dedup = sanitizeReadinessDiagnostics(rawReadiness({ components: {
     dedup: {
       status: "ok",
