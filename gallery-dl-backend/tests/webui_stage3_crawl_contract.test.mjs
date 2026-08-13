@@ -674,6 +674,16 @@ test("3A model：代理/授权前置条件投影全局、来源覆盖和 readine
     searchProxyMode: "direct",
     crawlProxyMode: "direct",
   }).authSites, ["pixiv"]);
+  assert.deepEqual(deriveCrawlPreconditions({
+    readinessProxy: null,
+    authBySite: new Map([["pixiv", { authorized: false }]]),
+    crawlSources: [],
+    sourceDrafts: sourceDrafts.map((item) => item.site === "pixiv"
+      ? { ...item, enabled: false }
+      : item),
+    searchProxyMode: "direct",
+    crawlProxyMode: "direct",
+  }), { proxy: null, authSites: [] });
 });
 
 test("3A model：创建参数校验、0 选择禁用原因与显式搜索状态", () => {
@@ -856,6 +866,26 @@ test("3A controller：loading/error/recovery 保留权威 Store，busy 阻止重
     await flush();
     assert.equal(harness.store.getState().crawl.sources[2].addresses.length, 1);
     assert.equal(harness.viewLog.some((item) => item[0] === "search-state" && item[1] === "recovery"), true);
+    harness.controller.destroy();
+  } finally {
+    restore();
+  }
+});
+
+test("3A controller：输出控制字符即时阻断，后续合法输入立即恢复标记", () => {
+  const restore = installControllerDom();
+  try {
+    const harness = controllerHarness({ initialSearch: completeSearchResponse() });
+    harness.outputDir.name = "output-dir";
+    harness.controller.activate();
+    const blocked = harness.root.emit("beforeinput", harness.outputDir, { data: "\n" });
+    assert.equal(blocked.defaultPrevented, true);
+    assert.equal(harness.outputDir.dataset.crawlControlInvalid, "true");
+    assert.equal(harness.viewLog.some((item) => item[0] === "validation"), true);
+
+    harness.outputDir.value = "stage3-safe";
+    harness.root.emit("input", harness.outputDir, { isTrusted: true });
+    assert.equal(harness.outputDir.dataset.crawlControlInvalid, undefined);
     harness.controller.destroy();
   } finally {
     restore();

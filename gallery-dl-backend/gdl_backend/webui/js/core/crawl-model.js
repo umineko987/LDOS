@@ -581,8 +581,14 @@ export function deriveCrawlPreconditions({
     });
   }
 
+  const enabledSites = new Set(
+    (Array.isArray(sourceDrafts) ? sourceDrafts : [])
+      .filter((source) => source?.enabled)
+      .map((source) => source.site),
+  );
   const authSites = [];
   for (const site of ["twitter", "pixiv", "exhentai"]) {
+    if (!enabledSites.has(site)) continue;
     const sourceAuth = (Array.isArray(crawlSources) ? crawlSources : []).find((source) => source.site === site)?.auth;
     const vaultAuth = authBySite instanceof Map ? authBySite.get(site) : null;
     const needsAuthorization = sourceAuth?.known

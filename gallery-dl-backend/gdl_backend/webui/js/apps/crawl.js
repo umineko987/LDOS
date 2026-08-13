@@ -337,15 +337,19 @@ export function createCrawlController(context, {
     const target = event.target;
     if (!(target instanceof HTMLInputElement) || target.name !== "output-dir") return;
     const data = typeof event.data === "string" ? event.data : "";
-    if (/[\u0000-\u001f\u007f]/.test(data)) target.dataset.crawlControlInvalid = "true";
+    if (!/[\u0000-\u001f\u007f]/.test(data)) return;
+    event.preventDefault();
+    target.dataset.crawlControlInvalid = "true";
+    view.refreshValidation("crawl", { announce: true });
   };
 
   const onInput = (event) => {
     const target = event.target;
     if (target === view.elements.keyword) requestAutocomplete();
     if (target === view.elements.ehTagQuery) view.setEhQuery(target.value);
-    if (target instanceof HTMLInputElement && target.name === "output-dir" && !event.isTrusted) {
+    if (target instanceof HTMLInputElement && target.name === "output-dir") {
       if (/[\u0000-\u001f\u007f]/.test(target.value)) target.dataset.crawlControlInvalid = "true";
+      else delete target.dataset.crawlControlInvalid;
     }
     if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) {
       view.refreshValidation("all");
