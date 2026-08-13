@@ -150,6 +150,19 @@ function selectedSnapshot(projected) {
   };
 }
 
+function rawPixivVaultStatus(authorized) {
+  return {
+    site: "pixiv",
+    label: "Pixiv",
+    method: "oauth",
+    state: authorized ? "authorized" : "required",
+    authorized,
+    actions: ["oauth", "clear"],
+    updated_at: 1_700_000_000,
+    oauth: authorized ? { present: true } : null,
+  };
+}
+
 function deferred() {
   let resolve;
   let reject;
@@ -621,11 +634,30 @@ test("3A model：共享草稿验证覆盖搜索、创建、控制字符与 EH �
   }
 });
 
-test("3A model：代理/授权前置条件投影全局、来源覆盖和 readiness", () => {
+test("3A model：搜索按 enabled、批次按 selected，Vault 条目覆盖搜索快照", () => {
   const disabled = { status: "disabled", running: false, healthy: 0, sourceCount: 0 };
   const error = { status: "error", running: false, healthy: 0, sourceCount: 0 };
   const running = { status: "ok", running: true, healthy: 2, sourceCount: 3 };
   const sourceDrafts = CRAWL_SITE_DEFINITIONS.map(({ id }) => ({ site: id, enabled: true, proxyMode: "" }));
+  const pixivRequired = sourceResult("pixiv", [candidate("pixiv", "1")], {
+    auth: { state: "required", authorized: false },
+  });
+  const pixivAuthorized = sourceResult("pixiv", [candidate("pixiv", "1")], {
+    auth: { state: "authorized", authorized: true },
+  });
+  const selectedPixiv = selectCandidate(
+    projectCrawlSearchResponse({ sources: [pixivRequired] }).snapshot,
+    0,
+    0,
+  ).sources;
+  const selectedAuthorizedPixiv = selectCandidate(
+    projectCrawlSearchResponse({ sources: [pixivAuthorized] }).snapshot,
+    0,
+    0,
+  ).sources;
+  const disabledPixivDrafts = sourceDrafts.map((item) => item.site === "pixiv"
+    ? { ...item, enabled: false, proxyMode: "required" }
+    : { ...item, proxyMode: "direct" });
 
   assert.deepEqual(deriveCrawlPreconditions({
     readinessProxy: disabled,
@@ -682,32 +714,117 @@ test("3A model：代理/授权前置条件投影全局、来源覆盖和 readine
     searchProxyMode: "required",
     crawlProxyMode: "direct",
   }).proxy.state, "stopped");
-  assert.deepEqual(deriveCrawlPreconditions({
-    readinessProxy: running,
-    authBySite: new Map([["pixiv", { authorized: false }]]),
-    crawlSources: [],
-    sourceDrafts,
+
+  assert.equal(deriveCrawlPreconditions({
+    readinessProxy: disabled,
+    authBySite: new Map(),
+    crawlSources: selectedPixiv,
+    sourceDrafts: disabledPixivDrafts,
     searchProxyMode: "direct",
     crawlProxyMode: "direct",
-  }).authSites, ["pixiv"]);
+  }).proxy.severity, "required", "selected + disabled 必须采用来源 required override");
+  assert.deepEqual(deriveCrawlPreconditions({
+    readinessProxy: running,
+    authBySite: new Map(),
+    crawlSources: selectedPixiv,
+    sourceDrafts: disabledPixivDrafts,
+    searchProxyMode: "direct",
+    crawlProxyMode: "direct",
+  }).authSites, ["pixiv"], "selected + disabled 必须保留搜索授权快照提示");
+  assert.deepEqual(deriveCrawlPreconditions({
+    readinessProxy: disabled,
+    authBySite: new Map(),
+    crawlSources: projectCrawlSearchResponse({ sources: [pixivRequired] }).snapshot.sources,
+    sourceDrafts: disabledPixivDrafts,
+    searchProxyMode: "direct",
+    crawlProxyMode: "direct",
+  }), { proxy: null, authSites: [] }, "清除选择且仍 disabled 后不提示");
+  assert.equal(deriveCrawlPreconditions({
+    readinessProxy: disabled,
+    authBySite: new Map(),
+    crawlSources: selectedPixiv,
+    sourceDrafts: disabledPixivDrafts.map((item) => ({ ...item, proxyMode: "direct" })),
+    searchProxyMode: "direct",
+    crawlProxyMode: "direct",
+  }).proxy, null, "all-direct 不提示代理");
+
   assert.deepEqual(deriveCrawlPreconditions({
     readinessProxy: running,
     authBySite: new Map([["pixiv", { authorized: true }]]),
-    crawlSources: [],
-    sourceDrafts,
+    crawlSources: selectedPixiv,
+    sourceDrafts: disabledPixivDrafts,
     searchProxyMode: "direct",
     crawlProxyMode: "direct",
-  }).authSites, []);
+  }).authSites, [], "Vault unauthorized→authorized 必须压过旧 required 快照");
   assert.deepEqual(deriveCrawlPreconditions({
-    readinessProxy: null,
+    readinessProxy: running,
     authBySite: new Map([["pixiv", { authorized: false }]]),
-    crawlSources: [],
-    sourceDrafts: sourceDrafts.map((item) => item.site === "pixiv"
-      ? { ...item, enabled: false }
-      : item),
+    crawlSources: selectedAuthorizedPixiv,
+    sourceDrafts: disabledPixivDrafts,
     searchProxyMode: "direct",
     crawlProxyMode: "direct",
-  }), { proxy: null, authSites: [] });
+  }).authSites, ["pixiv"], "Vault authorized→unauthorized 必须压过旧 authorized 快照");
+  assert.deepEqual(deriveCrawlPreconditions({
+    readinessProxy: running,
+    authBySite: new Map(),
+    crawlSources: selectedPixiv,
+    sourceDrafts: disabledPixivDrafts,
+    searchProxyMode: "direct",
+    crawlProxyMode: "direct",
+  }).authSites, ["pixiv"], "Vault 无条目时回退搜索快照");
+  assert.deepEqual(deriveCrawlPreconditions({
+    readinessProxy: running,
+    authBySite: new Map(),
+    crawlSources: selectedAuthorizedPixiv,
+    sourceDrafts: disabledPixivDrafts,
+    searchProxyMode: "direct",
+    crawlProxyMode: "direct",
+  }).authSites, [], "Vault 无条目时尊重 authorized 搜索快照");
+});
+
+test("3A view projection：Store auth Map replacement 双向即时重算已有搜索快照", () => {
+  const store = createStore({ reportError: () => {} });
+  store.dispatch(actionCreators.crawlSearchReceived({
+    sources: [sourceResult("pixiv", [candidate("pixiv", "1")], {
+      auth: { state: "required", authorized: false },
+    })],
+  }));
+  const key = store.getState().crawl.sources[0].addresses[0].key;
+  store.dispatch(actionCreators.crawlCandidateSelectionChanged(key, true));
+  const disabled = { status: "disabled", running: false, healthy: 0, sourceCount: 0 };
+  const sourceDrafts = [{ site: "pixiv", enabled: false, proxyMode: "required" }];
+  const projections = [];
+  const unsubscribe = store.subscribe((state) => ({
+    crawl: state.crawl,
+    authBySite: state.auth.bySite,
+  }), ({ crawl, authBySite }) => {
+    projections.push(deriveCrawlPreconditions({
+      readinessProxy: disabled,
+      authBySite,
+      crawlSources: crawl.sources,
+      sourceDrafts,
+      searchProxyMode: "direct",
+      crawlProxyMode: "direct",
+    }));
+  }, {
+    fireImmediately: true,
+    equality: (left, right) => Boolean(
+      left && right && left.crawl === right.crawl && left.authBySite === right.authBySite
+    ),
+  });
+
+  assert.deepEqual(projections.at(-1).authSites, ["pixiv"]);
+  const initialMap = store.getState().auth.bySite;
+  store.dispatch(actionCreators.authSiteStatusReceived(rawPixivVaultStatus(true)));
+  assert.notEqual(store.getState().auth.bySite, initialMap);
+  assert.deepEqual(projections.at(-1).authSites, []);
+  const authorizedMap = store.getState().auth.bySite;
+  store.dispatch(actionCreators.authSiteStatusReceived(rawPixivVaultStatus(false)));
+  assert.notEqual(store.getState().auth.bySite, authorizedMap);
+  assert.deepEqual(projections.at(-1).authSites, ["pixiv"]);
+  assert.equal(projections.at(-1).proxy.severity, "required");
+  assert.equal(projections.length, 3, "每次权威 auth Map replacement 触发一次即时重算");
+  unsubscribe();
 });
 
 test("3A model：创建参数校验、0 选择禁用原因与显式搜索状态", () => {

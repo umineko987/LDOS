@@ -633,7 +633,7 @@ export function createCrawlView(context) {
         CRAWL_SITE_DEFINITIONS.find((item) => item.id === site)?.label || site);
       notices.push(createElement("section", { className: "crawl-precondition" }, [
         createStatusBadge("warning", `待授权：${labels.join("、")}`),
-        createElement("p", { text: "启用的来源需要先完成授权。" }),
+        createElement("p", { text: "启用或已选的来源需要先完成授权。" }),
         button("open-vault", "打开授权管理", { small: true }),
       ]));
     }

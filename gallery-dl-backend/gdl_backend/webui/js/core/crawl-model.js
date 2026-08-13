@@ -521,10 +521,14 @@ export function validateCrawlDraft({
   return validationResult();
 }
 
-function effectiveProxyModes(sourceDrafts, globalMode) {
+function effectiveProxyModes(sourceDrafts, globalMode, relevantSites = null) {
   const modes = [];
   for (const source of Array.isArray(sourceDrafts) ? sourceDrafts : []) {
-    if (!source?.enabled || !SITE_IDS.has(source.site)) continue;
+    if (!SITE_IDS.has(source?.site)) continue;
+    const relevant = relevantSites instanceof Set
+      ? relevantSites.has(source.site)
+      : Boolean(source.enabled);
+    if (!relevant) continue;
     const mode = source.proxyMode || globalMode;
     if (PROXY_MODES.has(mode)) modes.push(mode);
   }
@@ -545,10 +549,11 @@ export function deriveCrawlPreconditions({
       .filter((source) => source?.addresses?.some((candidate) => candidate.selected))
       .map((source) => source.site),
   );
-  const crawlModes = (Array.isArray(sourceDrafts) ? sourceDrafts : [])
-    .filter((source) => source?.enabled && (!selectedSites.size || selectedSites.has(source.site)))
-    .map((source) => source.proxyMode || crawlProxyMode)
-    .filter((mode) => PROXY_MODES.has(mode));
+  const crawlModes = effectiveProxyModes(
+    sourceDrafts,
+    crawlProxyMode,
+    selectedSites.size ? selectedSites : null,
+  );
   const modes = [...searchModes, ...crawlModes];
   const requiresProxy = modes.includes("required");
   const prefersProxy = modes.includes("prefer");
@@ -581,19 +586,18 @@ export function deriveCrawlPreconditions({
     });
   }
 
-  const enabledSites = new Set(
-    (Array.isArray(sourceDrafts) ? sourceDrafts : [])
-      .filter((source) => source?.enabled)
-      .map((source) => source.site),
-  );
+  const relevantAuthSites = new Set(selectedSites);
+  for (const source of Array.isArray(sourceDrafts) ? sourceDrafts : []) {
+    if (source?.enabled && SITE_IDS.has(source.site)) relevantAuthSites.add(source.site);
+  }
   const authSites = [];
   for (const site of ["twitter", "pixiv", "exhentai"]) {
-    if (!enabledSites.has(site)) continue;
+    if (!relevantAuthSites.has(site)) continue;
     const sourceAuth = (Array.isArray(crawlSources) ? crawlSources : []).find((source) => source.site === site)?.auth;
-    const vaultAuth = authBySite instanceof Map ? authBySite.get(site) : null;
-    const needsAuthorization = sourceAuth?.known
-      ? !sourceAuth.authorized && sourceAuth.state === "required"
-      : Boolean(vaultAuth && !vaultAuth.authorized);
+    const hasVaultAuth = authBySite instanceof Map && authBySite.has(site);
+    const needsAuthorization = hasVaultAuth
+      ? !authBySite.get(site)?.authorized
+      : Boolean(sourceAuth?.known && !sourceAuth.authorized && sourceAuth.state === "required");
     if (needsAuthorization) authSites.push(site);
   }
   return Object.freeze({ proxy, authSites: Object.freeze(authSites) });
