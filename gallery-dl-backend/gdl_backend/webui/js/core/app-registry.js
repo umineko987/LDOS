@@ -6,6 +6,7 @@ import reviewApplication from "../apps/review.js";
 import policyApplication from "../apps/policy.js";
 import diagnosticsApplication from "../apps/diagnostics.js";
 import personalizationApplication from "../apps/personalization.js";
+import galleryApplication from "../apps/gallery.js";
 import { createPlaceholderApplication } from "../apps/placeholder.js";
 import {
   applicationDefinitions,
@@ -23,7 +24,7 @@ const controllers = [
   ["policy", policyApplication],
   ["diagnostics", diagnosticsApplication],
   ["personalization", personalizationApplication],
-  ["gallery", createPlaceholderApplication("浏览和搜索已下载的图片。")],
+  ["gallery", galleryApplication],
   ["schedule", createPlaceholderApplication("按计划自动启动采集任务。")],
   ["export", createPlaceholderApplication("将审核后的图片整理并导出为数据集。")],
 ];
