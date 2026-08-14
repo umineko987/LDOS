@@ -9,15 +9,26 @@ export const MOTION_LIMITATION_MESSAGE =
   "已开启界面动效，但系统“减少动态效果”设置会限制部分效果。";
 
 export const PERSONALIZATION_SCENE_CHOICES = Object.freeze([
-  Object.freeze({ id: "graphite", label: "石墨", description: "深墨石墨与冷灰环境光。" }),
-  Object.freeze({ id: "slate", label: "岩灰", description: "岩灰基底与柔和侧向光。" }),
-  Object.freeze({ id: "deep-ocean", label: "深海", description: "深海蓝黑与远处冷光。" }),
-  Object.freeze({ id: "forest", label: "深林", description: "墨绿夜色与低位环境光。" }),
-  Object.freeze({ id: "plum-gray", label: "灰梅", description: "灰梅夜色与克制暖光。" }),
-  Object.freeze({ id: "warm-paper", label: "暖纸", description: "暖灰夜色与柔和灯光。" }),
+  Object.freeze({ id: "graphite", label: "夜航石墨", description: "右上月光、左下深蓝与中央微金远光。" }),
+  Object.freeze({ id: "slate", label: "月岩", description: "右上冷灰蓝与左下墨蓝光井。" }),
+  Object.freeze({ id: "deep-ocean", label: "深海", description: "右上海蓝、左下深青与微金远光。" }),
+  Object.freeze({ id: "forest", label: "深林", description: "右上柔绿、左下墨绿与中央微金光。" }),
+  Object.freeze({ id: "plum-gray", label: "雾褐", description: "右上暖灰、左下深褐与克制冷月光。" }),
+  Object.freeze({ id: "warm-paper", label: "暖夜", description: "右上琥珀、左下深棕与克制月光。" }),
 ]);
 
 const STATUS_KINDS = new Set(["clean", "dirty", "saving", "success", "error"]);
+
+function choiceStateLabel(selected, current) {
+  if (selected && current) return "已选择 · 当前应用";
+  if (selected) return "已选择";
+  if (current) return "当前应用";
+  return "";
+}
+
+function sceneCanvasClass(sceneId) {
+  return `personalization-scene-canvas desktop-wallpaper--${sceneId}`;
+}
 
 export function deriveMotionLimitationState(userMode, motionState) {
   if (userMode !== "on" && userMode !== "off") {
@@ -30,27 +41,46 @@ export function deriveMotionLimitationState(userMode, motionState) {
   });
 }
 
-function createRadioChoice({ group, value, label, description = "", datasetName }) {
+function createRadioChoice({
+  group,
+  value,
+  label,
+  description = "",
+  datasetName,
+  scenePreview = false,
+}) {
   const id = `personalization-${group}-${value}`;
   const descriptionId = description ? `${id}-description` : null;
+  const stateId = `${id}-state`;
   const input = createElement("input", {
     attributes: {
       id,
       type: "radio",
       name: `personalization-${group}`,
       value,
-      "aria-describedby": descriptionId,
+      "aria-describedby": [descriptionId, stateId].filter(Boolean).join(" "),
     },
     dataset: { [datasetName]: value },
   });
+  const sceneCanvas = scenePreview
+    ? createElement("span", {
+      className: sceneCanvasClass(value),
+      attributes: { "aria-hidden": "true" },
+    })
+    : null;
+  const scenePreviewElement = sceneCanvas
+    ? createElement("span", {
+      className: "personalization-choice__scene-preview",
+      attributes: { "aria-hidden": "true" },
+    }, [sceneCanvas])
+    : null;
   const selection = createElement("span", {
     className: "personalization-choice__selection",
-    attributes: { "aria-hidden": "true" },
+    attributes: { id: stateId },
   });
-  const children = [
-    input,
-    createElement("strong", { text: label }),
-  ];
+  const children = [input];
+  if (scenePreviewElement) children.push(scenePreviewElement);
+  children.push(createElement("strong", { text: label }));
   if (description) {
     children.push(createElement("span", {
       className: "personalization-choice__description",
@@ -59,14 +89,15 @@ function createRadioChoice({ group, value, label, description = "", datasetName 
     }));
   }
   children.push(selection);
-  return Object.freeze({
-    input,
-    selection,
-    element: createElement("label", {
-      className: `personalization-choice personalization-${group}-choice`,
-      attributes: { for: id },
-    }, children),
-  });
+  const element = createElement("label", {
+    className: `personalization-choice personalization-${group}-choice`,
+    attributes: { for: id },
+    dataset: {
+      personalizationSelected: "false",
+      personalizationCurrent: "false",
+    },
+  }, children);
+  return Object.freeze({ input, sceneCanvas, selection, element });
 }
 
 function createColumn(index, title, description, content, modifier = "") {
@@ -110,6 +141,7 @@ export function createPersonalizationView({ root, app }) {
       label: choice.label,
       description: choice.description,
       datasetName: "personalizationScene",
+      scenePreview: true,
     }),
   ]));
   const motionChoices = new Map([
@@ -129,17 +161,22 @@ export function createPersonalizationView({ root, app }) {
     })],
   ]);
 
+  const previewSceneCanvas = createElement("span", {
+    className: sceneCanvasClass(PERSONALIZATION_DEFAULTS.wallpaperColor),
+    attributes: { "aria-hidden": "true" },
+  });
   const previewDesktop = createElement("div", {
     className: "personalization-preview-desktop",
     attributes: {
       role: "img",
-      "aria-label": "夜航玻璃桌面只读预览",
+      "aria-label": "夜航玻璃桌面只读预览；场景、玻璃和动效均不可在预览内编辑",
     },
     dataset: {
       personalizationScene: PERSONALIZATION_DEFAULTS.wallpaperColor,
       personalizationMotion: PERSONALIZATION_DEFAULTS.animations,
     },
   }, [
+    previewSceneCanvas,
     createElement("div", { className: "personalization-preview-menu" }, [
       createElement("strong", { text: "ImageWeave" }),
       createElement("span", { text: "夜航" }),
@@ -287,7 +324,7 @@ export function createPersonalizationView({ root, app }) {
     }),
   ]);
 
-  root.className = "personalization-app";
+  root.className = "app-view personalization-app";
   root.setAttribute("aria-labelledby", titleId);
   root.replaceChildren(header, form);
 
@@ -299,16 +336,23 @@ export function createPersonalizationView({ root, app }) {
     latestState = state;
     for (const [value, choice] of sceneChoices) {
       const selected = value === state.draft.wallpaperColor;
+      const current = value === state.committed.wallpaperColor;
       choice.input.checked = selected;
-      choice.selection.textContent = selected ? "当前" : "";
+      choice.element.dataset.personalizationSelected = String(selected);
+      choice.element.dataset.personalizationCurrent = String(current);
+      choice.selection.textContent = choiceStateLabel(selected, current);
     }
     for (const [value, choice] of motionChoices) {
       const selected = value === state.draft.animations;
+      const current = value === state.committed.animations;
       choice.input.checked = selected;
-      choice.selection.textContent = selected ? "当前" : "";
+      choice.element.dataset.personalizationSelected = String(selected);
+      choice.element.dataset.personalizationCurrent = String(current);
+      choice.selection.textContent = choiceStateLabel(selected, current);
     }
 
     previewDesktop.dataset.personalizationScene = preview.scene.id;
+    previewSceneCanvas.className = sceneCanvasClass(preview.scene.id);
     previewDesktop.dataset.personalizationMotion = preview.motion.statusId;
     previewSceneFact.textContent = `场景：${preview.scene.label}（${preview.scene.description}）`;
     previewToneFact.textContent = `外观：${preview.appearance.toneLabel}；${preview.appearance.surfaceLabel}`;
@@ -352,10 +396,20 @@ export function createPersonalizationView({ root, app }) {
       sceneInputs: Object.freeze(Object.fromEntries(
         [...sceneChoices].map(([value, choice]) => [value, choice.input]),
       )),
+      sceneChoiceElements: Object.freeze(Object.fromEntries(
+        [...sceneChoices].map(([value, choice]) => [value, choice.element]),
+      )),
+      scenePreviewCanvases: Object.freeze(Object.fromEntries(
+        [...sceneChoices].map(([value, choice]) => [value, choice.sceneCanvas]),
+      )),
       motionInputs: Object.freeze(Object.fromEntries(
         [...motionChoices].map(([value, choice]) => [value, choice.input]),
       )),
+      motionChoiceElements: Object.freeze(Object.fromEntries(
+        [...motionChoices].map(([value, choice]) => [value, choice.element]),
+      )),
       previewDesktop,
+      previewSceneCanvas,
       previewSceneFact,
       previewToneFact,
       previewMotionFact,

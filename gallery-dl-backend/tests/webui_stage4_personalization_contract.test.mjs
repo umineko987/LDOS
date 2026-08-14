@@ -33,7 +33,17 @@ const STORAGE_SOURCE = readWebui("js/core/wallpaper-storage.js");
 const MAIN_SOURCE = readWebui("js/main.js");
 const INDEX_SOURCE = readWebui("index.html");
 const CSS_SOURCE = readWebui("styles/apps/personalization.css");
+const CONTROLS_CSS_SOURCE = readWebui("styles/controls.css");
 const DESKTOP_CSS_SOURCE = readWebui("styles/desktop.css");
+
+function personalizationCssBlock(selector) {
+  const marker = `${selector} {`;
+  const start = CSS_SOURCE.indexOf(marker);
+  assert.notEqual(start, -1, selector);
+  const opening = CSS_SOURCE.indexOf("{", start);
+  const closing = CSS_SOURCE.indexOf("}", opening);
+  return CSS_SOURCE.slice(opening + 1, closing);
+}
 
 function state({ committed = {}, draft = {}, busy = false, systemReduced = false } = {}) {
   const committedPreferences = projectPersonalizationPreferences({
@@ -256,8 +266,23 @@ test("Personalization DOM：场景 / 动效 / 应用三栏且不存在任意颜�
       elements.workspaceTrack.children.map((column) => column.children[0].children[1].textContent),
       ["场景", "动效", "应用"],
     );
+    assert.equal(dom.root.className, "app-view personalization-app");
     assert.equal(Object.keys(elements.sceneInputs).length, 6);
+    assert.equal(Object.keys(elements.sceneChoiceElements).length, 6);
+    assert.equal(Object.keys(elements.scenePreviewCanvases).length, 6);
     assert.equal(Object.keys(elements.motionInputs).length, 2);
+    assert.deepEqual(
+      PERSONALIZATION_SCENE_CHOICES.map(({ label }) => label),
+      ["夜航石墨", "月岩", "深海", "深林", "雾褐", "暖夜"],
+    );
+    for (const choice of PERSONALIZATION_SCENE_CHOICES) {
+      assert.equal(elements.sceneInputs[choice.id].type, "radio");
+      assert.match(elements.sceneInputs[choice.id].getAttribute("aria-describedby"), /-state$/);
+      assert.match(
+        elements.scenePreviewCanvases[choice.id].className,
+        new RegExp(`desktop-wallpaper--${choice.id}$`),
+      );
+    }
     const all = dom.descendants(dom.root);
     assert.equal(all.filter((element) => ["color", "file"].includes(element.type)).length, 0);
     assert.equal(all.filter((element) => element.tagName === "FORM").length, 1);
@@ -267,6 +292,16 @@ test("Personalization DOM：场景 / 动效 / 应用三栏且不存在任意颜�
     view.renderState(previewState);
     assert.equal(elements.previewDesktop.dataset.personalizationScene, "deep-ocean");
     assert.equal(elements.previewDesktop.dataset.personalizationMotion, "off");
+    assert.match(elements.previewSceneCanvas.className, /desktop-wallpaper--deep-ocean$/);
+    assert.equal(elements.sceneInputs["deep-ocean"].checked, true);
+    assert.equal(elements.sceneChoiceElements["deep-ocean"].dataset.personalizationSelected, "true");
+    assert.equal(elements.sceneChoiceElements["deep-ocean"].dataset.personalizationCurrent, "false");
+    assert.match(elements.sceneInputs["deep-ocean"].parentElement.children.at(-1).textContent, /已选择/);
+    assert.equal(elements.sceneChoiceElements.graphite.dataset.personalizationSelected, "false");
+    assert.equal(elements.sceneChoiceElements.graphite.dataset.personalizationCurrent, "true");
+    assert.match(elements.sceneInputs.graphite.parentElement.children.at(-1).textContent, /当前应用/);
+    assert.equal(elements.motionChoiceElements.off.dataset.personalizationSelected, "true");
+    assert.equal(elements.motionChoiceElements.on.dataset.personalizationCurrent, "true");
     assert.match(elements.previewSceneFact.textContent, /深海/);
     assert.match(elements.previewToneFact.textContent, /深色夜航玻璃/);
     assert.deepEqual(view.readDraft(previewState.draft), previewState.draft);
@@ -278,20 +313,134 @@ test("Personalization DOM：场景 / 动效 / 应用三栏且不存在任意颜�
   }
 });
 
-test("Personalization CSS：横向三栏、独立纵滚与辅助功能路径保留", () => {
+test("Personalization CSS T7.5：三栏夜航玻璃、真实场景、扁平状态与 canonical a11y", () => {
   assert.match(CSS_SOURCE, /\.window-body:has\(> \.personalization-app\)\s*\{[^}]*padding\s*:\s*0[^}]*overflow\s*:\s*hidden/s);
-  assert.match(CSS_SOURCE, /\.personalization-app\s*\{[^}]*grid-template-rows\s*:\s*auto minmax\(0,\s*1fr\)[^}]*height\s*:\s*100%/s);
-  assert.match(CSS_SOURCE, /\.personalization-workspace\s*\{[^}]*overflow-x\s*:\s*auto[^}]*overflow-y\s*:\s*hidden/s);
-  assert.match(CSS_SOURCE, /\.personalization-workspace-track\s*\{[^}]*grid-template-columns\s*:[^;]*minmax[^;]*minmax[^;]*minmax[^;]*;[^}]*min-width\s*:\s*1120px/s);
-  assert.match(CSS_SOURCE, /\.personalization-column-scroll\s*\{[^}]*overflow-y\s*:\s*auto/s);
+  assert.match(CSS_SOURCE, /\.personalization-app\s*\{[^}]*grid-template-rows\s*:\s*auto minmax\(0,\s*1fr\)[^}]*height\s*:\s*100%[^}]*background\s*:\s*transparent/s);
+  const workspace = personalizationCssBlock(".personalization-workspace");
+  assert.match(workspace, /padding:\s*24px/);
+  assert.match(workspace, /overflow-x:\s*auto/);
+  assert.match(workspace, /overflow-y:\s*hidden/);
+  const track = personalizationCssBlock(".personalization-workspace-track");
+  assert.match(track, /grid-template-columns:[^;]*minmax[^;]*minmax[^;]*minmax/);
+  assert.match(track, /gap:\s*24px/);
+  assert.match(track, /min-width:\s*1120px/);
+  const column = personalizationCssBlock(".personalization-column");
+  assert.match(column, /border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-default\)/);
+  assert.match(column, /border-radius:\s*var\(--imageweave-radius-card\)/);
+  assert.match(column, /background:\s*var\(--imageweave-glass-surface-input\)/);
+  assert.match(column, /inset 0 1px 0/);
+  assert.match(column, /inset 0 -1px 0/);
+  assert.doesNotMatch(column, /backdrop-filter|var\(--imageweave-shadow-/);
+  assert.match(
+    personalizationCssBlock(".personalization-column:first-child,\n.personalization-column--apply"),
+    /background:\s*var\(--imageweave-glass-surface-secondary\)/,
+  );
+  const columnScroll = personalizationCssBlock(".personalization-column-scroll");
+  assert.match(columnScroll, /padding:\s*24px/);
+  assert.match(columnScroll, /overflow-y:\s*auto/);
   assert.match(CSS_SOURCE, /\.application-window\[data-maximized\] \.personalization-workspace-track\s*\{[^}]*min-width\s*:\s*100%/s);
-  assert.match(CSS_SOURCE, /min-height:\s*44px/);
+
+  const solidRefs = CSS_SOURCE.match(/--imageweave-[\w-]*-solid/g) || [];
+  assert.deepEqual(solidRefs, ["--imageweave-fallback-elevated-solid"]);
+  assert.doesNotMatch(CSS_SOURCE, /--imageweave-state-[\w-]*-surface/);
+  assert.doesNotMatch(
+    CSS_SOURCE,
+    /^\s*(?:-webkit-)?backdrop-filter\s*:(?![^\n]*\bnone\b)/m,
+  );
+  assert.doesNotMatch(CSS_SOURCE, /^\s*filter\s*:/m);
+  assert.doesNotMatch(CSS_SOURCE, /(?:border-(?:left|right):\s*[34]px|inset\s+[34]px\s+0(?:px)?\s+0)/);
+  assert.match(
+    CSS_SOURCE,
+    /\.personalization-choice,[\s\S]*?\.personalization-preview-fact\s*\{[\s\S]*?border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-weak\)[\s\S]*?border-radius:\s*var\(--imageweave-radius-control\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-weak\)[\s\S]*?box-shadow:\s*none[\s\S]*?transform:\s*none/,
+  );
+  const panel = personalizationCssBlock(".personalization-app .personalization-panel");
+  assert.match(panel, /border-bottom:[^;]*--imageweave-border-weak/);
+  assert.match(panel, /background:\s*transparent/);
+  assert.match(panel, /background-image:\s*none/);
+  assert.match(panel, /box-shadow:\s*none/);
+
+  // Every thumbnail and the read-only desktop consume the real desktop scene
+  // classes; Personalization CSS does not duplicate six arbitrary color maps.
+  assert.match(VIEW_SOURCE, /function sceneCanvasClass\(sceneId\)[\s\S]*desktop-wallpaper--\$\{sceneId\}/);
+  assert.match(VIEW_SOURCE, /scenePreview:\s*true/);
+  assert.match(VIEW_SOURCE, /previewSceneCanvas\.className\s*=\s*sceneCanvasClass\(preview\.scene\.id\)/);
+  assert.doesNotMatch(CSS_SOURCE, /personalization-preview-desktop\[data-personalization-scene=/);
+  assert.doesNotMatch(CSS_SOURCE, /#20242A|#384554|#20364A|#294039|#403341|#E7E1D6/i);
+  const sceneCanvas = personalizationCssBlock(".personalization-scene-canvas");
+  assert.match(sceneCanvas, /width:\s*1440px/);
+  assert.match(sceneCanvas, /height:\s*900px/);
+  assert.match(sceneCanvas, /scale\(0\.05\)/);
+  const scenePreview = personalizationCssBlock(".personalization-choice__scene-preview");
+  assert.match(scenePreview, /border-radius:\s*var\(--imageweave-radius-control\)/);
+  assert.match(scenePreview, /background:\s*var\(--imageweave-background-deepest\)/);
+  const previewDesktop = personalizationCssBlock(".personalization-preview-desktop");
+  assert.match(previewDesktop, /border-radius:\s*var\(--imageweave-radius-control\)/);
+  assert.doesNotMatch(previewDesktop, /var\(--imageweave-shadow-/);
+  assert.match(personalizationCssBlock(".personalization-preview-menu"), /--imageweave-glass-surface-secondary/);
+  assert.match(personalizationCssBlock(".personalization-preview-window"), /--imageweave-glass-surface-input/);
+
+  const radio = personalizationCssBlock('.personalization-choice input[type="radio"]');
+  assert.match(radio, /width:\s*20px/);
+  assert.match(radio, /height:\s*20px/);
+  assert.match(radio, /accent-color:\s*var\(--imageweave-accent\)/);
+  assert.match(CSS_SOURCE, /data-personalization-selected="true"[\s\S]*?data-personalization-current="true"[\s\S]*?border-color:\s*var\(--imageweave-border-focus\)/);
+  assert.match(personalizationCssBlock(".personalization-choice__selection:not(:empty)::before"), /content:\s*"◆"/);
+  const hover = personalizationCssBlock(".personalization-choice:hover:not(:has(input:disabled))");
+  assert.match(hover, /background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  assert.match(hover, /box-shadow:\s*none/);
+  assert.match(hover, /transform:\s*none/);
+
+  for (const [stateName, token] of [
+    ["clean", "success"],
+    ["dirty", "warning"],
+    ["saving", "running"],
+    ["success", "success"],
+    ["error", "danger"],
+  ]) {
+    assert.match(
+      CSS_SOURCE,
+      new RegExp(`data-personalization-status="${stateName}"[\\s\\S]*?--imageweave-state-${token}`),
+      stateName,
+    );
+  }
+  for (const marker of [
+    'content: "△ 未应用 · "',
+    'content: "▶ 保存中 · "',
+    'content: "✓ 完成 · "',
+    'content: "! 保存失败 · "',
+  ]) assert.match(CSS_SOURCE, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(
+    personalizationCssBlock('.personalization-save-status[data-personalization-status="error"]'),
+    /border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/,
+  );
+  assert.match(
+    CONTROLS_CSS_SOURCE,
+    /\.personalization-button\.personalization-button--primary[\s\S]*?border-color:\s*var\(--imageweave-accent\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-button\)/,
+  );
+  assert.doesNotMatch(CSS_SOURCE, /\.personalization-button--primary\s*\{[^}]*background/s);
+  assert.match(
+    personalizationCssBlock(".personalization-actions .personalization-button"),
+    /min-height:\s*var\(--imageweave-control-height\)/,
+  );
+
+  assert.doesNotMatch(CSS_SOURCE, /\b(?:100|120|150|180)ms\b/);
+  assert.match(CSS_SOURCE, /var\(--imageweave-transition-standard\)/);
+  assert.match(CSS_SOURCE, /@supports not \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)/);
+  assert.match(CSS_SOURCE, /background:\s*var\(--imageweave-fallback-elevated-solid\)/);
+  assert.match(CSS_SOURCE, /@media \(prefers-contrast: more\)/);
   assert.match(CSS_SOURCE, /@media \(forced-colors: active\)/);
-  assert.match(CSS_SOURCE, /CanvasText/);
-  assert.match(CSS_SOURCE, /ButtonFace/);
-  assert.match(CSS_SOURCE, /Highlight/);
-  assert.match(CSS_SOURCE, /@media \(prefers-reduced-motion: reduce\)/);
+  for (const expected of [
+    "CanvasText",
+    "ButtonFace",
+    "Highlight",
+    "background-image: none",
+    "box-shadow: none",
+    "backdrop-filter: none",
+  ]) assert.match(CSS_SOURCE, new RegExp(expected));
   assert.match(CSS_SOURCE, /:root\[data-motion="off"\]/);
+  assert.match(CSS_SOURCE, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.ok((CSS_SOURCE.match(/transition: none !important/g) || []).length >= 3);
+  assert.doesNotMatch(CSS_SOURCE, /@media\s*\(max-width\s*:/);
   assert.doesNotMatch(CSS_SOURCE, /desktop-wallpaper__(?:image|mask)|window-layer--opacity|personalization-(?:theme|image|mask|position)/i);
 });
 

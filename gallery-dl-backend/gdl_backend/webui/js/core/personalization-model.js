@@ -29,12 +29,12 @@ const OPTION_SETS = Object.freeze(Object.fromEntries(
 const PREFERENCE_KEY_SET = new Set(PERSONALIZATION_PREFERENCE_KEYS);
 const DANGEROUS_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const SCENE_LABELS = Object.freeze({
-  graphite: "石墨",
-  slate: "岩灰",
+  graphite: "夜航石墨",
+  slate: "月岩",
   "deep-ocean": "深海",
   forest: "深林",
-  "plum-gray": "灰梅",
-  "warm-paper": "暖纸",
+  "plum-gray": "雾褐",
+  "warm-paper": "暖夜",
 });
 
 function recordDescriptors(value) {

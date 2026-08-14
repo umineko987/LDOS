@@ -1141,13 +1141,375 @@ class WebUiModuleTests(unittest.TestCase):
         )
         self.assertIn("min-width: 1120px", personalization_css)
         self.assertIn("grid-template-columns: minmax", personalization_css)
-        self.assertIn("min-height: 44px", personalization_css)
+        self.assertIn(
+            "min-height: var(--imageweave-control-height)",
+            personalization_css,
+        )
         self.assertIn("@media (forced-colors: active)", personalization_css)
         self.assertIn("@media (prefers-reduced-motion: reduce)", personalization_css)
         self.assertIn(':root[data-motion="off"]', personalization_css)
         self.assertIn("CanvasText", personalization_css)
         self.assertIn("ButtonFace", personalization_css)
         self.assertIn("Highlight", personalization_css)
+
+    def test_personalization_t75_visual_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        css = (webui / "styles" / "apps" / "personalization.css").read_text(
+            encoding="utf-8"
+        )
+        controls = (webui / "styles" / "controls.css").read_text(
+            encoding="utf-8"
+        )
+        desktop = (webui / "styles" / "desktop.css").read_text(
+            encoding="utf-8"
+        )
+        view = (
+            webui / "js" / "components" / "personalization-view.js"
+        ).read_text(encoding="utf-8")
+        model = (
+            webui / "js" / "core" / "personalization-model.js"
+        ).read_text(encoding="utf-8")
+        controller = (
+            webui / "js" / "apps" / "personalization.js"
+        ).read_text(encoding="utf-8")
+        runtime = (webui / "js" / "core" / "personalization.js").read_text(
+            encoding="utf-8"
+        )
+        cleanup = (
+            webui / "js" / "core" / "wallpaper-storage.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str) -> str:
+            marker = f"{selector} {{"
+            start = css.find(marker)
+            self.assertNotEqual(start, -1, selector)
+            opening = css.find("{", start)
+            closing = css.find("}", opening)
+            self.assertNotEqual(closing, -1, selector)
+            return css[opening + 1 : closing]
+
+        # Three columns retain the desktop-only scroll ownership: the ordinary
+        # 800x560 window scrolls the track horizontally, maximized fits all
+        # columns, and each column owns only its vertical scroll.
+        workspace = css_block(".personalization-workspace")
+        for expected in (
+            "padding: 24px",
+            "overflow-x: auto",
+            "overflow-y: hidden",
+        ):
+            self.assertIn(expected, workspace)
+        track = css_block(".personalization-workspace-track")
+        self.assertGreaterEqual(track.count("minmax("), 3)
+        self.assertIn("gap: 24px", track)
+        self.assertIn("min-width: 1120px", track)
+        column_scroll = css_block(".personalization-column-scroll")
+        self.assertIn("padding: 24px", column_scroll)
+        self.assertIn("overflow-y: auto", column_scroll)
+        self.assertRegex(
+            css,
+            r"\.application-window\[data-maximized\] "
+            r"\.personalization-workspace-track\s*\{[^}]*"
+            r"min-width:\s*100%",
+        )
+        self.assertNotRegex(css, r"@media\s*\(max-width\s*:")
+
+        # Top-level columns are 5%-6%, 24px cards with complete 15% edges and
+        # only directional inset light. Internal panels are structural sections,
+        # while choices/facts/status are shadowless 4% rows.
+        column = css_block(".personalization-column")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-card)",
+            "background: var(--imageweave-glass-surface-input)",
+            "inset 0 1px 0",
+            "inset 0 -1px 0",
+        ):
+            self.assertIn(expected, column)
+        self.assertNotIn("backdrop-filter", column)
+        self.assertNotIn("var(--imageweave-shadow-", column)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-secondary)",
+            css_block(
+                ".personalization-column:first-child,\n"
+                ".personalization-column--apply"
+            ),
+        )
+        rows = css_block(
+            ".personalization-choice,\n"
+            ".personalization-motion-limit,\n"
+            ".personalization-save-status,\n"
+            ".personalization-preview-state,\n"
+            ".personalization-preview-fact"
+        )
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-weak)",
+            "border-radius: var(--imageweave-radius-control)",
+            "background: var(--imageweave-glass-surface-weak)",
+            "box-shadow: none",
+            "transform: none",
+        ):
+            self.assertIn(expected, rows)
+        panel = css_block(".personalization-app .personalization-panel")
+        for expected in (
+            "border-bottom",
+            "var(--imageweave-border-weak)",
+            "background: transparent",
+            "background-image: none",
+            "box-shadow: none",
+        ):
+            self.assertIn(expected, panel)
+
+        # The only *-solid token is the canonical capability fallback. No
+        # internal row creates a blur/filter layer, state tint, large shadow,
+        # one-sided marker or old quick transition.
+        self.assertEqual(
+            re.findall(r"--imageweave-[\w-]*-solid", css),
+            ["--imageweave-fallback-elevated-solid"],
+        )
+        self.assertNotRegex(css, r"--imageweave-state-[\w-]*-surface")
+        self.assertNotRegex(
+            css,
+            r"(?m)^\s*(?:-webkit-)?backdrop-filter\s*:"
+            r"(?![^\n]*\bnone\b)",
+        )
+        self.assertNotRegex(css, r"(?m)^\s*filter\s*:")
+        self.assertNotRegex(
+            css,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+        self.assertNotRegex(css, r"\b(?:100|120|150|180)ms\b")
+        self.assertIn("var(--imageweave-transition-standard)", css)
+
+        # Six controls and the large read-only preview reuse desktop.css as the
+        # sole visual scene source. The 1440x900 canvas scales that same radial
+        # composition instead of copying six arbitrary colors into app CSS.
+        labels = (
+            'graphite: "夜航石墨"',
+            'slate: "月岩"',
+            '"deep-ocean": "深海"',
+            'forest: "深林"',
+            '"plum-gray": "雾褐"',
+            '"warm-paper": "暖夜"',
+        )
+        for label in labels:
+            self.assertIn(label, model)
+        for label in (
+            'label: "夜航石墨"',
+            'label: "月岩"',
+            'label: "深海"',
+            'label: "深林"',
+            'label: "雾褐"',
+            'label: "暖夜"',
+        ):
+            self.assertIn(label, view)
+        for marker in (
+            "function sceneCanvasClass(sceneId)",
+            "desktop-wallpaper--${sceneId}",
+            "scenePreview: true",
+            "previewSceneCanvas.className = sceneCanvasClass(preview.scene.id)",
+            'root.className = "app-view personalization-app"',
+        ):
+            self.assertIn(marker, view)
+        self.assertNotRegex(
+            css,
+            r"personalization-preview-desktop\["
+            r"data-personalization-scene=",
+        )
+        self.assertNotRegex(
+            css,
+            r"#20242A|#384554|#20364A|#294039|#403341|#E7E1D6",
+        )
+        scene_canvas = css_block(".personalization-scene-canvas")
+        self.assertIn("width: 1440px", scene_canvas)
+        self.assertIn("height: 900px", scene_canvas)
+        self.assertIn("scale(0.05)", scene_canvas)
+        for scene in (
+            "graphite",
+            "slate",
+            "deep-ocean",
+            "forest",
+            "plum-gray",
+            "warm-paper",
+        ):
+            match = re.search(
+                rf"\.desktop-wallpaper--{re.escape(scene)}\s*\{{([^}}]+)\}}",
+                desktop,
+            )
+            self.assertIsNotNone(match, scene)
+            self.assertGreaterEqual(match.group(1).count("radial-gradient("), 2)
+        preview = css_block(".personalization-preview-desktop")
+        self.assertIn(
+            "border-radius: var(--imageweave-radius-control)", preview
+        )
+        self.assertNotIn("var(--imageweave-shadow-", preview)
+
+        # Native radios plus readable selected/current copy, a complete 35%
+        # edge and a champagne diamond carry state without color alone.
+        radio = css_block('.personalization-choice input[type="radio"]')
+        for expected in (
+            "width: 20px",
+            "height: 20px",
+            "accent-color: var(--imageweave-accent)",
+        ):
+            self.assertIn(expected, radio)
+        for marker in (
+            '"aria-describedby": [descriptionId, stateId]',
+            'personalizationSelected: "false"',
+            'personalizationCurrent: "false"',
+            'return "已选择 · 当前应用"',
+            'return "已选择"',
+            'return "当前应用"',
+        ):
+            self.assertIn(marker, view)
+        self.assertRegex(
+            css,
+            r'data-personalization-selected="true"[\s\S]*?'
+            r'data-personalization-current="true"[\s\S]*?'
+            r"border-color:\s*var\(--imageweave-border-focus\)",
+        )
+        self.assertIn(
+            'content: "◆"',
+            css_block(
+                ".personalization-choice__selection:not(:empty)::before"
+            ),
+        )
+        hover = css_block(
+            ".personalization-choice:hover:not(:has(input:disabled))"
+        )
+        for expected in (
+            "background: var(--imageweave-glass-surface-secondary)",
+            "box-shadow: none",
+            "transform: none",
+        ):
+            self.assertIn(expected, hover)
+
+        # Dirty/saving/success/error remain neutral 5% status rows. Shapes,
+        # text, full semantic borders and the T6 primary action are all present.
+        for state, token in (
+            ("clean", "success"),
+            ("dirty", "warning"),
+            ("saving", "running"),
+            ("success", "success"),
+            ("error", "danger"),
+        ):
+            self.assertRegex(
+                css,
+                rf'data-personalization-status="{state}"'
+                rf"[\s\S]*?--imageweave-state-{token}",
+                state,
+            )
+        for marker in (
+            'content: "△ 未应用 · "',
+            'content: "▶ 保存中 · "',
+            'content: "✓ 完成 · "',
+            'content: "! 保存失败 · "',
+        ):
+            self.assertIn(marker, css)
+        error = css_block(
+            '.personalization-save-status['
+            'data-personalization-status="error"]'
+        )
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            error,
+        )
+        self.assertRegex(
+            controls,
+            r"\.personalization-button\.personalization-button--primary"
+            r"[\s\S]*?border-color:\s*var\(--imageweave-accent\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-button\)",
+        )
+        self.assertNotRegex(
+            css,
+            r"\.personalization-button--primary\s*\{[^}]*background",
+        )
+        actions = css_block(".personalization-actions .personalization-button")
+        self.assertIn(
+            "min-height: var(--imageweave-control-height)", actions
+        )
+
+        # Canonical no-backdrop, contrast, forced-colors and both motion opt-outs
+        # are explicit; forced colors remove gradients, shadows and backdrop.
+        self.assertIn(
+            "@supports not ((-webkit-backdrop-filter: blur(1px)) or "
+            "(backdrop-filter: blur(1px)))",
+            css,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid)", css
+        )
+        self.assertIn("@media (prefers-contrast: more)", css)
+        self.assertIn("@media (forced-colors: active)", css)
+        for expected in (
+            "CanvasText",
+            "ButtonFace",
+            "Highlight",
+            "background-image: none",
+            "box-shadow: none",
+            "backdrop-filter: none",
+        ):
+            self.assertIn(expected, css)
+        self.assertIn(':root[data-motion="off"]', css)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", css)
+        self.assertGreaterEqual(css.count("transition: none !important"), 3)
+
+        # T7.5 changes only presentation/accessible scene semantics. T3's two
+        # fields, live preview, single-flight save/leave, lifecycle cleanup and
+        # delete-only best-effort migration boundaries stay explicit.
+        self.assertIn(
+            'export const PERSONALIZATION_PREFERENCE_KEYS = Object.freeze([\n'
+            '  "animations",\n  "wallpaperColor",\n]);',
+            model,
+        )
+        for marker in (
+            "personalization.preview(view.readDraft(current.draft))",
+            "await personalization.commit()",
+            "personalization.cancel()",
+            "discardRequest",
+            "beforeLeave()",
+            "beforeWindowHide(visibility)",
+            'globalThis.addEventListener?.("beforeunload"',
+            "invalidateViewOperations()",
+            "unsubscribe()",
+        ):
+            self.assertIn(marker, controller)
+        for marker in (
+            "projectPersonalizationPreferences(preferences)",
+            "writePersonalizationPreferences",
+            "preferencesToCommit",
+            "lifecycleVersion",
+            "applyScene(wallpaper, draft.wallpaperColor)",
+            "previewMotion(motion, draft.animations)",
+        ):
+            self.assertIn(marker, runtime)
+        self.assertEqual(cleanup.count(".delete("), 1)
+        for forbidden in (
+            ".get(",
+            ".put(",
+            "Blob",
+            "createObjectStore",
+            "deleteDatabase",
+        ):
+            self.assertNotIn(forbidden, cleanup)
+        combined = "\n".join((view, model, controller, runtime))
+        for forbidden in (
+            'type: "color"',
+            'type: "file"',
+            "createObjectURL",
+            "setProperty(",
+            "windowOpacity",
+            "themeAccent",
+            "themeSurface",
+            "/api/",
+            "innerHTML",
+        ):
+            self.assertNotIn(forbidden, combined)
 
     def test_glass_phase_one_visual_contract(self):
         backend_root = Path(__file__).resolve().parents[1]

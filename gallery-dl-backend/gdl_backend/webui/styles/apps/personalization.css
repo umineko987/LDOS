@@ -8,9 +8,12 @@
   grid-template-rows: auto minmax(0, 1fr);
   width: 100%;
   height: 100%;
+  max-width: none;
+  min-width: 0;
   min-height: 0;
+  margin: 0;
   color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-content-solid);
+  background: transparent;
 }
 
 .personalization-app h1,
@@ -18,35 +21,49 @@
 .personalization-app h3,
 .personalization-app p {
   margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.personalization-app h2 {
+  font-size: 1.125rem;
+  font-weight: 650;
+}
+
+.personalization-app h3,
+.personalization-fieldset > legend {
+  color: var(--imageweave-text-primary);
+  font-size: 1rem;
+  font-weight: 650;
 }
 
 .personalization-app-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 18px 22px;
-  border-bottom: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
-  background: var(--imageweave-surface-navigation-solid);
+  gap: 16px 24px;
+  min-width: 0;
+  padding: 16px 24px;
+  border-bottom: var(--imageweave-border-width) solid var(--imageweave-border-weak);
+  background: var(--imageweave-glass-surface-weak);
 }
 
 .personalization-app-header h1 {
-  font-size: 1.15rem;
+  font-size: 1.5rem;
+  font-weight: 650;
   line-height: 1.25;
 }
 
 .personalization-app-header .app-executable {
-  margin-top: 4px;
-  color: var(--imageweave-text-secondary);
-  font-family: var(--imageweave-font-mono);
-  font-size: 0.76rem;
+  margin: 0 0 4px;
 }
 
 .personalization-app-header .app-summary {
   max-width: 430px;
+  margin: 0;
   color: var(--imageweave-text-secondary);
-  font-size: 0.84rem;
-  line-height: 1.45;
+  font-size: 0.8125rem;
+  line-height: 1.5;
   text-align: right;
 }
 
@@ -58,24 +75,29 @@
 .personalization-workspace {
   width: 100%;
   height: 100%;
+  min-width: 0;
   min-height: 0;
+  padding: 24px;
   overflow-x: auto;
   overflow-y: hidden;
-  overscroll-behavior: contain;
+  overscroll-behavior-inline: contain;
   scrollbar-gutter: stable;
+  background: transparent;
 }
 
 .personalization-workspace:focus-visible {
   outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
-  outline-offset: -5px;
+  outline-offset: -4px;
 }
 
 .personalization-workspace-track {
   display: grid;
-  grid-template-columns: minmax(340px, 1fr) minmax(340px, 1fr) minmax(400px, 1.1fr);
+  grid-template-columns: minmax(330px, 0.94fr) minmax(320px, 0.9fr) minmax(420px, 1.2fr);
+  gap: 24px;
+  width: 100%;
   min-width: 1120px;
   height: 100%;
-  min-height: 0;
+  min-height: 100%;
 }
 
 .personalization-column {
@@ -83,188 +105,313 @@
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  border-right: var(--imageweave-border-width) solid var(--imageweave-separator);
-  background: var(--imageweave-surface-content-solid);
+  overflow: hidden;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-card);
+  background: var(--imageweave-glass-surface-input);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
+  transition:
+    background-color var(--imageweave-transition-standard),
+    border-color var(--imageweave-transition-standard),
+    box-shadow var(--imageweave-transition-standard);
 }
 
-.personalization-column:last-child {
-  border-right: 0;
+.personalization-column:first-child,
+.personalization-column--apply {
+  background: var(--imageweave-glass-surface-secondary);
 }
 
 .personalization-column-header {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px 10px;
-  padding: 18px 20px 14px;
-  border-bottom: var(--imageweave-border-width) solid var(--imageweave-separator);
-  background: var(--imageweave-surface-navigation-solid);
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  min-width: 0;
+  padding: 20px 24px 16px;
+  border-bottom: var(--imageweave-border-width) solid var(--imageweave-border-weak);
+  background: var(--imageweave-glass-surface-weak);
 }
 
 .personalization-column-header h2 {
   align-self: center;
-  font-size: 1rem;
 }
 
 .personalization-column-header > p:last-child {
   grid-column: 1 / -1;
+  max-width: 65ch;
+  margin-top: 4px;
   color: var(--imageweave-text-secondary);
-  font-size: 0.82rem;
-  line-height: 1.45;
+  font-size: 0.8125rem;
+  line-height: 1.5;
 }
 
 .personalization-column-index {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   place-items: center;
-  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
   border-radius: var(--imageweave-radius-pill);
   color: var(--imageweave-text-secondary);
+  background: var(--imageweave-glass-surface-weak);
   font-family: var(--imageweave-font-mono);
   font-size: 0.75rem;
+  font-weight: 700;
 }
 
 .personalization-column-scroll {
   display: grid;
   align-content: start;
-  gap: 16px;
+  gap: 24px;
+  min-width: 0;
   min-height: 0;
-  padding: 18px;
+  padding: 24px;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
-.personalization-panel,
-.personalization-choice,
-.personalization-save-status,
-.personalization-motion-limit,
-.personalization-preview-state,
-.personalization-preview-fact {
-  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
-  border-radius: var(--imageweave-radius-card);
-  background: var(--imageweave-surface-control-solid);
+.personalization-column-scroll:last-child {
+  padding-bottom: 32px;
 }
 
-.personalization-panel {
-  padding: 16px;
+.personalization-app .personalization-panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  margin: 0 0 24px;
+  padding: 0 0 24px;
+  border: 0;
+  border-bottom: var(--imageweave-border-width) solid var(--imageweave-border-weak);
+  border-radius: 0;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
 }
 
-.personalization-panel h3,
-.personalization-fieldset > legend {
-  color: var(--imageweave-text-primary);
-  font-size: 0.92rem;
-  font-weight: 700;
+.personalization-app .personalization-panel:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 
 .personalization-fieldset {
   min-width: 0;
-  margin: 0;
 }
 
 .personalization-fieldset > legend {
-  padding: 0 5px;
+  padding: 0;
 }
 
 .personalization-help {
-  margin-top: 7px !important;
   color: var(--imageweave-text-secondary);
-  font-size: 0.8rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
   line-height: 1.5;
 }
 
 .personalization-scene-options,
 .personalization-motion-options {
   display: grid;
-  gap: 10px;
-  margin-top: 14px;
+  gap: 8px;
+  margin-top: 4px;
 }
 
-.personalization-scene-options {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.personalization-choice,
+.personalization-motion-limit,
+.personalization-save-status,
+.personalization-preview-state,
+.personalization-preview-fact {
+  min-width: 0;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-weak);
+  border-radius: var(--imageweave-radius-control);
+  background: var(--imageweave-glass-surface-weak);
+  box-shadow: none;
+  transform: none;
+  transition:
+    color var(--imageweave-transition-standard),
+    background-color var(--imageweave-transition-standard),
+    border-color var(--imageweave-transition-standard),
+    box-shadow var(--imageweave-transition-standard);
 }
 
 .personalization-choice {
   position: relative;
   display: grid;
-  min-height: 74px;
-  padding: 12px 36px 12px 13px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-areas:
+    "control title"
+    "control description"
+    "control selection";
+  align-content: center;
+  align-items: center;
+  gap: 4px 12px;
+  min-height: 88px;
+  padding: 12px 16px;
+  color: var(--imageweave-text-primary);
   cursor: pointer;
-  transition:
-    border-color var(--imageweave-transition-standard),
-    background-color var(--imageweave-transition-standard),
-    box-shadow var(--imageweave-transition-standard);
 }
 
-.personalization-motion-choice {
-  min-height: 82px;
+.personalization-scene-choice {
+  grid-template-columns: 20px 72px minmax(0, 1fr);
+  grid-template-areas:
+    "control preview title"
+    "control preview description"
+    "control preview selection";
+  min-height: 98px;
 }
 
-.personalization-choice input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+.personalization-choice input[type="radio"] {
+  grid-area: control;
+  align-self: center;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--imageweave-accent);
+  cursor: pointer;
+  opacity: 1;
 }
 
 .personalization-choice strong {
-  align-self: center;
-  font-size: 0.88rem;
+  grid-area: title;
+  align-self: end;
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .personalization-choice__description {
-  margin-top: 4px;
+  grid-area: description;
+  min-width: 0;
   color: var(--imageweave-text-secondary);
   font-size: 0.75rem;
-  line-height: 1.4;
+  font-weight: 600;
+  line-height: 1.45;
 }
 
 .personalization-choice__selection {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  min-width: 20px;
+  grid-area: selection;
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
   min-height: 20px;
-  color: var(--imageweave-text-secondary);
-  font-size: 0.68rem;
-  line-height: 20px;
-  text-align: center;
+  color: var(--imageweave-accent-highlight);
+  font-size: 0.75rem;
+  font-weight: 750;
+  line-height: 1.35;
 }
 
-.personalization-choice:has(input:checked) {
-  border-color: var(--imageweave-border-strong);
-  background: var(--imageweave-surface-control-active);
-  box-shadow: var(--imageweave-shadow-control);
+.personalization-choice__selection:empty {
+  display: none;
+}
+
+.personalization-choice__selection:not(:empty)::before {
+  content: "◆";
+  margin-right: 6px;
+  color: var(--imageweave-accent);
+  font-size: 0.62rem;
+}
+
+.personalization-choice__scene-preview {
+  position: relative;
+  grid-area: preview;
+  display: block;
+  width: 72px;
+  height: 48px;
+  overflow: hidden;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-control);
+  background: var(--imageweave-background-deepest);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
+  pointer-events: none;
+}
+
+.personalization-scene-canvas {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  width: 1440px;
+  height: 900px;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.05);
+  transform-origin: center;
+}
+
+.personalization-choice:is(
+  [data-personalization-selected="true"],
+  [data-personalization-current="true"]
+) {
+  border-color: var(--imageweave-border-focus);
+}
+
+.personalization-choice[data-personalization-selected="true"] {
+  background: var(--imageweave-glass-surface-input);
 }
 
 .personalization-choice:hover:not(:has(input:disabled)) {
-  background: var(--imageweave-surface-control-hover);
+  border-color: var(--imageweave-border-default);
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow: none;
+  transform: none;
+}
+
+.personalization-choice:is(
+  [data-personalization-selected="true"],
+  [data-personalization-current="true"]
+):hover:not(:has(input:disabled)) {
+  border-color: var(--imageweave-border-focus);
+  background: var(--imageweave-glass-surface-input);
 }
 
 .personalization-choice:has(input:focus-visible) {
-  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
+  border-color: var(--imageweave-border-focus);
+  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-glow);
   outline-offset: 2px;
 }
 
+.personalization-choice input[type="radio"]:focus-visible {
+  outline: none;
+}
+
 .personalization-choice:has(input:disabled) {
+  border-color: var(--imageweave-state-disabled);
+  color: var(--imageweave-text-secondary);
+  background: var(--imageweave-glass-surface-weak);
   cursor: not-allowed;
-  filter: grayscale(0.35);
+}
+
+.personalization-choice input[type="radio"]:disabled {
+  cursor: not-allowed;
+  opacity: 1;
 }
 
 .personalization-motion-limit,
 .personalization-save-status,
 .personalization-preview-state,
 .personalization-preview-fact {
-  padding: 10px 12px;
-  font-size: 0.8rem;
-  line-height: 1.45;
+  padding: 12px 16px;
+  color: var(--imageweave-text-primary);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  line-height: 1.5;
 }
 
 .personalization-motion-limit {
-  margin-top: 12px !important;
+  margin-top: 4px;
+  border-color: var(--imageweave-state-warning);
+  background: var(--imageweave-glass-surface-secondary);
+}
+
+.personalization-motion-limit::before {
+  content: "△ 系统限制 · ";
   color: var(--imageweave-state-warning);
-  background: var(--imageweave-state-warning-surface-solid);
 }
 
 .personalization-motion-limit[hidden] {
@@ -274,40 +421,24 @@
 .personalization-preview-desktop {
   position: relative;
   min-height: 220px;
-  margin-top: 14px;
+  margin-top: 4px;
   overflow: hidden;
-  border: var(--imageweave-border-width) solid var(--imageweave-border-strong);
-  border-radius: var(--imageweave-radius-card);
-  background: #20242A;
-  box-shadow: var(--imageweave-shadow-card);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-control);
+  background: var(--imageweave-background-deepest);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
 }
 
-.personalization-preview-desktop[data-personalization-scene="graphite"] {
-  background: #20242A;
-}
-
-.personalization-preview-desktop[data-personalization-scene="slate"] {
-  background: #384554;
-}
-
-.personalization-preview-desktop[data-personalization-scene="deep-ocean"] {
-  background: #20364A;
-}
-
-.personalization-preview-desktop[data-personalization-scene="forest"] {
-  background: #294039;
-}
-
-.personalization-preview-desktop[data-personalization-scene="plum-gray"] {
-  background: #403341;
-}
-
-.personalization-preview-desktop[data-personalization-scene="warm-paper"] {
-  background: #E7E1D6;
+.personalization-preview-desktop > .personalization-scene-canvas {
+  z-index: 0;
+  transform: translate(-50%, -50%) scale(0.26);
 }
 
 .personalization-preview-menu {
   position: absolute;
+  z-index: 1;
   top: 0;
   right: 0;
   left: 0;
@@ -315,25 +446,32 @@
   align-items: center;
   justify-content: space-between;
   min-height: 30px;
-  padding: 0 10px;
-  color: #FFFFFF;
-  background: rgb(15 22 29 / 0.78);
-  font-size: 0.68rem;
+  padding: 0 12px;
+  border-bottom: var(--imageweave-border-width) solid var(--imageweave-border-weak);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-secondary);
+  font-size: 0.6875rem;
 }
 
 .personalization-preview-window {
   position: absolute;
+  z-index: 1;
   top: 48px;
   left: 50%;
   display: grid;
-  width: min(72%, 270px);
+  width: min(74%, 280px);
   min-height: 116px;
   padding: 38px 14px 14px;
-  border: 1px solid rgb(255 255 255 / 0.28);
-  border-radius: var(--imageweave-radius-card);
-  background: rgb(255 255 255 / 0.1);
-  box-shadow: var(--imageweave-shadow-card);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-control);
+  background: var(--imageweave-glass-surface-input);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    inset 0 -1px 0 rgb(2 6 16 / 0.32);
   transform: translateX(-50%);
+  transition:
+    background-color var(--imageweave-transition-standard),
+    border-color var(--imageweave-transition-standard);
 }
 
 .personalization-preview-window__title {
@@ -343,9 +481,10 @@
   left: 0;
   min-height: 28px;
   padding: 7px 10px;
-  border-bottom: 1px solid rgb(255 255 255 / 0.2);
-  color: #FFFFFF;
-  font-size: 0.68rem;
+  border-bottom: var(--imageweave-border-width) solid var(--imageweave-border-weak);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-weak);
+  font-size: 0.6875rem;
 }
 
 .personalization-preview-window__line {
@@ -353,7 +492,7 @@
   height: 8px;
   margin-top: 10px;
   border-radius: var(--imageweave-radius-pill);
-  background: var(--imageweave-glass-surface-button);
+  background: var(--imageweave-glass-surface-input);
 }
 
 .personalization-preview-window__line--short {
@@ -362,107 +501,173 @@
 
 .personalization-preview-dock {
   position: absolute;
+  z-index: 1;
   right: 0;
-  bottom: 9px;
+  bottom: 10px;
   left: 0;
   display: flex;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
 }
 
 .personalization-preview-dock span {
-  width: 23px;
-  height: 23px;
-  border: 1px solid rgb(255 255 255 / 0.28);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 0.12);
+  width: 24px;
+  height: 24px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-control);
+  background: var(--imageweave-glass-surface-input);
+  box-shadow: none;
 }
 
 .personalization-preview-facts {
   display: grid;
   gap: 8px;
-  margin-top: 12px;
 }
 
-.personalization-preview-state[data-personalization-preview-state="dirty"],
-.personalization-preview-state[data-personalization-preview-state="saving"],
-.personalization-save-status[data-personalization-status="dirty"],
-.personalization-save-status[data-personalization-status="saving"] {
-  color: var(--imageweave-state-warning);
-  background: var(--imageweave-state-warning-surface-solid);
+.personalization-preview-fact::before {
+  content: "◆ 事实 · ";
+  color: var(--imageweave-accent-highlight);
 }
 
-.personalization-save-status[data-personalization-status="error"] {
-  color: var(--imageweave-state-danger);
-  background: var(--imageweave-state-danger-surface-solid);
+.personalization-preview-state[data-personalization-preview-state="clean"] {
+  border-color: var(--imageweave-state-success);
+  background: var(--imageweave-glass-surface-secondary);
 }
 
-.personalization-save-status[data-personalization-status="success"] {
+.personalization-preview-state[data-personalization-preview-state="clean"]::before {
+  content: "✓ 当前预览 · ";
   color: var(--imageweave-state-success);
-  background: var(--imageweave-state-success-surface-solid);
+}
+
+.personalization-preview-state[data-personalization-preview-state="dirty"] {
+  border-color: var(--imageweave-state-warning);
+  background: var(--imageweave-glass-surface-secondary);
+}
+
+.personalization-preview-state[data-personalization-preview-state="dirty"]::before {
+  content: "△ 未应用 · ";
+  color: var(--imageweave-state-warning);
+}
+
+.personalization-preview-state[data-personalization-preview-state="saving"] {
+  border-color: var(--imageweave-state-running);
+  background: var(--imageweave-glass-surface-secondary);
+}
+
+.personalization-preview-state[data-personalization-preview-state="saving"]::before {
+  content: "▶ 保存中 · ";
+  color: var(--imageweave-state-running);
 }
 
 .personalization-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 2px;
 }
 
-.personalization-button {
-  min-width: 92px;
-  min-height: 44px;
-  padding: 9px 16px;
-  border: var(--imageweave-border-width) solid var(--imageweave-border-strong);
-  border-radius: var(--imageweave-radius-control);
-  color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-control-solid);
-  box-shadow: var(--imageweave-shadow-control);
-  font: inherit;
-  font-weight: 650;
-  cursor: pointer;
+.personalization-actions .personalization-button {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--imageweave-control-height);
 }
 
-.personalization-button--primary {
-  color: var(--imageweave-text-inverse);
-  background: var(--imageweave-accent);
-}
-
-.personalization-button:hover:not(:disabled) {
-  background: var(--imageweave-surface-control-hover);
-}
-
-.personalization-button:focus-visible {
-  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
-  outline-offset: 2px;
-}
-
-.personalization-button:disabled {
-  cursor: not-allowed;
-  filter: grayscale(0.45);
+.personalization-actions .personalization-button--primary {
+  grid-column: 1 / -1;
 }
 
 .personalization-save-status {
-  margin-top: 12px !important;
+  margin-top: 4px;
+  background: var(--imageweave-glass-surface-secondary);
+}
+
+.personalization-save-status[data-personalization-status="clean"] {
+  border-color: var(--imageweave-state-success);
+}
+
+.personalization-save-status[data-personalization-status="clean"]::before {
+  content: "✓ 已保存 · ";
+  color: var(--imageweave-state-success);
+}
+
+.personalization-save-status[data-personalization-status="dirty"] {
+  border-color: var(--imageweave-state-warning);
+}
+
+.personalization-save-status[data-personalization-status="dirty"]::before {
+  content: "△ 未应用 · ";
+  color: var(--imageweave-state-warning);
+}
+
+.personalization-save-status[data-personalization-status="saving"] {
+  border-color: var(--imageweave-state-running);
+}
+
+.personalization-save-status[data-personalization-status="saving"]::before {
+  content: "▶ 保存中 · ";
+  color: var(--imageweave-state-running);
+}
+
+.personalization-save-status[data-personalization-status="success"] {
+  border-color: var(--imageweave-state-success);
+}
+
+.personalization-save-status[data-personalization-status="success"]::before {
+  content: "✓ 完成 · ";
+  color: var(--imageweave-state-success);
+}
+
+.personalization-save-status[data-personalization-status="error"] {
+  border: var(--imageweave-border-strong-width) solid var(--imageweave-state-danger);
+  color: var(--imageweave-text-primary);
+}
+
+.personalization-save-status[data-personalization-status="error"]::before {
+  content: "! 保存失败 · ";
+  color: var(--imageweave-state-danger);
 }
 
 .application-window[data-maximized] .personalization-workspace-track {
   min-width: 100%;
+  grid-template-columns: minmax(290px, 0.94fr) minmax(280px, 0.9fr) minmax(390px, 1.2fr);
 }
 
 .application-window:not([data-maximized]) .personalization-workspace-track {
-  min-width: 1120px;
+  grid-template-columns: minmax(330px, 0.94fr) minmax(320px, 0.9fr) minmax(420px, 1.2fr);
 }
 
-:root[data-motion="off"] .personalization-choice,
-:root[data-motion="off"] .personalization-preview-window {
-  transition: none;
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .personalization-app-header,
+  .personalization-column {
+    background: var(--imageweave-fallback-elevated-solid);
+  }
+}
+
+:root[data-motion="off"] :is(
+  .personalization-column,
+  .personalization-choice,
+  .personalization-motion-limit,
+  .personalization-save-status,
+  .personalization-preview-state,
+  .personalization-preview-fact,
+  .personalization-preview-window
+) {
+  animation: none !important;
+  transition: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .personalization-choice,
-  .personalization-preview-window {
-    transition: none;
+  :is(
+    .personalization-column,
+    .personalization-choice,
+    .personalization-motion-limit,
+    .personalization-save-status,
+    .personalization-preview-state,
+    .personalization-preview-fact,
+    .personalization-preview-window
+  ) {
+    animation: none !important;
+    transition: none !important;
   }
 
   .personalization-workspace {
@@ -470,44 +675,148 @@
   }
 }
 
+@media (prefers-contrast: more) {
+  .personalization-column {
+    border-color: var(--imageweave-border-focus);
+  }
+
+  :is(
+    .personalization-choice,
+    .personalization-motion-limit,
+    .personalization-save-status,
+    .personalization-preview-state,
+    .personalization-preview-fact,
+    .personalization-preview-desktop,
+    .personalization-preview-window
+  ) {
+    border-color: var(--imageweave-border-default);
+  }
+
+  .personalization-column-header > p:last-child,
+  .personalization-help,
+  .personalization-choice__description {
+    color: var(--imageweave-text-primary);
+  }
+
+  .personalization-choice:is(
+    [data-personalization-selected="true"],
+    [data-personalization-current="true"]
+  ) {
+    border-color: var(--imageweave-border-focus);
+  }
+
+  .personalization-motion-limit,
+  .personalization-preview-state[data-personalization-preview-state="dirty"],
+  .personalization-save-status[data-personalization-status="dirty"] {
+    border-color: var(--imageweave-state-warning);
+  }
+
+  .personalization-preview-state[data-personalization-preview-state="saving"],
+  .personalization-save-status[data-personalization-status="saving"] {
+    border-color: var(--imageweave-state-running);
+  }
+
+  .personalization-preview-state[data-personalization-preview-state="clean"],
+  .personalization-save-status:is(
+    [data-personalization-status="clean"],
+    [data-personalization-status="success"]
+  ) {
+    border-color: var(--imageweave-state-success);
+  }
+
+  .personalization-save-status[data-personalization-status="error"] {
+    border-color: var(--imageweave-state-danger);
+  }
+}
+
 @media (forced-colors: active) {
   .personalization-app,
   .personalization-app-header,
+  .personalization-workspace,
+  .personalization-workspace-track,
   .personalization-column,
   .personalization-column-header,
-  .personalization-panel,
+  .personalization-column-scroll,
+  .personalization-app .personalization-panel,
+  .personalization-fieldset {
+    color: CanvasText;
+    border-color: CanvasText;
+    background: Canvas;
+    background-image: none;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
   .personalization-choice,
-  .personalization-save-status,
   .personalization-motion-limit,
+  .personalization-save-status,
   .personalization-preview-state,
   .personalization-preview-fact,
   .personalization-preview-desktop,
   .personalization-preview-menu,
   .personalization-preview-window,
+  .personalization-preview-window__title,
+  .personalization-preview-window__line,
   .personalization-preview-dock span,
-  .personalization-button {
-    border-color: CanvasText;
-    color: CanvasText;
-    background: Canvas;
+  .personalization-choice__scene-preview {
+    color: ButtonText;
+    border-color: ButtonText;
+    background: ButtonFace;
     background-image: none;
     box-shadow: none;
-    forced-color-adjust: auto;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
-  .personalization-button--primary {
-    color: ButtonText;
-    background: ButtonFace;
+  .personalization-scene-canvas {
+    display: none;
+    background: Canvas;
+    background-image: none;
   }
 
-  .personalization-choice:has(input:checked),
-  .personalization-choice:hover:not(:has(input:disabled)) {
-    color: HighlightText;
-    background: Highlight;
+  .personalization-choice:is(
+    [data-personalization-selected="true"],
+    [data-personalization-current="true"]
+  ) {
+    border: var(--imageweave-border-strong-width) solid Highlight;
+  }
+
+  .personalization-choice__selection,
+  .personalization-choice__selection:not(:empty)::before,
+  .personalization-preview-fact::before {
+    color: Highlight;
   }
 
   .personalization-choice:has(input:focus-visible),
-  .personalization-button:focus-visible,
   .personalization-workspace:focus-visible {
-    outline-color: Highlight;
+    outline: var(--imageweave-border-strong-width) solid Highlight;
+  }
+
+  .personalization-choice:has(input:disabled) {
+    border-color: GrayText;
+    color: GrayText;
+  }
+
+  .personalization-choice input[type="radio"] {
+    accent-color: Highlight;
+  }
+
+  .personalization-save-status[data-personalization-status="error"] {
+    border: var(--imageweave-border-strong-width) solid CanvasText;
+    color: CanvasText;
+  }
+
+  :is(
+    .personalization-column,
+    .personalization-choice,
+    .personalization-motion-limit,
+    .personalization-save-status,
+    .personalization-preview-state,
+    .personalization-preview-fact,
+    .personalization-preview-window
+  ) {
+    animation: none !important;
+    transition: none !important;
   }
 }
