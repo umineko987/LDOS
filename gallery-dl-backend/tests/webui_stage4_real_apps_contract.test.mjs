@@ -2639,7 +2639,19 @@ test("4B Vault controller：失败、confirm cancel、换站、deactivate/destro
   }
 });
 
-test("4B Vault DOM/CSS：固定三栏导航/材料/恢复布局，普通窗横滚、最大化独立纵滚且无移动单列", () => {
+test("4B CSS T7.3b：Vault 三栏低透明、状态非颜色、敏感控件复用 T6 且窗口独占 backdrop", () => {
+  const block = (selector) => {
+    const marker = `${selector} {`;
+    const start = VAULT_CSS_SOURCE.indexOf(marker);
+    assert.notEqual(start, -1, selector);
+    const opening = VAULT_CSS_SOURCE.indexOf("{", start);
+    const closing = VAULT_CSS_SOURCE.indexOf("}", opening);
+    return VAULT_CSS_SOURCE.slice(opening + 1, closing);
+  };
+
+  // Existing navigation/material/recovery semantics remain the sole layout
+  // owner. Normal windows scroll horizontally, maximized windows fit all three
+  // columns, and each column retains its independent vertical scroll owner.
   for (const contract of [
     /vault-workspace-track/,
     /className:\s*"vault-workspace"[\s\S]*tabindex:\s*"0"/,
@@ -2653,16 +2665,104 @@ test("4B Vault DOM/CSS：固定三栏导航/材料/恢复布局，普通窗横�
     /危险操作/,
   ]) assert.match(VAULT_DOM_SOURCE, contract);
   assert.match(VAULT_CSS_SOURCE, /\.window-body:has\(> \.vault-app\)/);
-  assert.match(VAULT_CSS_SOURCE, /\.vault-workspace\s*\{[^}]*overflow-x\s*:\s*auto/s);
-  assert.match(VAULT_CSS_SOURCE, /\.vault-workspace-track\s*\{[^}]*grid-template-columns\s*:[^;]*minmax[^;]*minmax[^;]*minmax[^;]*;/s);
-  assert.match(VAULT_CSS_SOURCE, /\.vault-workspace-track\s*\{[^}]*min-width\s*:\s*(?:1080|1100|1120|1140|1160)px/s);
-  assert.match(VAULT_CSS_SOURCE, /\.vault-column-scroll\s*\{[^}]*overflow-y\s*:\s*auto/s);
+  const workspace = block(".vault-workspace");
+  assert.match(workspace, /padding:\s*24px/);
+  assert.match(workspace, /overflow-x:\s*auto/);
+  assert.match(workspace, /overflow-y:\s*hidden/);
+  const track = block(".vault-workspace-track");
+  assert.match(track, /min-width:\s*1120px/);
+  assert.match(track, /gap:\s*24px/);
+  assert.ok((track.match(/minmax\(/g) || []).length >= 3);
   assert.match(VAULT_CSS_SOURCE, /\.application-window\[data-maximized\] \.vault-workspace-track\s*\{[^}]*min-width\s*:\s*100%/s);
-  assert.match(VAULT_CSS_SOURCE, /--imageweave-surface-content-solid/);
-  assert.match(VAULT_CSS_SOURCE, /forced-colors/);
-  assert.match(VAULT_CSS_SOURCE, /prefers-reduced-motion|data-motion/);
+  const column = block(".vault-column");
+  assert.match(column, /border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-default\)/);
+  assert.match(column, /border-radius:\s*var\(--imageweave-radius-card\)/);
+  assert.match(column, /background:\s*var\(--imageweave-glass-surface-input\)/);
+  assert.match(column, /inset 0 1px 0[\s\S]*inset 0 -1px 0/);
+  assert.doesNotMatch(column, /backdrop-filter|var\(--imageweave-shadow-/);
+  assert.match(block(".vault-column--navigation"), /background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  const columnScroll = block(".vault-column-scroll");
+  assert.match(columnScroll, /padding:\s*24px/);
+  assert.match(columnScroll, /overflow-y:\s*auto/);
+
+  // All normal Vault surfaces use canonical 4%-8% neutral glass. The only
+  // solid token is the capability fallback; facts/forms use 16px weak rows,
+  // no outer card shadow and no additional compositing layer.
+  const solidRefs = [...VAULT_CSS_SOURCE.matchAll(/--imageweave-[\w-]*-solid/g)].map((match) => match[0]);
+  assert.deepEqual(solidRefs, ["--imageweave-fallback-elevated-solid"]);
+  assert.doesNotMatch(VAULT_CSS_SOURCE, /--imageweave-state-[\w-]*-surface/);
+  assert.doesNotMatch(VAULT_CSS_SOURCE, /^\s*(?:-webkit-)?backdrop-filter\s*:(?![^\n]*\bnone\b)/m);
+  assert.doesNotMatch(VAULT_CSS_SOURCE, /^\s*filter\s*:/m);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-waiting-host,[\s\S]*?\.vault-definition-list > div\s*\{[\s\S]*?border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-weak\)[\s\S]*?border-radius:\s*var\(--imageweave-radius-control\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-weak\)[\s\S]*?box-shadow:\s*none/);
+  const flatPanel = block(".vault-app .vault-panel");
+  assert.match(flatPanel, /border-bottom:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-weak\)/);
+  assert.match(flatPanel, /background:\s*transparent/);
+  assert.match(flatPanel, /background-image:\s*none/);
+  assert.match(flatPanel, /box-shadow:\s*none/);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-definition-list dd[\s\S]*?color:\s*var\(--imageweave-text-code\)[\s\S]*?font-family:\s*var\(--imageweave-font-mono\)/);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-profile-status \.empty-state,[\s\S]*?background:\s*transparent[\s\S]*?box-shadow:\s*none/);
+
+  // pending/ready/error/expired-material proxies keep neutral fills and use
+  // complete semantic edges plus existing badge/text and explicit shaped copy.
+  const errorState = block('.vault-waiting-host[data-vault-workspace-state="error"]');
+  assert.match(errorState, /border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/);
+  assert.match(errorState, /background:\s*var\(--imageweave-glass-surface-default\)/);
+  for (const [state, token] of [
+    ["loading", "running"], ["authorizing", "running"], ["writing", "running"],
+    ["ready", "success"], ["authorized", "success"],
+    ["partial", "warning"], ["required", "warning"], ["error", "danger"],
+  ]) {
+    assert.match(VAULT_CSS_SOURCE, new RegExp(`data-vault-workspace-state="${state}"[\\s\\S]*?--imageweave-state-${token}`), state);
+  }
+  for (const [state, token] of [
+    ["ready", "success"], ["running", "running"], ["warning", "warning"],
+    ["error", "danger"], ["disabled", "disabled"],
+  ]) {
+    assert.match(VAULT_CSS_SOURCE, new RegExp(`data-site-state="${state}"[\\s\\S]*?--imageweave-state-${token}`), state);
+  }
+  assert.match(VAULT_CSS_SOURCE, /\.vault-site-nav-button\[aria-current="true"\]::after[\s\S]*?content:\s*"◆"/);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-operation-live::before[\s\S]*?content:\s*"◆"/);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-impact-note::before[\s\S]*?content:\s*"⚠ 影响 · "/);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-proof-note::before,[\s\S]*?content:\s*"◆ 状态说明 · "/);
+  const validation = block(".vault-field-error:not(:empty)");
+  assert.match(validation, /border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/);
+  assert.match(validation, /color:\s*var\(--imageweave-text-primary\)/);
+  assert.match(validation, /background:\s*var\(--imageweave-glass-surface-default\)/);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-danger-zone\s*\{[\s\S]*?border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  assert.doesNotMatch(VAULT_CSS_SOURCE, /(?:border-(?:left|right):\s*[34]px|inset\s+[34]px\s+0(?:px)?\s+0)/);
+  const kicker = block(".vault-column-kicker");
+  assert.match(kicker, /letter-spacing:\s*normal/);
+  assert.match(kicker, /text-transform:\s*none/);
+  assert.doesNotMatch(VAULT_CSS_SOURCE, /\b(?:100|120|150|180)ms\b/);
+
+  // Sensitive proxy input and all actions delegate appearance to T6. Local
+  // Vault CSS adds sizing only; invalid/disabled reasons and dangerous Dialog
+  // ownership retain full edges and readable text.
+  const secretInput = block(".vault-secret-input");
+  assert.doesNotMatch(secretInput, /background|border|box-shadow|color/);
+  assert.match(CONTROLS_CSS_SOURCE, /\.app-view :is\([\s\S]*?input\[type="text"\][\s\S]*?textarea[\s\S]*?background:\s*var\(--imageweave-glass-surface-input\)[\s\S]*?border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-default\)/);
+  assert.match(CONTROLS_CSS_SOURCE, /\.vault-button\.vault-button--primary,[\s\S]*?border-color:\s*var\(--imageweave-accent\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-button\)/);
+  assert.match(CONTROLS_CSS_SOURCE, /\.vault-button\.vault-button--dangerous,[\s\S]*?border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/);
+  assert.doesNotMatch(VAULT_CSS_SOURCE, /\.vault-button--primary|\.vault-button--dangerous/);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-site-nav-button:hover[\s\S]*?background:\s*var\(--imageweave-glass-surface-secondary\)[\s\S]*?transform:\s*none/);
+  assert.match(VAULT_CSS_SOURCE, /\.vault-site-card:hover,[\s\S]*?transform:\s*none/);
+
+  // Canonical no-backdrop, contrast, forced-colors and both motion opt-outs
+  // stay explicit. Forced colors remove every optical effect.
+  assert.match(VAULT_CSS_SOURCE, /@supports not \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)/);
+  assert.match(VAULT_CSS_SOURCE, /background:\s*var\(--imageweave-fallback-elevated-solid\)/);
+  assert.match(VAULT_CSS_SOURCE, /@media \(prefers-contrast: more\)/);
+  assert.match(VAULT_CSS_SOURCE, /@media \(forced-colors: active\)/);
+  assert.match(VAULT_CSS_SOURCE, /CanvasText/);
+  assert.match(VAULT_CSS_SOURCE, /ButtonFace/);
+  assert.match(VAULT_CSS_SOURCE, /Highlight/);
+  assert.match(VAULT_CSS_SOURCE, /background-image:\s*none/);
+  assert.match(VAULT_CSS_SOURCE, /box-shadow:\s*none/);
+  assert.match(VAULT_CSS_SOURCE, /backdrop-filter:\s*none/);
+  assert.match(VAULT_CSS_SOURCE, /:root\[data-motion="off"\]/);
+  assert.match(VAULT_CSS_SOURCE, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.ok((VAULT_CSS_SOURCE.match(/transition:\s*none !important/g) || []).length >= 2);
   assert.doesNotMatch(VAULT_CSS_SOURCE, /@media\s*\(max-width\s*:/);
-  assert.doesNotMatch(VAULT_CSS_SOURCE, /backdrop-filter/);
 });
 
 test("4B Vault focus/state：站点和 action 重绘保持稳定焦点，显式非颜色状态进入 aria-live", () => {

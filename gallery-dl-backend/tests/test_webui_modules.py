@@ -2644,6 +2644,370 @@ class WebUiModuleTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, combined)
 
+    def test_nocturne_vault_t73b_visual_and_security_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        vault = (
+            webui / "styles" / "apps" / "vault.css"
+        ).read_text(encoding="utf-8")
+        controls = (webui / "styles" / "controls.css").read_text(
+            encoding="utf-8"
+        )
+        controller = (
+            webui / "js" / "apps" / "vault.js"
+        ).read_text(encoding="utf-8")
+        view = (
+            webui / "js" / "components" / "vault-view.js"
+        ).read_text(encoding="utf-8")
+        dom = (
+            webui / "js" / "components" / "vault-dom.js"
+        ).read_text(encoding="utf-8")
+        model = (
+            webui / "js" / "core" / "vault-model.js"
+        ).read_text(encoding="utf-8")
+        store_state = (
+            webui / "js" / "core" / "store-state.js"
+        ).read_text(encoding="utf-8")
+        store_transition = (
+            webui / "js" / "core" / "store-business-transition.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str) -> str:
+            marker = f"{selector} {{"
+            start = vault.find(marker)
+            self.assertNotEqual(start, -1, selector)
+            opening = vault.find("{", start)
+            closing = vault.find("}", opening)
+            return vault[opening + 1 : closing]
+
+        # Existing navigation/material/recovery structure remains the layout
+        # owner: normal windows scroll horizontally, maximized windows fit the
+        # three columns, and each column owns its vertical scrolling.
+        workspace = css_block(".vault-workspace")
+        self.assertIn("padding: 24px", workspace)
+        self.assertIn("overflow-x: auto", workspace)
+        self.assertIn("overflow-y: hidden", workspace)
+        track = css_block(".vault-workspace-track")
+        self.assertIn("min-width: 1120px", track)
+        self.assertIn("gap: 24px", track)
+        self.assertGreaterEqual(track.count("minmax("), 3)
+        self.assertIn(
+            ".application-window[data-maximized] .vault-workspace-track",
+            vault,
+        )
+        self.assertIn("min-width: 100%", vault)
+        column = css_block(".vault-column")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-card)",
+            "background: var(--imageweave-glass-surface-input)",
+            "inset 0 1px 0",
+            "inset 0 -1px 0",
+        ):
+            self.assertIn(expected, column)
+        self.assertNotIn("backdrop-filter", column)
+        self.assertNotIn("var(--imageweave-shadow-", column)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-secondary)",
+            css_block(".vault-column--navigation"),
+        )
+        column_scroll = css_block(".vault-column-scroll")
+        self.assertIn("padding: 24px", column_scroll)
+        self.assertIn("overflow-y: auto", column_scroll)
+
+        # Normal surfaces are canonical 4%-8% neutral glass. Only the
+        # no-backdrop capability path may use a solid token. Rows/forms/facts
+        # use complete weak edges, 16px radii and no outer shadow/compositor.
+        solid_refs = re.findall(r"--imageweave-[\w-]*-solid", vault)
+        self.assertEqual(
+            solid_refs,
+            ["--imageweave-fallback-elevated-solid"],
+        )
+        self.assertNotRegex(vault, r"--imageweave-state-[\w-]*-surface")
+        self.assertNotRegex(
+            vault,
+            r"(?m)^\s*(?:-webkit-)?backdrop-filter\s*:"
+            r"(?![^\n]*\bnone\b)",
+        )
+        self.assertNotRegex(vault, r"(?m)^\s*filter\s*:")
+        self.assertRegex(
+            vault,
+            r"\.vault-waiting-host,[\s\S]*?"
+            r"\.vault-definition-list > div\s*\{"
+            r"[\s\S]*?border:\s*var\(--imageweave-border-width\)"
+            r" solid var\(--imageweave-border-weak\)"
+            r"[\s\S]*?border-radius:\s*"
+            r"var\(--imageweave-radius-control\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-weak\)"
+            r"[\s\S]*?box-shadow:\s*none",
+        )
+        flat_panel = css_block(".vault-app .vault-panel")
+        self.assertIn("border-bottom", flat_panel)
+        self.assertIn("var(--imageweave-border-weak)", flat_panel)
+        self.assertIn("background: transparent", flat_panel)
+        self.assertIn("background-image: none", flat_panel)
+        self.assertIn("box-shadow: none", flat_panel)
+        self.assertRegex(
+            vault,
+            r"\.vault-definition-list dd[\s\S]*?color:\s*"
+            r"var\(--imageweave-text-code\)"
+            r"[\s\S]*?font-family:\s*"
+            r"var\(--imageweave-font-mono\)",
+        )
+        self.assertRegex(
+            vault,
+            r"\.vault-profile-status \.empty-state,[\s\S]*?"
+            r"background:\s*transparent[\s\S]*?box-shadow:\s*none",
+        )
+
+        # Pending/ready/error/expired/material/proxy presentations retain the
+        # existing icon and readable text, complete semantic edges and neutral
+        # fills. No single-sided stripe or tracked uppercase kicker remains.
+        error_state = css_block(
+            '.vault-waiting-host[data-vault-workspace-state="error"]'
+        )
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            error_state,
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            error_state,
+        )
+        for state, token in (
+            ("loading", "running"),
+            ("authorizing", "running"),
+            ("writing", "running"),
+            ("ready", "success"),
+            ("authorized", "success"),
+            ("partial", "warning"),
+            ("required", "warning"),
+            ("error", "danger"),
+        ):
+            self.assertRegex(
+                vault,
+                rf'data-vault-workspace-state="{state}"'
+                rf"[\s\S]*?--imageweave-state-{token}",
+                state,
+            )
+        for state, token in (
+            ("ready", "success"),
+            ("running", "running"),
+            ("warning", "warning"),
+            ("error", "danger"),
+            ("disabled", "disabled"),
+        ):
+            self.assertRegex(
+                vault,
+                rf'data-site-state="{state}"'
+                rf"[\s\S]*?--imageweave-state-{token}",
+                state,
+            )
+        for marker in (
+            'content: "◆"',
+            'content: "⚠ 影响 · "',
+            'content: "◆ 状态说明 · "',
+            'content: "⚠ 输入无效 · "',
+            'content: "⚠ "',
+        ):
+            self.assertIn(marker, vault)
+        validation = css_block(".vault-field-error:not(:empty)")
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            validation,
+        )
+        self.assertIn("color: var(--imageweave-text-primary)", validation)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            validation,
+        )
+        self.assertRegex(
+            vault,
+            r"\.vault-danger-zone\s*\{[\s\S]*?"
+            r"border:\s*var\(--imageweave-border-strong-width\)"
+            r" solid var\(--imageweave-state-danger\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-secondary\)",
+        )
+        self.assertNotRegex(
+            vault,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+        kicker = css_block(".vault-column-kicker")
+        self.assertIn("letter-spacing: normal", kicker)
+        self.assertIn("text-transform: none", kicker)
+        self.assertNotRegex(vault, r"\b(?:100|120|150|180)ms\b")
+
+        # Sensitive authorization proxy input delegates its complete visual
+        # state to T6. Invalid/disabled help and dangerous actions retain high
+        # contrast, full edges and the existing Dialog confirmation owner.
+        secret_input = css_block(".vault-secret-input")
+        for forbidden in ("background", "border", "box-shadow", "color"):
+            self.assertNotIn(forbidden, secret_input)
+        self.assertRegex(
+            controls,
+            r"\.app-view :is\([\s\S]*?input\[type=\"text\"\]"
+            r"[\s\S]*?textarea[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-input\)"
+            r"[\s\S]*?border:\s*var\(--imageweave-border-width\)"
+            r" solid var\(--imageweave-border-default\)",
+        )
+        self.assertRegex(
+            controls,
+            r"\.vault-button\.vault-button--primary,[\s\S]*?"
+            r"border-color:\s*var\(--imageweave-accent\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-button\)",
+        )
+        self.assertRegex(
+            controls,
+            r"\.vault-button\.vault-button--dangerous,[\s\S]*?"
+            r"border:\s*var\(--imageweave-border-strong-width\)"
+            r" solid var\(--imageweave-state-danger\)",
+        )
+        self.assertNotIn(".vault-button--primary", vault)
+        self.assertNotIn(".vault-button--dangerous", vault)
+        self.assertRegex(
+            vault,
+            r"\.vault-site-nav-button:hover[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-secondary\)"
+            r"[\s\S]*?transform:\s*none",
+        )
+        self.assertRegex(
+            vault,
+            r"\.vault-site-card:hover,[\s\S]*?transform:\s*none",
+        )
+
+        # Canonical no-backdrop, contrast, forced-colors and both motion
+        # opt-outs remain explicit. Forced colors remove all optical effects.
+        self.assertIn(
+            "@supports not ((-webkit-backdrop-filter: blur(1px)) or "
+            "(backdrop-filter: blur(1px)))",
+            vault,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid)",
+            vault,
+        )
+        self.assertIn("@media (prefers-contrast: more)", vault)
+        self.assertIn("@media (forced-colors: active)", vault)
+        for expected in (
+            "CanvasText",
+            "ButtonFace",
+            "Highlight",
+            "background-image: none",
+            "box-shadow: none",
+            "backdrop-filter: none",
+        ):
+            self.assertIn(expected, vault)
+        self.assertIn(':root[data-motion="off"]', vault)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", vault)
+        self.assertGreaterEqual(vault.count("transition: none !important"), 2)
+        self.assertNotRegex(vault, r"@media\s*\(max-width\s*:")
+
+        # Visual-only production change: endpoint/query/payload ownership, the
+        # 800ms authorization session cadence, opaque runtime-only reference,
+        # full+site authority reads, request generations, immediate secret
+        # clearing, Dialog and lifecycle abort boundaries remain unchanged.
+        for marker in (
+            'status: "/api/v1/auth"',
+            'proxy: "/api/v1/auth/proxy"',
+            'browserProfile: "/api/v1/auth/browser-profile"',
+            'pixivOAuthStart: "/api/v1/auth/pixiv/oauth/start"',
+            'pixivOAuthSession: "/api/v1/auth/pixiv/oauth/session"',
+            'AUTHORIZATION_POLL_KEY = "vault.authorization"',
+            "AUTHORIZATION_POLL_INTERVAL_MS = 800",
+            "alwaysFocusRate: true",
+            "immediate: false",
+            "resume: \"immediate\"",
+            'requestGate.beginRead("status")',
+            'requestGate.beginRead("site")',
+            'requestGate.beginRead("session")',
+            "requestGate.beginWrite()",
+            "requestGate.advanceLifecycle()",
+            "activeOperationController?.abort()",
+            "abortRead(statusRead)",
+            "abortRead(siteRead)",
+            "abortRead(sessionRead)",
+            "stopAuthorizationPolling()",
+            "Promise.allSettled([",
+            "readStatus(null, { replace: true, report: false })",
+            "readSite(reference.site, null, { report: false })",
+            "view.clearSensitiveInputs()",
+            'input.value = ""',
+            "capturedPayload = null",
+            "dialogs.destroy()",
+        ):
+            self.assertIn(marker, controller)
+        for marker in (
+            "SESSION_ID_PATTERN = /^[0-9a-f]{32}$/",
+            "extractVaultSessionReference",
+            "sanitizeVaultStatus",
+            "sanitizeVaultSiteStatus",
+            "validateVaultSnapshot",
+            "secrets_exposed !== false",
+            "credentialsRedacted",
+            "displayEndpoint",
+            "SESSION_VIEW_KEYS",
+            "PROXY_VIEW_KEYS",
+        ):
+            self.assertIn(marker, model)
+        self.assertIn(
+            "action(ACTION_TYPES.AUTH_STATUS_RECEIVED, sanitizeVaultStatus(status))",
+            store_state,
+        )
+        self.assertIn(
+            "action(ACTION_TYPES.AUTH_SITE_STATUS_RECEIVED, "
+            "sanitizeVaultSiteStatus(status))",
+            store_state,
+        )
+        self.assertIn(
+            "const snapshot = validateVaultSnapshot(action.payload)",
+            store_transition,
+        )
+        self.assertIn(
+            "const site = validateVaultSiteViewModel(action.payload)",
+            store_transition,
+        )
+        for marker in (
+            'className: "vault-workspace"',
+            'tabindex: "0"',
+            'autocomplete: "off"',
+            "vaultSecret",
+            '"aria-errormessage": "vault-proxy-validation"',
+            'role: "alert"',
+            'role: "status"',
+            '"aria-live": "polite"',
+            '"aria-live": "assertive"',
+        ):
+            self.assertIn(marker, dom)
+        self.assertIn("vaultFocusToken", view)
+        self.assertIn("restoreVaultFocus", view)
+        self.assertIn("deriveVaultWorkspacePresentation", view)
+        self.assertRegex(
+            view + dom,
+            r"(?s)^(?!.*(?:sessionId|session_id|authorization_url)).*$",
+        )
+        combined = "\n".join((controller, view, dom, model))
+        for forbidden in (
+            "fetch(",
+            "globalThis.fetch",
+            "XMLHttpRequest",
+            "localStorage",
+            "sessionStorage",
+            "indexedDB",
+            "console.",
+            "innerHTML",
+            "tests/fixtures",
+            "fixtures/webui",
+        ):
+            self.assertNotIn(forbidden, combined)
+
     def test_window_manager_t12_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
         webui = backend_root / "gdl_backend" / "webui"
