@@ -1450,3 +1450,15 @@ git diff --check
 - 覆盖率：独立 red 目标按约束不计入正式 coverage；既有 runner 指标与 T0 相同且 gate PASS。
 - 浏览器验收：T1 没有生产视觉变化，也没有新增浏览器验收；继续使用 `/tmp/imageweave-nocturne-t0/` 的四张基线截图。
 - 剩余风险：10 个 red 分组必须在 T2–T9 逐步转绿；T2 首先承担安全 SVG、同源静态提供与 wheel package-data 风险，不能借机改变 FastAPI 业务路由。目标契约在 T9 全绿前保持 standalone；旧 Python 静态断言仍描述当前实现，需在对应实现阶段而非 T1 提前改写。
+
+### 实施记录：T2 SVG 噪点静态资源与后端打包通道
+
+- 完成日期：2026-08-14
+- 阶段：T2 SVG 噪点静态资源与后端打包通道
+- 提交：见本阶段提交
+- 行为变化：新增固定 `256×256`、灰度、可平铺的本地 `feTurbulence` 装饰资源，并把 `webui/assets/*.svg` 纳入 setuptools package-data；未修改 `app.py`、业务 API、依赖、版本或 requirements 锁。T2 只贯通资源与交付通道，不在 HTML/CSS 中视觉挂载；全视口单层挂载、`pointer-events: none`、forced-colors 移除和最终 `2.5%` opacity 明确留给 T4。
+- 测试：`tests.test_api` 新增正式 `create_app`/`StaticFiles` 同源 HTTP、SVG MIME、内部结构及脚本/事件/外链/data URI/动态内容禁止项，72/72 pass；`tests.test_webui_modules` 16/16 pass；固定 Node v24.13.0 正式 runner 311/311 pass。
+- 验证：`uv 0.12.3 build --wheel` 在 `/tmp/imageweave-nocturne-t2/` 的隔离源码/缓存/输出中成功；wheel 的 104 个 WebUI 成员与构建源精确一致，`gdl_backend/webui/assets/noise.svg` 恰好 1 份、497 bytes、SHA-256 `9a525197b6bc88f7a64d8746a50f04aa64f29f08d06d57c3e69514b6db083529`，11/11 应用 controller 与 CSS 仍在。工作树和 wheel 解包后的正式 app 请求均返回 `200`、`Content-Type: image/svg+xml` 且响应字节一致；前后 OpenAPI 50 paths/61 operations、FastAPI 61 条业务 route 及唯一 `/ui` StaticFiles mount 快照完全一致。
+- 覆盖率：正式 runner 指标保持 core line/branch/function `86.614746% / 77.481177% / 90.622098%`、apps `74.321196% / 65.497630% / 67.821782%`、components `32.515091% / 76.374443% / 63.218391%`，全部通过既有 gate。
+- 浏览器验收：T2 没有可见挂载或视觉变化，按阶段边界不新增截图；同源 FastAPI 交付和 wheel 解包运行时已实际请求验收。
+- 剩余风险：standalone 夜航契约仍为 6 pass/10 个预期 red；噪点分组从“资源缺失 + 0 引用 + 0 CSS 规则”缩减为“0 引用 + 0 CSS 规则”，须由 T4 只挂载一次并设为 `2.5%`，不能在 T3 越界处理。T3 仍需重点守住偏好白名单、旧 custom 回退和 delete-only IndexedDB 清理 seam，同时保持本阶段静态路径、wheel 通道与业务 route 集合不变。

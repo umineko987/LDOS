@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
+from xml.etree import ElementTree
+
+from fastapi.staticfiles import StaticFiles
 
 from gdl_backend.app import ServiceContainer, _validate_network_target, create_app
 from gdl_backend.auth import AuthError, AuthManager
@@ -616,6 +620,147 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/ui-next/").status_code, 404)
         self.assertEqual(self.client.get("/ui/app.js").status_code, 404)
         self.assertEqual(self.client.get("/ui/styles.css").status_code, 404)
+
+    def test_webui_noise_svg_is_safe_same_origin_static_asset(self):
+        asset_path = "/ui/assets/noise.svg"
+        response = self.client.get(asset_path)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.headers.get("content-type", "").partition(";")[0].lower(),
+            "image/svg+xml",
+        )
+        request_url = response.request.url
+        base_url = self.client.base_url
+        self.assertEqual(request_url.path, asset_path)
+        self.assertFalse(request_url.query)
+        self.assertEqual(
+            (request_url.scheme, request_url.host, request_url.port),
+            (base_url.scheme, base_url.host, base_url.port),
+        )
+        self.assertFalse(response.history)
+
+        ui_mounts = [
+            route
+            for route in self.app.routes
+            if getattr(route, "path", None) == "/ui"
+            and isinstance(getattr(route, "app", None), StaticFiles)
+        ]
+        self.assertEqual(len(ui_mounts), 1)
+        self.assertNotIn(asset_path, self.app.openapi()["paths"])
+
+        source = response.content.decode("utf-8")
+        source_lower = source.lower()
+        for forbidden_declaration in (
+            "<!doctype",
+            "<!entity",
+            "<?xml-stylesheet",
+        ):
+            self.assertNotIn(forbidden_declaration, source_lower)
+
+        root = ElementTree.fromstring(source)
+
+        def local_name(qualified_name: str) -> str:
+            return qualified_name.rsplit("}", 1)[-1]
+
+        self.assertEqual(local_name(root.tag), "svg")
+        self.assertEqual(root.attrib.get("aria-hidden"), "true")
+        self.assertEqual(root.attrib.get("focusable"), "false")
+
+        width = float(root.attrib["width"])
+        height = float(root.attrib["height"])
+        self.assertEqual(width, height)
+        self.assertGreaterEqual(width, 64)
+        self.assertLessEqual(width, 512)
+        view_box = tuple(
+            float(part)
+            for part in root.attrib["viewBox"].replace(",", " ").split()
+        )
+        self.assertEqual(view_box, (0.0, 0.0, width, height))
+
+        elements = list(root.iter())
+        element_names = {local_name(element.tag).lower() for element in elements}
+        self.assertLessEqual(
+            element_names,
+            {"svg", "defs", "filter", "feturbulence", "fecolormatrix", "rect"},
+        )
+        self.assertIn("feturbulence", element_names)
+
+        element_ids = {
+            element.attrib["id"] for element in elements if "id" in element.attrib
+        }
+        local_references: set[str] = set()
+        for element in elements:
+            self.assertFalse((element.text or "").strip())
+            self.assertFalse((element.tail or "").strip())
+            for qualified_name, value in element.attrib.items():
+                attribute_name = local_name(qualified_name).lower()
+                compact_value = "".join(value.split()).lower()
+                self.assertFalse(attribute_name.startswith("on"))
+                self.assertNotIn(attribute_name, {"href", "src", "style"})
+                self.assertNotIn("opacity", attribute_name)
+                for external_marker in (
+                    "data:",
+                    "javascript:",
+                    "http:",
+                    "https:",
+                    "//",
+                ):
+                    self.assertNotIn(external_marker, compact_value)
+                if "url(" in compact_value:
+                    reference = re.fullmatch(
+                        r"url\(#([a-z_][a-z0-9_.:-]*)\)",
+                        compact_value,
+                    )
+                    self.assertIsNotNone(reference, value)
+                    local_references.add(reference.group(1))
+        self.assertTrue(local_references)
+        self.assertLessEqual(local_references, element_ids)
+
+        turbulence = [
+            element
+            for element in elements
+            if local_name(element.tag).lower() == "feturbulence"
+        ]
+        self.assertEqual(len(turbulence), 1)
+        turbulence_attributes = turbulence[0].attrib
+        self.assertEqual(turbulence_attributes.get("type"), "fractalNoise")
+        self.assertEqual(turbulence_attributes.get("stitchTiles"), "stitch")
+        frequencies = [
+            float(value)
+            for value in turbulence_attributes["baseFrequency"].split()
+        ]
+        self.assertTrue(all(0.0 < value <= 1.0 for value in frequencies))
+        self.assertIn(int(turbulence_attributes["numOctaves"]), range(1, 5))
+        int(turbulence_attributes["seed"])
+
+        filters = [
+            element
+            for element in elements
+            if local_name(element.tag).lower() == "filter"
+        ]
+        self.assertEqual(len(filters), 1)
+        self.assertEqual(filters[0].attrib.get("x"), "0")
+        self.assertEqual(filters[0].attrib.get("y"), "0")
+        self.assertEqual(filters[0].attrib.get("width"), "100%")
+        self.assertEqual(filters[0].attrib.get("height"), "100%")
+
+        color_matrices = [
+            element
+            for element in elements
+            if local_name(element.tag).lower() == "fecolormatrix"
+        ]
+        self.assertEqual(len(color_matrices), 1)
+        self.assertEqual(color_matrices[0].attrib.get("type"), "saturate")
+        self.assertEqual(float(color_matrices[0].attrib["values"]), 0.0)
+
+        rectangles = [
+            element
+            for element in elements
+            if local_name(element.tag).lower() == "rect"
+        ]
+        self.assertEqual(len(rectangles), 1)
+        self.assertIn(rectangles[0].attrib.get("fill"), {"none", "transparent"})
 
     def test_webui_desktop_shell_static_contract(self):
         index = self.client.get("/ui/")
