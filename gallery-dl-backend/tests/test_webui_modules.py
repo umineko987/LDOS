@@ -2326,6 +2326,324 @@ class WebUiModuleTests(unittest.TestCase):
             self.assertIn(marker, controller)
         self.assertIn("TASK_POLL_INTERVAL_MS = 1_500", model)
 
+    def test_nocturne_proxy_t73a_visual_and_security_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        proxy = (
+            webui / "styles" / "apps" / "proxy.css"
+        ).read_text(encoding="utf-8")
+        controls = (webui / "styles" / "controls.css").read_text(
+            encoding="utf-8"
+        )
+        controller = (
+            webui / "js" / "apps" / "proxy.js"
+        ).read_text(encoding="utf-8")
+        view = (
+            webui / "js" / "components" / "proxy-view.js"
+        ).read_text(encoding="utf-8")
+        dom = (
+            webui / "js" / "components" / "proxy-dom.js"
+        ).read_text(encoding="utf-8")
+        model = (
+            webui / "js" / "core" / "proxy-model.js"
+        ).read_text(encoding="utf-8")
+        store_transition = (
+            webui / "js" / "core" / "store-business-transition.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str) -> str:
+            marker = f"{selector} {{"
+            start = proxy.find(marker)
+            self.assertNotEqual(start, -1, selector)
+            opening = proxy.find("{", start)
+            closing = proxy.find("}", opening)
+            return proxy[opening + 1 : closing]
+
+        # The existing status/runtime/source structure remains the sole layout
+        # owner: normal windows scroll horizontally, maximized windows fit the
+        # three columns, and each column retains its vertical scroll ownership.
+        workspace = css_block(".proxy-workspace")
+        self.assertIn("padding: 24px", workspace)
+        self.assertIn("overflow-x: auto", workspace)
+        self.assertIn("overflow-y: hidden", workspace)
+        track = css_block(".proxy-workspace-track")
+        self.assertIn("min-width: 1120px", track)
+        self.assertIn("gap: 24px", track)
+        self.assertGreaterEqual(track.count("minmax("), 3)
+        self.assertIn(
+            ".application-window[data-maximized] .proxy-workspace-track",
+            proxy,
+        )
+        self.assertIn("min-width: 100%", proxy)
+        column = css_block(".proxy-column")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-card)",
+            "background: var(--imageweave-glass-surface-input)",
+            "inset 0 1px 0",
+            "inset 0 -1px 0",
+        ):
+            self.assertIn(expected, column)
+        self.assertNotIn("backdrop-filter", column)
+        self.assertNotIn("var(--imageweave-shadow-", column)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-secondary)",
+            css_block(".proxy-column--status"),
+        )
+        column_scroll = css_block(".proxy-column-scroll")
+        self.assertIn("padding: 24px", column_scroll)
+        self.assertIn("overflow-y: auto", column_scroll)
+
+        # All normal Proxy surfaces use canonical 4%-8% neutral glass. The
+        # only solid token is capability fallback; facts/rows use 16px, weak
+        # separators, no outer card shadow, and no additional compositing layer.
+        solid_refs = re.findall(r"--imageweave-[\w-]*-solid", proxy)
+        self.assertEqual(
+            solid_refs,
+            ["--imageweave-fallback-elevated-solid"],
+        )
+        self.assertNotRegex(proxy, r"--imageweave-state-[\w-]*-surface")
+        self.assertNotRegex(
+            proxy,
+            r"(?m)^\s*(?:-webkit-)?backdrop-filter\s*:"
+            r"(?![^\n]*\bnone\b)",
+        )
+        self.assertNotRegex(proxy, r"(?m)^\s*filter\s*:")
+        self.assertRegex(
+            proxy,
+            r"\.proxy-node-card,[\s\S]*?\.proxy-metric\s*\{"
+            r"[\s\S]*?border-radius:\s*"
+            r"var\(--imageweave-radius-control\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-weak\)"
+            r"[\s\S]*?box-shadow:\s*none",
+        )
+        self.assertRegex(
+            proxy,
+            r"\.proxy-definition-list > div,[\s\S]*?"
+            r"\.proxy-source-summary > div\s*\{"
+            r"[\s\S]*?border:\s*var\(--imageweave-border-width\)"
+            r" solid var\(--imageweave-border-weak\)"
+            r"[\s\S]*?border-radius:\s*"
+            r"var\(--imageweave-radius-control\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-weak\)"
+            r"[\s\S]*?box-shadow:\s*none",
+        )
+        flat_section = css_block(".proxy-source-overview")
+        self.assertIn("border-bottom", flat_section)
+        self.assertIn("var(--imageweave-border-weak)", flat_section)
+        self.assertIn("background: transparent", flat_section)
+        self.assertIn("box-shadow: none", flat_section)
+        self.assertRegex(
+            proxy,
+            r"\.proxy-metric strong[\s\S]*?color:\s*"
+            r"var\(--imageweave-text-code\)"
+            r"[\s\S]*?font-family:\s*"
+            r"var\(--imageweave-font-mono\)",
+        )
+
+        # Running/ready/warning/error/disabled, leased nodes and source safety
+        # facts combine existing icon/text with complete semantic edges over
+        # neutral fills. No old one-sided stripe or tracked uppercase kicker remains.
+        error_state = css_block(
+            '.proxy-waiting-host[data-proxy-workspace-state="error"]'
+        )
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            error_state,
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            error_state,
+        )
+        for state, token in (
+            ("loading", "running"),
+            ("writing", "running"),
+            ("running", "running"),
+            ("partial", "warning"),
+            ("reload-required", "warning"),
+            ("stopped", "warning"),
+            ("disabled", "disabled"),
+        ):
+            self.assertRegex(
+                proxy,
+                rf'data-proxy-workspace-state="{state}"'
+                rf"[\s\S]*?--imageweave-state-{token}",
+                state,
+            )
+        leased = css_block('.proxy-node-card[data-leased="true"]')
+        self.assertIn(
+            "border-color: var(--imageweave-state-running)", leased
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-secondary)", leased
+        )
+        self.assertIn("box-shadow: none", leased)
+        self.assertIn('content: "◆ 正在使用"', proxy)
+        self.assertRegex(
+            proxy,
+            r"\.proxy-danger-zone\s*\{[\s\S]*?margin-top:\s*24px"
+            r"[\s\S]*?border:\s*var\(--imageweave-border-strong-width\)"
+            r" solid var\(--imageweave-state-danger\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-secondary\)",
+        )
+        validation = css_block(".proxy-field-validation")
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            validation,
+        )
+        self.assertIn("color: var(--imageweave-text-primary)", validation)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            validation,
+        )
+        self.assertIn('content: "◆ 安全投影 · "', proxy)
+        self.assertIn('content: "◆"', proxy)
+        self.assertNotRegex(
+            proxy,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+        kicker = css_block(".proxy-column-kicker")
+        self.assertIn("letter-spacing: normal", kicker)
+        self.assertIn("text-transform: none", kicker)
+        self.assertNotRegex(proxy, r"\b(?:100|120|150|180)ms\b")
+
+        # Secret inputs and all actions delegate appearance to T6. Local Proxy
+        # CSS adds only sizing; invalid/disabled reasons remain readable and
+        # dangerous controls keep full edges and Dialog confirmation ownership.
+        secret_input = css_block(".proxy-secret-input")
+        for forbidden in ("background", "border", "box-shadow", "color"):
+            self.assertNotIn(forbidden, secret_input)
+        self.assertRegex(
+            controls,
+            r"\.app-view :is\([\s\S]*?input\[type=\"url\"\]"
+            r"[\s\S]*?textarea[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-input\)"
+            r"[\s\S]*?border:\s*var\(--imageweave-border-width\)"
+            r" solid var\(--imageweave-border-default\)",
+        )
+        self.assertRegex(
+            controls,
+            r"\.proxy-button\.proxy-button--primary,[\s\S]*?"
+            r"border-color:\s*var\(--imageweave-accent\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-button\)",
+        )
+        self.assertRegex(
+            controls,
+            r"\.proxy-button\.proxy-button--dangerous,[\s\S]*?"
+            r"border:\s*var\(--imageweave-border-strong-width\)"
+            r" solid var\(--imageweave-state-danger\)",
+        )
+        self.assertNotIn(".proxy-button--primary", proxy)
+        self.assertNotIn(".proxy-button--dangerous", proxy)
+        self.assertRegex(
+            proxy,
+            r":hover\s*\{[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-secondary\)"
+            r"[\s\S]*?transform:\s*none",
+        )
+
+        # Canonical no-backdrop, contrast, forced-colors and both motion opt-outs
+        # stay explicit. Forced colors remove every optical effect.
+        self.assertIn(
+            "@supports not ((-webkit-backdrop-filter: blur(1px)) or "
+            "(backdrop-filter: blur(1px)))",
+            proxy,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid)", proxy
+        )
+        self.assertIn("@media (prefers-contrast: more)", proxy)
+        self.assertIn("@media (forced-colors: active)", proxy)
+        for expected in (
+            "CanvasText",
+            "ButtonFace",
+            "Highlight",
+            "background-image: none",
+            "box-shadow: none",
+            "backdrop-filter: none",
+        ):
+            self.assertIn(expected, proxy)
+        self.assertIn(':root[data-motion="off"]', proxy)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", proxy)
+        self.assertGreaterEqual(proxy.count("transition: none !important"), 2)
+        self.assertNotIn("@media (max-width: 767px)", proxy)
+
+        # Visual-only production change: endpoint/payload, 10s polling,
+        # status/sources concurrency, stale/write/lifecycle gates, dual authority
+        # reads, immediate secret clearing, safe Store projection and fixture
+        # isolation remain the existing production implementation.
+        for marker in (
+            'status: "/api/v1/proxy/status"',
+            'start: "/api/v1/proxy/start"',
+            'reload: "/api/v1/proxy/reload"',
+            'probe: "/api/v1/proxy/probe"',
+            'stop: "/api/v1/proxy/stop"',
+            'sources: "/api/v1/proxy/sources"',
+            'STATUS_POLL_KEY = "proxy.status"',
+            "STATUS_POLL_INTERVAL_MS = 10_000",
+            "Promise.allSettled([",
+            'requestGate.beginRead("status")',
+            'requestGate.beginRead("sources")',
+            "requestGate.beginWrite()",
+            "requestGate.advanceLifecycle()",
+            "activeOperationController?.abort()",
+            "abortRead(statusRead)",
+            "abortRead(sourcesRead)",
+            "view.clearSecretInputs()",
+            "input.value = \"\"",
+            "{ force_refresh: true }",
+            "{ force: false }",
+            "api.post(PROXY_ENDPOINTS.probe, {}, { signal })",
+        ):
+            self.assertIn(marker, controller)
+        for marker in (
+            "sanitizeProxyStatus",
+            "sanitizeProxySources",
+            "safeSensitiveText",
+            "safeProxyErrorDetail",
+            "credentials_redacted",
+            "sensitive_parts_redacted",
+        ):
+            self.assertIn(marker, model)
+        self.assertIn(
+            "status: sanitizeProxyStatus(action.payload)", store_transition
+        )
+        self.assertIn(
+            "sources: sanitizeProxySources(action.payload)", store_transition
+        )
+        for marker in (
+            'className: "proxy-workspace"',
+            'tabindex: "0"',
+            'autocomplete: "off"',
+            "aria-describedby",
+            "proxySecret",
+            'role: "status"',
+            'aria-live": "polite"',
+        ):
+            self.assertIn(marker, dom)
+        combined = "\n".join((controller, view, dom, model))
+        for forbidden in (
+            "fetch(",
+            "globalThis.fetch",
+            "XMLHttpRequest",
+            "localStorage",
+            "sessionStorage",
+            "indexedDB",
+            "console.",
+            "innerHTML",
+            "tests/fixtures",
+            "fixtures/webui",
+        ):
+            self.assertNotIn(forbidden, combined)
+
     def test_window_manager_t12_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
         webui = backend_root / "gdl_backend" / "webui"

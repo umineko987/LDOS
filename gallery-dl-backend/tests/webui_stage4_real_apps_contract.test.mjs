@@ -88,6 +88,10 @@ const PROXY_CSS_SOURCE = readFileSync(
   new URL("../gdl_backend/webui/styles/apps/proxy.css", import.meta.url),
   "utf8",
 );
+const CONTROLS_CSS_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/styles/controls.css", import.meta.url),
+  "utf8",
+);
 const VAULT_APP_SOURCE = readFileSync(
   new URL("../gdl_backend/webui/js/apps/vault.js", import.meta.url),
   "utf8",
@@ -1661,7 +1665,7 @@ test("4B request gate：同类旧读取、写前读取和生命周期响应均�
   assert.throws(() => gate.beginRead("vault"), TypeError);
 });
 
-test("4B controller：仅 active app 每 10s poll，deactivate/destroy 停止并中止", async () => {
+test("4B controller：仅 active app 每 10s poll，deactivate 停止且 reactivate 恢复，destroy 终止", async () => {
   const restore = installProxyControllerDom();
   try {
     const harness = proxyControllerHarness();
@@ -1671,9 +1675,18 @@ test("4B controller：仅 active app 每 10s poll，deactivate/destroy 停止并
     assert.equal(poll.intervalMs, PROXY_STATUS_POLL_INTERVAL_MS);
     assert.equal(poll.intervalMs, 10_000);
     assert.equal(poll.scope, "app:proxy");
+    assert.equal(poll.immediate, true);
+    assert.equal(poll.critical, false);
+    assert.equal(poll.resume, "immediate");
     assert.equal(harness.calls.filter((call) => call[0] === "get" && call[1] === PROXY_ENDPOINTS.sources).length, 1);
     harness.controller.deactivate();
     assert.equal(harness.polling.entries.has("proxy.status"), false);
+
+    harness.controller.activate();
+    await flush();
+    assert.equal(harness.polling.starts.length, 2);
+    assert.equal(harness.polling.entries.has("proxy.status"), true);
+    assert.equal(harness.calls.filter((call) => call[0] === "get" && call[1] === PROXY_ENDPOINTS.sources).length, 2);
     harness.controller.destroy();
     assert.equal(harness.polling.entries.has("proxy.status"), false);
   } finally {
@@ -1724,7 +1737,7 @@ test("4B controller：status/sources 并发且旧响应、写前响应、destroy
   }
 });
 
-test("4B controller：保存 source draft 与 reload 分离，控制写后权威 status+sources 重读", async () => {
+test("4B controller：五种 source create/update 精确 payload，保存≠reload 且每次双权威重读", async () => {
   const restore = installProxyControllerDom();
   try {
     let statusReads = 0;
@@ -1746,21 +1759,60 @@ test("4B controller：保存 source draft 与 reload 分离，控制写后权威
     const initialPoll = harness.polling.entries.get("proxy.status");
     await initialPoll.task(new AbortController().signal);
     await flush();
-    const beforeSave = { statusReads, sourceReads };
 
-    const submitted = harness.submit(
-      "subscription-add",
-      `https://user:${PROXY_SECRET}@provider.invalid/private?token=${PROXY_SECRET}`,
+    const runSourceWrite = async (kind, value, sourceId, method, endpoint, payload) => {
+      const beforeCalls = harness.calls.length;
+      const beforeReads = { statusReads, sourceReads };
+      const submitted = harness.submit(kind, value, sourceId);
+      assert.equal(submitted.input.value, "", `${kind} must clear before request settles`);
+      await flush();
+      assert.equal(submitted.input.value, "", `${kind} must remain clear after authority reads`);
+      const operationCalls = harness.calls.slice(beforeCalls);
+      const write = operationCalls.find((call) => call[0] === method && call[1] === endpoint);
+      assert.equal(Boolean(write), true, kind);
+      assert.deepEqual(write[2], payload, kind);
+      assert.deepEqual(
+        operationCalls.filter((call) => call[0] === "get").map(getCallUrl).sort(),
+        [PROXY_ENDPOINTS.sources, PROXY_ENDPOINTS.status].sort(),
+        kind,
+      );
+      assert.equal(statusReads, beforeReads.statusReads + 1, kind);
+      assert.equal(sourceReads, beforeReads.sourceReads + 1, kind);
+    };
+
+    const subscription = `https://user:${PROXY_SECRET}@provider.invalid/private?token=${PROXY_SECRET}`;
+    await runSourceWrite(
+      "subscription-add", subscription, "", "post", PROXY_ENDPOINTS.subscriptions,
+      { url: subscription },
     );
-    await flush();
-    assert.equal(submitted.input.value, "");
-    const save = harness.calls.find((call) => call[0] === "post" && call[1] === PROXY_ENDPOINTS.subscriptions);
-    assert.equal(Boolean(save), true);
-    assert.equal(harness.calls.some((call) => call[1] === PROXY_ENDPOINTS.reload), false);
-    assert.equal(statusReads, beforeSave.statusReads + 1);
-    assert.equal(sourceReads, beforeSave.sourceReads + 1);
-    assert.equal(harness.viewLog.some((entry) => entry[0] === "message" && /尚未改变/.test(entry[1])), true);
+    const replacement = `https://user:${PROXY_SECRET}@replacement.invalid/new`;
+    await runSourceWrite(
+      "subscription-replace", replacement, PROXY_SUBSCRIPTION_ID, "put",
+      `${PROXY_ENDPOINTS.subscriptions}/${PROXY_SUBSCRIPTION_ID}`,
+      { url: replacement },
+    );
+    const nodePath = `../subscriptions/${PROXY_SECRET}.yaml`;
+    await runSourceWrite(
+      "node-file-set", nodePath, "", "put", PROXY_ENDPOINTS.nodeFile,
+      { path: nodePath },
+    );
+    const inlineText = [
+      `vless://${PROXY_SECRET}@proxy.invalid:443#one`,
+      `http://user:${PROXY_SECRET}@proxy.invalid:8080`,
+    ].join("\n");
+    await runSourceWrite(
+      "inline-add", inlineText, "", "post", PROXY_ENDPOINTS.inlineNodes,
+      { nodes: inlineText.split("\n") },
+    );
+    const inlineReplacement = `trojan://${PROXY_SECRET}@replacement.invalid:443#two`;
+    await runSourceWrite(
+      "inline-replace", inlineReplacement, PROXY_INLINE_ID, "put",
+      `${PROXY_ENDPOINTS.inlineNodes}/${PROXY_INLINE_ID}`,
+      { node: inlineReplacement },
+    );
 
+    assert.equal(harness.calls.some((call) => call[1] === PROXY_ENDPOINTS.reload), false);
+    assert.equal(harness.viewLog.some((entry) => entry[0] === "message" && /尚未改变|不会重新显示/.test(entry[1])), true);
     const beforeReload = { statusReads, sourceReads };
     harness.click("reload");
     await flush();
@@ -1773,11 +1825,16 @@ test("4B controller：保存 source draft 与 reload 分离，控制写后权威
   }
 });
 
-test("4B controller：start/stop/reload/probe 单飞并各自写后权威重读", async () => {
+test("4B controller：start/stop/reload/probe 精确 payload、单飞并各自写后双权威重读", async () => {
   const restore = installProxyControllerDom();
   try {
-    const endpoints = ["start", "stop", "reload", "probe"];
-    for (const action of endpoints) {
+    const expected = {
+      start: { force_refresh: true },
+      stop: { force: false },
+      reload: { force_refresh: true },
+      probe: {},
+    };
+    for (const action of Object.keys(expected)) {
       const harness = proxyControllerHarness();
       harness.controller.activate();
       const poll = harness.polling.entries.get("proxy.status");
@@ -1790,6 +1847,7 @@ test("4B controller：start/stop/reload/probe 单飞并各自写后权威重读"
       const operationCalls = harness.calls.slice(before).filter((call) => call[0] === "post");
       assert.equal(operationCalls.length, 1, action);
       assert.equal(operationCalls[0][1], PROXY_ENDPOINTS[action], action);
+      assert.deepEqual(operationCalls[0][2], expected[action], action);
       const reads = harness.calls.slice(before).filter((call) => call[0] === "get").map(getCallUrl).sort();
       assert.deepEqual(reads, [PROXY_ENDPOINTS.sources, PROXY_ENDPOINTS.status].sort(), action);
       harness.controller.destroy();
@@ -1799,7 +1857,7 @@ test("4B controller：start/stop/reload/probe 单飞并各自写后权威重读"
   }
 });
 
-test("4B controller：delete confirm deny/allow，危险操作只在允许后写入并重读", async () => {
+test("4B controller：四种 delete/reset confirm deny/allow，允许后精确删除并双权威重读", async () => {
   const restore = installProxyControllerDom();
   try {
     const deny = proxyControllerHarness({ dialogChoice: "cancel" });
@@ -1808,22 +1866,34 @@ test("4B controller：delete confirm deny/allow，危险操作只在允许后写
     deny.click("subscription-delete", PROXY_SUBSCRIPTION_ID);
     await flush();
     assert.equal(deny.dialogOptions[0].dangerous, true);
+    assert.match(deny.dialogOptions[0].confirmationText, /应用并重新加载/);
     assert.equal(deny.calls.some((call) => call[0] === "delete"), false);
     deny.controller.destroy();
 
     const allow = proxyControllerHarness();
     allow.controller.activate();
     await flush();
-    const before = allow.calls.length;
-    allow.click("subscription-delete", PROXY_SUBSCRIPTION_ID);
-    await flush();
-    assert.equal(allow.dialogOptions[0].dangerous, true);
-    assert.equal(allow.calls.some((call) => call[0] === "delete" &&
-      call[1] === `${PROXY_ENDPOINTS.subscriptions}/${PROXY_SUBSCRIPTION_ID}`), true);
-    assert.deepEqual(
-      allow.calls.slice(before).filter((call) => call[0] === "get").map(getCallUrl).sort(),
-      [PROXY_ENDPOINTS.sources, PROXY_ENDPOINTS.status].sort(),
-    );
+    const operations = [
+      ["subscription-delete", PROXY_SUBSCRIPTION_ID, `${PROXY_ENDPOINTS.subscriptions}/${PROXY_SUBSCRIPTION_ID}`],
+      ["inline-delete", PROXY_INLINE_ID, `${PROXY_ENDPOINTS.inlineNodes}/${PROXY_INLINE_ID}`],
+      ["node-file-clear", "", PROXY_ENDPOINTS.nodeFile],
+      ["override-reset", "", PROXY_ENDPOINTS.override],
+    ];
+    for (const [action, sourceId, endpoint] of operations) {
+      const before = allow.calls.length;
+      const dialogCount = allow.dialogOptions.length;
+      allow.click(action, sourceId);
+      await flush();
+      assert.equal(allow.dialogOptions.length, dialogCount + 1, action);
+      assert.equal(allow.dialogOptions.at(-1).dangerous, true, action);
+      const operationCalls = allow.calls.slice(before);
+      assert.equal(operationCalls.filter((call) => call[0] === "delete" && call[1] === endpoint).length, 1, action);
+      assert.deepEqual(
+        operationCalls.filter((call) => call[0] === "get").map(getCallUrl).sort(),
+        [PROXY_ENDPOINTS.sources, PROXY_ENDPOINTS.status].sort(),
+        action,
+      );
+    }
     allow.controller.destroy();
   } finally {
     restore();
@@ -1857,6 +1927,14 @@ test("4B controller：secret/raw 输入在成功、失败、取消、deactivate�
     await flush();
     const cancelInput = new ProxyTestInput(PROXY_SECRET);
     cancelled.secretInputs.add(cancelInput);
+    const replacementForm = new ProxyTestForm("subscription-replace", cancelInput, PROXY_SUBSCRIPTION_ID);
+    const replacementCancel = new ProxyTestButton("replacement-cancel");
+    replacementCancel.parentNode = replacementForm;
+    cancelled.root.emit("click", replacementCancel);
+    await flush();
+    assert.equal(cancelInput.value, "");
+    assert.equal(replacementForm.hidden, true);
+    cancelInput.value = PROXY_SECRET;
     cancelled.click("subscription-delete", PROXY_SUBSCRIPTION_ID);
     await flush();
     assert.equal(cancelInput.value, "");
@@ -1877,23 +1955,106 @@ test("4B controller：secret/raw 输入在成功、失败、取消、deactivate�
   }
 });
 
-test("4B target：Proxy 使用可聚焦三段工作区和独立滚动列", () => {
+test("4B CSS T7.3a：Proxy 三栏低透明、事实扁平、敏感控件复用 T6 且窗口独占 backdrop", () => {
+  const block = (selector) => {
+    const marker = `${selector} {`;
+    const start = PROXY_CSS_SOURCE.indexOf(marker);
+    assert.notEqual(start, -1, selector);
+    const opening = PROXY_CSS_SOURCE.indexOf("{", start);
+    const closing = PROXY_CSS_SOURCE.indexOf("}", opening);
+    return PROXY_CSS_SOURCE.slice(opening + 1, closing);
+  };
+
+  assert.match(PROXY_CSS_SOURCE, /\.window-body:has\(> \.proxy-app\)/);
+  const workspace = block(".proxy-workspace");
+  assert.match(workspace, /padding:\s*24px/);
+  assert.match(workspace, /overflow-x:\s*auto/);
+  assert.match(workspace, /overflow-y:\s*hidden/);
+  const track = block(".proxy-workspace-track");
+  assert.match(track, /grid-template-columns:[^;]*minmax[^;]*minmax[^;]*minmax[^;]*;/s);
+  assert.match(track, /min-width:\s*1120px/);
+  assert.match(track, /gap:\s*24px/);
+  assert.match(block(".proxy-column-scroll"), /padding:\s*24px[\s\S]*overflow-y:\s*auto/);
+  assert.match(PROXY_CSS_SOURCE, /\.application-window\[data-maximized\] \.proxy-workspace-track\s*\{[^}]*min-width\s*:\s*100%/s);
+  const column = block(".proxy-column");
+  assert.match(column, /border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-default\)/);
+  assert.match(column, /border-radius:\s*var\(--imageweave-radius-card\)/);
+  assert.match(column, /background:\s*var\(--imageweave-glass-surface-input\)/);
+  assert.match(column, /inset 0 1px 0[\s\S]*inset 0 -1px 0/);
+  assert.doesNotMatch(column, /backdrop-filter|var\(--imageweave-shadow-/);
+  assert.match(block(".proxy-column--status"), /background:\s*var\(--imageweave-glass-surface-secondary\)/);
+
+  const solidRefs = [...PROXY_CSS_SOURCE.matchAll(/--imageweave-[\w-]*-solid/g)].map((match) => match[0]);
+  assert.deepEqual(solidRefs, ["--imageweave-fallback-elevated-solid"]);
+  assert.doesNotMatch(PROXY_CSS_SOURCE, /--imageweave-state-[\w-]*-surface/);
+  assert.doesNotMatch(PROXY_CSS_SOURCE, /^\s*(?:-webkit-)?backdrop-filter\s*:(?![^\n]*\bnone\b)/m);
+  assert.doesNotMatch(PROXY_CSS_SOURCE, /^\s*filter\s*:/m);
+  assert.match(PROXY_CSS_SOURCE, /\.proxy-node-card,[\s\S]*?\.proxy-metric\s*\{[\s\S]*?border-radius:\s*var\(--imageweave-radius-control\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-weak\)[\s\S]*?box-shadow:\s*none/);
+  assert.match(PROXY_CSS_SOURCE, /\.proxy-definition-list > div,[\s\S]*?\.proxy-source-summary > div\s*\{[\s\S]*?border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-weak\)[\s\S]*?border-radius:\s*var\(--imageweave-radius-control\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-weak\)[\s\S]*?box-shadow:\s*none/);
+  const flatSection = block(".proxy-source-overview");
+  assert.match(flatSection, /border-bottom:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-weak\)/);
+  assert.match(flatSection, /background:\s*transparent/);
+  assert.match(flatSection, /box-shadow:\s*none/);
+  assert.match(block(".proxy-metric"), /background:\s*var\(--imageweave-glass-surface-weak\)[\s\S]*box-shadow:\s*none/);
+  assert.match(PROXY_CSS_SOURCE, /\.proxy-metric strong[\s\S]*?color:\s*var\(--imageweave-text-code\)[\s\S]*?font-family:\s*var\(--imageweave-font-mono\)/);
+
+  const errorState = block('.proxy-waiting-host[data-proxy-workspace-state="error"]');
+  assert.match(errorState, /border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/);
+  assert.match(errorState, /background:\s*var\(--imageweave-glass-surface-default\)/);
+  for (const [state, token] of [
+    ["loading", "running"], ["writing", "running"], ["running", "running"],
+    ["partial", "warning"], ["reload-required", "warning"], ["stopped", "warning"],
+    ["disabled", "disabled"],
+  ]) {
+    assert.match(PROXY_CSS_SOURCE, new RegExp(`data-proxy-workspace-state="${state}"[\\s\\S]*?--imageweave-state-${token}`), state);
+  }
+  const leased = block('.proxy-node-card[data-leased="true"]');
+  assert.match(leased, /border-color:\s*var\(--imageweave-state-running\)/);
+  assert.match(leased, /background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  assert.match(leased, /box-shadow:\s*none/);
+  assert.match(PROXY_CSS_SOURCE, /\.proxy-node-card\[data-leased="true"\]::before[\s\S]*?content:\s*"◆ 正在使用"/);
+  assert.match(PROXY_CSS_SOURCE, /\.proxy-danger-zone\s*\{[\s\S]*?margin-top:\s*24px[\s\S]*?border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  const validation = block(".proxy-field-validation");
+  assert.match(validation, /border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/);
+  assert.match(validation, /color:\s*var\(--imageweave-text-primary\)/);
+  assert.match(validation, /background:\s*var\(--imageweave-glass-surface-default\)/);
+  assert.match(block(".proxy-control-reasons"), /border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-weak\)/);
+  assert.match(block(".proxy-redaction-note"), /border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-weak\)/);
+  assert.match(PROXY_CSS_SOURCE, /\.proxy-redaction-note::before[\s\S]*?content:\s*"◆ 安全投影 · "/);
+  assert.doesNotMatch(PROXY_CSS_SOURCE, /(?:border-(?:left|right):\s*[34]px|inset\s+[34]px\s+0(?:px)?\s+0)/);
+
+  const secretInput = block(".proxy-secret-input");
+  assert.doesNotMatch(secretInput, /background|border|box-shadow|color/);
+  assert.match(CONTROLS_CSS_SOURCE, /\.app-view :is\([\s\S]*?input\[type="url"\][\s\S]*?textarea[\s\S]*?background:\s*var\(--imageweave-glass-surface-input\)[\s\S]*?border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-default\)/);
+  assert.match(CONTROLS_CSS_SOURCE, /\.proxy-button\.proxy-button--primary,[\s\S]*?border-color:\s*var\(--imageweave-accent\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-button\)/);
+  assert.match(CONTROLS_CSS_SOURCE, /\.proxy-button\.proxy-button--dangerous,[\s\S]*?border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/);
+  assert.doesNotMatch(PROXY_CSS_SOURCE, /\.proxy-button--primary|\.proxy-button--dangerous/);
+  assert.match(PROXY_CSS_SOURCE, /:hover\s*\{[\s\S]*?background:\s*var\(--imageweave-glass-surface-secondary\)[\s\S]*?transform:\s*none/);
+  const kicker = block(".proxy-column-kicker");
+  assert.match(kicker, /letter-spacing:\s*normal/);
+  assert.match(kicker, /text-transform:\s*none/);
+  assert.doesNotMatch(PROXY_CSS_SOURCE, /\b(?:100|120|150|180)ms\b/);
+
+  assert.match(PROXY_CSS_SOURCE, /@supports not \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)/);
+  assert.match(PROXY_CSS_SOURCE, /background:\s*var\(--imageweave-fallback-elevated-solid\)/);
+  assert.match(PROXY_CSS_SOURCE, /@media \(prefers-contrast: more\)/);
+  assert.match(PROXY_CSS_SOURCE, /@media \(forced-colors: active\)/);
+  assert.match(PROXY_CSS_SOURCE, /CanvasText/);
+  assert.match(PROXY_CSS_SOURCE, /ButtonFace/);
+  assert.match(PROXY_CSS_SOURCE, /Highlight/);
+  assert.match(PROXY_CSS_SOURCE, /:root\[data-motion="off"\]/);
+  assert.match(PROXY_CSS_SOURCE, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.ok((PROXY_CSS_SOURCE.match(/transition:\s*none !important/g) || []).length >= 2);
+  assert.doesNotMatch(PROXY_CSS_SOURCE, /@media\s*\(max-width:\s*767px\)/);
+
   assert.match(PROXY_DOM_SOURCE, /proxy-workspace-track/);
   assert.match(PROXY_DOM_SOURCE, /className:\s*"proxy-workspace"[\s\S]*tabindex:\s*"0"/);
   assert.match(PROXY_DOM_SOURCE, /01 · 状态/);
   assert.match(PROXY_DOM_SOURCE, /02 · 运行池/);
   assert.match(PROXY_DOM_SOURCE, /03 · 来源/);
-  assert.match(PROXY_CSS_SOURCE, /\.window-body:has\(> \.proxy-app\)/);
-  assert.match(PROXY_CSS_SOURCE, /\.proxy-workspace\s*\{[^}]*overflow-x\s*:\s*auto/s);
-  assert.match(PROXY_CSS_SOURCE, /\.proxy-workspace-track\s*\{[^}]*grid-template-columns\s*:[^;]*minmax[^;]*minmax[^;]*minmax[^;]*;/s);
-  assert.match(PROXY_CSS_SOURCE, /\.proxy-workspace-track\s*\{[^}]*min-width\s*:\s*(?:1080|1100|1120|1140|1160)px/s);
-  assert.match(PROXY_CSS_SOURCE, /\.proxy-column-scroll\s*\{[^}]*overflow-y\s*:\s*auto/s);
-  assert.match(PROXY_CSS_SOURCE, /\.application-window\[data-maximized\] \.proxy-workspace-track\s*\{[^}]*min-width\s*:\s*100%/s);
-  assert.match(PROXY_CSS_SOURCE, /--imageweave-surface-content-solid/);
-  assert.match(PROXY_CSS_SOURCE, /forced-colors/);
-  assert.match(PROXY_CSS_SOURCE, /prefers-reduced-motion|data-motion/);
-  assert.doesNotMatch(PROXY_CSS_SOURCE, /@media\s*\(max-width:\s*767px\)/);
-  assert.doesNotMatch(PROXY_CSS_SOURCE, /backdrop-filter/);
+  assert.match(PROXY_DOM_SOURCE, /autocomplete:\s*"off"/);
+  assert.match(PROXY_DOM_SOURCE, /aria-describedby/);
+  assert.match(PROXY_DOM_SOURCE, /data-proxy-secret|proxySecret/);
   assert.doesNotMatch([PROXY_APP_SOURCE, PROXY_MODEL_SOURCE, PROXY_VIEW_SOURCE, PROXY_DOM_SOURCE].join("\n"), /innerHTML/);
 });
 
