@@ -13,7 +13,7 @@
   min-height: 0;
   margin: 0;
   color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-environment-solid);
+  background: transparent;
 }
 
 .review-app[data-mode="panel"] {
@@ -57,16 +57,22 @@
   overflow-wrap: anywhere;
 }
 
+/* Panel mode keeps its existing document scroll owner. These are top-level
+   surfaces; all rows inside inherit the application window's single 60px
+   backdrop instead of creating another compositing layer. */
 .review-panel {
   display: grid;
-  gap: 14px;
+  gap: 16px;
   min-width: 0;
   padding: clamp(16px, 2.2vw, 24px);
-  border: 1px solid var(--imageweave-border-soft);
-  border-radius: var(--imageweave-radius-lg);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-card);
   color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-content-solid);
-  box-shadow: var(--imageweave-shadow-panel);
+  background: var(--imageweave-glass-surface-input);
+  background-image: none;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
 }
 
 .review-panel-heading,
@@ -75,14 +81,14 @@
 .review-deck-complete-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 9px;
+  gap: 8px 16px;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
 }
 
 .review-panel-heading p {
-  margin: 5px 0 0;
+  margin: 8px 0 0;
   color: var(--imageweave-text-secondary);
 }
 
@@ -95,30 +101,44 @@
 .review-group-picker > select {
   flex: 1 1 300px;
   min-width: 0;
-  min-height: 42px;
-  padding: 8px 11px;
-  border: 1px solid var(--imageweave-border-strong);
-  border-radius: var(--imageweave-radius-md);
-  color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-content-solid);
-  font: inherit;
 }
 
+/* Status copy remains readable and carries dirty state through text, a symbol,
+   and a complete edge rather than a one-sided color bar. */
 .review-operation-live {
   min-width: 0;
   margin: 0;
-  padding: 9px 12px;
-  border: 1px solid var(--imageweave-border-soft);
-  border-radius: var(--imageweave-radius-md);
+  padding: 12px 16px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-weak);
+  border-radius: var(--imageweave-radius-control);
   color: var(--imageweave-text-secondary);
-  background: var(--imageweave-surface-content-solid);
+  background: var(--imageweave-glass-surface-weak);
+  box-shadow: none;
   font-weight: 700;
+  line-height: 1.5;
   overflow-wrap: anywhere;
+  transform: none;
+  transition:
+    color var(--imageweave-transition-standard),
+    background-color var(--imageweave-transition-standard),
+    border-color var(--imageweave-transition-standard);
+}
+
+.review-operation-live::before {
+  content: "◆ 状态 · ";
+  color: var(--imageweave-accent-highlight);
 }
 
 .review-operation-live[data-review-dirty="true"] {
-  border-color: var(--imageweave-warning);
-  box-shadow: inset 4px 0 0 var(--imageweave-warning);
+  border: var(--imageweave-border-strong-width) solid var(--imageweave-state-warning);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow: none;
+}
+
+.review-operation-live[data-review-dirty="true"]::before {
+  content: "△ 未保存 · ";
+  color: var(--imageweave-state-warning);
 }
 
 .review-error-host:empty,
@@ -130,71 +150,35 @@
 .review-app[data-mode="deck"] > .review-error-host:not(:empty) {
   position: absolute;
   z-index: 20;
-  top: 10px;
-  right: 10px;
-  left: 10px;
-  max-height: calc(100% - 20px);
-  overflow: auto;
-  border-radius: var(--imageweave-radius-lg);
-  background: var(--imageweave-surface-content-solid);
-  box-shadow: var(--imageweave-shadow-window);
-}
-
-.review-button,
-a.review-button {
-  display: inline-grid;
-  min-height: 42px;
-  padding: 7px 13px;
+  inset: 16px;
+  display: grid;
+  padding: 16px;
   place-items: center;
-  border: 1px solid var(--imageweave-border-strong);
-  border-radius: var(--imageweave-radius-md);
-  color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-content-solid);
-  box-shadow: var(--imageweave-shadow-control);
-  font: inherit;
-  font-weight: 750;
-  text-decoration: none;
-}
-
-.review-button:hover:not(:disabled) {
-  border-color: var(--imageweave-accent);
-  background: color-mix(in srgb, var(--imageweave-accent) 9%, var(--imageweave-surface-content-solid));
-}
-
-.review-button--primary {
-  border-color: var(--imageweave-accent);
-  color: var(--imageweave-surface-content-solid);
-  background: var(--imageweave-accent);
-}
-
-.review-button--primary:hover:not(:disabled) {
-  color: var(--imageweave-surface-content-solid);
-  background: color-mix(in srgb, var(--imageweave-accent) 86%, black);
-}
-
-.review-button--dangerous {
-  border-color: var(--imageweave-danger);
-  color: var(--imageweave-danger);
-}
-
-.review-button--small {
-  min-height: 36px;
-  padding-block: 5px;
+  overflow: auto;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-card);
+  background: rgb(6 10 19 / 0.68);
   box-shadow: none;
-  font-size: 0.82rem;
 }
 
+.review-app[data-mode="deck"] > .review-error-host:not(:empty) > .error-view {
+  width: min(680px, 100%);
+}
+
+/* Base/primary/dangerous/disabled button optics are canonical in controls.css.
+   Review only owns its pressed state and compact deck geometry. */
 .review-button[aria-pressed="true"] {
   border-color: var(--imageweave-accent);
-  color: var(--imageweave-surface-content-solid);
-  background: var(--imageweave-accent);
-  box-shadow: inset 0 0 0 1px var(--imageweave-surface-content-solid);
+  color: var(--imageweave-accent-highlight);
+  background: var(--imageweave-glass-surface-button);
+  box-shadow:
+    0 0 0 1px rgb(228 184 99 / 0.28),
+    inset 0 1px 0 rgb(255 255 255 / 0.25),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
 }
 
-.review-button:disabled,
-.review-button[aria-disabled="true"] {
-  cursor: not-allowed;
-  opacity: 0.58;
+.review-button[aria-pressed="true"]::before {
+  content: "✓ ";
 }
 
 .review-workspace,
@@ -205,42 +189,81 @@ a.review-button {
 .review-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 8px;
 }
 
 .review-tab {
-  min-height: 36px;
-  padding: 6px 10px;
-  border: 1px solid transparent;
-  border-radius: 999px;
+  min-height: var(--imageweave-control-height);
+  padding: 8px 12px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-weak);
+  border-radius: var(--imageweave-radius-control);
   color: var(--imageweave-text-secondary);
-  background: var(--imageweave-surface-navigation-solid);
+  background: var(--imageweave-glass-surface-weak);
+  box-shadow: none;
   font: inherit;
   font-weight: 750;
+  transform: none;
+  transition:
+    color var(--imageweave-transition-standard),
+    background-color var(--imageweave-transition-standard),
+    border-color var(--imageweave-transition-standard),
+    box-shadow var(--imageweave-transition-standard);
+}
+
+.review-tab:hover:not(:disabled) {
+  border-color: var(--imageweave-border-button);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow: none;
+  transform: none;
+}
+
+.review-tab:active:not(:disabled) {
+  background: var(--imageweave-glass-surface-input);
+  box-shadow: none;
+  transform: none;
+}
+
+.review-tab:focus-visible {
+  border-color: var(--imageweave-border-focus);
+  outline: none;
+  box-shadow: 0 0 0 var(--imageweave-focus-width) var(--imageweave-focus-glow);
 }
 
 .review-tab--active {
-  border-color: var(--imageweave-accent);
-  color: var(--imageweave-surface-content-solid);
-  background: var(--imageweave-accent);
+  border-color: var(--imageweave-border-focus);
+  color: var(--imageweave-accent-highlight);
+  background: var(--imageweave-glass-surface-input);
+  box-shadow: inset 0 0 0 1px rgb(228 184 99 / 0.32);
 }
 
+.review-tab--active::before {
+  content: "◆ ";
+  color: var(--imageweave-accent);
+}
+
+/* Header, stage and statusbar preserve the full-window three-row deck. Each
+   top-level region is neutral 5%-6% glass with a complete 15% edge; their
+   internal controls and facts remain shadowless weak rows. */
 .review-deck-header {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 8px 16px;
   align-content: flex-start;
   align-items: center;
   min-width: 0;
   min-height: 0;
-  max-height: min(230px, 38%);
-  padding: 8px 10px;
+  max-height: 230px;
+  padding: 12px 16px;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border-bottom: 1px solid var(--imageweave-border-soft);
-  background: var(--imageweave-surface-navigation-solid);
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--imageweave-text-primary) 8%, transparent);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-card);
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
 }
 
 .review-deck-identity,
@@ -252,7 +275,7 @@ a.review-button {
 .review-loupe-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 8px;
   align-items: center;
   min-width: 0;
 }
@@ -278,9 +301,10 @@ a.review-button {
   width: min(300px, 100%);
   height: 10px;
   overflow: hidden;
-  border: 1px solid var(--imageweave-border-strong);
-  border-radius: 999px;
-  background: var(--imageweave-surface-content-solid);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-pill);
+  background: var(--imageweave-glass-surface-weak);
+  box-shadow: none;
 }
 
 .review-deck-progress-fill {
@@ -289,7 +313,7 @@ a.review-button {
   height: 100%;
   border-radius: inherit;
   background: var(--imageweave-accent);
-  transition: width 160ms ease;
+  transition: width var(--imageweave-transition-standard);
 }
 
 .review-deck-tabs {
@@ -303,42 +327,43 @@ a.review-button {
 
 .review-group-picker > select {
   flex-basis: 260px;
-  min-height: 38px;
-  padding-block: 5px;
 }
 
 .review-loupe-controls {
   flex: 1 1 350px;
-  padding-left: 9px;
-  border-left: 1px solid var(--imageweave-border-soft);
+  padding-left: 16px;
+  border-left: var(--imageweave-border-width) solid var(--imageweave-border-weak);
 }
 
 .review-loupe-zoom {
   display: inline-flex;
-  min-width: 62px;
-  min-height: 36px;
-  padding: 5px 8px;
+  min-width: 68px;
+  min-height: var(--imageweave-control-height);
+  padding: 8px 12px;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--imageweave-border-soft);
-  border-radius: var(--imageweave-radius-md);
-  background: var(--imageweave-surface-content-solid);
-  font-size: 0.74rem;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-weak);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-fact);
+  background: var(--imageweave-glass-surface-weak);
+  box-shadow: none;
+  font-family: var(--imageweave-font-mono);
+  font-size: 0.75rem;
   font-weight: 800;
   white-space: nowrap;
 }
 
-.review-loupe-controls .review-button {
-  min-height: 36px;
-  padding: 5px 9px;
+.review-loupe-controls .review-button,
+.review-deck-batch-controls .review-button,
+.review-deck-actions .review-button {
   box-shadow: none;
 }
 
 .review-deck-utilities {
   flex: 1 1 100%;
   justify-content: space-between;
-  padding-top: 7px;
-  border-top: 1px solid var(--imageweave-border-soft);
+  padding-top: 8px;
+  border-top: var(--imageweave-border-width) solid var(--imageweave-border-weak);
 }
 
 .review-deck-batch-controls {
@@ -351,14 +376,6 @@ a.review-button {
 
 .review-deck-batch-controls select {
   flex-basis: 220px;
-  min-height: 36px;
-}
-
-.review-deck-batch-controls .review-button,
-.review-deck-actions .review-button {
-  min-height: 36px;
-  padding-block: 5px;
-  box-shadow: none;
 }
 
 .review-deck-actions {
@@ -376,7 +393,7 @@ a.review-button {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--imageweave-surface-environment-solid);
+  background: transparent;
 }
 
 .review-deck-stage {
@@ -386,18 +403,34 @@ a.review-button {
   gap: 8px;
   min-width: 0;
   min-height: 0;
-  padding: 10px;
+  padding: 16px;
   overflow: hidden;
-  background: var(--imageweave-surface-content-solid);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-card);
+  background: var(--imageweave-glass-surface-input);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
+}
+
+.review-deck-stage:focus-visible {
+  border-color: var(--imageweave-border-focus);
+  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-glow);
+  outline-offset: -4px;
 }
 
 .review-deck-stage-heading {
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 8px;
   align-items: center;
   min-width: 0;
+  padding: 8px 12px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-weak);
+  border-radius: var(--imageweave-radius-control);
+  background: var(--imageweave-glass-surface-weak);
+  box-shadow: none;
   font-weight: 750;
 }
 
@@ -407,18 +440,29 @@ a.review-button {
 
 .review-deck-selection-count {
   margin-left: auto;
+  color: var(--imageweave-text-fact);
+  font-family: var(--imageweave-font-mono);
   white-space: nowrap;
   font-weight: 800;
 }
 
+.review-deck-selection-count::before {
+  content: "◆ ";
+  color: var(--imageweave-accent);
+}
+
 .review-deck-readonly {
-  padding: 3px 8px;
-  border: 1px solid var(--imageweave-border-strong);
-  border-radius: 999px;
+  padding: 4px 8px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-control);
   color: var(--imageweave-text-secondary);
-  background: var(--imageweave-surface-navigation-solid);
-  font-size: 0.72rem;
+  background: var(--imageweave-glass-surface-weak);
+  font-size: 0.75rem;
   font-weight: 800;
+}
+
+.review-deck-readonly::before {
+  content: "◈ ";
 }
 
 .review-deck-cards {
@@ -429,12 +473,15 @@ a.review-button {
   justify-content: center;
   min-width: 0;
   min-height: 0;
-  padding: 6px;
+  padding: 8px;
   overflow: auto;
   overscroll-behavior: contain;
-  animation: review-deck-enter 140ms ease-out;
+  scroll-behavior: auto;
 }
 
+/* A card is one image tool surface, not a nested card stack. Selected and
+   active states use complete edges plus existing readable markers; image
+   pixels never dim, blend, filter or inherit a branded treatment. */
 .review-image-card {
   position: relative;
   width: var(--review-tile-width, 280px);
@@ -442,45 +489,64 @@ a.review-button {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--imageweave-border-strong);
-  border-radius: var(--imageweave-radius-lg);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-control);
   color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-content-solid);
-  box-shadow: var(--imageweave-shadow-panel);
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow: none;
+  opacity: 1;
+  transform: none;
   transition:
-    opacity var(--imageweave-transition-standard),
-    transform var(--imageweave-transition-standard),
-    border-color var(--imageweave-transition-standard);
+    background-color var(--imageweave-transition-standard),
+    border-color var(--imageweave-transition-standard),
+    box-shadow var(--imageweave-transition-standard);
 }
 
 .review-image-card[aria-disabled="false"] {
   cursor: pointer;
 }
 
+.review-image-card[aria-disabled="false"]:hover {
+  border-color: var(--imageweave-border-focus);
+  background: var(--imageweave-glass-surface-default);
+  box-shadow: none;
+  transform: none;
+}
+
 .review-image-card[data-selected="true"] {
-  border-color: var(--imageweave-success);
-  box-shadow: inset 0 0 0 2px var(--imageweave-success), var(--imageweave-shadow-panel);
+  border-color: var(--imageweave-border-focus);
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow: inset 0 0 0 1px rgb(228 184 99 / 0.42);
 }
 
 .review-image-card[data-selected="false"] {
-  border-color: var(--imageweave-border-soft);
-  opacity: 0.68;
+  border-color: var(--imageweave-border-default);
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow: none;
+  opacity: 1;
 }
 
 .review-image-card[data-active="true"] {
+  border-color: var(--imageweave-accent);
   opacity: 1;
-  outline: 3px solid var(--imageweave-focus-ring);
+  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
   outline-offset: -5px;
+  box-shadow: inset 0 0 0 1px var(--imageweave-accent-highlight);
+  transform: none;
 }
 
 .review-image-card:focus-visible,
 .review-image-card[data-loupe-source="true"] {
+  border-color: var(--imageweave-border-focus);
   outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
   outline-offset: -5px;
+  box-shadow: inset 0 0 0 1px var(--imageweave-accent-highlight);
 }
 
 .review-image-card:active[aria-disabled="false"] {
-  transform: scale(0.995);
+  background: var(--imageweave-glass-surface-default);
+  box-shadow: inset 0 0 0 1px var(--imageweave-accent-highlight);
+  transform: none;
 }
 
 .review-image-media {
@@ -492,16 +558,15 @@ a.review-button {
   min-height: 0;
   place-items: center;
   overflow: hidden;
-  background: var(--imageweave-surface-content-solid);
+  border-radius: inherit;
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow: none;
 }
 
 .review-image-card[data-selected="false"] .review-image-media::after {
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  content: "";
-  pointer-events: none;
-  background: color-mix(in srgb, var(--imageweave-surface-content-solid) 62%, transparent);
+  display: none;
+  content: none;
+  background: transparent;
 }
 
 .review-image-media > img {
@@ -511,17 +576,26 @@ a.review-button {
   min-width: 0;
   min-height: 0;
   object-fit: contain;
-  background: var(--imageweave-surface-content-solid);
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  opacity: 1;
+  filter: none;
+  mix-blend-mode: normal;
+  transform: none;
+  transition: none;
   user-select: none;
   -webkit-user-drag: none;
 }
 
 .review-image-fallback {
   z-index: 2;
-  padding: 18px;
-  border: 1px solid var(--imageweave-border-strong);
-  border-radius: var(--imageweave-radius-md);
-  background: var(--imageweave-surface-content-solid);
+  padding: 16px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow: none;
   font-weight: 800;
   text-align: center;
 }
@@ -532,34 +606,37 @@ a.review-button {
 .review-image-stamp {
   position: absolute;
   z-index: 5;
-  border: 1px solid var(--imageweave-border-strong);
-  border-radius: 999px;
-  background: var(--imageweave-surface-content-solid);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-input);
+  box-shadow: none;
   font-weight: 800;
   pointer-events: none;
 }
 
 .review-image-index {
-  top: 7px;
-  left: 7px;
+  top: 8px;
+  left: 8px;
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   place-items: center;
+  font-family: var(--imageweave-font-mono);
 }
 
 .review-image-active-marker {
-  top: 7px;
+  top: 8px;
   left: 50%;
   display: none;
-  min-width: 88px;
-  padding: 4px 9px;
+  min-width: 96px;
+  padding: 5px 10px;
   transform: translateX(-50%);
-  border-color: var(--imageweave-focus-ring);
-  color: var(--imageweave-surface-content-solid);
-  background: var(--imageweave-focus-ring);
-  font-size: 0.72rem;
-  letter-spacing: 0.03em;
+  border-color: var(--imageweave-accent);
+  color: var(--imageweave-accent-highlight);
+  background: var(--imageweave-glass-surface-input);
+  font-size: 0.75rem;
+  letter-spacing: normal;
   text-align: center;
   white-space: nowrap;
 }
@@ -569,32 +646,36 @@ a.review-button {
 }
 
 .review-recommended {
-  top: 7px;
-  right: 7px;
-  padding: 4px 7px;
-  border-color: var(--imageweave-warning);
+  top: 8px;
+  right: 8px;
+  padding: 5px 8px;
+  border-color: var(--imageweave-state-warning);
   color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-content-solid);
-  font-size: 0.7rem;
+  background: var(--imageweave-glass-surface-input);
+  font-size: 0.75rem;
 }
 
 .review-image-stamp {
   right: 8px;
   bottom: 8px;
-  min-width: 84px;
-  padding: 4px 9px;
-  font-size: 0.72rem;
-  letter-spacing: 0.03em;
+  min-width: 88px;
+  padding: 5px 10px;
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-input);
+  font-size: 0.75rem;
+  letter-spacing: normal;
   text-align: center;
   white-space: nowrap;
 }
 
 .review-image-stamp[data-state="keep"] {
-  border-color: var(--imageweave-success);
-  color: var(--imageweave-surface-content-solid);
-  background: var(--imageweave-success);
+  border-color: var(--imageweave-accent);
+  color: var(--imageweave-accent-highlight);
+  background: var(--imageweave-glass-surface-input);
 }
 
+/* Loupe motion is direct manipulation: crosshair/lens position and Canvas
+   pixels update on the next RAF with no 500ms delay, blur or transition. */
 .review-loupe-crosshair {
   position: absolute;
   z-index: 7;
@@ -602,10 +683,14 @@ a.review-button {
   width: 28px;
   height: 28px;
   transform: translate(-50%, -50%);
-  border: 2px solid var(--imageweave-surface-content-solid);
-  outline: 1px solid var(--imageweave-text-primary);
+  border: var(--imageweave-border-strong-width) solid var(--imageweave-text-primary);
+  outline: var(--imageweave-border-width) solid var(--imageweave-background-deepest);
   border-radius: 50%;
-  box-shadow: 0 0 0 1px var(--imageweave-surface-content-solid);
+  box-shadow: none;
+  opacity: 1;
+  filter: none;
+  transition: none;
+  animation: none;
   pointer-events: none;
 }
 
@@ -641,13 +726,18 @@ a.review-button {
   height: clamp(116px, 13vw, 176px);
   overflow: hidden;
   transform: translate(-50%, -50%);
-  border: 2px solid var(--imageweave-surface-content-solid);
-  border-radius: 31%;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-control);
   corner-shape: squircle;
-  outline: 1px solid var(--imageweave-text-primary);
-  background: var(--imageweave-surface-content-solid);
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--imageweave-text-primary) 24%, transparent);
+  outline: var(--imageweave-border-width) solid var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow: none;
   image-rendering: pixelated;
+  opacity: 1;
+  filter: none;
+  mix-blend-mode: normal;
+  transition: none;
+  animation: none;
   pointer-events: none;
 }
 
@@ -659,15 +749,21 @@ a.review-button {
   position: absolute;
   z-index: 9;
   max-width: 12ch;
-  padding: 4px 7px;
+  padding: 5px 8px;
   transform: translate(-50%, -50%);
-  border: 1px solid var(--imageweave-danger);
-  border-radius: var(--imageweave-radius-sm);
-  color: var(--imageweave-danger);
-  background: var(--imageweave-surface-content-solid);
-  font-size: 0.7rem;
+  border: var(--imageweave-border-strong-width) solid var(--imageweave-state-danger);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-input);
+  box-shadow: none;
+  font-size: 0.75rem;
   font-weight: 800;
   pointer-events: none;
+}
+
+.review-loupe-error::before {
+  content: "! ";
+  color: var(--imageweave-state-danger);
 }
 
 .review-loupe-error[hidden] {
@@ -681,34 +777,36 @@ a.review-button {
   align-items: center;
   min-width: 0;
   min-height: 0;
-  padding: 6px 10px;
+  padding: 8px 12px;
   overflow: hidden;
-  border-top: 1px solid var(--imageweave-border-soft);
-  background: var(--imageweave-surface-navigation-solid);
-  box-shadow: 0 -8px 24px color-mix(in srgb, var(--imageweave-text-primary) 7%, transparent);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-card);
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
 }
 
 .review-deck-command-list {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
   min-width: 0;
 }
 
 .review-deck-command-list .review-button {
-  min-height: 34px;
-  padding-block: 4px;
+  box-shadow: none;
 }
 
 .review-shortcut-hints {
   display: grid;
   gap: 0;
-  padding: 1px 8px;
-  border-left: 1px solid var(--imageweave-border-soft);
+  padding: 4px 12px;
+  border-left: var(--imageweave-border-width) solid var(--imageweave-border-weak);
   color: var(--imageweave-text-secondary);
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1.25;
 }
 
 .review-shortcut-hints > span {
@@ -718,16 +816,16 @@ a.review-button {
 .review-deck-live-host {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px 8px;
+  gap: 8px;
   align-items: center;
   min-width: 0;
 }
 
 .review-deck-live-host .review-operation-live {
   flex: 1 1 260px;
-  max-width: 56ch;
-  padding: 5px 8px;
-  font-size: 0.74rem;
+  max-width: 64ch;
+  padding: 8px 12px;
+  font-size: 0.75rem;
 }
 
 .review-deck-complete {
@@ -738,18 +836,21 @@ a.review-button {
   padding: 16px;
   place-items: center;
   overflow: auto;
-  background: color-mix(in srgb, var(--imageweave-surface-environment-solid) 78%, transparent);
+  background: rgb(6 10 19 / 0.68);
 }
 
 .review-deck-complete-box {
   display: grid;
-  gap: 13px;
+  gap: 16px;
   width: min(480px, 100%);
-  padding: 22px;
-  border: 1px solid var(--imageweave-border-strong);
-  border-radius: var(--imageweave-radius-lg);
-  background: var(--imageweave-surface-content-solid);
-  box-shadow: var(--imageweave-shadow-window);
+  padding: 24px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-card);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-default);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.22),
+    inset 0 -1px 0 rgb(2 6 16 / 0.35);
   text-align: center;
 }
 
@@ -762,82 +863,206 @@ a.review-button {
   justify-content: center;
 }
 
-@keyframes review-deck-enter {
-  from {
-    opacity: 0.82;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+.application-window[data-maximized] .review-deck-header,
+.application-window[data-maximized] .review-deck-stage,
+.application-window[data-maximized] .review-deck-statusbar {
+  border-radius: var(--imageweave-radius-card);
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .review-panel,
+  .review-deck-header,
+  .review-deck-stage,
+  .review-deck-statusbar,
+  .review-deck-complete-box {
+    background: var(--imageweave-fallback-elevated-solid);
   }
 }
 
-:root[data-motion="off"] .review-deck-cards,
-:root[data-motion="off"] .review-image-card,
-:root[data-motion="off"] .review-deck-progress-fill,
-:root[data-motion-effective="off"] .review-deck-cards,
-:root[data-motion-effective="off"] .review-image-card,
-:root[data-motion-effective="off"] .review-deck-progress-fill {
-  animation: none;
-  transition: none;
+:root:is([data-motion="off"], [data-motion-effective="off"]) :is(
+  .review-panel,
+  .review-operation-live,
+  .review-button,
+  .review-tab,
+  .review-deck-header,
+  .review-deck-progress-fill,
+  .review-deck-stage,
+  .review-image-card,
+  .review-deck-statusbar,
+  .review-deck-complete-box
+) {
+  animation: none !important;
+  transition: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .review-deck-cards,
-  .review-image-card,
-  .review-deck-progress-fill {
-    animation: none;
-    transition: none;
+  :is(
+    .review-panel,
+    .review-operation-live,
+    .review-button,
+    .review-tab,
+    .review-deck-header,
+    .review-deck-progress-fill,
+    .review-deck-stage,
+    .review-image-card,
+    .review-deck-statusbar,
+    .review-deck-complete-box
+  ) {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .review-app,
+  .review-deck-header,
+  .review-deck-cards {
+    scroll-behavior: auto;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .review-panel,
+  .review-deck-header,
+  .review-deck-stage,
+  .review-deck-statusbar,
+  .review-deck-complete-box {
+    border-color: var(--imageweave-border-focus);
+  }
+
+  :is(
+    .review-operation-live,
+    .review-tab,
+    .review-deck-stage-heading,
+    .review-deck-readonly,
+    .review-loupe-zoom,
+    .review-image-card,
+    .review-image-fallback,
+    .review-image-index,
+    .review-image-active-marker,
+    .review-recommended,
+    .review-image-stamp,
+    .review-loupe-lens
+  ) {
+    border-color: var(--imageweave-border-default);
+  }
+
+  .review-panel-heading p,
+  .review-operation-live,
+  .review-shortcut-hints,
+  .review-deck-readonly {
+    color: var(--imageweave-text-primary);
+  }
+
+  .review-tab--active,
+  .review-image-card:is([data-selected="true"], [data-active="true"]) {
+    border-color: var(--imageweave-border-focus);
   }
 }
 
 @media (forced-colors: active) {
   .review-app,
   .review-panel,
-  .review-operation-live,
-  .review-button,
-  .review-tab,
   .review-deck-header,
+  .review-deck-body,
   .review-deck-stage,
   .review-deck-statusbar,
-  .review-image-card,
-  .review-image-media,
-  .review-image-fallback,
-  .review-loupe-lens,
-  .review-loupe-crosshair,
-  .review-loupe-error,
+  .review-deck-complete,
   .review-deck-complete-box {
     color: CanvasText;
     border-color: CanvasText;
-    outline-color: CanvasText;
     background: Canvas;
+    background-image: none;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .review-operation-live,
+  .review-tab,
+  .review-deck-progress-track,
+  .review-loupe-zoom,
+  .review-deck-stage-heading,
+  .review-deck-readonly,
+  .review-image-card,
+  .review-image-media,
+  .review-image-fallback,
+  .review-image-index,
+  .review-image-active-marker,
+  .review-recommended,
+  .review-image-stamp,
+  .review-loupe-lens,
+  .review-loupe-error {
+    color: ButtonText;
+    border-color: ButtonText;
+    outline-color: ButtonText;
+    background: ButtonFace;
+    background-image: none;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .review-tab--active,
+  .review-image-card[data-selected="true"],
+  .review-image-card[data-active="true"],
+  .review-image-card:focus-visible,
+  .review-image-card[data-loupe-source="true"] {
+    border: var(--imageweave-border-strong-width) solid Highlight;
+    outline-color: Highlight;
     box-shadow: none;
   }
 
-  .review-button--primary,
   .review-button[aria-pressed="true"],
-  .review-tab--active,
   .review-image-active-marker,
   .review-image-stamp[data-state="keep"] {
-    color: HighlightText;
+    color: Highlight;
     border-color: Highlight;
-    background: Highlight;
-  }
-
-  .review-image-card[data-selected="false"],
-  .review-button:disabled,
-  .review-button[aria-disabled="true"] {
-    opacity: 1;
-  }
-
-  .review-image-card[data-selected="false"] .review-image-media::after {
-    background: transparent;
+    background: ButtonFace;
   }
 
   .review-deck-progress-fill,
   .review-loupe-crosshair::before,
   .review-loupe-crosshair::after {
     background: Highlight;
+  }
+
+  .review-loupe-crosshair {
+    border-color: Highlight;
+    outline-color: ButtonFace;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .review-image-media > img,
+  .review-loupe-lens {
+    opacity: 1;
+    filter: none;
+    mix-blend-mode: normal;
+  }
+
+  .review-image-card[data-selected="false"] {
+    opacity: 1;
+  }
+
+  .review-image-card[data-selected="false"] .review-image-media::after {
+    display: none;
+    background: transparent;
+  }
+
+  :is(
+    .review-panel,
+    .review-operation-live,
+    .review-button,
+    .review-tab,
+    .review-deck-header,
+    .review-deck-progress-fill,
+    .review-deck-stage,
+    .review-image-card,
+    .review-loupe-crosshair,
+    .review-loupe-lens,
+    .review-deck-statusbar,
+    .review-deck-complete-box
+  ) {
+    animation: none !important;
+    transition: none !important;
   }
 }

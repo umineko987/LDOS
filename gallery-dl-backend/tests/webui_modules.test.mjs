@@ -6833,9 +6833,9 @@ test("REVIEW deck 底部只有两按钮和三行提示，镜片按钮独立声�
   ]) {
     assert.equal(viewSource.includes(fingerprint), true, fingerprint);
   }
-  assert.match(cssSource, /\.review-image-card\[data-active="true"\] \{[\s\S]*?opacity: 1;[\s\S]*?outline: 3px solid var\(--imageweave-focus-ring\)/);
+  assert.match(cssSource, /\.review-image-card\[data-active="true"\] \{[\s\S]*?border-color: var\(--imageweave-accent\);[\s\S]*?opacity: 1;[\s\S]*?outline: var\(--imageweave-focus-width\) solid var\(--imageweave-focus-ring\)/);
   assert.match(cssSource, /\.review-image-card\[data-active="true"\] \.review-image-active-marker \{\s*display: block;/);
-  assert.match(cssSource, /\.review-image-active-marker \{[\s\S]*?color: var\(--imageweave-surface-content-solid\);[\s\S]*?background: var\(--imageweave-focus-ring\);/);
+  assert.match(cssSource, /\.review-image-active-marker \{[\s\S]*?border-color: var\(--imageweave-accent\);[\s\S]*?color: var\(--imageweave-accent-highlight\);[\s\S]*?background: var\(--imageweave-glass-surface-input\);/);
 
   for (const fingerprint of [
     'command === "previous-group"',

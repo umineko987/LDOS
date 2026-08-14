@@ -694,7 +694,11 @@ class WebUiModuleTests(unittest.TestCase):
             self.assertIn(fingerprint, review_view)
         self.assertRegex(
             review_css,
-            r'\.review-image-card\[data-active="true"\]\s*\{[^}]*opacity:\s*1;[^}]*outline:\s*3px solid var\(--imageweave-focus-ring\)',
+            r'\.review-image-card\[data-active="true"\]\s*\{'
+            r'[^}]*border-color:\s*var\(--imageweave-accent\);'
+            r'[^}]*opacity:\s*1;[^}]*outline:\s*'
+            r'var\(--imageweave-focus-width\) solid '
+            r'var\(--imageweave-focus-ring\)',
         )
         self.assertRegex(
             review_css,
@@ -851,6 +855,292 @@ class WebUiModuleTests(unittest.TestCase):
         )
         self.assertNotRegex(review_model, r"\b(?:relative_path|analysis_log_path)\s*:")
         self.assertNotRegex(review_view, r"\b(?:relative_path|analysis_log_path|raw_url)\b")
+
+    def test_review_t76_visual_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        css = (webui / "styles" / "apps" / "review.css").read_text(
+            encoding="utf-8"
+        )
+        controls = (webui / "styles" / "controls.css").read_text(
+            encoding="utf-8"
+        )
+        view = (
+            webui / "js" / "components" / "review-view.js"
+        ).read_text(encoding="utf-8")
+        controller = (
+            webui / "js" / "apps" / "review.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str) -> str:
+            marker = f"{selector} {{"
+            start = css.find(marker)
+            self.assertNotEqual(start, -1, selector)
+            opening = css.find("{", start)
+            closing = css.find("}", opening)
+            self.assertNotEqual(closing, -1, selector)
+            return css[opening + 1 : closing]
+
+        # The panel/deck structure, ordinary-window scroll ownership and
+        # maximized full-window geometry are presentation-only and unchanged.
+        self.assertIn(".window-body:has(> .review-app)", css)
+        app = css_block(".review-app")
+        for expected in (
+            "width: 100%",
+            "height: 100%",
+            "max-width: none",
+            "background: transparent",
+        ):
+            self.assertIn(expected, app)
+        panel_mode = css_block('.review-app[data-mode="panel"]')
+        self.assertIn("overflow-y: auto", panel_mode)
+        deck_mode = css_block('.review-app[data-mode="deck"]')
+        self.assertIn(
+            "grid-template-rows: auto minmax(0, 1fr) auto", deck_mode
+        )
+        self.assertIn("overflow: hidden", deck_mode)
+        self.assertIn("display: contents", css_block(
+            '.review-app[data-mode="deck"] > .review-deck'
+        ))
+        self.assertIn("overflow: auto", css_block(".review-deck-cards"))
+        self.assertIn("overflow: hidden", css_block(".review-deck-stage"))
+
+        # Panel, deck header, stage and statusbar are complete 15%/24px
+        # top-level surfaces in the canonical 5%-8% neutral range. They use
+        # directional inset edges but no nested backdrop or large outer shadow.
+        panel = css_block(".review-panel")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-card)",
+            "background: var(--imageweave-glass-surface-input)",
+            "inset 0 1px 0",
+            "inset 0 -1px 0",
+        ):
+            self.assertIn(expected, panel)
+        for selector, surface in (
+            (".review-deck-header", "secondary"),
+            (".review-deck-stage", "input"),
+            (".review-deck-statusbar", "secondary"),
+        ):
+            block = css_block(selector)
+            for expected in (
+                "border: var(--imageweave-border-width) solid "
+                "var(--imageweave-border-default)",
+                "border-radius: var(--imageweave-radius-card)",
+                f"background: var(--imageweave-glass-surface-{surface})",
+                "inset 0 1px 0",
+                "inset 0 -1px 0",
+            ):
+                self.assertIn(expected, block, selector)
+            self.assertNotIn("backdrop-filter", block)
+            self.assertNotIn("var(--imageweave-shadow-", block)
+            if selector == ".review-deck-header":
+                self.assertIn("max-height: 230px", block)
+
+        # A controlled error gets a centered neutral shield, complete edge and
+        # readable shared ErrorView instead of colliding with live deck rows.
+        error_overlay = css_block(
+            '.review-app[data-mode="deck"] > '
+            ".review-error-host:not(:empty)"
+        )
+        for expected in (
+            "inset: 16px",
+            "display: grid",
+            "place-items: center",
+            "var(--imageweave-border-default)",
+            "background: rgb(6 10 19 / 0.68)",
+            "box-shadow: none",
+        ):
+            self.assertIn(expected, error_overlay)
+        self.assertNotIn("backdrop-filter", error_overlay)
+        self.assertNotIn("var(--imageweave-shadow-", error_overlay)
+
+        # Toolbar/fact/status/image rows are 4%-6%, 16px and flat. Dirty,
+        # selected and active all combine readable text/symbols with full edges.
+        operation = css_block(".review-operation-live")
+        for expected in (
+            "var(--imageweave-border-weak)",
+            "border-radius: var(--imageweave-radius-control)",
+            "color: var(--imageweave-text-secondary)",
+            "background: var(--imageweave-glass-surface-weak)",
+            "box-shadow: none",
+        ):
+            self.assertIn(expected, operation)
+        self.assertIn('content: "◆ 状态 · "', css)
+        self.assertIn('content: "△ 未保存 · "', css)
+        self.assertRegex(
+            css,
+            r'\.review-operation-live\[data-review-dirty="true"\]'
+            r"\s*\{[^}]*border:\s*var\(--imageweave-border-strong-width\)"
+            r" solid var\(--imageweave-state-warning\)",
+        )
+        self.assertIn('content: "◆ "', css_block(".review-tab--active::before"))
+        for marker in (
+            'className: "review-image-active-marker"',
+            'text: "当前选中"',
+            'text: image.selected ? "✓ 保留" : "✗ 移除"',
+            '"aria-checked": String(image.selected)',
+            '"aria-current": String(image.id === activeImageId)',
+            'reviewDirty: "false"',
+            'attributes: { "aria-live": "polite", role: "status" }',
+        ):
+            self.assertIn(marker, view)
+
+        card = css_block(".review-image-card")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-control)",
+            "background: var(--imageweave-glass-surface-secondary)",
+            "box-shadow: none",
+            "opacity: 1",
+            "transform: none",
+        ):
+            self.assertIn(expected, card)
+        hover = css_block('.review-image-card[aria-disabled="false"]:hover')
+        self.assertIn("box-shadow: none", hover)
+        self.assertIn("transform: none", hover)
+        self.assertIn(
+            "opacity: 1", css_block(
+                '.review-image-card[data-selected="false"]'
+            )
+        )
+        self.assertRegex(
+            css,
+            r'\.review-image-card\[data-selected="true"\]'
+            r"\s*\{[^}]*border-color:\s*"
+            r"var\(--imageweave-border-focus\)",
+        )
+        self.assertRegex(
+            css,
+            r'\.review-image-card\[data-active="true"\]'
+            r"\s*\{[^}]*border-color:\s*var\(--imageweave-accent\)"
+            r"[^}]*outline:[^;]*var\(--imageweave-focus-ring\)",
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-input)",
+            css_block('.review-image-stamp[data-state="keep"]'),
+        )
+
+        # Image and Canvas pixels stay literal: contain sizing, no dimming,
+        # filter, blend or delayed animation. The lens keeps nearest-neighbor
+        # sampling and a complete 15%/16px edge.
+        image = css_block(".review-image-media > img")
+        for expected in (
+            "min-width: 0",
+            "min-height: 0",
+            "object-fit: contain",
+            "background: transparent",
+            "opacity: 1",
+            "filter: none",
+            "mix-blend-mode: normal",
+            "transition: none",
+        ):
+            self.assertIn(expected, image)
+        lens = css_block(".review-loupe-lens")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-control)",
+            "background: var(--imageweave-glass-surface-secondary)",
+            "image-rendering: pixelated",
+            "opacity: 1",
+            "filter: none",
+            "mix-blend-mode: normal",
+            "transition: none",
+            "animation: none",
+        ):
+            self.assertIn(expected, lens)
+        crosshair = css_block(".review-loupe-crosshair")
+        self.assertIn("transition: none", crosshair)
+        self.assertIn("animation: none", crosshair)
+
+        # The sole *-solid reference is the canonical no-backdrop fallback.
+        # No state fill, old quick duration, one-sided bar or positive internal
+        # backdrop/filter survives in normal Review presentation.
+        self.assertEqual(
+            re.findall(r"--imageweave-[\w-]*-solid", css),
+            ["--imageweave-fallback-elevated-solid"],
+        )
+        self.assertNotRegex(css, r"--imageweave-state-[\w-]*-surface")
+        self.assertNotRegex(css, r"\b(?:100|120|140|150|160|180)ms\b")
+        self.assertNotRegex(
+            css,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+        for declaration in re.findall(
+            r"(?m)^\s*(?:-webkit-)?backdrop-filter\s*:\s*([^;\n]+)",
+            css,
+        ):
+            self.assertEqual(declaration.strip(), "none")
+        for declaration in re.findall(
+            r"(?m)^\s*filter\s*:\s*([^;\n]+)", css
+        ):
+            self.assertEqual(declaration.strip(), "none")
+
+        # Primary styling remains the T6 neutral shared control. Capability,
+        # contrast, motion and forced-color fallbacks are all canonical.
+        self.assertRegex(
+            controls,
+            r"\.review-button\.review-button--primary"
+            r"[\s\S]*?border-color:\s*var\(--imageweave-accent\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-button\)",
+        )
+        self.assertNotRegex(
+            css, r"\.review-button--primary\s*\{[^}]*background"
+        )
+        self.assertIn(
+            "@supports not ((-webkit-backdrop-filter: blur(1px)) or "
+            "(backdrop-filter: blur(1px)))",
+            css,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid)", css
+        )
+        self.assertIn("@media (prefers-contrast: more)", css)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", css)
+        self.assertIn('@media (forced-colors: active)', css)
+        self.assertIn('data-motion="off"', css)
+        for marker in (
+            "CanvasText",
+            "ButtonFace",
+            "Highlight",
+            "background-image: none",
+            "box-shadow: none",
+            "backdrop-filter: none",
+            "transition: none !important",
+        ):
+            self.assertIn(marker, css)
+
+        # T7.6 is CSS-only: all=true, exact partial payload, shortcut scope,
+        # RAF Canvas, media release and window lifecycle seams remain present.
+        self.assertEqual(controller.count("?all=true"), 1)
+        for marker in (
+            "buildReviewDecisionPayload(review)",
+            "splitReviewDecisionPayload(payload)",
+            "for (const chunk of captured)",
+            "await api.put(reviewPath(batchId, \"/decisions\"), chunk",
+            "event.target.closest(\"input, select, textarea, button, "
+            "a[href], [contenteditable]\")",
+            "operationController?.abort()",
+            "view.deactivate();",
+            "view.destroy();",
+        ):
+            self.assertIn(marker, controller)
+        for marker in (
+            "context2d.imageSmoothingEnabled = false",
+            "context2d.drawImage(",
+            "requestFrame(() => drawLoupeNow())",
+            'image.removeAttribute("src")',
+            "canvas.width = 1",
+            "resizeObserver?.disconnect()",
+            'root.removeEventListener("pointermove"',
+            "stageGeneration += 1",
+        ):
+            self.assertIn(marker, view)
 
     def test_polling_focus_t14_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]

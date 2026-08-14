@@ -42,6 +42,20 @@ const CSS_SOURCE = readFileSync(
   new URL("../gdl_backend/webui/styles/apps/review.css", import.meta.url),
   "utf8",
 );
+const CONTROLS_CSS_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/styles/controls.css", import.meta.url),
+  "utf8",
+);
+
+function cssBlock(selector) {
+  const marker = `${selector} {`;
+  const start = CSS_SOURCE.indexOf(marker);
+  assert.notEqual(start, -1, selector);
+  const opening = CSS_SOURCE.indexOf("{", start);
+  const closing = CSS_SOURCE.indexOf("}", opening);
+  assert.notEqual(closing, -1, selector);
+  return CSS_SOURCE.slice(opening + 1, closing);
+}
 
 function rawSummary(overrides = {}) {
   return {
@@ -568,12 +582,12 @@ test("4D controller：leave/minimize/close 共享一次串行保存和权威重�
   const restore = installReviewDom();
   try {
     const firstPut = deferred();
-    const putSizes = [];
+    const putPayloads = [];
     const harness = reviewControllerHarness({
       initialPage: rawPage(),
       apiPut(_url, payload) {
-        putSizes.push(payload.groups.length);
-        return putSizes.length === 1 ? firstPut.promise : Promise.resolve(rawSummary());
+        putPayloads.push(structuredClone(payload));
+        return putPayloads.length === 1 ? firstPut.promise : Promise.resolve(rawSummary());
       },
     });
     dispatchDirty(harness.store, REVIEW_DECISION_BATCH_LIMIT + 1);
@@ -584,10 +598,15 @@ test("4D controller：leave/minimize/close 共享一次串行保存和权威重�
     const minimize = harness.controller.beforeWindowHide("minimized");
     const close = harness.controller.beforeWindowHide("closed");
     await flush(2);
-    assert.deepEqual(putSizes, [50]);
+    assert.deepEqual(putPayloads.map((payload) => payload.groups.length), [50]);
     firstPut.resolve(rawSummary());
     assert.deepEqual(await Promise.all([leave, minimize, close]), [true, true, true]);
-    assert.deepEqual(putSizes, [50, 1]);
+    assert.deepEqual(putPayloads.map((payload) => payload.groups.length), [50, 1]);
+    assert.deepEqual(
+      putPayloads.flatMap((payload) => payload.groups.map((group) => group.group_id)),
+      Array.from({ length: REVIEW_DECISION_BATCH_LIMIT + 1 }, (_, index) => `group-${index + 1}`),
+    );
+    assert.equal(putPayloads.every((payload) => Object.keys(payload).join() === "groups"), true);
     const pageGets = harness.calls.filter((call) => call[0] === "get" && call[1].includes("?all=true")).length;
     assert.equal(pageGets, baselineGets + 1);
     assert.equal(harness.store.getState().review.dirty, false);
@@ -597,18 +616,23 @@ test("4D controller：leave/minimize/close 共享一次串行保存和权威重�
   }
 });
 
-test("4D controller：保存失败拒绝 leave/hide 并保留完整草稿", async () => {
+test("4D controller：保存失败拒绝 leave/hide、保留完整草稿并可按原 payload 重试", async () => {
   const restore = installReviewDom();
   try {
+    const putPayloads = [];
     const harness = reviewControllerHarness({
       initialPage: rawPage(),
-      apiPut() {
-        return Promise.reject(Object.assign(new Error(SECRET), {
-          status: 409,
-          code: "review_state_conflict",
-          requestId: "review-request-safe",
-          details: { token: SECRET },
-        }));
+      apiPut(_url, payload) {
+        putPayloads.push(structuredClone(payload));
+        if (putPayloads.length === 1) {
+          return Promise.reject(Object.assign(new Error(SECRET), {
+            status: 409,
+            code: "review_state_conflict",
+            requestId: "review-request-safe",
+            details: { token: SECRET },
+          }));
+        }
+        return Promise.resolve(rawSummary({ decided_group_count: 1 }));
       },
     });
     dispatchDirty(harness.store, 1);
@@ -619,7 +643,13 @@ test("4D controller：保存失败拒绝 leave/hide 并保留完整草稿", asyn
     assert.deepEqual(await Promise.all([leave, hide]), [false, false]);
     assert.equal(harness.store.getState().review.dirty, true);
     assert.deepEqual(harness.store.getState().review.dirtyGroupIds, ["group-1"]);
+    assert.deepEqual(putPayloads, [{ groups: [{ group_id: "group-1", selected_image_ids: [] }] }]);
     assert.equal(JSON.stringify(harness.viewLog).includes(SECRET), false);
+
+    assert.equal(await harness.controller.beforeLeave(), true);
+    assert.deepEqual(putPayloads[1], putPayloads[0]);
+    assert.equal(harness.store.getState().review.dirty, false);
+    assert.deepEqual(harness.store.getState().review.dirtyGroupIds, []);
     harness.controller.destroy();
   } finally {
     restore();
@@ -652,7 +682,7 @@ test("4D controller：deactivate/destroy 后旧 write 不清 dirty、不重读�
   }
 });
 
-test("4D DOM/CSS：panel/deck 全高比较舞台、固定 command/status 与细边界玻璃契约", () => {
+test("4D DOM/CSS T7.6：全高 deck、低透明舞台、真实图片与 canonical a11y", () => {
   for (const fingerprint of [
     'className: "review-deck-header"',
     'className: "review-deck-stage"',
@@ -666,21 +696,111 @@ test("4D DOM/CSS：panel/deck 全高比较舞台、固定 command/status 与细�
     "读取受限",
   ]) assert.match(VIEW_SOURCE, new RegExp(fingerprint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(CSS_SOURCE, /\.window-body:has\(> \.review-app\)/);
-  assert.match(CSS_SOURCE, /\.review-app\s*\{[^}]*height:\s*100%/s);
+  assert.match(CSS_SOURCE, /\.review-app\s*\{[^}]*height:\s*100%[^}]*background:\s*transparent/s);
   assert.match(CSS_SOURCE, /\.review-app\[data-mode="panel"\][^\{]*\{[^}]*overflow-y:\s*auto/s);
   assert.match(CSS_SOURCE, /\.review-deck-stage\s*\{[^}]*min-height:\s*0[^}]*overflow:\s*hidden/s);
   assert.match(CSS_SOURCE, /\.review-deck-cards\s*\{[^}]*overflow:\s*auto/s);
-  assert.match(
-    CSS_SOURCE,
-    /\.review-image-media\s*>\s*img\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*0;[^}]*object-fit:\s*contain/s,
+
+  const panel = cssBlock(".review-panel");
+  for (const expected of [
+    "border: var(--imageweave-border-width) solid var(--imageweave-border-default)",
+    "border-radius: var(--imageweave-radius-card)",
+    "background: var(--imageweave-glass-surface-input)",
+    "inset 0 1px 0",
+    "inset 0 -1px 0",
+  ]) assert.match(panel, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(panel, /backdrop-filter|var\(--imageweave-shadow-/);
+
+  for (const [selector, surface] of [
+    [".review-deck-header", "secondary"],
+    [".review-deck-stage", "input"],
+    [".review-deck-statusbar", "secondary"],
+  ]) {
+    const block = cssBlock(selector);
+    assert.match(block, /border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-default\)/);
+    assert.match(block, /border-radius:\s*var\(--imageweave-radius-card\)/);
+    assert.match(block, new RegExp(`background:\\s*var\\(--imageweave-glass-surface-${surface}\\)`));
+    assert.match(block, /inset 0 1px 0/);
+    assert.match(block, /inset 0 -1px 0/);
+    assert.doesNotMatch(block, /backdrop-filter|var\(--imageweave-shadow-/);
+    if (selector === ".review-deck-header") assert.match(block, /max-height:\s*230px/);
+  }
+
+  const errorOverlay = cssBlock('.review-app[data-mode="deck"] > .review-error-host:not(:empty)');
+  assert.match(errorOverlay, /inset:\s*16px/);
+  assert.match(errorOverlay, /display:\s*grid/);
+  assert.match(errorOverlay, /place-items:\s*center/);
+  assert.match(errorOverlay, /border:[^;]*--imageweave-border-default/);
+  assert.match(errorOverlay, /background:\s*rgb\(6 10 19 \/ 0\.68\)/);
+  assert.match(errorOverlay, /box-shadow:\s*none/);
+  assert.doesNotMatch(errorOverlay, /backdrop-filter|var\(--imageweave-shadow-/);
+
+  const operation = cssBlock(".review-operation-live");
+  assert.match(operation, /border:[^;]*--imageweave-border-weak/);
+  assert.match(operation, /border-radius:\s*var\(--imageweave-radius-control\)/);
+  assert.match(operation, /background:\s*var\(--imageweave-glass-surface-weak\)/);
+  assert.match(operation, /color:\s*var\(--imageweave-text-secondary\)/);
+  assert.match(CSS_SOURCE, /\.review-operation-live\[data-review-dirty="true"\][\s\S]*?border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-warning\)/);
+  assert.match(CSS_SOURCE, /content:\s*"△ 未保存 · "/);
+  assert.match(CSS_SOURCE, /\.review-tab--active::before\s*\{[^}]*content:\s*"◆ "/s);
+
+  const imageCard = cssBlock(".review-image-card");
+  assert.match(imageCard, /border:[^;]*--imageweave-border-default/);
+  assert.match(imageCard, /border-radius:\s*var\(--imageweave-radius-control\)/);
+  assert.match(imageCard, /background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  assert.match(imageCard, /box-shadow:\s*none/);
+  assert.match(imageCard, /transform:\s*none/);
+  const cardHover = cssBlock('.review-image-card[aria-disabled="false"]:hover');
+  assert.match(cardHover, /transform:\s*none/);
+  assert.match(cardHover, /box-shadow:\s*none/);
+  assert.match(cssBlock('.review-image-card[data-selected="false"]'), /opacity:\s*1/);
+  assert.match(CSS_SOURCE, /\.review-image-card\[data-selected="true"\][\s\S]*?border-color:\s*var\(--imageweave-border-focus\)/);
+  assert.match(CSS_SOURCE, /\.review-image-card\[data-active="true"\][\s\S]*?border-color:\s*var\(--imageweave-accent\)[\s\S]*?outline:[^;]*--imageweave-focus-ring/);
+  assert.match(CSS_SOURCE, /\.review-image-card\[data-active="true"\] \.review-image-active-marker\s*\{\s*display:\s*block/);
+  assert.match(CSS_SOURCE, /\.review-image-stamp\[data-state="keep"\][\s\S]*?background:\s*var\(--imageweave-glass-surface-input\)/);
+
+  const image = cssBlock(".review-image-media > img");
+  for (const expected of [
+    /min-width:\s*0/,
+    /min-height:\s*0/,
+    /object-fit:\s*contain/,
+    /background:\s*transparent/,
+    /opacity:\s*1/,
+    /filter:\s*none/,
+    /mix-blend-mode:\s*normal/,
+    /transition:\s*none/,
+  ]) assert.match(image, expected);
+  const lens = cssBlock(".review-loupe-lens");
+  assert.match(lens, /border:[^;]*--imageweave-border-default/);
+  assert.match(lens, /border-radius:\s*var\(--imageweave-radius-control\)/);
+  assert.match(lens, /background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  assert.match(lens, /image-rendering:\s*pixelated/);
+  assert.match(lens, /filter:\s*none/);
+  assert.match(lens, /mix-blend-mode:\s*normal/);
+  assert.match(lens, /transition:\s*none/);
+  assert.match(lens, /animation:\s*none/);
+
+  assert.deepEqual(
+    CSS_SOURCE.match(/--imageweave-[\w-]*-solid/g) || [],
+    ["--imageweave-fallback-elevated-solid"],
   );
-  assert.match(CSS_SOURCE, /--imageweave-surface-content-solid/);
-  assert.match(CSS_SOURCE, /--imageweave-surface-navigation-solid/);
-  assert.match(CSS_SOURCE, /forced-colors/);
-  assert.match(CSS_SOURCE, /prefers-reduced-motion/);
-  assert.match(CSS_SOURCE, /data-motion="off"/);
-  assert.doesNotMatch(CSS_SOURCE, /@media\s*\((?:max-width|max-height)|backdrop-filter/);
+  assert.doesNotMatch(CSS_SOURCE, /--imageweave-state-[\w-]*-surface|\b(?:100|120|140|150|160|180)ms\b/);
+  for (const match of CSS_SOURCE.matchAll(/(?:^|\n)\s*(?:-webkit-)?backdrop-filter\s*:\s*([^;\n]+)/g)) {
+    assert.equal(match[1].trim(), "none");
+  }
   assert.doesNotMatch(CSS_SOURCE, /border-style:\s*(?:double|dashed|dotted)|outline:\s*6px\s+double/);
+  assert.match(CSS_SOURCE, /@supports not \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)/);
+  assert.match(CSS_SOURCE, /@media \(prefers-contrast: more\)/);
+  assert.match(CSS_SOURCE, /@media \(forced-colors: active\)/);
+  assert.match(CSS_SOURCE, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(CSS_SOURCE, /data-motion="off"/);
+  assert.match(CSS_SOURCE, /CanvasText/);
+  assert.match(CSS_SOURCE, /ButtonFace/);
+  assert.match(CSS_SOURCE, /Highlight/);
+  assert.match(
+    CONTROLS_CSS_SOURCE,
+    /\.review-button\.review-button--primary[\s\S]*?border-color:\s*var\(--imageweave-accent\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-button\)/,
+  );
   assert.doesNotMatch(`${VIEW_SOURCE}\n${CSS_SOURCE}`, /review-deck-inspector|review-metrics|pseudo-terminal|raw logs/i);
 });
 
