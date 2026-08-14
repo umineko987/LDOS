@@ -2850,6 +2850,15 @@ const POLICY_CSS_SOURCE = readFileSync(
   "utf8",
 );
 
+function policyCssBlock(selector) {
+  const marker = `${selector} {`;
+  const start = POLICY_CSS_SOURCE.indexOf(marker);
+  assert.notEqual(start, -1, selector);
+  const opening = POLICY_CSS_SOURCE.indexOf("{", start);
+  const closing = POLICY_CSS_SOURCE.indexOf("}", opening);
+  return POLICY_CSS_SOURCE.slice(opening + 1, closing);
+}
+
 function rawPolicyConfig(overrides = {}) {
   return {
     max_concurrency: 20,
@@ -3525,7 +3534,7 @@ test("4C controller：failed PUT 权威重读后恢复原 draft，错误不回�
   }
 });
 
-test("4C DOM/CSS：三栏、真实横向 owner、四字段语义、aria-live、稳定焦点 token 与纵向列滚动", () => {
+test("4C DOM/CSS T7.4a：长表单三栏、低透明扁平状态、T6 controls 与完整 a11y fallback", () => {
   for (const contract of [
     /policy-workspace-track/,
     /className:\s*"policy-workspace"[\s\S]*tabindex:\s*"0"/,
@@ -3539,26 +3548,156 @@ test("4C DOM/CSS：三栏、真实横向 owner、四字段语义、aria-live、�
     /backoff_base_seconds/,
     /proxy_mode/,
     /aria-live/,
+    /aria-describedby/,
+    /aria-errormessage/,
     /恢复默认设置/,
     /影响范围/,
   ]) assert.match(POLICY_DOM_SOURCE, contract);
-  assert.match(POLICY_VIEW_SOURCE, /policyFocusToken/);
-  assert.match(POLICY_VIEW_SOURCE, /restorePolicyFocus/);
-  assert.match(POLICY_VIEW_SOURCE, /setCustomValidity/);
-  assert.match(POLICY_VIEW_SOURCE, /validatePolicyDraft/);
-  assert.match(POLICY_VIEW_SOURCE, /aria-invalid/);
-  assert.match(POLICY_VIEW_SOURCE, /elements\.workspace/);
+  for (const contract of [
+    /policyFocusToken/,
+    /restorePolicyFocus/,
+    /setCustomValidity/,
+    /validatePolicyDraft/,
+    /aria-invalid/,
+    /elements\.workspace/,
+    /createStatusBadge/,
+    /updateStatusBadge/,
+  ]) assert.match(POLICY_VIEW_SOURCE, contract);
+
   assert.match(POLICY_CSS_SOURCE, /\.window-body:has\(> \.policy-app\)/);
-  assert.match(POLICY_CSS_SOURCE, /\.policy-workspace\s*\{[^}]*overflow-x\s*:\s*auto/s);
-  assert.match(POLICY_CSS_SOURCE, /\.policy-workspace-track\s*\{[^}]*grid-template-columns\s*:[^;]*minmax[^;]*minmax[^;]*minmax[^;]*;/s);
-  assert.match(POLICY_CSS_SOURCE, /\.policy-workspace-track\s*\{[^}]*min-width\s*:\s*(?:1080|1100|1120|1140|1160)px/s);
-  assert.match(POLICY_CSS_SOURCE, /\.policy-column-scroll\s*\{[^}]*overflow-y\s*:\s*auto/s);
-  assert.match(POLICY_CSS_SOURCE, /\.application-window\[data-maximized\] \.policy-workspace-track\s*\{[^}]*min-width\s*:\s*100%/s);
-  assert.match(POLICY_CSS_SOURCE, /--imageweave-surface-content-solid/);
-  assert.match(POLICY_CSS_SOURCE, /forced-colors/);
-  assert.match(POLICY_CSS_SOURCE, /prefers-reduced-motion|data-motion/);
+  const workspace = policyCssBlock(".policy-workspace");
+  assert.match(workspace, /padding:\s*24px/);
+  assert.match(workspace, /overflow-x:\s*auto/);
+  assert.match(workspace, /overflow-y:\s*hidden/);
+  const track = policyCssBlock(".policy-workspace-track");
+  assert.match(track, /grid-template-columns:[^;]*minmax[^;]*minmax[^;]*minmax/);
+  assert.match(track, /gap:\s*24px/);
+  assert.match(track, /min-width:\s*1120px/);
+  const column = policyCssBlock(".policy-column");
+  assert.match(column, /border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-default\)/);
+  assert.match(column, /border-radius:\s*var\(--imageweave-radius-card\)/);
+  assert.match(column, /background:\s*var\(--imageweave-glass-surface-input\)/);
+  assert.match(column, /inset 0 1px 0/);
+  assert.match(column, /inset 0 -1px 0/);
+  assert.doesNotMatch(column, /backdrop-filter|var\(--imageweave-shadow-/);
+  assert.match(policyCssBlock(".policy-column--navigation"), /--imageweave-glass-surface-secondary/);
+  const columnScroll = policyCssBlock(".policy-column-scroll");
+  assert.match(columnScroll, /padding:\s*24px/);
+  assert.match(columnScroll, /overflow-y:\s*auto/);
+  assert.match(POLICY_CSS_SOURCE, /\.application-window\[data-maximized\] \.policy-workspace-track\s*\{[^}]*min-width:\s*100%/s);
+
+  const solidRefs = POLICY_CSS_SOURCE.match(/--imageweave-[\w-]*-solid/g) || [];
+  assert.deepEqual(solidRefs, ["--imageweave-fallback-elevated-solid"]);
+  assert.doesNotMatch(POLICY_CSS_SOURCE, /--imageweave-state-[\w-]*-surface/);
+  assert.doesNotMatch(
+    POLICY_CSS_SOURCE,
+    /^\s*(?:-webkit-)?backdrop-filter\s*:(?![^\n]*\bnone\b)/m,
+  );
+  assert.doesNotMatch(POLICY_CSS_SOURCE, /^\s*filter\s*:/m);
+  assert.match(
+    POLICY_CSS_SOURCE,
+    /\.policy-waiting-host,[\s\S]*?\.policy-action-reason\s*\{[\s\S]*?border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-weak\)[\s\S]*?border-radius:\s*var\(--imageweave-radius-control\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-weak\)[\s\S]*?box-shadow:\s*none/,
+  );
+  const form = policyCssBlock(".policy-form");
+  assert.match(form, /background:\s*transparent/);
+  assert.match(form, /border:\s*0/);
+  assert.match(form, /box-shadow:\s*none/);
+  const panel = policyCssBlock(".policy-app .policy-panel");
+  assert.match(panel, /border-bottom:[^;]*--imageweave-border-weak/);
+  assert.match(panel, /background:\s*transparent/);
+  assert.match(panel, /background-image:\s*none/);
+  assert.match(panel, /box-shadow:\s*none/);
+  const sourceSummary = policyCssBlock(".policy-app .policy-source-summary");
+  assert.match(sourceSummary, /border-radius:\s*var\(--imageweave-radius-control\)/);
+  assert.match(sourceSummary, /background:\s*var\(--imageweave-glass-surface-weak\)/);
+  assert.match(
+    POLICY_CSS_SOURCE,
+    /\.policy-source-title\s*\{[\s\S]*?color:\s*var\(--imageweave-text-code\)[\s\S]*?font-family:\s*var\(--imageweave-font-mono\)/,
+  );
+
+  for (const [state, token] of [
+    ["loading", "running"],
+    ["saving", "running"],
+    ["ready", "success"],
+    ["saved", "success"],
+    ["dirty", "warning"],
+    ["partial", "warning"],
+    ["invalid", "danger"],
+    ["readonly", "danger"],
+    ["error", "danger"],
+  ]) {
+    assert.match(
+      POLICY_CSS_SOURCE,
+      new RegExp(`data-policy-workspace-state="${state}"[\\s\\S]*?--imageweave-state-${token}`),
+      state,
+    );
+  }
+  const invalidState = policyCssBlock(
+    ".policy-waiting-host[data-policy-workspace-state=\"invalid\"],\n" +
+    ".policy-waiting-host[data-policy-workspace-state=\"readonly\"],\n" +
+    ".policy-waiting-host[data-policy-workspace-state=\"error\"]",
+  );
+  assert.match(invalidState, /border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/);
+  assert.match(invalidState, /background:\s*var\(--imageweave-glass-surface-default\)/);
+  const validation = policyCssBlock(".policy-validation");
+  assert.match(validation, /color:\s*var\(--imageweave-text-primary\)/);
+  assert.match(validation, /border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/);
+  assert.match(validation, /background:\s*var\(--imageweave-glass-surface-default\)/);
+  for (const marker of [
+    'content: "◆ 当前站点"',
+    'content: "◆ 来源 · "',
+    'content: "◆ 状态 · "',
+    'content: "△ 未保存 · "',
+    'content: "⚠ 输入无效 · "',
+    'content: "⚠ 恢复说明 · "',
+  ]) assert.match(POLICY_CSS_SOURCE, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(
+    POLICY_CSS_SOURCE,
+    /(?:border-(?:left|right):\s*[34]px|inset\s+[34]px\s+0(?:px)?\s+0)/,
+  );
+
+  const localControls = policyCssBlock(
+    '.policy-field input[type="number"],\n.policy-field select',
+  );
+  for (const forbidden of ["background", "border", "box-shadow", "color"]) {
+    assert.doesNotMatch(localControls, new RegExp(`(?:^|\\s)${forbidden}\\s*:`), forbidden);
+  }
+  assert.doesNotMatch(POLICY_CSS_SOURCE, /\.policy-button--(?:primary|dangerous)/);
+  assert.match(
+    CONTROLS_CSS_SOURCE,
+    /\.policy-button\.policy-button--primary,[\s\S]*?border-color:\s*var\(--imageweave-accent\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-button\)/,
+  );
+  assert.match(
+    CONTROLS_CSS_SOURCE,
+    /\.policy-button\.policy-button--dangerous,[\s\S]*?border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/,
+  );
+  const sourceHover = policyCssBlock(
+    '.policy-app .policy-source-option:hover:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]),\n' +
+    '.policy-app .policy-source-option:active:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"])',
+  );
+  assert.match(sourceHover, /background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  assert.match(sourceHover, /transform:\s*none/);
+  const kicker = policyCssBlock(".policy-column-kicker");
+  assert.match(kicker, /letter-spacing:\s*normal/);
+  assert.match(kicker, /text-transform:\s*none/);
+  assert.doesNotMatch(POLICY_CSS_SOURCE, /\b(?:100|120|150|180)ms\b/);
+
+  assert.match(POLICY_CSS_SOURCE, /@supports not \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)/);
+  assert.match(POLICY_CSS_SOURCE, /background:\s*var\(--imageweave-fallback-elevated-solid\)/);
+  assert.match(POLICY_CSS_SOURCE, /@media \(prefers-contrast: more\)/);
+  assert.match(POLICY_CSS_SOURCE, /@media \(forced-colors: active\)/);
+  for (const expected of [
+    "CanvasText",
+    "ButtonFace",
+    "Highlight",
+    "background-image: none",
+    "box-shadow: none",
+    "backdrop-filter: none",
+  ]) assert.match(POLICY_CSS_SOURCE, new RegExp(expected));
+  assert.match(POLICY_CSS_SOURCE, /:root\[data-motion="off"\]/);
+  assert.match(POLICY_CSS_SOURCE, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.ok((POLICY_CSS_SOURCE.match(/transition: none !important/g) || []).length >= 2);
   assert.doesNotMatch(POLICY_CSS_SOURCE, /@media\s*\(max-width\s*:/);
-  assert.doesNotMatch(POLICY_CSS_SOURCE, /backdrop-filter/);
 });
 
 test("4C static boundary：唯一 Policy endpoint/view，无 polling/旁路 I/O/storage/console/innerHTML/fixture 且四生命周期", () => {

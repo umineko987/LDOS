@@ -3008,6 +3008,336 @@ class WebUiModuleTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, combined)
 
+    def test_nocturne_policy_t74a_visual_and_security_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        policy = (
+            webui / "styles" / "apps" / "policy.css"
+        ).read_text(encoding="utf-8")
+        controls = (webui / "styles" / "controls.css").read_text(
+            encoding="utf-8"
+        )
+        controller = (
+            webui / "js" / "apps" / "policy.js"
+        ).read_text(encoding="utf-8")
+        view = (
+            webui / "js" / "components" / "policy-view.js"
+        ).read_text(encoding="utf-8")
+        dom = (
+            webui / "js" / "components" / "policy-dom.js"
+        ).read_text(encoding="utf-8")
+        model = (
+            webui / "js" / "core" / "policy-model.js"
+        ).read_text(encoding="utf-8")
+        store_state = (
+            webui / "js" / "core" / "store-state.js"
+        ).read_text(encoding="utf-8")
+        store_transition = (
+            webui / "js" / "core" / "store-business-transition.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str) -> str:
+            marker = f"{selector} {{"
+            start = policy.find(marker)
+            self.assertNotEqual(start, -1, selector)
+            opening = policy.find("{", start)
+            closing = policy.find("}", opening)
+            return policy[opening + 1 : closing]
+
+        # The existing long-form navigation/editor/action workspace remains the
+        # sole layout owner. Normal windows scroll horizontally, maximized
+        # windows fit all three columns, and each column owns vertical scroll.
+        workspace = css_block(".policy-workspace")
+        self.assertIn("padding: 24px", workspace)
+        self.assertIn("overflow-x: auto", workspace)
+        self.assertIn("overflow-y: hidden", workspace)
+        track = css_block(".policy-workspace-track")
+        self.assertIn("min-width: 1120px", track)
+        self.assertIn("gap: 24px", track)
+        self.assertGreaterEqual(track.count("minmax("), 3)
+        self.assertIn(
+            ".application-window[data-maximized] .policy-workspace-track",
+            policy,
+        )
+        self.assertIn("min-width: 100%", policy)
+        column = css_block(".policy-column")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-card)",
+            "background: var(--imageweave-glass-surface-input)",
+            "inset 0 1px 0",
+            "inset 0 -1px 0",
+        ):
+            self.assertIn(expected, column)
+        self.assertNotIn("backdrop-filter", column)
+        self.assertNotIn("var(--imageweave-shadow-", column)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-secondary)",
+            css_block(".policy-column--navigation"),
+        )
+        column_scroll = css_block(".policy-column-scroll")
+        self.assertIn("padding: 24px", column_scroll)
+        self.assertIn("overflow-y: auto", column_scroll)
+
+        # Normal Policy surfaces are canonical 4%-8% neutral glass. Only the
+        # capability fallback may use a solid token. Form/panel wrappers are
+        # flattened while fields, facts and help rows use 16px weak surfaces.
+        solid_refs = re.findall(r"--imageweave-[\w-]*-solid", policy)
+        self.assertEqual(
+            solid_refs,
+            ["--imageweave-fallback-elevated-solid"],
+        )
+        self.assertNotRegex(policy, r"--imageweave-state-[\w-]*-surface")
+        self.assertIsNone(
+            re.search(
+                r"^\s*(?:-webkit-)?backdrop-filter\s*:"
+                r"(?![^\n]*\bnone\b)",
+                policy,
+                flags=re.MULTILINE,
+            )
+        )
+        self.assertNotRegex(policy, r"(?m)^\s*filter\s*:")
+        self.assertRegex(
+            policy,
+            r"\.policy-waiting-host,[\s\S]*?"
+            r"\.policy-action-reason\s*\{[\s\S]*?"
+            r"border:\s*var\(--imageweave-border-width\) solid "
+            r"var\(--imageweave-border-weak\)[\s\S]*?"
+            r"border-radius:\s*var\(--imageweave-radius-control\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-weak\)"
+            r"[\s\S]*?box-shadow:\s*none",
+        )
+        form = css_block(".policy-form")
+        for expected in (
+            "border: 0",
+            "background: transparent",
+            "box-shadow: none",
+        ):
+            self.assertIn(expected, form)
+        panel = css_block(".policy-app .policy-panel")
+        self.assertIn("border-bottom", panel)
+        self.assertIn("var(--imageweave-border-weak)", panel)
+        self.assertIn("background: transparent", panel)
+        self.assertIn("background-image: none", panel)
+        self.assertIn("box-shadow: none", panel)
+        source_summary = css_block(".policy-app .policy-source-summary")
+        self.assertIn(
+            "border-radius: var(--imageweave-radius-control)",
+            source_summary,
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-weak)",
+            source_summary,
+        )
+        self.assertRegex(
+            policy,
+            r"\.policy-source-title\s*\{[\s\S]*?color:\s*"
+            r"var\(--imageweave-text-code\)[\s\S]*?font-family:\s*"
+            r"var\(--imageweave-font-mono\)",
+        )
+
+        # Loading/saving/success/inherited/dirty/warning/invalid/readonly/error
+        # retain status badge text/icons and complete semantic edges over neutral
+        # fills. Current and dirty states also have shaped textual markers.
+        for state, token in (
+            ("loading", "running"),
+            ("saving", "running"),
+            ("ready", "success"),
+            ("saved", "success"),
+            ("dirty", "warning"),
+            ("partial", "warning"),
+            ("invalid", "danger"),
+            ("readonly", "danger"),
+            ("error", "danger"),
+        ):
+            self.assertRegex(
+                policy,
+                rf'data-policy-workspace-state="{state}"'
+                rf"[\s\S]*?--imageweave-state-{token}",
+                state,
+            )
+        invalid = css_block(
+            '.policy-waiting-host[data-policy-workspace-state="invalid"],\n'
+            '.policy-waiting-host[data-policy-workspace-state="readonly"],\n'
+            '.policy-waiting-host[data-policy-workspace-state="error"]'
+        )
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            invalid,
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            invalid,
+        )
+        validation = css_block(".policy-validation")
+        self.assertIn("color: var(--imageweave-text-primary)", validation)
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            validation,
+        )
+        for marker in (
+            'content: "◆ 当前站点"',
+            'content: "◆ 来源 · "',
+            'content: "◆ 状态 · "',
+            'content: "△ 未保存 · "',
+            'content: "⚠ 输入无效 · "',
+            'content: "⚠ 恢复说明 · "',
+        ):
+            self.assertIn(marker, policy)
+        self.assertNotRegex(
+            policy,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+        kicker = css_block(".policy-column-kicker")
+        self.assertIn("letter-spacing: normal", kicker)
+        self.assertIn("text-transform: none", kicker)
+        self.assertNotRegex(policy, r"\b(?:100|120|150|180)ms\b")
+
+        # Number/select and save/reset retain only local sizing and delegate all
+        # visual states to T6 shared controls. Navigation rows explicitly do not
+        # lift or scale on hover/active.
+        local_inputs = css_block(
+            '.policy-field input[type="number"],\n.policy-field select'
+        )
+        for forbidden in ("background", "border", "box-shadow", "color"):
+            self.assertNotRegex(local_inputs, rf"(?:^|\s){forbidden}\s*:")
+        self.assertNotRegex(policy, r"\.policy-button--(?:primary|dangerous)")
+        self.assertRegex(
+            controls,
+            r"\.policy-button\.policy-button--primary,[\s\S]*?"
+            r"border-color:\s*var\(--imageweave-accent\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-button\)",
+        )
+        self.assertRegex(
+            controls,
+            r"\.policy-button\.policy-button--dangerous,[\s\S]*?"
+            r"border:\s*var\(--imageweave-border-strong-width\) solid "
+            r"var\(--imageweave-state-danger\)",
+        )
+        source_hover = css_block(
+            '.policy-app .policy-source-option:hover:not(:disabled):not('
+            '[aria-disabled="true"]):not([aria-busy="true"]),\n'
+            '.policy-app .policy-source-option:active:not(:disabled):not('
+            '[aria-disabled="true"]):not([aria-busy="true"])'
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-secondary)",
+            source_hover,
+        )
+        self.assertIn("transform: none", source_hover)
+
+        # Canonical no-backdrop, contrast, forced colors and both motion
+        # opt-outs stay explicit. Forced colors remove optical decoration.
+        self.assertIn(
+            "@supports not ((-webkit-backdrop-filter: blur(1px)) or "
+            "(backdrop-filter: blur(1px)))",
+            policy,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid)",
+            policy,
+        )
+        self.assertIn("@media (prefers-contrast: more)", policy)
+        self.assertIn("@media (forced-colors: active)", policy)
+        for expected in (
+            "CanvasText",
+            "ButtonFace",
+            "Highlight",
+            "background-image: none",
+            "box-shadow: none",
+            "backdrop-filter: none",
+        ):
+            self.assertIn(expected, policy)
+        self.assertIn(':root[data-motion="off"]', policy)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", policy)
+        self.assertGreaterEqual(policy.count("transition: none !important"), 2)
+        self.assertNotRegex(policy, r"@media\s*\(max-width\s*:")
+
+        # Visual-only production change: the exact endpoint/query, four-field
+        # payload, mutation->authority GET, draft preservation, shared discard
+        # promise, stale gate, safe projection and lifecycle aborts stay owned by
+        # the existing controller/model/Store implementation.
+        for marker in (
+            'policies: "/api/v1/sites/policies"',
+            'POLICY_VIEW_QUERY = "view=policy"',
+            "requestGate.beginRead()",
+            "requestGate.beginWrite()",
+            "requestGate.advanceLifecycle()",
+            "readConfig(null, { replace: true, report: false })",
+            "preservedDraft",
+            "view.restoreDraft(preservedDraft)",
+            "capturedPayload = null",
+            "discardRequest",
+            "beforeLeave()",
+            "beforeWindowHide(visibility)",
+            'globalThis.addEventListener?.("beforeunload"',
+            "activeOperationController?.abort()",
+            "abortRead()",
+            "dialogs.destroy()",
+            "view.clearDraft()",
+        ):
+            self.assertIn(marker, controller)
+        self.assertNotIn("polling.start", controller)
+        for marker in (
+            '"max_concurrency"',
+            '"retry_limit"',
+            '"backoff_base_seconds"',
+            '"proxy_mode"',
+            "buildPolicyPayload",
+            "sanitizePolicyResponse",
+            "validatePolicySnapshot",
+            "safePolicyErrorDetail",
+            "SAFE_DETAIL_FIELDS",
+            "DANGEROUS_KEYS",
+            "createPolicyRequestGate",
+        ):
+            self.assertIn(marker, model)
+        self.assertIn(
+            "action(ACTION_TYPES.POLICY_CONFIG_RECEIVED, "
+            "sanitizePolicyResponse(config))",
+            store_state,
+        )
+        self.assertIn(
+            "policy: { config: validatePolicySnapshot(action.payload) }",
+            store_transition,
+        )
+        for marker in (
+            'attributes: { "aria-label": "五个站点的设置状态" }',
+            'className: "policy-workspace"',
+            'tabindex: "0"',
+            'autocomplete: "off"',
+            '"aria-describedby"',
+            '"aria-errormessage"',
+            'role: "alert"',
+            'role: "status"',
+            '"aria-live": "polite"',
+            '"aria-live": "assertive"',
+        ):
+            self.assertIn(marker, dom)
+        self.assertIn("policyFocusToken", view)
+        self.assertIn("restorePolicyFocus", view)
+        self.assertIn("setCustomValidity", view)
+        combined = "\n".join((controller, view, dom, model))
+        for forbidden in (
+            "fetch(",
+            "globalThis.fetch",
+            "XMLHttpRequest",
+            "localStorage",
+            "sessionStorage",
+            "indexedDB",
+            "console.",
+            "innerHTML",
+            "tests/fixtures",
+            "fixtures/webui",
+        ):
+            self.assertNotIn(forbidden, combined)
+
     def test_window_manager_t12_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
         webui = backend_root / "gdl_backend" / "webui"
