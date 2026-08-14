@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN" data-motion="on" data-theme-tone="light">
+<html lang="zh-CN" data-motion="on" data-theme-tone="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="dark">
   <meta name="description" content="ImageWeave 图片采集与管理界面">
   <link rel="icon" href="data:,">
   <title>ImageWeave</title>
@@ -36,12 +36,7 @@
       data-desktop-wallpaper
       aria-hidden="true"
       inert
-    >
-      <div class="desktop-wallpaper__image-layer" data-desktop-wallpaper-image hidden>
-        <img class="desktop-wallpaper__image" alt="" draggable="false">
-      </div>
-      <div class="desktop-wallpaper__mask" data-desktop-wallpaper-mask></div>
-    </div>
+    ></div>
 
     <header class="menu-bar" data-menu-bar aria-label="ImageWeave 菜单栏">
       <div class="menu-bar__identity">
@@ -68,7 +63,7 @@
       </div>
     </header>
 
-    <div class="window-layer window-layer--opacity-solid" data-window-layer></div>
+    <div class="window-layer" data-window-layer></div>
 
     <template data-window-template>
       <section class="application-window" data-application-window role="group">

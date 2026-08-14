@@ -167,44 +167,25 @@ import {
 } from "../gdl_backend/webui/js/core/motion.js";
 import {
   createPersonalizationRuntime,
-  PERSONALIZATION_RUNTIME_CLASS_MAPS,
   WALLPAPER_COLOR_CLASSES,
-  WALLPAPER_CUSTOM_CLASS,
 } from "../gdl_backend/webui/js/core/personalization.js";
 import {
   BUILT_IN_WALLPAPER_COLORS,
-  calculateSrgbRelativeLuminance,
-  calculateThemeContrastRatio,
+  BUILT_IN_WALLPAPER_COLOR_IDS,
   copyPersonalizationPreferences,
-  deriveInterfaceThemeTone,
-  INTERFACE_THEME_DEFAULTS,
-  INTERFACE_THEME_PREFERENCE_KEYS,
-  INTERFACE_THEME_TONE_LUMINANCE_THRESHOLD,
-  isValidInterfaceTheme,
+  derivePersonalizationPreview,
   isValidPersonalizationPreferences,
   normalizePersonalizationPreferences,
-  normalizeThemeHex,
   PERSONALIZATION_DEFAULTS,
   PERSONALIZATION_OPTIONS,
+  PERSONALIZATION_PREFERENCE_KEYS,
   personalizationPreferencesEqual,
   projectPersonalizationPreferences,
   restoreDefaultPersonalizationPreferences,
-  WALLPAPER_IMAGE_LIMITS,
 } from "../gdl_backend/webui/js/core/personalization-model.js";
 import {
-  calculateWallpaperOutputDimensions,
-  hasSafeWallpaperOutputSignature,
-  importWallpaperImage,
-  validateWallpaperImageInput,
-  WallpaperImageImportError,
-} from "../gdl_backend/webui/js/core/wallpaper-image-import.js";
-import {
-  createWallpaperStorage,
-  normalizeWallpaperStorageError,
-  projectWallpaperImportResult,
-  projectWallpaperRecord,
+  cleanupLegacyCustomWallpaper,
   WALLPAPER_STORAGE_SCHEMA,
-  WallpaperStorageError,
 } from "../gdl_backend/webui/js/core/wallpaper-storage.js";
 import {
   clampRect,
@@ -253,6 +234,8 @@ import { createStoragePersistenceAdapter } from "../gdl_backend/webui/js/core/st
 import {
   deserializeUiPreferences,
   projectUiPreferences,
+  sanitizeUiPreferences,
+  serializePersonalizationPreferences,
   serializeUiPreferences,
 } from "../gdl_backend/webui/js/core/storage-preferences.js";
 import { createStorageServiceFromAdapter } from "../gdl_backend/webui/js/core/storage-service.js";
@@ -300,6 +283,7 @@ import {
   createPersonalizationView,
   deriveMotionLimitationState,
   MOTION_LIMITATION_MESSAGE,
+  PERSONALIZATION_SCENE_CHOICES,
 } from "../gdl_backend/webui/js/components/personalization-view.js";
 import crawlApplication, {
   CRAWL_ENDPOINTS,
@@ -1039,105 +1023,6 @@ async function flushPromises() {
   for (let index = 0; index < 8; index += 1) await Promise.resolve();
 }
 
-const PNG_SIGNATURE_BYTES = Uint8Array.from([
-  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-]);
-const JPEG_SIGNATURE_BYTES = Uint8Array.from([0xFF, 0xD8, 0xFF, 0xE0]);
-const GIF_SIGNATURE_BYTES = new TextEncoder().encode("GIF89a");
-
-function webpSignatureBytes({ animated = false } = {}) {
-  const bytes = new Uint8Array(32);
-  bytes.set(new TextEncoder().encode("RIFF"), 0);
-  const riffSize = bytes.length - 8;
-  bytes.set([
-    riffSize & 0xFF,
-    (riffSize >>> 8) & 0xFF,
-    (riffSize >>> 16) & 0xFF,
-    (riffSize >>> 24) & 0xFF,
-  ], 4);
-  bytes.set(new TextEncoder().encode("WEBPVP8X"), 8);
-  bytes[20] = animated ? 0x02 : 0;
-  return bytes;
-}
-
-function localImageFile(bytes, { name, type, size = bytes.byteLength }) {
-  const blob = new Blob([bytes], { type });
-  return Object.freeze({
-    name,
-    type,
-    size,
-    slice(start, end) {
-      return blob.slice(start, end);
-    },
-  });
-}
-
-function importedWallpaperFixture(seed, { width = 640, height = 360 } = {}) {
-  const blob = new Blob([PNG_SIGNATURE_BYTES, Uint8Array.of(seed)], {
-    type: "image/png",
-  });
-  return Object.freeze({
-    image: Object.freeze({
-      blob,
-      mediaType: "image/png",
-      width,
-      height,
-      version: 1,
-    }),
-    warning: null,
-  });
-}
-
-function storedWallpaperFixture(imported, updatedAt = 1_700_000_000_000) {
-  return Object.freeze({
-    ...imported.image,
-    updatedAt,
-  });
-}
-
-function createWallpaperRepositoryFixture(initialRecord = null) {
-  let record = initialRecord;
-  let updatedAt = 1_700_000_000_100;
-  const calls = {
-    read: 0,
-    snapshot: 0,
-    replace: 0,
-    restore: 0,
-    remove: 0,
-  };
-  const repository = Object.freeze({
-    async read() {
-      calls.read += 1;
-      return record;
-    },
-    async snapshot() {
-      calls.snapshot += 1;
-      return record;
-    },
-    async replace(image) {
-      calls.replace += 1;
-      record = Object.freeze({ ...image, updatedAt });
-      updatedAt += 1;
-      return record;
-    },
-    async restore(snapshot) {
-      calls.restore += 1;
-      record = snapshot;
-      return record;
-    },
-    async remove() {
-      calls.remove += 1;
-      record = null;
-      return true;
-    },
-  });
-  return Object.freeze({
-    repository,
-    calls,
-    current: () => record,
-  });
-}
-
 function createPersonalizationStorageFixture(initialPreferences) {
   let preferences = { ...initialPreferences };
   let writesAllowed = true;
@@ -1161,96 +1046,6 @@ function createPersonalizationStorageFixture(initialPreferences) {
       writesAllowed = value === true;
     },
   });
-}
-
-function createWallpaperSurfaceFixture({ onSourceChange = null } = {}) {
-  let source = "";
-  let backgroundImage = "";
-  let sequence = 0;
-  const created = [];
-  const revoked = [];
-  const events = [];
-  const calls = {
-    clearImageSource: 0,
-    clearBackgroundImage: 0,
-  };
-  const style = {
-    setProperty(name, value) {
-      if (name !== "background-image") throw new Error("unexpected style property");
-      backgroundImage = String(value);
-      events.push(["set-background", backgroundImage]);
-    },
-    removeProperty(name) {
-      if (name !== "background-image") throw new Error("unexpected style property");
-      calls.clearBackgroundImage += 1;
-      if (backgroundImage) events.push(["clear-background", backgroundImage]);
-      backgroundImage = "";
-    },
-    get backgroundImage() {
-      return backgroundImage;
-    },
-    set backgroundImage(value) {
-      backgroundImage = String(value);
-    },
-  };
-  const image = {
-    hidden: true,
-    style,
-    get src() {
-      return source;
-    },
-    set src(value) {
-      source = String(value);
-      events.push(["set-src", source]);
-      onSourceChange?.(source);
-    },
-    removeAttribute(name) {
-      if (name === "src") {
-        calls.clearImageSource += 1;
-        if (source) events.push(["clear-src", source]);
-        source = "";
-      }
-    },
-  };
-  const mask = { hidden: true };
-  const wallpaper = {
-    classList: new FakeClassList(),
-    querySelector(selector) {
-      return selector === "[data-desktop-wallpaper-mask]" ? mask : null;
-    },
-  };
-  const windowLayer = { classList: new FakeClassList() };
-  const urlApi = Object.freeze({
-    createObjectURL(blob) {
-      sequence += 1;
-      const url = `blob:wallpaper-fixture/${sequence}`;
-      created.push({ url, blob });
-      return url;
-    },
-    revokeObjectURL(url) {
-      revoked.push(url);
-      events.push(["revoke", url]);
-    },
-  });
-  return Object.freeze({
-    wallpaper,
-    image,
-    mask,
-    windowLayer,
-    urlApi,
-    created,
-    revoked,
-    events,
-    calls,
-  });
-}
-
-function stateContainsPrivateImageValue(value, seen = new Set()) {
-  if (typeof Blob === "function" && value instanceof Blob) return true;
-  if (typeof value === "string" && value.startsWith("blob:")) return true;
-  if (!value || typeof value !== "object" || seen.has(value)) return false;
-  seen.add(value);
-  return Object.values(value).some((item) => stateContainsPrivateImageValue(item, seen));
 }
 
 function createFakePolling(options = {}) {
@@ -1423,6 +1218,152 @@ test("DIALOG 控制器拒绝缺失的 DOM 行为依赖", () => {
     () => createDialogController({ documentObject: null }),
     /对话框需要可用的 document/,
   );
+});
+
+test("Personalization 离开确认使用真实 dialog 焦点环、单飞与销毁回退", async () => {
+  const previousNode = Object.getOwnPropertyDescriptor(globalThis, "Node");
+  const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  class DialogNode {}
+  class DialogElement extends DialogNode {
+    constructor(tagName, documentObject) {
+      super();
+      this.tagName = tagName.toUpperCase();
+      this.ownerDocument = documentObject;
+      this.attributes = new Map();
+      this.children = [];
+      this.listeners = new Map();
+      this.className = "";
+      this.textContent = "";
+      this.hidden = false;
+      this.open = false;
+      this.isConnected = false;
+    }
+    setAttribute(name, value) {
+      this.attributes.set(name, String(value));
+      if (name === "open") this.open = true;
+    }
+    getAttribute(name) { return this.attributes.get(name) ?? null; }
+    append(...children) {
+      for (const child of children) {
+        this.children.push(child);
+        if (child instanceof DialogElement) child.parentElement = this;
+      }
+    }
+    addEventListener(type, listener) {
+      if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+      this.listeners.get(type).add(listener);
+    }
+    removeEventListener(type, listener) { this.listeners.get(type)?.delete(listener); }
+    emit(type, details = {}) {
+      const event = {
+        key: details.key,
+        shiftKey: details.shiftKey === true,
+        defaultPrevented: false,
+        propagationStopped: false,
+        preventDefault() { this.defaultPrevented = true; },
+        stopPropagation() { this.propagationStopped = true; },
+      };
+      for (const listener of [...(this.listeners.get(type) || [])]) listener(event);
+      return event;
+    }
+    querySelectorAll() {
+      const descendants = (element) => element.children.flatMap((child) => (
+        child instanceof DialogElement ? [child, ...descendants(child)] : []
+      ));
+      return descendants(this).filter((element) => element.tagName === "BUTTON");
+    }
+    focus() { this.ownerDocument.activeElement = this; }
+    showModal() { this.open = true; }
+    close() { this.open = false; }
+    remove() {
+      this.ownerDocument.body.children = this.ownerDocument.body.children.filter(
+        (child) => child !== this,
+      );
+      this.isConnected = false;
+    }
+  }
+  const documentObject = { activeElement: null };
+  let modalSupported = true;
+  documentObject.createElement = (tagName) => {
+    const element = new DialogElement(tagName, documentObject);
+    if (tagName === "dialog" && !modalSupported) element.showModal = undefined;
+    return element;
+  };
+  documentObject.body = new DialogElement("body", documentObject);
+  documentObject.body.isConnected = true;
+  documentObject.body.append = (...children) => {
+    for (const child of children) {
+      documentObject.body.children.push(child);
+      child.parentElement = documentObject.body;
+      child.isConnected = true;
+    }
+  };
+  Object.defineProperty(globalThis, "Node", {
+    configurable: true,
+    writable: true,
+    value: DialogNode,
+  });
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    writable: true,
+    value: documentObject,
+  });
+
+  try {
+    const previousFocus = new DialogElement("button", documentObject);
+    previousFocus.isConnected = true;
+    previousFocus.focus();
+    const dialogs = createDialogController({ documentObject });
+    assert.throws(() => dialogs.open({ title: "", message: "内容" }), TypeError);
+    assert.throws(() => dialogs.open({
+      title: "危险操作",
+      message: "内容",
+      dangerous: true,
+      confirmLabel: "继续",
+    }), /确认/);
+
+    const result = dialogs.open({
+      title: "放弃未应用的外观设置？",
+      message: "当前场景或动效尚未应用。",
+      confirmLabel: "放弃更改并离开",
+      dangerous: true,
+      confirmationText: "未应用内容不会写入浏览器存储。",
+    });
+    assert.throws(() => dialogs.open({ title: "重复", message: "重复" }), /一次只能/);
+    const dialog = documentObject.body.children[0];
+    const [cancelButton, confirmButton] = dialog.querySelectorAll();
+    await Promise.resolve();
+    assert.equal(documentObject.activeElement, cancelButton);
+    let keyboard = dialog.emit("keydown", { key: "Tab", shiftKey: true });
+    assert.equal(keyboard.defaultPrevented, true);
+    assert.equal(documentObject.activeElement, confirmButton);
+    keyboard = dialog.emit("keydown", { key: "Tab" });
+    assert.equal(keyboard.defaultPrevented, true);
+    assert.equal(documentObject.activeElement, cancelButton);
+    confirmButton.emit("click");
+    assert.equal(await result, "confirm");
+    assert.equal(documentObject.body.children.length, 0);
+    assert.equal(documentObject.activeElement, previousFocus);
+
+    const cancelled = dialogs.open({ title: "离开？", message: "仍有更改" });
+    const cancelDialog = documentObject.body.children[0];
+    const escape = cancelDialog.emit("keydown", { key: "Escape" });
+    assert.equal(escape.defaultPrevented, true);
+    assert.equal(escape.propagationStopped, true);
+    assert.equal(await cancelled, "cancel");
+
+    modalSupported = false;
+    const destroyed = dialogs.open({ title: "离开？", message: "仍有更改" });
+    assert.equal(documentObject.body.children[0].getAttribute("open"), "");
+    dialogs.destroy();
+    assert.equal(await destroyed, "cancel");
+    assert.doesNotThrow(() => dialogs.destroy());
+  } finally {
+    if (previousNode) Object.defineProperty(globalThis, "Node", previousNode);
+    else delete globalThis.Node;
+    if (previousDocument) Object.defineProperty(globalThis, "document", previousDocument);
+    else delete globalThis.document;
+  }
 });
 
 test("API 请求构造只在存在请求体时发送 JSON Content-Type", () => {
@@ -4280,7 +4221,261 @@ test("反复切焦 50 次保持每 entry 一个 timer 且不增长状态源监�
   assert.equal(visibility.listeners.size, 0);
 });
 
-test("个性化模型固定六色、界面主题默认值与不可变白名单", () => {
+function installPersonalizationDom() {
+  const previous = new Map();
+  const install = (name, value) => {
+    previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  };
+
+  class TestNode {}
+  class TestElement extends TestNode {
+    constructor(tagName = "div") {
+      super();
+      this.tagName = tagName.toUpperCase();
+      this.attributes = new Map();
+      this.dataset = {};
+      this.children = [];
+      this.parentElement = null;
+      this.className = "";
+      this.textContent = "";
+      this.value = "";
+      this.checked = false;
+      this.disabled = false;
+      this.hidden = false;
+      this.inert = false;
+      this.listeners = new Map();
+      this.scrollLeft = 0;
+    }
+
+    setAttribute(name, value) {
+      const normalized = String(value);
+      this.attributes.set(name, normalized);
+      if (name === "value") this.value = normalized;
+      if (name === "type") this.type = normalized;
+      if (name === "name") this.name = normalized;
+      if (name === "id") this.id = normalized;
+      if (name === "hidden") this.hidden = true;
+      if (name === "disabled") this.disabled = true;
+    }
+
+    getAttribute(name) { return this.attributes.get(name) ?? null; }
+    hasAttribute(name) { return this.attributes.has(name); }
+    removeAttribute(name) {
+      this.attributes.delete(name);
+      if (name === "hidden") this.hidden = false;
+      if (name === "disabled") this.disabled = false;
+    }
+    toggleAttribute(name, force) {
+      if (force) this.setAttribute(name, "");
+      else this.removeAttribute(name);
+    }
+    append(...children) {
+      for (const child of children) {
+        if (child instanceof TestElement) child.parentElement = this;
+        this.children.push(child);
+      }
+    }
+    replaceChildren(...children) {
+      for (const child of this.children) {
+        if (child instanceof TestElement) child.parentElement = null;
+      }
+      this.children = [];
+      this.append(...children);
+    }
+    contains(target) {
+      let current = target;
+      while (current) {
+        if (current === this) return true;
+        current = current.parentElement;
+      }
+      return false;
+    }
+    matches(selector) {
+      return selector.split(",").some((part) => {
+        const token = part.trim();
+        const match = token.match(/^\[data-([a-z0-9-]+)(?:="([^"]+)")?\]$/);
+        if (!match) return false;
+        const key = match[1].replace(/-([a-z])/g, (_whole, letter) => letter.toUpperCase());
+        if (!Object.prototype.hasOwnProperty.call(this.dataset, key)) return false;
+        return match[2] === undefined || this.dataset[key] === match[2];
+      });
+    }
+    closest(selector) {
+      let current = this;
+      while (current) {
+        if (current.matches?.(selector)) return current;
+        current = current.parentElement;
+      }
+      return null;
+    }
+    addEventListener(type, listener) {
+      if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+      this.listeners.get(type).add(listener);
+    }
+    removeEventListener(type, listener) { this.listeners.get(type)?.delete(listener); }
+    emit(type, target = this, details = {}) {
+      const event = {
+        type,
+        target,
+        key: details.key,
+        returnValue: undefined,
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+      };
+      for (const listener of [...(this.listeners.get(type) || [])]) listener(event);
+      return event;
+    }
+    focus() { globalThis.document.activeElement = this; }
+    scrollBy(options) {
+      this.lastScrollBy = options;
+      this.scrollLeft += Number(options?.left || 0);
+    }
+    click() {}
+  }
+  class TestButton extends TestElement {}
+  class TestForm extends TestElement {}
+
+  const globalListeners = new Map();
+  const documentObject = {
+    activeElement: null,
+    createElement(tagName) {
+      if (tagName === "button") return new TestButton(tagName);
+      if (tagName === "form") return new TestForm(tagName);
+      return new TestElement(tagName);
+    },
+  };
+  install("Node", TestNode);
+  install("Element", TestElement);
+  install("HTMLElement", TestElement);
+  install("HTMLButtonElement", TestButton);
+  install("HTMLFormElement", TestForm);
+  install("document", documentObject);
+  install("addEventListener", (type, listener) => {
+    if (!globalListeners.has(type)) globalListeners.set(type, new Set());
+    globalListeners.get(type).add(listener);
+  });
+  install("removeEventListener", (type, listener) => globalListeners.get(type)?.delete(listener));
+
+  const root = new TestElement("main");
+  return {
+    root,
+    TestElement,
+    descendants(element) {
+      return [element, ...(element.children || []).flatMap((child) => (
+        child instanceof TestElement ? this.descendants(child) : []
+      ))];
+    },
+    emitGlobal(type) {
+      const event = { returnValue: undefined, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+      for (const listener of [...(globalListeners.get(type) || [])]) listener(event);
+      return event;
+    },
+    listenerCount(type) { return globalListeners.get(type)?.size ?? 0; },
+    restore() {
+      for (const [name, descriptor] of previous) {
+        if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+        else delete globalThis[name];
+      }
+    },
+  };
+}
+
+function personalizationState(overrides = {}) {
+  const committed = projectPersonalizationPreferences({
+    ...PERSONALIZATION_DEFAULTS,
+    ...(overrides.committed || {}),
+  });
+  const draft = projectPersonalizationPreferences({
+    ...committed,
+    ...(overrides.draft || {}),
+  });
+  const systemReduced = overrides.systemReduced === true;
+  return {
+    committed,
+    draft,
+    dirty: !personalizationPreferencesEqual(committed, draft),
+    busy: overrides.busy === true,
+    motion: {
+      userMode: draft.animations,
+      systemReduced,
+      effective: draft.animations === "on" && !systemReduced,
+      limitedBySystem: draft.animations === "on" && systemReduced,
+    },
+  };
+}
+
+function cleanupIndexedDbFixture(mode = "success") {
+  const calls = {
+    open: [],
+    contains: [],
+    transactions: [],
+    objectStores: [],
+    deletes: [],
+    reads: 0,
+    closes: 0,
+  };
+  const database = {
+    objectStoreNames: {
+      contains(name) {
+        calls.contains.push(name);
+        return mode !== "no-store" && mode !== "upgrade-no-store";
+      },
+    },
+    transaction(name, access) {
+      calls.transactions.push([name, access]);
+      if (mode === "transaction-error") throw new Error("transaction denied");
+      const transaction = {
+        objectStore(storeName) {
+          calls.objectStores.push(storeName);
+          return {
+            get() {
+              calls.reads += 1;
+              throw new Error("cleanup must not read");
+            },
+            delete(key) {
+              calls.deletes.push(key);
+              const request = { error: new Error("delete failed") };
+              queueMicrotask(() => {
+                if (mode === "delete-error") {
+                  request.onerror?.({ target: request });
+                  transaction.onerror?.({ target: transaction });
+                } else {
+                  transaction.oncomplete?.({ target: transaction });
+                }
+              });
+              return request;
+            },
+          };
+        },
+      };
+      return transaction;
+    },
+    close() { calls.closes += 1; },
+  };
+  const indexedDB = {
+    open(...args) {
+      calls.open.push(args);
+      if (mode === "open-throw") throw new Error("open failed");
+      const request = { result: database, error: new Error("open failed") };
+      queueMicrotask(() => {
+        if (mode === "blocked-late-success") {
+          request.onblocked?.({ target: request });
+          queueMicrotask(() => request.onsuccess?.({ target: request }));
+        } else if (mode === "open-error") {
+          request.onerror?.({ target: request });
+        } else {
+          if (mode === "upgrade-no-store") request.onupgradeneeded?.({ target: request });
+          request.onsuccess?.({ target: request });
+        }
+      });
+      return request;
+    },
+  };
+  return { calls, indexedDB };
+}
+
+test("个性化模型只保留场景与动效，严格投影覆盖六场景", () => {
   assert.deepEqual(BUILT_IN_WALLPAPER_COLORS, {
     graphite: "#20242A",
     slate: "#384554",
@@ -4289,1427 +4484,301 @@ test("个性化模型固定六色、界面主题默认值与不可变白名单",
     "plum-gray": "#403341",
     "warm-paper": "#E7E1D6",
   });
-  assert.deepEqual(PERSONALIZATION_DEFAULTS, {
-    animations: "on",
-    wallpaperKind: "color",
-    wallpaperColor: "graphite",
-    wallpaperFit: "cover",
-    wallpaperPosition: "center",
-    wallpaperMaskTone: "dark",
-    wallpaperMaskStrength: 40,
-    wallpaperBlur: "off",
-    windowOpacity: "solid",
-    themeAccent: "#46515D",
-    themeSurface: "#F4F1EA",
-  });
-  assert.deepEqual(INTERFACE_THEME_DEFAULTS, {
-    themeAccent: "#46515D",
-    themeSurface: "#F4F1EA",
-  });
-  assert.deepEqual(INTERFACE_THEME_PREFERENCE_KEYS, [
-    "themeAccent",
-    "themeSurface",
+  assert.deepEqual(BUILT_IN_WALLPAPER_COLOR_IDS, [
+    "graphite", "slate", "deep-ocean", "forest", "plum-gray", "warm-paper",
   ]);
-  assert.equal(
-    INTERFACE_THEME_TONE_LUMINANCE_THRESHOLD,
-    Math.sqrt(1.05 * 0.05) - 0.05,
-  );
-  assert.equal(Object.isFrozen(BUILT_IN_WALLPAPER_COLORS), true);
-  assert.equal(Object.isFrozen(INTERFACE_THEME_DEFAULTS), true);
-  assert.equal(Object.isFrozen(INTERFACE_THEME_PREFERENCE_KEYS), true);
+  assert.deepEqual(PERSONALIZATION_PREFERENCE_KEYS, ["animations", "wallpaperColor"]);
+  assert.deepEqual(Object.keys(PERSONALIZATION_OPTIONS), ["animations", "wallpaperColor"]);
+  assert.deepEqual(PERSONALIZATION_DEFAULTS, { animations: "on", wallpaperColor: "graphite" });
   assert.equal(Object.isFrozen(PERSONALIZATION_DEFAULTS), true);
-  assert.equal(Object.isFrozen(PERSONALIZATION_OPTIONS), true);
-  assert.equal(
-    Object.values(PERSONALIZATION_OPTIONS).every((values) => Object.isFrozen(values)),
-    true,
-  );
-  assert.deepEqual(PERSONALIZATION_OPTIONS.wallpaperPosition, [
-    "top-left", "top", "top-right", "left", "center", "right",
-    "bottom-left", "bottom", "bottom-right",
-  ]);
-});
+  assert.equal(Object.isFrozen(PERSONALIZATION_OPTIONS.animations), true);
+  assert.equal(Object.isFrozen(BUILT_IN_WALLPAPER_COLOR_IDS), true);
 
-test("界面主题颜色规范化、WCAG 对比度计算与底色 tone 派生使用固定算法", () => {
-  for (const [input, expected] of [
-    ["#46515D", "#46515D"],
-    ["#f4f1ea", "#F4F1EA"],
-    ["#a0B1c2", "#A0B1C2"],
-  ]) {
-    assert.equal(normalizeThemeHex(input), expected, input);
-  }
-  for (const invalid of [
-    "#123",
-    "#46515DFF",
-    "46515D",
-    "transparent",
-    "red",
-    "rgb(70 81 93)",
-    "var(--unsafe)",
-    "url(https://example.invalid/theme.css)",
-    "#GGGGGG",
-    null,
-  ]) {
-    assert.equal(normalizeThemeHex(invalid), null, String(invalid));
-  }
-
-  assert.ok(Math.abs(
-    calculateSrgbRelativeLuminance("#46515D") - 0.07977263878707866,
-  ) < 1e-12);
-  const defaultRatio = calculateThemeContrastRatio("#46515D", "#F4F1EA");
-  assert.ok(Math.abs(defaultRatio - 7.172868210874588) < 1e-12);
-  assert.equal(isValidInterfaceTheme("#46515D", "#F4F1EA"), true);
-
-  // 对比度只用于 live status；低对比、同色与真实用户组合仍是合法主题。
-  assert.ok(calculateThemeContrastRatio("#767676", "#FFFFFF") > 4.5);
-  assert.ok(calculateThemeContrastRatio("#777777", "#FFFFFF") < 4.5);
-  const userRatio = calculateThemeContrastRatio("#0065D1", "#7E6425");
-  assert.ok(userRatio > 1 && userRatio < 1.02);
-  assert.equal(isValidInterfaceTheme("#767676", "#FFFFFF"), true);
-  assert.equal(isValidInterfaceTheme("#777777", "#FFFFFF"), true);
-  assert.equal(isValidInterfaceTheme("#0065D1", "#7E6425"), true);
-  assert.equal(isValidInterfaceTheme("#101010", "#101010"), true);
-  assert.equal(isValidInterfaceTheme("#FFFFFF", "#101010"), true);
-  assert.equal(isValidInterfaceTheme("#FFF", "#101010"), false);
-  assert.equal(isValidInterfaceTheme("var(--unsafe)", "#101010"), false);
-
-  // #757575 和 #767676 分别位于黑/白前景等对比阈值两侧。
-  assert.ok(
-    calculateSrgbRelativeLuminance("#757575")
-      < INTERFACE_THEME_TONE_LUMINANCE_THRESHOLD,
-  );
-  assert.ok(
-    calculateSrgbRelativeLuminance("#767676")
-      > INTERFACE_THEME_TONE_LUMINANCE_THRESHOLD,
-  );
-  assert.equal(deriveInterfaceThemeTone("#FFFFFF"), "light");
-  assert.equal(deriveInterfaceThemeTone("#767676"), "light");
-  assert.equal(deriveInterfaceThemeTone("#757575"), "dark");
-  assert.equal(deriveInterfaceThemeTone("#101010"), "dark");
-  assert.throws(() => calculateSrgbRelativeLuminance("rgb(0 0 0)"), TypeError);
-  assert.throws(() => deriveInterfaceThemeTone("#0008"), TypeError);
-});
-
-test("个性化严格投影接受全部白名单值并拒绝越界、对象与 CSS 字符串", () => {
-  for (const [field, allowed] of Object.entries(PERSONALIZATION_OPTIONS)) {
-    for (const value of allowed) {
-      const projected = projectPersonalizationPreferences({
-        ...PERSONALIZATION_DEFAULTS,
-        [field]: value,
-      });
-      assert.equal(projected[field], value, `${field}: ${value}`);
+  for (const animations of PERSONALIZATION_OPTIONS.animations) {
+    for (const wallpaperColor of BUILT_IN_WALLPAPER_COLOR_IDS) {
+      const projected = projectPersonalizationPreferences({ animations, wallpaperColor });
+      assert.deepEqual(projected, { animations, wallpaperColor });
       assert.equal(Object.isFrozen(projected), true);
+      assert.equal(isValidPersonalizationPreferences(projected), true);
     }
   }
-
-  const darkTheme = projectPersonalizationPreferences({
-    ...PERSONALIZATION_DEFAULTS,
-    themeAccent: "#ffffff",
-    themeSurface: "#101010",
-  });
-  assert.equal(darkTheme.themeAccent, "#FFFFFF");
-  assert.equal(darkTheme.themeSurface, "#101010");
-
-  const lowContrastTheme = projectPersonalizationPreferences({
-    ...PERSONALIZATION_DEFAULTS,
-    themeAccent: "#0065d1",
-    themeSurface: "#7e6425",
-  });
-  assert.equal(lowContrastTheme.themeAccent, "#0065D1");
-  assert.equal(lowContrastTheme.themeSurface, "#7E6425");
-
-  for (const [themeAccent, themeSurface] of [
-    ["#FFFFFF00", "#101010"],
-    ["#FFF", "#101010"],
-    ["white", "#101010"],
-    ["rgb(255 255 255)", "#101010"],
-    ["var(--imageweave-accent)", "#101010"],
-    ["url(https://example.invalid/theme.css)", "#101010"],
-    ["} body { color: red", "#101010"],
-  ]) {
-    assert.throws(
-      () => projectPersonalizationPreferences({
-        ...PERSONALIZATION_DEFAULTS,
-        themeAccent,
-        themeSurface,
-      }),
-      TypeError,
-      `${themeAccent} / ${themeSurface}`,
-    );
-  }
-
-  for (const wallpaperMaskStrength of [-5, 3, 40.5, 85, "40"]) {
-    assert.throws(
-      () => projectPersonalizationPreferences({ wallpaperMaskStrength }),
-      TypeError,
-    );
-  }
-  for (const [field, value] of [
-    ["animations", "system"],
-    ["wallpaperKind", "remote"],
-    ["wallpaperColor", "#20242A"],
-    ["wallpaperColor", "url(https://example.invalid/wallpaper.png)"],
-    ["wallpaperFit", "auto"],
-    ["wallpaperPosition", "center center"],
-    ["wallpaperMaskTone", "transparent"],
-    ["wallpaperBlur", "strong"],
-    ["windowOpacity", "transparent"],
-  ]) {
-    assert.throws(
-      () => projectPersonalizationPreferences({ [field]: value }),
-      TypeError,
-    );
-  }
-  assert.throws(
-    () => projectPersonalizationPreferences({ wallpaperColor: { id: "graphite" } }),
-    TypeError,
-  );
-  assert.throws(
-    () => projectPersonalizationPreferences({ ...PERSONALIZATION_DEFAULTS, unknown: true }),
-    TypeError,
-  );
-  assert.equal(isValidPersonalizationPreferences(PERSONALIZATION_DEFAULTS), true);
-  assert.equal(isValidPersonalizationPreferences(new Blob(["unsafe"])), false);
+  for (const invalid of [
+    { animations: "system", wallpaperColor: "graphite" },
+    { animations: "on", wallpaperColor: "#20242A" },
+    { animations: "on", wallpaperColor: "unknown" },
+    { animations: "on", wallpaperColor: { id: "forest" } },
+    { animations: "on", wallpaperColor: "forest", unknown: true },
+    { animations: "on", wallpaperColor: "forest", themeAccent: "#FFFFFF" },
+  ]) assert.throws(() => projectPersonalizationPreferences(invalid), TypeError);
+  assert.equal(isValidPersonalizationPreferences([]), false);
 });
 
-test("个性化宽容规范化逐字段回退，草稿复制、比较与恢复默认安全", () => {
-  const normalized = normalizePersonalizationPreferences({
-    animations: "unexpected",
-    wallpaperKind: "custom",
-    wallpaperColor: "unknown-color",
-    wallpaperFit: "contain",
-    wallpaperPosition: { row: 1, column: 1 },
-    wallpaperMaskTone: "light",
-    wallpaperMaskStrength: 42,
-    wallpaperBlur: "medium",
-    windowOpacity: "subtle",
-    unknown: "discarded",
-  });
-  assert.deepEqual(normalized, {
-    ...PERSONALIZATION_DEFAULTS,
-    wallpaperKind: "custom",
-    wallpaperFit: "contain",
-    wallpaperMaskTone: "light",
-    wallpaperBlur: "medium",
-    windowOpacity: "subtle",
-  });
-  assert.equal("unknown" in normalized, false);
-  assert.deepEqual(normalizePersonalizationPreferences(null), PERSONALIZATION_DEFAULTS);
-
-  const lowercaseTheme = normalizePersonalizationPreferences({
-    wallpaperFit: "contain",
-    themeAccent: "#ffffff",
-    themeSurface: "#101010",
-  });
-  assert.deepEqual(lowercaseTheme, {
-    ...PERSONALIZATION_DEFAULTS,
-    wallpaperFit: "contain",
-    themeAccent: "#FFFFFF",
-    themeSurface: "#101010",
-  });
-  const lowContrastTheme = normalizePersonalizationPreferences({
-    wallpaperFit: "contain",
-    themeAccent: "#0065d1",
-    themeSurface: "#7e6425",
-  });
-  assert.deepEqual(lowContrastTheme, {
-    ...PERSONALIZATION_DEFAULTS,
-    wallpaperFit: "contain",
-    themeAccent: "#0065D1",
-    themeSurface: "#7E6425",
-  });
-  for (const damagedTheme of [
-    { themeAccent: "#46515DCC", themeSurface: "#101010" },
-    { themeAccent: "var(--unsafe)", themeSurface: "#101010" },
-  ]) {
-    const recovered = normalizePersonalizationPreferences({
-      wallpaperFit: "contain",
-      wallpaperMaskTone: "light",
-      ...damagedTheme,
-    });
-    assert.equal(recovered.themeAccent, INTERFACE_THEME_DEFAULTS.themeAccent);
-    assert.equal(recovered.themeSurface, INTERFACE_THEME_DEFAULTS.themeSurface);
-    assert.equal(recovered.wallpaperFit, "contain");
-    assert.equal(recovered.wallpaperMaskTone, "light");
+test("个性化旧记录迁移保留合法值，custom、损坏与危险对象安全回退", () => {
+  for (const wallpaperColor of BUILT_IN_WALLPAPER_COLOR_IDS) {
+    assert.deepEqual(normalizePersonalizationPreferences({
+      animations: "off",
+      wallpaperColor,
+      wallpaperFit: "tile",
+      windowOpacity: "soft",
+      themeAccent: "#FFFFFF",
+    }), { animations: "off", wallpaperColor });
   }
+  assert.deepEqual(normalizePersonalizationPreferences({
+    animations: "off",
+    wallpaperKind: "custom",
+    wallpaperColor: "forest",
+  }), { animations: "off", wallpaperColor: "graphite" });
+  assert.deepEqual(normalizePersonalizationPreferences({
+    animations: "off",
+    wallpaperColor: "unknown",
+  }), { animations: "off", wallpaperColor: "graphite" });
+  assert.deepEqual(normalizePersonalizationPreferences(null), PERSONALIZATION_DEFAULTS);
+  assert.deepEqual(normalizePersonalizationPreferences(new Date()), PERSONALIZATION_DEFAULTS);
 
-  let getterCalled = false;
+  let getterReads = 0;
   const accessor = Object.create(null);
+  Object.defineProperty(accessor, "animations", {
+    enumerable: true,
+    get() { getterReads += 1; return "off"; },
+  });
   Object.defineProperty(accessor, "wallpaperColor", {
     enumerable: true,
-    get() {
-      getterCalled = true;
-      return "forest";
-    },
+    get() { getterReads += 1; return "forest"; },
   });
-  Object.defineProperty(accessor, "themeAccent", {
-    enumerable: true,
-    get() {
-      getterCalled = true;
-      return "#FFFFFF";
-    },
-  });
-  assert.equal(normalizePersonalizationPreferences(accessor).wallpaperColor, "graphite");
-  assert.equal(
-    normalizePersonalizationPreferences(accessor).themeAccent,
-    INTERFACE_THEME_DEFAULTS.themeAccent,
-  );
+  assert.deepEqual(normalizePersonalizationPreferences(accessor), PERSONALIZATION_DEFAULTS);
   assert.throws(() => projectPersonalizationPreferences(accessor), TypeError);
-  assert.equal(getterCalled, false);
+  assert.equal(getterReads, 0);
 
-  let proxyGetCalled = false;
-  const proxied = new Proxy({
-    themeAccent: "#ffffff",
-    themeSurface: "#101010",
-  }, {
-    get(target, key, receiver) {
-      proxyGetCalled = true;
-      return Reflect.get(target, key, receiver);
-    },
-  });
-  assert.equal(normalizePersonalizationPreferences(proxied).themeAccent, "#FFFFFF");
-  assert.equal(proxyGetCalled, false);
+  const dangerous = JSON.parse('{"animations":"off","wallpaperColor":"forest","__proto__":{"polluted":true}}');
+  assert.deepEqual(normalizePersonalizationPreferences(dangerous), PERSONALIZATION_DEFAULTS);
+  assert.throws(() => projectPersonalizationPreferences(dangerous), TypeError);
+  assert.equal({}.polluted, undefined);
 
-  const draft = copyPersonalizationPreferences(normalized);
-  draft.wallpaperColor = "forest";
-  draft.themeAccent = "#000000";
-  assert.equal(PERSONALIZATION_DEFAULTS.wallpaperColor, "graphite");
-  assert.equal(PERSONALIZATION_DEFAULTS.themeAccent, "#46515D");
-  assert.equal(personalizationPreferencesEqual(draft, normalized), false);
+  const copied = copyPersonalizationPreferences({ animations: "off", wallpaperColor: "forest" });
+  copied.wallpaperColor = "slate";
+  assert.equal(personalizationPreferencesEqual(copied, { animations: "off", wallpaperColor: "forest" }), false);
   assert.equal(personalizationPreferencesEqual({}, PERSONALIZATION_DEFAULTS), true);
-  assert.equal(
-    personalizationPreferencesEqual({ wallpaperMaskStrength: 42 }, PERSONALIZATION_DEFAULTS),
-    false,
-  );
-
   const restored = restoreDefaultPersonalizationPreferences();
   assert.deepEqual(restored, PERSONALIZATION_DEFAULTS);
   assert.notEqual(restored, PERSONALIZATION_DEFAULTS);
-  restored.animations = "off";
-  assert.equal(PERSONALIZATION_DEFAULTS.animations, "on");
 });
 
-test("E2 设置视图聚合回显禁用语义，并严格读取完整可读性草稿", () => {
-  const previousDocument = globalThis.document;
-  const previousNode = globalThis.Node;
-  const previousButton = globalThis.HTMLButtonElement;
-  const previousForm = globalThis.HTMLFormElement;
-
-  class ViewTestNode {}
-  class ViewTestClassList {
-    constructor() {
-      this.values = new Set();
-    }
-
-    add(...names) {
-      for (const name of names) this.values.add(name);
-    }
-
-    remove(...names) {
-      for (const name of names) this.values.delete(name);
-    }
+test("个性化只读预览拒绝污染状态并固定深色夜航事实", () => {
+  for (const choice of PERSONALIZATION_SCENE_CHOICES) {
+    const preview = derivePersonalizationPreview(personalizationState({
+      draft: { wallpaperColor: choice.id, animations: "off" },
+    }));
+    assert.equal(Object.isFrozen(preview), true);
+    assert.equal(preview.scene.id, choice.id);
+    assert.equal(preview.scene.label, choice.label);
+    assert.equal(preview.appearance.tone, "dark");
+    assert.equal(preview.motion.statusId, "off");
+    assert.equal(preview.status.id, "dirty");
   }
-  class ViewTestElement extends ViewTestNode {
-    constructor(tagName) {
-      super();
-      this.tagName = tagName.toUpperCase();
-      this.attributes = new Map();
-      this.dataset = {};
-      this.children = [];
-      this.classList = new ViewTestClassList();
-      this.className = "";
-      this.textContent = "";
-      this.value = "";
-      this.checked = false;
-      this.disabled = false;
-      this.hidden = false;
-    }
+  const limited = derivePersonalizationPreview(personalizationState({ systemReduced: true }));
+  assert.equal(limited.motion.statusId, "system-limited");
+  assert.match(limited.motion.message, /减少动态效果/);
+  assert.throws(() => derivePersonalizationPreview({
+    ...personalizationState(),
+    secret: "do-not-leak",
+  }), TypeError);
+  const accessor = personalizationState();
+  Object.defineProperty(accessor, "motion", { get() { throw new Error("secret"); } });
+  assert.throws(() => derivePersonalizationPreview(accessor), TypeError);
+  assert.throws(() => derivePersonalizationPreview({
+    ...personalizationState(),
+    dirty: true,
+  }), TypeError);
+});
 
-    setAttribute(name, value) {
-      const normalized = String(value);
-      this.attributes.set(name, normalized);
-      if (name === "value") this.value = normalized;
-      if (name === "type") this.type = normalized;
-      if (name === "name") this.name = normalized;
-      if (name === "id") this.id = normalized;
-      if (name === "hidden") this.hidden = true;
-    }
-
-    getAttribute(name) {
-      return this.attributes.get(name) ?? null;
-    }
-
-    removeAttribute(name) {
-      this.attributes.delete(name);
-    }
-
-    append(...children) {
-      this.children.push(...children);
-    }
-
-    replaceChildren(...children) {
-      this.children = children;
-    }
-
-    focus() {}
-  }
-  class ViewTestButton extends ViewTestElement {}
-  class ViewTestForm extends ViewTestElement {}
-
-  globalThis.Node = ViewTestNode;
-  globalThis.HTMLButtonElement = ViewTestButton;
-  globalThis.HTMLFormElement = ViewTestForm;
-  globalThis.document = {
-    createElement(tagName) {
-      if (tagName === "button") return new ViewTestButton(tagName);
-      if (tagName === "form") return new ViewTestForm(tagName);
-      return new ViewTestElement(tagName);
-    },
-  };
-
-  let view = null;
+test("Personalization 视图仅有场景、动效、只读预览与应用动作", () => {
+  const dom = installPersonalizationDom();
+  let view;
   try {
-    const root = new ViewTestElement("main");
     view = createPersonalizationView({
-      root,
-      app: { label: "外观设置", windowTitle: "C:\\IMAGEWEAVE\\DESKTOP.CPL" },
+      root: dom.root,
+      app: { label: "外观设置", windowTitle: "DESKTOP.CPL" },
     });
-    const state = ({ draft = {}, customWallpaper = {}, busy = false, dirty = true }) => ({
-      committed: { ...PERSONALIZATION_DEFAULTS },
-      draft: { ...PERSONALIZATION_DEFAULTS, ...draft },
-      dirty,
-      busy,
-      customWallpaper: {
-        loading: false,
-        saved: false,
-        pending: false,
-        available: customWallpaper.pending === true || customWallpaper.saved === true,
-        selectedReady: false,
-        storageAvailable: true,
-        ...customWallpaper,
-      },
-      motion: {
-        userMode: draft.animations ?? PERSONALIZATION_DEFAULTS.animations,
-        systemReduced: false,
-        effective: (draft.animations ?? PERSONALIZATION_DEFAULTS.animations) === "on",
-        limitedBySystem: false,
-      },
-    });
-    const elements = view.elements;
-    const descendants = (element) => [
-      element,
-      ...element.children.flatMap((child) => (
-        child instanceof ViewTestElement ? descendants(child) : []
-      )),
-    ];
-
-    assert.equal(elements.form.children.length, 1, "form 只包裹可聚焦三栏 workspace");
-    assert.equal(elements.form.children[0], elements.workspace);
-    assert.equal(elements.workspaceTrack.children.length, 3);
-    assert.equal(elements.workspaceTrack.children[0].children[0].children[0].textContent, "01 · 实时预览");
-    assert.equal(elements.workspaceTrack.children[1].children[0].children[0].textContent, "02 · 主题与壁纸");
-    assert.equal(elements.workspaceTrack.children[2].children[0].children[0].textContent, "03 · 显示与应用");
-    assert.equal(elements.themeFieldset.children[0].textContent, "界面主题");
-    assert.equal(elements.themeAccentInput.type, "color");
-    assert.equal(elements.themeSurfaceInput.type, "color");
-    assert.equal(elements.themeAccentInput.dataset.personalizationThemeAccent, "setting");
-    assert.equal(elements.themeSurfaceInput.dataset.personalizationThemeSurface, "setting");
-    assert.equal(elements.themeAccentOutput.textContent, "#46515D");
-    assert.equal(elements.themeSurfaceOutput.textContent, "#F4F1EA");
-    assert.equal(elements.themeContrastStatus.getAttribute("role"), "status");
-    assert.equal(elements.themeContrastStatus.getAttribute("aria-live"), "polite");
-    assert.equal(elements.themeContrastStatus.getAttribute("aria-atomic"), "true");
-    assert.match(elements.themeContrastStatus.textContent, /7\.17:1.*可正常使用/);
-    assert.equal(
-      elements.themeAccentInput.getAttribute("aria-describedby"),
-      "personalization-theme-help personalization-theme-contrast-status",
-    );
-    assert.equal(
-      elements.themeSurfaceInput.getAttribute("aria-describedby"),
-      "personalization-theme-help personalization-theme-contrast-status",
-    );
-    const labels = descendants(elements.themeFieldset).filter(
-      (element) => element.tagName === "LABEL",
-    );
-    assert.equal(labels.some((label) => (
-      label.textContent === "强调色"
-      && label.getAttribute("for") === "personalization-theme-accent"
-    )), true);
-    assert.equal(labels.some((label) => (
-      label.textContent === "窗口底色"
-      && label.getAttribute("for") === "personalization-theme-surface"
-    )), true);
-
-    view.renderState(state({
-      draft: {
-        wallpaperKind: "color",
-        wallpaperFit: "contain",
-        wallpaperPosition: "bottom",
-        wallpaperMaskTone: "light",
-        wallpaperMaskStrength: 35,
-        wallpaperBlur: "soft",
-        windowOpacity: "subtle",
-        themeAccent: "#ffffff",
-        themeSurface: "#101010",
-      },
-    }));
-    assert.equal(elements.imageSettingsPanel.hidden, true);
-    assert.equal(elements.wallpaperFit.disabled, true);
-    assert.equal(elements.positionFieldset.disabled, true);
-    assert.equal(elements.wallpaperMaskTone.disabled, true);
-    assert.equal(elements.maskStrengthInput.disabled, true);
-    assert.equal(elements.wallpaperBlur.disabled, true);
-    assert.equal(elements.windowOpacity.disabled, false, "窗口透明度在纯色模式仍可用");
-    assert.equal(elements.wallpaperFit.value, "contain", "隐藏控件仍完整回显草稿");
-    assert.equal(elements.maskStrengthInput.value, "35");
-    assert.equal(elements.maskStrengthOutput.textContent, "35%");
-    assert.equal(elements.maskStrengthInput.getAttribute("aria-valuetext"), "35%");
-    assert.equal(elements.maskStrengthOutput.getAttribute("aria-live"), "polite");
-    assert.equal(elements.themeAccentOutput.textContent, "#FFFFFF");
-    assert.equal(elements.themeSurfaceOutput.textContent, "#101010");
-    assert.match(elements.themeContrastStatus.textContent, /可正常使用/);
-    assert.equal(elements.themeAccentInput.getAttribute("aria-invalid"), null);
-    assert.equal(elements.themeSurfaceInput.getAttribute("aria-invalid"), null);
+    const all = dom.descendants(dom.root);
+    assert.equal(view.elements.form.children.length, 1);
+    assert.equal(view.elements.form.children[0], view.elements.workspace);
+    assert.equal(view.elements.workspaceTrack.children.length, 3);
     assert.deepEqual(
-      ["min", "max", "step"].map((name) => elements.maskStrengthInput.getAttribute(name)),
-      ["0", "80", "5"],
+      view.elements.workspaceTrack.children.map((column) => column.children[0].children[1].textContent),
+      ["场景", "动效", "应用"],
     );
+    assert.equal(Object.keys(view.elements.sceneInputs).length, 6);
+    assert.equal(Object.keys(view.elements.motionInputs).length, 2);
+    assert.equal(all.filter((element) => element.type === "color" || element.type === "file").length, 0);
+    assert.equal(all.filter((element) => element.tagName === "FORM").length, 1);
+    assert.equal(all.filter((element) => element.getAttribute("aria-live") === "polite").length >= 5, true);
 
-    view.renderState(state({
-      draft: { wallpaperKind: "custom" },
-      customWallpaper: { selectedReady: false },
-    }));
-    assert.equal(elements.imageSettingsPanel.hidden, false);
-    assert.equal(elements.wallpaperFit.disabled, true);
-    assert.equal(elements.maskStrengthInput.disabled, true);
-    assert.equal(elements.windowOpacity.disabled, false);
-    assert.equal(elements.applyButton.disabled, true);
-    assert.match(elements.imageControlsStatus.textContent, /尚无可显示.*已禁用.*不会被视为已生效/);
-
-    const currentDraft = {
-      ...PERSONALIZATION_DEFAULTS,
-      animations: "off",
-      wallpaperKind: "custom",
-      wallpaperColor: "forest",
-      wallpaperFit: "tile",
-      wallpaperPosition: "top-left",
-      wallpaperMaskTone: "dark",
-      wallpaperMaskStrength: 65,
-      wallpaperBlur: "soft",
-      windowOpacity: "subtle",
-    };
-    view.renderState(state({
-      draft: currentDraft,
-      customWallpaper: { saved: true, selectedReady: true },
-    }));
-    assert.equal(elements.wallpaperFit.disabled, false);
-    assert.equal(elements.positionFieldset.disabled, true, "平铺只禁用位置组");
-    assert.equal(elements.positionInputs["top-left"].checked, true);
-    assert.equal(elements.tilePositionNote.hidden, false);
-    assert.match(elements.tilePositionNote.textContent, /切换回其他模式后恢复“左上”/);
-    assert.equal(elements.maskStrengthInput.disabled, false);
-    assert.equal(elements.maskStrengthOutput.textContent, "65%");
-    assert.equal(elements.windowOpacity.disabled, false);
-    assert.deepEqual(Object.keys(elements.positionInputs), [
-      "top-left", "top", "top-right", "left", "center", "right",
-      "bottom-left", "bottom", "bottom-right",
-    ]);
-
-    elements.wallpaperFit.value = "stretch";
-    for (const input of Object.values(elements.positionInputs)) input.checked = false;
-    elements.positionInputs["bottom-right"].checked = true;
-    elements.wallpaperMaskTone.value = "light";
-    elements.maskStrengthInput.value = "70";
-    elements.wallpaperBlur.value = "medium";
-    elements.windowOpacity.value = "soft";
-    elements.themeAccentInput.value = "#ffffff";
-    elements.themeSurfaceInput.value = "#101010";
-    const read = view.readDraft(currentDraft);
-    assert.deepEqual(read, {
-      ...currentDraft,
-      wallpaperFit: "stretch",
-      wallpaperPosition: "bottom-right",
-      wallpaperMaskTone: "light",
-      wallpaperMaskStrength: 70,
-      wallpaperBlur: "medium",
-      windowOpacity: "soft",
-      themeAccent: "#FFFFFF",
-      themeSurface: "#101010",
+    const state = personalizationState({
+      draft: { wallpaperColor: "forest", animations: "off" },
     });
-    assert.equal(typeof read.wallpaperMaskStrength, "number");
+    view.renderState(state);
+    assert.equal(view.elements.previewDesktop.dataset.personalizationScene, "forest");
+    assert.equal(view.elements.previewDesktop.dataset.personalizationMotion, "off");
+    assert.match(view.elements.previewSceneFact.textContent, /深林/);
+    assert.match(view.elements.previewToneFact.textContent, /深色夜航玻璃/);
+    assert.equal(view.elements.applyButton.disabled, false);
+    assert.equal(view.elements.cancelButton.disabled, false);
+    assert.deepEqual(view.readDraft(state.draft), state.draft);
 
-    elements.maskStrengthInput.value = "42";
-    assert.throws(() => view.readDraft(currentDraft), TypeError);
-
-    elements.maskStrengthInput.value = "70";
-    elements.themeAccentInput.value = "#0065d1";
-    elements.themeSurfaceInput.value = "#7e6425";
-    const unrestrictedTheme = view.beginThemeDraft();
-    assert.equal(unrestrictedTheme.valid, true);
-    assert.ok(unrestrictedTheme.contrastRatio > 1 && unrestrictedTheme.contrastRatio < 1.02);
-    assert.equal(elements.themeAccentOutput.textContent, "#0065D1");
-    assert.equal(elements.themeSurfaceOutput.textContent, "#7E6425");
-    assert.match(elements.themeContrastStatus.textContent, /1\.01:1.*可正常使用/);
-    assert.equal(elements.themeContrastStatus.dataset.personalizationThemeStatus, "valid");
-    assert.equal(elements.themeAccentInput.getAttribute("aria-invalid"), null);
-    assert.equal(elements.themeSurfaceInput.getAttribute("aria-invalid"), null);
-    assert.equal(elements.applyButton.disabled, true, "同步 preview 结算前仅暂存主题输入");
-    assert.equal(elements.cancelButton.disabled, false);
-    assert.equal(root.dataset.dirty, "true");
-
-    const unrestrictedState = state({
-      draft: {
-        ...currentDraft,
-        themeAccent: "#0065D1",
-        themeSurface: "#7E6425",
-      },
-      customWallpaper: { saved: true, selectedReady: true },
-    });
-    view.acceptThemeDraft(unrestrictedState);
-    assert.equal(view.hasLocalThemeDraft(), false);
-    assert.equal(elements.applyButton.disabled, false, "低对比 runtime 草稿可直接应用");
-
-    view.renderState(state({
-      draft: {
-        ...currentDraft,
-        themeAccent: "#0065D1",
-        themeSurface: "#7E6425",
-      },
-      customWallpaper: { saved: true, selectedReady: true },
-      busy: true,
-    }));
-    assert.equal(elements.themeAccentInput.value, "#0065D1");
-    assert.equal(elements.themeSurfaceInput.value, "#7E6425");
-    assert.equal(elements.themeAccentInput.disabled, true);
-    assert.equal(elements.themeSurfaceInput.disabled, true);
-    assert.equal(elements.themeFieldset.disabled, true);
-
-    view.clearLocalThemeDraft();
-    view.renderState(state({
-      draft: { ...read },
-      customWallpaper: { saved: true, selectedReady: true },
-      busy: true,
-    }));
-    assert.equal(elements.wallpaperFit.disabled, true);
-    assert.equal(elements.maskStrengthInput.disabled, true);
-    assert.equal(elements.windowOpacity.disabled, true);
-    assert.equal(elements.themeAccentInput.value, "#FFFFFF");
-    assert.equal(elements.themeSurfaceInput.value, "#101010");
-    assert.equal(elements.themeAccentOutput.textContent, "#FFFFFF");
-    assert.equal(elements.themeSurfaceOutput.textContent, "#101010");
-
-    view.renderState(state({
-      draft: { ...read },
-      customWallpaper: { saved: true, selectedReady: true },
-    }));
-    elements.themeAccentInput.value = "#123";
-    const invalidFormat = view.beginThemeDraft();
-    assert.equal(invalidFormat.valid, false);
-    assert.equal(elements.themeAccentInput.getAttribute("aria-invalid"), "true");
-    assert.equal(elements.themeSurfaceInput.getAttribute("aria-invalid"), "true");
-    assert.match(elements.themeContrastStatus.textContent, /颜色格式无效.*6 位十六进制颜色值/);
-    assert.equal(elements.applyButton.disabled, true);
+    view.setBusy(true);
+    assert.equal(view.elements.applyButton.disabled, true);
+    assert.equal(Object.values(view.elements.sceneInputs).every((input) => input.disabled), true);
+    view.setBusy(false);
+    view.setStatus("success", "已保存");
+    assert.equal(view.elements.status.dataset.personalizationStatus, "success");
+    assert.throws(() => view.setStatus("warning", "invalid"), TypeError);
+    assert.equal(view.scrollWorkspace(1), true);
+    assert.equal(view.elements.workspace.lastScrollBy.left > 0, true);
+    assert.equal(view.scrollWorkspace(-1), true);
+    assert.equal(view.scrollWorkspace(0), false);
   } finally {
     view?.destroy();
-    if (previousDocument === undefined) delete globalThis.document;
-    else globalThis.document = previousDocument;
-    if (previousNode === undefined) delete globalThis.Node;
-    else globalThis.Node = previousNode;
-    if (previousButton === undefined) delete globalThis.HTMLButtonElement;
-    else globalThis.HTMLButtonElement = previousButton;
-    if (previousForm === undefined) delete globalThis.HTMLFormElement;
-    else globalThis.HTMLFormElement = previousForm;
+    dom.restore();
   }
 });
 
-test("G2 主题低对比即时预览应用，格式与 setter 失败仍安全阻断", async () => {
-  const previousDocument = globalThis.document;
-  const previousNode = globalThis.Node;
-  const previousElement = globalThis.Element;
-  const previousButton = globalThis.HTMLButtonElement;
-  const previousForm = globalThis.HTMLFormElement;
-  const previousAddEventListener = globalThis.addEventListener;
-  const previousRemoveEventListener = globalThis.removeEventListener;
-
-  class ControllerTestNode {}
-  class ControllerTestClassList {
-    constructor() {
-      this.values = new Set();
-    }
-
-    add(...names) {
-      for (const name of names) this.values.add(name);
-    }
-
-    remove(...names) {
-      for (const name of names) this.values.delete(name);
-    }
-
-    toggle(name, force) {
-      if (force) this.values.add(name);
-      else this.values.delete(name);
-      return this.values.has(name);
-    }
-  }
-  class ControllerTestElement extends ControllerTestNode {
-    constructor(tagName) {
-      super();
-      this.tagName = tagName.toUpperCase();
-      this.attributes = new Map();
-      this.dataset = {};
-      this.children = [];
-      this.parentElement = null;
-      this.listeners = new Map();
-      this.classList = new ControllerTestClassList();
-      this.className = "";
-      this._textContent = "";
-      this.textContentWrites = 0;
-      this._value = "";
-      this.failNextValueWrite = false;
-      this.checked = false;
-      this.disabled = false;
-      this.hidden = false;
-      this.inert = false;
-    }
-
-    set textContent(next) {
-      this._textContent = String(next);
-      this.textContentWrites += 1;
-    }
-
-    get textContent() {
-      return this._textContent;
-    }
-
-    set value(next) {
-      if (this.failNextValueWrite) {
-        this.failNextValueWrite = false;
-        throw new Error("controlled form setter failure");
-      }
-      this._value = String(next);
-    }
-
-    get value() {
-      return this._value;
-    }
-
-    setAttribute(name, value) {
-      const normalized = String(value);
-      this.attributes.set(name, normalized);
-      if (name === "value") this.value = normalized;
-      if (name === "type") this.type = normalized;
-      if (name === "name") this.name = normalized;
-      if (name === "id") this.id = normalized;
-      if (name === "hidden") this.hidden = true;
-    }
-
-    getAttribute(name) {
-      return this.attributes.get(name) ?? null;
-    }
-
-    removeAttribute(name) {
-      this.attributes.delete(name);
-      if (name === "hidden") this.hidden = false;
-    }
-
-    toggleAttribute(name, force) {
-      if (force) this.setAttribute(name, "");
-      else this.removeAttribute(name);
-    }
-
-    append(...children) {
-      for (const child of children) {
-        if (child instanceof ControllerTestElement) child.parentElement = this;
-        this.children.push(child);
-      }
-    }
-
-    replaceChildren(...children) {
-      this.children = [];
-      this.append(...children);
-    }
-
-    addEventListener(type, listener) {
-      if (!this.listeners.has(type)) this.listeners.set(type, new Set());
-      this.listeners.get(type).add(listener);
-    }
-
-    removeEventListener(type, listener) {
-      this.listeners.get(type)?.delete(listener);
-    }
-
-    matches(selectorList) {
-      return selectorList.split(",").some((rawSelector) => {
-        const selector = rawSelector.trim();
-        const match = /^\[data-([a-z0-9-]+)(?:="([^"]*)")?\]$/.exec(selector);
-        if (!match) return false;
-        const key = match[1].replace(/-([a-z])/g, (_whole, letter) => letter.toUpperCase());
-        if (!Object.prototype.hasOwnProperty.call(this.dataset, key)) return false;
-        return match[2] === undefined || this.dataset[key] === match[2];
-      });
-    }
-
-    closest(selector) {
-      let current = this;
-      while (current) {
-        if (current.matches(selector)) return current;
-        current = current.parentElement;
-      }
-      return null;
-    }
-
-    emit(type, target = this) {
-      const event = {
-        target,
-        defaultPrevented: false,
-        returnValue: undefined,
-        preventDefault() {
-          this.defaultPrevented = true;
-        },
-      };
-      for (const listener of [...(this.listeners.get(type) ?? [])]) listener(event);
-      return event;
-    }
-
-    find(predicate) {
-      if (predicate(this)) return this;
-      for (const child of this.children) {
-        if (!(child instanceof ControllerTestElement)) continue;
-        const found = child.find(predicate);
-        if (found) return found;
-      }
-      return null;
-    }
-
-    focus() {}
-    click() {}
-  }
-  class ControllerTestButton extends ControllerTestElement {}
-  class ControllerTestForm extends ControllerTestElement {}
-
-  const globalListeners = new Map();
-  globalThis.Node = ControllerTestNode;
-  globalThis.Element = ControllerTestElement;
-  globalThis.HTMLButtonElement = ControllerTestButton;
-  globalThis.HTMLFormElement = ControllerTestForm;
-  globalThis.document = {
-    createElement(tagName) {
-      if (tagName === "button") return new ControllerTestButton(tagName);
-      if (tagName === "form") return new ControllerTestForm(tagName);
-      return new ControllerTestElement(tagName);
+test("Personalization controller 保持实时预览、Apply/Cancel/reset 与单飞离开保护", async () => {
+  const dom = installPersonalizationDom();
+  const storageFixture = createPersonalizationStorageFixture(PERSONALIZATION_DEFAULTS);
+  const wallpaper = { classList: new FakeClassList() };
+  const motionListeners = new Set();
+  let motionMode = "on";
+  const motion = {
+    getState: () => ({ userMode: motionMode, systemReduced: false, effective: motionMode === "on", limitedBySystem: false }),
+    previewUserMode(mode) { motionMode = mode; },
+    subscribe(listener) { motionListeners.add(listener); return () => motionListeners.delete(listener); },
+  };
+  const runtime = createPersonalizationRuntime({
+    wallpaper,
+    storage: storageFixture.service,
+    motion,
+  });
+  let dialogCalls = 0;
+  let resolveDialog = null;
+  const dialogs = {
+    open() {
+      dialogCalls += 1;
+      return new Promise((resolve) => { resolveDialog = resolve; });
     },
+    destroyCalls: 0,
+    destroy() { this.destroyCalls += 1; },
   };
-  globalThis.addEventListener = (type, listener) => {
-    if (!globalListeners.has(type)) globalListeners.set(type, new Set());
-    globalListeners.get(type).add(listener);
-  };
-  globalThis.removeEventListener = (type, listener) => {
-    globalListeners.get(type)?.delete(listener);
-  };
-
   let mounted = false;
-  let runtime = null;
   try {
-    const root = new ControllerTestElement("main");
-    const surface = createWallpaperSurfaceFixture();
-    const themeRoot = new FakeThemeRoot();
-    const preferenceStorage = createPersonalizationStorageFixture(
-      PERSONALIZATION_DEFAULTS,
-    );
-    runtime = createPersonalizationRuntime({
-      wallpaper: surface.wallpaper,
-      wallpaperImage: surface.image,
-      wallpaperMask: surface.mask,
-      windowLayer: surface.windowLayer,
-      themeRoot,
-      storage: preferenceStorage.service,
-      wallpaperStorage: null,
-      urlApi: surface.urlApi,
-    });
-    await runtime.ready();
-
-    const calls = { preview: 0 };
-    const personalization = Object.freeze({
-      getState: runtime.getState,
-      preview(preferences) {
-        calls.preview += 1;
-        return runtime.preview(preferences);
-      },
-      selectCustomWallpaper: runtime.selectCustomWallpaper,
-      previewCustomImage: runtime.previewCustomImage,
-      commit: runtime.commit,
-      cancel: runtime.cancel,
-      deleteCustomWallpaper: runtime.deleteCustomWallpaper,
-      subscribe: runtime.subscribe,
-    });
-    const dialogChoices = [];
-    const dialogCalls = [];
-    const dialogs = Object.freeze({
-      async open(options) {
-        dialogCalls.push(options);
-        return dialogChoices.shift() ?? "cancel";
-      },
-      destroy() {},
-    });
-
     personalizationApplication.mount({
-      root,
+      root: dom.root,
+      app: { label: "外观设置", windowTitle: "DESKTOP.CPL" },
       dialogs,
-      personalization,
-      app: { label: "外观设置", windowTitle: "C:\\IMAGEWEAVE\\DESKTOP.CPL" },
+      personalization: runtime,
     });
     mounted = true;
     personalizationApplication.activate();
+    assert.equal(dom.root.hidden, false);
+    assert.equal(dom.listenerCount("beforeunload"), 1);
 
-    const byDataset = (key, value = undefined) => root.find((element) => (
-      Object.prototype.hasOwnProperty.call(element.dataset, key)
-      && (value === undefined || element.dataset[key] === value)
+    const sceneInputs = dom.descendants(dom.root).filter((element) => (
+      Object.prototype.hasOwnProperty.call(element.dataset, "personalizationScene")
     ));
-    const accent = byDataset("personalizationThemeAccent");
-    const surfaceInput = byDataset("personalizationThemeSurface");
-    const windowOpacity = byDataset("personalizationWindowOpacity");
-    const form = byDataset("personalizationForm");
-    const apply = byDataset("personalizationAction", "apply");
-    const cancel = byDataset("personalizationAction", "cancel");
-    const reset = byDataset("personalizationAction", "reset");
-    const contrastStatus = byDataset("personalizationThemeStatus");
-    const saveStatus = byDataset("personalizationStatus");
-    const maskStrengthOutput = root.find((element) => (
-      element.getAttribute("id") === "personalization-mask-strength-value"
-    ));
-    const safeTheme = themeRoot.snapshot();
-
-    const beforeChangeOnly = maskStrengthOutput.textContentWrites;
-    accent.value = "#0065d1";
-    root.emit("change", accent);
-    assert.equal(calls.preview, 1, "change-only 第一色必须立即预览");
-    assert.equal(maskStrengthOutput.textContentWrites, beforeChangeOnly);
-    assert.equal(runtime.getState().draft.themeAccent, "#0065D1");
-    assert.equal(runtime.getState().draft.themeSurface, "#F4F1EA");
-    assert.equal(apply.disabled, false);
-
-    surfaceInput.value = "#7e6425";
-    root.emit("change", surfaceInput);
-    assert.equal(calls.preview, 2, "change-only 低对比真实颜色对也必须立即预览");
-    assert.equal(maskStrengthOutput.textContentWrites, beforeChangeOnly);
-    assert.equal(runtime.getState().draft.themeAccent, "#0065D1");
-    assert.equal(runtime.getState().draft.themeSurface, "#7E6425");
-    assert.deepEqual(themeRoot.snapshot(), {
-      themeAccent: "#0065D1",
-      themeSurface: "#7E6425",
-      tone: "dark",
-    });
-    assert.equal(apply.disabled, false, "低对比草稿必须保持 Apply enabled");
-    assert.equal(accent.getAttribute("aria-invalid"), null);
-    assert.equal(surfaceInput.getAttribute("aria-invalid"), null);
-    assert.match(contrastStatus.textContent, /1\.01:1.*可正常使用/);
-    root.emit("change", surfaceInput);
-    assert.equal(calls.preview, 2, "相同规范化颜色对的重复 change 必须值级去重");
-    assert.equal(maskStrengthOutput.textContentWrites, beforeChangeOnly);
-
-    root.emit("click", cancel);
-    calls.preview = 0;
-    assert.deepEqual(themeRoot.snapshot(), safeTheme);
-    assert.equal(accent.value, "#46515D");
-    assert.equal(surfaceInput.value, "#F4F1EA");
-
-    const beforeThemeInput = maskStrengthOutput.textContentWrites;
-    accent.value = "#123";
-    root.emit("input", accent);
-    assert.equal(calls.preview, 0, "非法格式不得调用 runtime.preview");
-    assert.equal(
-      maskStrengthOutput.textContentWrites,
-      beforeThemeInput,
-      "主题 input 轻量刷新不得写无关表单输出",
-    );
-    assert.deepEqual(themeRoot.snapshot(), safeTheme, "非法格式不得改变根 Token");
-    assert.equal(preferenceStorage.writes.length, 0);
-    assert.equal(runtime.getState().dirty, false);
-    assert.equal(accent.value, "#123");
-    assert.equal(surfaceInput.value, "#F4F1EA");
-    assert.equal(accent.getAttribute("aria-invalid"), "true");
-    assert.equal(surfaceInput.getAttribute("aria-invalid"), "true");
-    assert.equal(apply.disabled, true);
-    assert.equal(cancel.disabled, false);
-    assert.equal(root.dataset.dirty, "true");
-    assert.match(contrastStatus.textContent, /颜色格式无效.*6 位十六进制颜色值/);
-    assert.match(saveStatus.textContent, /颜色格式无效.*6 位十六进制颜色值/);
-
-    const beforeUnload = [...(globalListeners.get("beforeunload") ?? [])][0];
-    const unloadEvent = {
-      returnValue: undefined,
-      prevented: false,
-      preventDefault() { this.prevented = true; },
-    };
-    beforeUnload(unloadEvent);
-    assert.equal(unloadEvent.prevented, true);
-    assert.equal(unloadEvent.returnValue, "");
-
-    dialogChoices.push("cancel");
-    const firstDiscard = personalizationApplication.beforeLeave();
-    const duplicateDiscard = personalizationApplication.beforeWindowHide(null, "minimized");
-    assert.equal(firstDiscard, duplicateDiscard);
-    assert.equal(dialogCalls.length, 1);
-    assert.equal(await firstDiscard, false);
-    assert.match(dialogCalls.at(-1).message, /切换应用后将放弃/);
-    assert.equal(accent.value, "#123", "取消离开继续保留非法格式表单值");
-
-    windowOpacity.value = "soft";
-    const beforeInvalidControlRefresh = maskStrengthOutput.textContentWrites;
-    root.emit("change", windowOpacity);
-    assert.equal(calls.preview, 0, "格式非法时其他控件不得绕过主题校验");
-    assert.equal(runtime.getState().draft.windowOpacity, "solid");
-    assert.equal(
-      maskStrengthOutput.textContentWrites,
-      beforeInvalidControlRefresh + 1,
-      "格式非法时的非主题控件只按需完整刷新一次",
-    );
-
-    const beforeExternalPublish = maskStrengthOutput.textContentWrites;
-    runtime.preview({
-      ...runtime.getState().draft,
-      animations: "off",
-      windowOpacity: "soft",
-    });
-    assert.equal(
-      maskStrengthOutput.textContentWrites,
-      beforeExternalPublish + 1,
-      "外部 runtime publish 仍须完整刷新一次",
-    );
-    assert.equal(accent.value, "#123", "外部 publish 不得覆盖非法格式表单值");
-    assert.equal(surfaceInput.value, "#F4F1EA", "外部 publish 不得覆盖本地主题表单值");
-    assert.equal(windowOpacity.value, "soft", "完整 DOM 表单调整应一并保留");
-
-    const beforeAcceptedTheme = maskStrengthOutput.textContentWrites;
-    accent.value = "#0065d1";
-    root.emit("input", accent);
-    assert.equal(calls.preview, 1, "修正为严格 HEX 后必须立即预览");
-    surfaceInput.value = "#7e6425";
-    root.emit("input", surfaceInput);
-    assert.equal(calls.preview, 2, "真实低对比颜色对必须继续即时预览");
-    assert.equal(
-      maskStrengthOutput.textContentWrites,
-      beforeAcceptedTheme,
-      "同步 publish 回显与 accept 均不得完整刷新主题表单",
-    );
-    assert.equal(runtime.getState().draft.themeAccent, "#0065D1");
-    assert.equal(runtime.getState().draft.themeSurface, "#7E6425");
-    assert.equal(runtime.getState().draft.windowOpacity, "solid");
-    assert.equal(runtime.getState().draft.animations, "on");
-    assert.deepEqual(themeRoot.snapshot(), {
-      themeAccent: "#0065D1",
-      themeSurface: "#7E6425",
-      tone: "dark",
-    });
-    assert.equal(accent.getAttribute("aria-invalid"), null);
-    assert.equal(surfaceInput.getAttribute("aria-invalid"), null);
-    assert.equal(apply.disabled, false);
-    assert.equal(root.dataset.dirty, "true");
-    assert.match(contrastStatus.textContent, /1\.01:1.*可正常使用/);
-
-    root.emit("change", surfaceInput);
-    assert.equal(calls.preview, 2, "input 后同值 change 不得重复 preview");
-    assert.equal(maskStrengthOutput.textContentWrites, beforeAcceptedTheme);
-
-    const submitEvent = root.emit("submit", form);
-    assert.equal(submitEvent.defaultPrevented, true);
-    await flushPromises();
-    assert.equal(preferenceStorage.writes.length, 1, "完整 Apply 只写一次偏好");
-    assert.deepEqual(preferenceStorage.writes[0], runtime.getState().committed);
-    assert.equal(preferenceStorage.writes[0].themeAccent, "#0065D1");
-    assert.equal(preferenceStorage.writes[0].themeSurface, "#7E6425");
-    assert.equal(preferenceStorage.writes[0].windowOpacity, "solid");
-
-    const committedTheme = themeRoot.snapshot();
-    themeRoot.failNext("setProperty:--imageweave-surface");
-    accent.value = "#F4F1EA";
-    const beforePreviewError = maskStrengthOutput.textContentWrites;
-    root.emit("input", accent);
-    assert.equal(
-      maskStrengthOutput.textContentWrites,
-      beforePreviewError,
-      "preview error 必须只刷新主题与相关按钮",
-    );
-    assert.deepEqual(themeRoot.snapshot(), committedTheme, "runtime setter 失败回滚根 Token");
-    assert.equal(runtime.getState().draft.themeAccent, "#0065D1");
-    assert.equal(runtime.getState().draft.themeSurface, "#7E6425");
-    assert.equal(preferenceStorage.writes.length, 1);
-    assert.equal(apply.disabled, true);
-    assert.equal(root.dataset.dirty, "true");
-    assert.match(saveStatus.textContent, /无法预览当前设置.*上次预览已保留/);
-
-    const beforePublishAfterError = maskStrengthOutput.textContentWrites;
-    runtime.preview({ ...runtime.getState().draft, animations: "off" });
-    assert.equal(
-      maskStrengthOutput.textContentWrites,
-      beforePublishAfterError + 1,
-      "异常后必须恢复订阅标志并接收后续外部 publish",
-    );
-    assert.equal(accent.value, "#F4F1EA", "外部 publish 仍保留 preview error 表单颜色");
-    root.emit("click", cancel);
-
-    accent.value = "#101010";
-    accent.failNextValueWrite = true;
-    windowOpacity.value = "soft";
-    root.emit("change", windowOpacity);
-    assert.deepEqual(themeRoot.snapshot(), {
-      ...committedTheme,
-      themeAccent: "#101010",
-    }, "setter 失败不得破坏已成功应用的安全主题值");
-    assert.equal(runtime.getState().draft.windowOpacity, "solid");
-    assert.equal(preferenceStorage.writes.length, 1);
-    assert.equal(apply.disabled, true, "受控 DOM 回显错误不得继续提交");
-    assert.equal(root.dataset.dirty, "true");
-    assert.match(saveStatus.textContent, /无法显示部分设置.*当前预览已保留/);
-    root.emit("click", cancel);
-
-    accent.value = "#101010";
-    root.emit("input", accent);
-    root.emit("click", cancel);
-    assert.equal(accent.value, "#0065D1");
-    assert.equal(surfaceInput.value, "#7E6425");
-    assert.equal(root.dataset.dirty, "false", "Cancel 恢复已提交真实颜色对");
-
-    accent.value = "#101010";
-    root.emit("input", accent);
-    root.emit("click", reset);
-    assert.equal(accent.value, "#46515D");
-    assert.equal(surfaceInput.value, "#F4F1EA");
-    assert.equal(runtime.getState().draft.themeAccent, "#46515D");
-    assert.equal(runtime.getState().draft.themeSurface, "#F4F1EA");
-    root.emit("click", cancel);
-
-    accent.value = "#101010";
-    root.emit("input", accent);
-    dialogChoices.push("confirm");
-    assert.equal(
-      await personalizationApplication.beforeWindowHide(null, "minimized"),
-      true,
-    );
-    assert.match(dialogCalls.at(-1).message, /最小化窗口/);
-    assert.equal(accent.value, "#0065D1", "确认离开恢复已提交主题");
-    assert.equal(surfaceInput.value, "#7E6425");
-
-    runtime.preview({
-      ...runtime.getState().draft,
-      wallpaperColor: runtime.getState().draft.wallpaperColor === "forest"
-        ? "graphite"
-        : "forest",
-    });
+    const graphite = sceneInputs.find((input) => input.dataset.personalizationScene === "graphite");
+    const forest = sceneInputs.find((input) => input.dataset.personalizationScene === "forest");
+    graphite.checked = false;
+    forest.checked = true;
+    dom.root.emit("change", forest);
+    assert.equal(runtime.getState().draft.wallpaperColor, "forest");
     assert.equal(runtime.getState().dirty, true);
-    accent.value = "#101010";
-    root.emit("input", accent);
-    personalizationApplication.deactivate();
-    assert.equal(runtime.getState().dirty, false);
-    assert.equal(windowOpacity.value, "soft", "deactivate 恢复最后提交的完整表单");
-    personalizationApplication.activate();
-    assert.equal(accent.value, "#0065D1", "重新 activate 回显最后提交主题");
-    assert.equal(surfaceInput.value, "#7E6425");
+    assert.equal(wallpaper.classList.contains(WALLPAPER_COLOR_CLASSES.forest), true);
+    assert.equal(dom.emitGlobal("beforeunload").defaultPrevented, true);
 
-    accent.value = "#101010";
-    root.emit("input", accent);
-    personalizationApplication.unmount();
-    mounted = false;
-    assert.equal(runtime.getState().dirty, false, "destroy 取消安全草稿");
-    assert.equal(root.children.length, 0, "destroy 清除仅 DOM 中间态");
-    assert.equal(globalListeners.get("beforeunload")?.size ?? 0, 0);
+    const leave = personalizationApplication.beforeLeave();
+    const duplicate = personalizationApplication.beforeWindowHide(null, "minimized");
+    assert.equal(leave, duplicate);
+    assert.equal(dialogCalls, 1);
+    resolveDialog("cancel");
+    assert.equal(await leave, false);
+    assert.equal(runtime.getState().dirty, true);
+
+    const form = dom.descendants(dom.root).find((element) => element instanceof HTMLFormElement);
+    dom.root.emit("submit", form);
+    await flushPromises();
+    assert.equal(storageFixture.writes.length, 1);
+    assert.deepEqual(storageFixture.current(), { animations: "on", wallpaperColor: "forest" });
+    assert.equal(runtime.getState().dirty, false);
+
+    const reset = dom.descendants(dom.root).find((element) => element.dataset.personalizationAction === "reset");
+    dom.root.emit("click", reset);
+    assert.equal(runtime.getState().draft.wallpaperColor, "graphite");
+    assert.equal(runtime.getState().dirty, true);
+    const cancel = dom.descendants(dom.root).find((element) => element.dataset.personalizationAction === "cancel");
+    dom.root.emit("click", cancel);
+    assert.equal(runtime.getState().draft.wallpaperColor, "forest");
+    assert.equal(runtime.getState().dirty, false);
+
+    graphite.checked = true;
+    forest.checked = false;
+    dom.root.emit("change", graphite);
+    const confirmed = personalizationApplication.beforeLeave();
+    resolveDialog("confirm");
+    assert.equal(await confirmed, true);
+    assert.equal(runtime.getState().dirty, false);
+    assert.equal(runtime.getState().draft.wallpaperColor, "forest");
+
+    personalizationApplication.deactivate();
+    assert.equal(dom.root.hidden, true);
+    assert.equal(dom.root.inert, true);
+    personalizationApplication.activate();
+    assert.equal(dom.root.hidden, false);
   } finally {
     if (mounted) personalizationApplication.unmount();
-    runtime?.destroy();
-    if (previousDocument === undefined) delete globalThis.document;
-    else globalThis.document = previousDocument;
-    if (previousNode === undefined) delete globalThis.Node;
-    else globalThis.Node = previousNode;
-    if (previousElement === undefined) delete globalThis.Element;
-    else globalThis.Element = previousElement;
-    if (previousButton === undefined) delete globalThis.HTMLButtonElement;
-    else globalThis.HTMLButtonElement = previousButton;
-    if (previousForm === undefined) delete globalThis.HTMLFormElement;
-    else globalThis.HTMLFormElement = previousForm;
-    if (previousAddEventListener === undefined) delete globalThis.addEventListener;
-    else globalThis.addEventListener = previousAddEventListener;
-    if (previousRemoveEventListener === undefined) delete globalThis.removeEventListener;
-    else globalThis.removeEventListener = previousRemoveEventListener;
+    runtime.destroy();
+    assert.equal(motionListeners.size, 0);
+    assert.equal(dom.listenerCount("beforeunload"), 0);
+    dom.restore();
   }
 });
 
-test("图片输入以扩展名、MIME、签名和 15 MiB 上限共同判定", async () => {
-  assert.deepEqual(WALLPAPER_IMAGE_LIMITS, {
-    inputExtensions: ["jpg", "jpeg", "png", "webp"],
-    inputMediaTypes: ["image/jpeg", "image/png", "image/webp"],
-    outputMediaTypes: ["image/webp", "image/png"],
-    maxInputBytes: 15 * 1024 * 1024,
-    maxEdge: 4096,
-    suggestedMinWidth: 320,
-    suggestedMinHeight: 180,
-    webpQuality: 0.88,
-    version: 1,
-  });
-
-  for (const [file, mediaType] of [
-    [localImageFile(JPEG_SIGNATURE_BYTES, { name: "wallpaper.JPG", type: "image/jpeg" }), "image/jpeg"],
-    [localImageFile(JPEG_SIGNATURE_BYTES, { name: "wallpaper.jpeg", type: "image/jpeg" }), "image/jpeg"],
-    [localImageFile(PNG_SIGNATURE_BYTES, { name: "wallpaper.png", type: "image/png" }), "image/png"],
-    [localImageFile(webpSignatureBytes(), { name: "wallpaper.webp", type: "image/webp" }), "image/webp"],
-  ]) {
-    assert.deepEqual(await validateWallpaperImageInput(file), { mediaType });
-  }
-
-  const exactLimit = localImageFile(PNG_SIGNATURE_BYTES, {
-    name: "limit.png",
-    type: "image/png",
-    size: WALLPAPER_IMAGE_LIMITS.maxInputBytes,
-  });
-  assert.deepEqual(await validateWallpaperImageInput(exactLimit), { mediaType: "image/png" });
-  await assert.rejects(
-    validateWallpaperImageInput(localImageFile(PNG_SIGNATURE_BYTES, {
-      name: "too-large.png",
-      type: "image/png",
-      size: WALLPAPER_IMAGE_LIMITS.maxInputBytes + 1,
-    })),
-    (error) => error instanceof WallpaperImageImportError
-      && error.code === "file_too_large"
-      && !error.message.includes("too-large.png"),
-  );
-
-  const rejected = [
-    [localImageFile(new TextEncoder().encode("<svg/>"), { name: "wallpaper.svg", type: "image/svg+xml" }), "unsupported_extension"],
-    [localImageFile(GIF_SIGNATURE_BYTES, { name: "wallpaper.gif", type: "image/gif" }), "unsupported_extension"],
-    [localImageFile(new TextEncoder().encode("video"), { name: "wallpaper.mp4", type: "video/mp4" }), "unsupported_extension"],
-    [localImageFile(new TextEncoder().encode("<html>"), { name: "wallpaper.html", type: "text/html" }), "unsupported_extension"],
-    [localImageFile(GIF_SIGNATURE_BYTES, { name: "forged.png", type: "image/png" }), "format_mismatch"],
-    [localImageFile(PNG_SIGNATURE_BYTES, { name: "forged.jpg", type: "image/png" }), "format_mismatch"],
-    [localImageFile(JPEG_SIGNATURE_BYTES, { name: "forged.png", type: "image/jpeg" }), "format_mismatch"],
-    [localImageFile(PNG_SIGNATURE_BYTES, { name: "forged.png", type: "text/html" }), "unsupported_media_type"],
-  ];
-  for (const [file, code] of rejected) {
-    await assert.rejects(validateWallpaperImageInput(file), (error) => {
-      assert(error instanceof WallpaperImageImportError);
-      assert.equal(error.code, code);
-      assert.equal(error.message.includes(file.name), false);
-      return true;
-    });
-  }
-
-  assert.equal(
-    await hasSafeWallpaperOutputSignature(
-      new Blob([webpSignatureBytes()], { type: "image/webp" }),
-      "image/webp",
-    ),
-    true,
-  );
-  assert.equal(
-    await hasSafeWallpaperOutputSignature(
-      new Blob([webpSignatureBytes({ animated: true })], { type: "image/webp" }),
-      "image/webp",
-    ),
-    false,
-  );
-});
-
-test("图片导入按正确尺寸有界缩放、静态重编码并只返回安全投影", async () => {
-  assert.deepEqual(calculateWallpaperOutputDimensions(8000, 1000), {
-    width: 4096,
-    height: 512,
-  });
-  assert.deepEqual(calculateWallpaperOutputDimensions(1, 10000), {
-    width: 1,
-    height: 4096,
-  });
-  assert.deepEqual(calculateWallpaperOutputDimensions(4096, 180), {
-    width: 4096,
-    height: 180,
-  });
-  assert.throws(() => calculateWallpaperOutputDimensions(0, 180), TypeError);
-
-  const privateName = "private-original-wallpaper.png";
-  const file = localImageFile(PNG_SIGNATURE_BYTES, {
-    name: privateName,
-    type: "image/png",
-  });
-  let sourceWidth = 8000;
-  let sourceHeight = 1000;
-  const calls = [];
-  const released = { decoded: 0, canvas: 0 };
-  const adapter = {
-    async decode() {
-      calls.push(["decode"]);
-      return {
-        source: { originalFileName: privateName, laterFrames: [2, 3] },
-        width: sourceWidth,
-        height: sourceHeight,
-      };
-    },
-    createCanvas(width, height) {
-      calls.push(["canvas", width, height]);
-      return { width, height };
-    },
-    draw(canvas, source, width, height) {
-      calls.push(["draw", canvas.width, source.laterFrames.length, width, height]);
-    },
-    async encode(_canvas, mediaType, quality) {
-      calls.push(["encode", mediaType, quality]);
-      return new Blob([webpSignatureBytes()], { type: "image/webp" });
-    },
-    releaseDecoded() {
-      released.decoded += 1;
-    },
-    releaseCanvas() {
-      released.canvas += 1;
-    },
-  };
-
-  const imported = await importWallpaperImage(file, { adapter });
-  assert.deepEqual(Object.keys(imported), ["image", "warning"]);
-  assert.deepEqual(Object.keys(imported.image), [
-    "blob", "mediaType", "width", "height", "version",
-  ]);
-  assert.deepEqual({
-    mediaType: imported.image.mediaType,
-    width: imported.image.width,
-    height: imported.image.height,
-    version: imported.image.version,
-    warning: imported.warning,
-  }, {
-    mediaType: "image/webp",
-    width: 4096,
-    height: 512,
-    version: 1,
-    warning: null,
-  });
-  assert.equal(Object.prototype.toString.call(imported.image.blob), "[object Blob]");
-  assert.equal(Object.isFrozen(imported), true);
-  assert.equal(Object.isFrozen(imported.image), true);
-  assert.deepEqual(calls.slice(-3), [
-    ["canvas", 4096, 512],
-    ["draw", 4096, 2, 4096, 512],
-    ["encode", "image/webp", 0.88],
-  ]);
-  assert.deepEqual(released, { decoded: 1, canvas: 1 });
-  assert.equal(JSON.stringify(imported).includes(privateName), false);
-
-  sourceWidth = 319;
-  sourceHeight = 180;
-  const small = await importWallpaperImage(file, { adapter });
-  assert.equal(small.image.width, 319);
-  assert.deepEqual(small.warning, {
-    code: "small_dimensions",
-    message: "图片尺寸低于建议的 320 × 180 像素，仍可继续使用。",
-  });
-
-  await assert.rejects(importWallpaperImage(file, {
-    adapter: {
-      ...adapter,
-      async decode() {
-        throw new Error("raw decoder detail");
-      },
-    },
-  }), (error) => error instanceof WallpaperImageImportError
-    && error.code === "decode_failed"
-    && !error.message.includes("raw decoder detail"));
-});
-
-test("壁纸仓库记录采用严格 Blob 与字段白名单", () => {
-  const blob = new Blob([PNG_SIGNATURE_BYTES], { type: "image/png" });
-  const image = {
-    blob,
-    mediaType: "image/png",
-    width: 4096,
-    height: 2160,
-    version: 1,
-  };
-  const projectedImage = projectWallpaperImportResult(image);
-  assert.deepEqual(Object.keys(projectedImage), [
-    "blob", "mediaType", "width", "height", "version",
-  ]);
-  assert.equal(Object.isFrozen(projectedImage), true);
-
-  const record = { ...image, updatedAt: 1_700_000_000_000 };
-  const projected = projectWallpaperRecord(record);
-  assert.deepEqual(Object.keys(projected), [
-    "blob", "mediaType", "width", "height", "updatedAt", "version",
-  ]);
-  assert.equal(projected.blob, blob);
-  assert.equal(Object.isFrozen(projected), true);
-
-  for (const invalid of [
-    { ...record, originalFileName: "private.png" },
-    { ...record, originalPath: "hidden" },
-    { ...record, remoteSource: "https://example.invalid/wallpaper.png" },
-    { ...record, blobUrl: "blob:https://example.invalid/private" },
-    { ...record, width: 4097 },
-    { ...record, height: 0 },
-    { ...record, version: 2 },
-    { ...record, updatedAt: 0 },
-    { ...record, blob: new Blob([JPEG_SIGNATURE_BYTES], { type: "image/jpeg" }), mediaType: "image/jpeg" },
-    { ...record, blob: new Blob([PNG_SIGNATURE_BYTES], { type: "image/png" }), mediaType: "image/webp" },
-  ]) {
-    assert.throws(() => projectWallpaperRecord(invalid), TypeError);
-  }
-  assert.throws(
-    () => projectWallpaperImportResult({ ...image, updatedAt: record.updatedAt }),
-    TypeError,
-  );
-
-  let getterCalled = false;
-  const accessor = { ...record };
-  Object.defineProperty(accessor, "width", {
-    enumerable: true,
-    get() {
-      getterCalled = true;
-      return 100;
-    },
-  });
-  assert.throws(() => projectWallpaperRecord(accessor), TypeError);
-  assert.equal(getterCalled, false);
-
-  if (typeof File === "function") {
-    const fileBlob = new File([PNG_SIGNATURE_BYTES], "private.png", { type: "image/png" });
-    assert.throws(
-      () => projectWallpaperImportResult({ ...image, blob: fileBlob }),
-      TypeError,
-    );
-  }
-});
-
-test("壁纸仓库固定 schema、归一化错误且关闭后不泄漏连接行为", async () => {
+test("旧壁纸清理 seam 只删除已知 record，覆盖成功与全部非阻断失败", async () => {
   assert.deepEqual(WALLPAPER_STORAGE_SCHEMA, {
     databaseName: "imageweave-ui",
-    databaseVersion: 1,
     storeName: "wallpapers",
     customKey: "custom",
   });
-  const privateDetail = "private storage implementation detail";
-  for (const [name, operation, code] of [
-    ["QuotaExceededError", "write", "storage_quota_exceeded"],
-    ["SecurityError", "open", "indexeddb_unavailable"],
-    ["UnknownError", "read", "storage_read_failed"],
-    ["AbortError", "delete", "storage_delete_failed"],
-  ]) {
-    const raw = new Error(privateDetail);
-    raw.name = name;
-    const normalized = normalizeWallpaperStorageError(raw, operation);
-    assert(normalized instanceof WallpaperStorageError);
-    assert.equal(normalized.code, code);
-    assert.equal(normalized.message.includes(privateDetail), false);
+  assert.equal(await cleanupLegacyCustomWallpaper({ indexedDB: null }), false);
+  assert.equal(await cleanupLegacyCustomWallpaper({ indexedDB: {} }), false);
+
+  const success = cleanupIndexedDbFixture("success");
+  assert.equal(await cleanupLegacyCustomWallpaper({ indexedDB: success.indexedDB }), true);
+  assert.deepEqual(success.calls.open, [["imageweave-ui"]]);
+  assert.deepEqual(success.calls.transactions, [["wallpapers", "readwrite"]]);
+  assert.deepEqual(success.calls.deletes, ["custom"]);
+  assert.equal(success.calls.reads, 0);
+  assert.equal(success.calls.closes, 1);
+
+  for (const mode of ["no-store", "upgrade-no-store"]) {
+    const noStore = cleanupIndexedDbFixture(mode);
+    assert.equal(await cleanupLegacyCustomWallpaper({ indexedDB: noStore.indexedDB }), true, mode);
+    assert.deepEqual(noStore.calls.transactions, [], mode);
+    assert.equal(noStore.calls.closes, 1, mode);
   }
 
-  const repository = createWallpaperStorage({ indexedDB: null });
-  for (const method of [
-    "open", "read", "write", "replace", "delete", "remove",
-    "snapshot", "restore", "close", "destroy",
-  ]) {
-    assert.equal(typeof repository[method], "function", method);
+  for (const mode of ["open-throw", "open-error", "transaction-error", "delete-error"]) {
+    const fixture = cleanupIndexedDbFixture(mode);
+    assert.equal(await cleanupLegacyCustomWallpaper({ indexedDB: fixture.indexedDB }), false, mode);
+    assert.equal(fixture.calls.reads, 0, mode);
+    if (mode === "transaction-error" || mode === "delete-error") {
+      assert.equal(fixture.calls.closes, 1, mode);
+    }
   }
-  await assert.rejects(repository.open(), (error) => (
-    error instanceof WallpaperStorageError
-    && error.code === "indexeddb_unavailable"
-  ));
-  repository.close();
-  repository.destroy();
-  await assert.rejects(repository.read(), (error) => (
-    error instanceof WallpaperStorageError
-    && error.code === "storage_closed"
-  ));
+
+  const blocked = cleanupIndexedDbFixture("blocked-late-success");
+  assert.equal(await cleanupLegacyCustomWallpaper({ indexedDB: blocked.indexedDB }), false);
+  await flushPromises();
+  assert.equal(blocked.calls.closes, 1, "a connection arriving after blocked resolution is still closed");
+  assert.equal(blocked.calls.reads, 0);
 });
 
 test("Storage v2 位置偏好 facade、service shape 与 key 保持严格", () => {
@@ -5806,197 +4875,124 @@ test("Storage 只写固定 session/local 命名空间", () => {
   assert.equal(storage.writeCurrentApp("review"), true);
   assert.equal(storage.writeActiveBatchId("batch-123"), true);
   assert.equal(storage.writeWindowLayout([windowRecord("review")]), true);
-  assert.equal(storage.writeUiPreferences({ taskbarDensity: "compact" }), true);
+  assert.equal(storage.writeUiPreferences({ animations: "off", wallpaperColor: "slate" }), true);
   assert.deepEqual([...session.values.keys()].sort(), [
     STORAGE_KEYS.activeBatch, STORAGE_KEYS.currentApp,
   ].sort());
   assert.deepEqual([...local.values.keys()].sort(), [
     STORAGE_KEYS.uiPreferences, STORAGE_KEYS.windowPlacements,
   ].sort());
+  assert.deepEqual(JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)), {
+    animations: "off", wallpaperColor: "slate",
+  });
   assert.equal(storage.readCurrentApp(), "review");
   assert.equal(storage.readActiveBatchId(), "batch-123");
-  assert.deepEqual(storage.readWindowPlacements({ width: 1280, height: 720 }), [
-    { appId: "review", rect: windowRect(), maximized: false },
-  ]);
 });
 
-test("Storage 迁移动效旧值并对损坏字段逐项回退", () => {
-  for (const [storedAnimations, expectedAnimations] of [
-    ["system", "on"],
-    ["reduced", "off"],
-    ["unexpected", "on"],
-    [undefined, "on"],
-  ]) {
-    const local = new MemoryStorage();
-    const stored = {
-      wallpaperFit: "contain",
-      wallpaperColor: "url(https://example.invalid/wallpaper.png)",
-      wallpaperMaskStrength: 42,
-      taskbarDensity: "compact",
-      unknown: "discarded",
-    };
-    if (storedAnimations !== undefined) stored.animations = storedAnimations;
-    local.values.set(STORAGE_KEYS.uiPreferences, JSON.stringify(stored));
-    const storage = createStorageService({
-      localStorage: local,
-      sessionStorage: new MemoryStorage(),
-    });
-
-    const expected = {
-      ...PERSONALIZATION_DEFAULTS,
-      animations: expectedAnimations,
-      wallpaperFit: "contain",
-      taskbarDensity: "compact",
-    };
-    assert.deepEqual(storage.readUiPreferences(), expected);
-    assert.deepEqual(JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)), expected);
-  }
-
-  for (const { storedTheme, expectedTheme } of [
-    {
-      storedTheme: { themeAccent: "#ffffff", themeSurface: "#101010" },
-      expectedTheme: { themeAccent: "#FFFFFF", themeSurface: "#101010" },
-    },
-    {
-      storedTheme: { themeAccent: "#0065d1", themeSurface: "#7e6425" },
-      expectedTheme: { themeAccent: "#0065D1", themeSurface: "#7E6425" },
-    },
-    {
-      storedTheme: { themeAccent: "#777777", themeSurface: "#FFFFFF" },
-      expectedTheme: { themeAccent: "#777777", themeSurface: "#FFFFFF" },
-    },
-    {
-      storedTheme: { themeAccent: "#1234", themeSurface: "#101010" },
-      expectedTheme: INTERFACE_THEME_DEFAULTS,
-    },
-  ]) {
-    const local = new MemoryStorage();
-    local.values.set(STORAGE_KEYS.uiPreferences, JSON.stringify({
+test("Storage 迁移六场景、旧动效和 custom，并永久丢弃退役字段", () => {
+  for (const wallpaperColor of BUILT_IN_WALLPAPER_COLOR_IDS) {
+    const legacy = {
       animations: "off",
+      wallpaperColor,
+      wallpaperKind: "color",
       wallpaperFit: "contain",
-      taskbarDensity: "compact",
-      ...storedTheme,
-    }));
-    const storage = createStorageService({
-      localStorage: local,
-      sessionStorage: new MemoryStorage(),
-    });
-    const expected = {
-      ...PERSONALIZATION_DEFAULTS,
-      animations: "off",
-      wallpaperFit: "contain",
-      ...expectedTheme,
+      wallpaperPosition: "bottom-right",
+      wallpaperMaskTone: "light",
+      wallpaperMaskStrength: 75,
+      wallpaperBlur: "medium",
+      windowOpacity: "soft",
+      themeAccent: "#FFFFFF",
+      themeSurface: "#101010",
       taskbarDensity: "compact",
     };
-    assert.deepEqual(storage.readUiPreferences(), expected);
-    assert.deepEqual(JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)), expected);
+    assert.deepEqual(deserializeUiPreferences(JSON.stringify(legacy)), {
+      animations: "off", wallpaperColor,
+    });
   }
-
-  const empty = createStorageService({
-    localStorage: new MemoryStorage(),
-    sessionStorage: new MemoryStorage(),
+  assert.deepEqual(deserializeUiPreferences(JSON.stringify({
+    animations: "off", wallpaperKind: "custom", wallpaperColor: "forest",
+  })), { animations: "off", wallpaperColor: "graphite" });
+  assert.deepEqual(deserializeUiPreferences('{"animations":"system","wallpaperColor":"slate"}'), {
+    animations: "on", wallpaperColor: "slate",
   });
-  assert.deepEqual(empty.readUiPreferences(), PERSONALIZATION_DEFAULTS);
-});
+  assert.deepEqual(deserializeUiPreferences('{"animations":"reduced","wallpaperColor":"slate"}'), {
+    animations: "off", wallpaperColor: "slate",
+  });
+  assert.deepEqual(deserializeUiPreferences("{broken"), PERSONALIZATION_DEFAULTS);
 
-test("Storage 严格写入完整安全对象并拒绝图片载荷、路径、URL 与未知字段", () => {
-  assert.equal(isValidBatchId("batch:abc-123"), true);
-  assert.equal(isValidBatchId("../private"), false);
   const local = new MemoryStorage();
-  const session = new MemoryStorage();
-  const storage = createStorageService({ localStorage: local, sessionStorage: session });
-  assert.throws(() => storage.writeCurrentApp("unknown"), TypeError);
-  assert.throws(() => storage.writeActiveBatchId("bad/path"), TypeError);
-  assert.throws(
-    () => storage.writeWindowLayout([windowRecord("unknown")]),
-    TypeError,
-  );
-  assert.throws(
-    () => storage.writeWindowLayout([{ ...windowRecord("review"), backendUrl: "/api/private" }]),
-    TypeError,
-  );
-
-  const safePreferences = {
-    ...PERSONALIZATION_DEFAULTS,
+  local.values.set(STORAGE_KEYS.uiPreferences, JSON.stringify({
     animations: "off",
     wallpaperKind: "custom",
     wallpaperColor: "warm-paper",
-    wallpaperFit: "stretch",
-    wallpaperPosition: "bottom-right",
-    wallpaperMaskTone: "light",
-    wallpaperMaskStrength: 80,
-    wallpaperBlur: "medium",
-    windowOpacity: "soft",
-    taskbarDensity: "comfortable",
-  };
-  const lowercaseThemePreferences = {
-    ...safePreferences,
-    themeAccent: "#0065d1",
-    themeSurface: "#7e6425",
-  };
-  assert.equal(storage.writeUiPreferences(lowercaseThemePreferences), true);
-  assert.deepEqual(
-    JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)),
-    {
-      ...lowercaseThemePreferences,
-      themeAccent: "#0065D1",
-      themeSurface: "#7E6425",
-    },
-  );
-
-  assert.equal(storage.writeUiPreferences(safePreferences), true);
-  assert.deepEqual(
-    JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)),
-    safePreferences,
-  );
-  const serializedSafePreferences = local.values.get(STORAGE_KEYS.uiPreferences);
-
-  const unsafePreferences = [
-    { ...safePreferences, animations: "system" },
-    { ...safePreferences, wallpaperMaskStrength: -5 },
-    { ...safePreferences, wallpaperMaskStrength: 42 },
-    { ...safePreferences, wallpaperMaskStrength: 85 },
-    { ...safePreferences, wallpaperColor: "data:image/png;base64,AAAA" },
-    { ...safePreferences, wallpaperColor: "blob:https://example.invalid/private" },
-    { ...safePreferences, wallpaperColor: "https://example.invalid/wallpaper.png" },
-    { ...safePreferences, wallpaperCss: "url(https://example.invalid/a.png)" },
-    { ...safePreferences, wallpaperData: "QUFBQQ==" },
-    { ...safePreferences, originalFileName: "private-wallpaper.png" },
-    { ...safePreferences, originalPath: "/home/user/private-wallpaper.png" },
-    { ...safePreferences, wallpaperPayload: { bytes: [1, 2, 3] } },
-    { ...safePreferences, themeAccent: "#FFFFFF80", themeSurface: "#101010" },
-    { ...safePreferences, themeAccent: "#FFF", themeSurface: "#101010" },
-    { ...safePreferences, themeAccent: "var(--unsafe)", themeSurface: "#101010" },
-    { ...safePreferences, themeAccent: "red", themeSurface: "#FFFFFF" },
-    { ...safePreferences, taskbarDensity: "dense" },
-  ];
-  if (typeof Blob === "function") {
-    unsafePreferences.push(new Blob(["unsafe"], { type: "image/png" }));
-    unsafePreferences.push({ ...safePreferences, wallpaperBlob: new Blob(["unsafe"]) });
-  }
-  if (typeof File === "function") {
-    unsafePreferences.push(new File(["unsafe"], "private.png", { type: "image/png" }));
-    unsafePreferences.push({
-      ...safePreferences,
-      wallpaperFile: new File(["unsafe"], "private.png", { type: "image/png" }),
-    });
-  }
-  for (const unsafe of unsafePreferences) {
-    assert.throws(() => storage.writeUiPreferences(unsafe), TypeError);
-  }
-
-  let getterCalled = false;
-  const accessorPreferences = { ...safePreferences };
-  Object.defineProperty(accessorPreferences, "wallpaperColor", {
-    enumerable: true,
-    get() {
-      getterCalled = true;
-      return "forest";
-    },
+    taskbarDensity: "compact",
+    image: "private",
+  }));
+  const service = createStorageService({ localStorage: local, sessionStorage: new MemoryStorage() });
+  assert.deepEqual(service.readUiPreferences(), { animations: "off", wallpaperColor: "graphite" });
+  assert.deepEqual(JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)), {
+    animations: "off", wallpaperColor: "graphite",
   });
-  assert.throws(() => storage.writeUiPreferences(accessorPreferences), TypeError);
-  assert.equal(getterCalled, false);
-  assert.equal(local.values.get(STORAGE_KEYS.uiPreferences), serializedSafePreferences);
+
+  let getterReads = 0;
+  const accessor = { wallpaperColor: "forest" };
+  Object.defineProperty(accessor, "animations", {
+    enumerable: true,
+    get() { getterReads += 1; return "off"; },
+  });
+  assert.deepEqual(sanitizeUiPreferences(accessor), {
+    animations: "on", wallpaperColor: "forest",
+  });
+  assert.equal(getterReads, 0);
+});
+
+test("Storage 新写入严格只有 animations 与 wallpaperColor", () => {
+  const safe = { animations: "off", wallpaperColor: "plum-gray" };
+  assert.deepEqual(projectUiPreferences(safe), safe);
+  assert.deepEqual(JSON.parse(serializeUiPreferences(safe)), safe);
+  assert.deepEqual(JSON.parse(serializePersonalizationPreferences(
+    safe,
+    JSON.stringify({
+      ...safe,
+      wallpaperKind: "custom",
+      themeAccent: "#FFFFFF",
+      taskbarDensity: "compact",
+    }),
+  )), safe);
+
+  for (const unsafe of [
+    { ...safe, wallpaperKind: "color" },
+    { ...safe, themeAccent: "#FFFFFF" },
+    { ...safe, windowOpacity: "soft" },
+    { ...safe, taskbarDensity: "compact" },
+    { ...safe, wallpaperColor: "https://example.invalid/private.png" },
+    { ...safe, image: new Uint8Array([1, 2, 3]) },
+    [],
+    new Date(),
+  ]) {
+    assert.throws(() => serializeUiPreferences(unsafe), TypeError);
+  }
+
+  let getterReads = 0;
+  const accessor = { wallpaperColor: "forest" };
+  Object.defineProperty(accessor, "animations", {
+    enumerable: true,
+    get() { getterReads += 1; return "off"; },
+  });
+  assert.throws(() => projectUiPreferences(accessor), TypeError);
+  assert.equal(getterReads, 0);
+
+  const dangerous = JSON.parse('{"animations":"off","wallpaperColor":"forest","constructor":{}}');
+  assert.throws(() => projectUiPreferences(dangerous), TypeError);
+  const withSymbol = { ...safe };
+  Object.defineProperty(withSymbol, Symbol("secret"), { value: true, enumerable: true });
+  assert.throws(() => projectUiPreferences(withSymbol), TypeError);
+
+  const local = new MemoryStorage();
+  const storage = createStorageService({ localStorage: local, sessionStorage: new MemoryStorage() });
+  assert.equal(storage.writePersonalizationPreferences(safe), true);
+  assert.deepEqual(JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)), safe);
+  assert.throws(() => storage.writeUiPreferences({ ...safe, unknown: true }), TypeError);
 });
 
 test("Storage 兼容不可用或损坏的浏览器存储并自愈偏好 JSON", () => {
@@ -6034,17 +5030,10 @@ test("Storage 兼容不可用或损坏的浏览器存储并自愈偏好 JSON", (
   assert.equal(unavailable.writeUiPreferences(PERSONALIZATION_DEFAULTS), false);
 });
 
-test("动效控制器落实系统覆盖且切换时保留完整个性化偏好", () => {
+test("动效控制器落实系统覆盖且只保留场景与动效偏好", () => {
   const retainedPreferences = {
-    ...PERSONALIZATION_DEFAULTS,
+    animations: "on",
     wallpaperColor: "plum-gray",
-    wallpaperFit: "tile",
-    wallpaperPosition: "top-left",
-    wallpaperMaskTone: "light",
-    wallpaperMaskStrength: 75,
-    wallpaperBlur: "soft",
-    windowOpacity: "subtle",
-    taskbarDensity: "compact",
   };
   const local = new MemoryStorage();
   local.values.set(STORAGE_KEYS.uiPreferences, JSON.stringify(retainedPreferences));
@@ -6078,35 +5067,24 @@ test("动效控制器落实系统覆盖且切换时保留完整个性化偏好",
   const observed = [];
   const unsubscribe = controller.subscribe((state) => observed.push(state));
   assert.equal(controller.setUserMode("off"), true);
-  assert.equal(root.getAttribute("data-motion"), "off");
-  assert.equal(root.getAttribute("data-motion-limited"), "false");
-  assert.deepEqual(
-    JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)),
-    { ...retainedPreferences, animations: "off" },
-  );
-
+  assert.deepEqual(JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)), {
+    animations: "off",
+    wallpaperColor: "plum-gray",
+  });
   mediaQuery.setMatches(false);
   assert.equal(controller.getState().effective, false);
   assert.equal(controller.setUserMode("on"), true);
+  assert.deepEqual(JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)), retainedPreferences);
   assert.equal(controller.getState().effective, true);
-  assert.equal(root.getAttribute("data-motion-effective"), "on");
-  assert.deepEqual(
-    JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)),
-    retainedPreferences,
-  );
-
   mediaQuery.setMatches(true);
   assert.equal(controller.getState().limitedBySystem, true);
-  assert.equal(root.getAttribute("data-motion-effective"), "off");
   assert.equal(observed.length, 4);
   assert.throws(() => controller.setUserMode("system"), TypeError);
-  assert.throws(() => controller.setUserMode("reduced"), TypeError);
+  assert.throws(() => controller.subscribe(null), TypeError);
 
   unsubscribe();
   controller.destroy();
   assert.equal(mediaQuery.listeners.size, 0);
-  mediaQuery.setMatches(false);
-  assert.equal(root.getAttribute("data-motion-limited"), "true");
 });
 
 test("动效控制器初始化失败时使用安全默认值且不阻断调用方", () => {
@@ -6131,765 +5109,175 @@ test("动效控制器初始化失败时使用安全默认值且不阻断调用�
   assert.doesNotThrow(() => controller.destroy());
 });
 
-test("G1 任意对比主题随预览、提交与存储恢复同步应用", async () => {
-  const preferenceStorage = createPersonalizationStorageFixture(
-    PERSONALIZATION_DEFAULTS,
-  );
-  const themeRoot = new FakeThemeRoot();
-  const runtime = createPersonalizationRuntime({
-    themeRoot,
-    storage: preferenceStorage.service,
+test("个性化运行时只映射六场景与 motion，实时预览和取消不写存储", async () => {
+  const preferenceStorage = createPersonalizationStorageFixture({
+    animations: "off",
+    wallpaperKind: "custom",
+    wallpaperColor: "forest",
+    themeAccent: "#FFFFFF",
   });
-
-  assert.deepEqual(runtime.getState().committed, PERSONALIZATION_DEFAULTS);
-  assert.deepEqual(themeRoot.snapshot(), {
-    themeAccent: "#46515D",
-    themeSurface: "#F4F1EA",
-    tone: "light",
-  });
-  assert.equal(preferenceStorage.writes.length, 0, "同步恢复不得写存储");
-  await runtime.ready();
-
-  const beforeRejectedPreview = themeRoot.snapshot();
-  assert.throws(() => runtime.preview({
-    ...runtime.getState().draft,
-    themeAccent: "#0065D180",
-    themeSurface: "#7E6425",
-  }), TypeError);
-  assert.deepEqual(themeRoot.snapshot(), beforeRejectedPreview);
-  assert.equal(preferenceStorage.writes.length, 0, "非法格式不得预览或写存储");
-
-  let state = runtime.preview({
-    ...runtime.getState().draft,
-    themeAccent: "#0065d1",
-    themeSurface: "#7e6425",
-  });
-  assert.equal(state.draft.themeAccent, "#0065D1");
-  assert.equal(state.draft.themeSurface, "#7E6425");
-  assert.equal(state.dirty, true);
-  assert.deepEqual(themeRoot.snapshot(), {
-    themeAccent: "#0065D1",
-    themeSurface: "#7E6425",
-    tone: "dark",
-  });
-  assert.equal(preferenceStorage.writes.length, 0, "低对比主题预览不得写存储");
-
-  state = runtime.cancel();
-  assert.equal(state.dirty, false);
-  assert.deepEqual(themeRoot.snapshot(), {
-    themeAccent: "#46515D",
-    themeSurface: "#F4F1EA",
-    tone: "light",
-  });
-
-  runtime.preview({
-    ...state.draft,
-    themeAccent: "#0065d1",
-    themeSurface: "#7e6425",
-  });
-  const committed = await runtime.commit();
-  assert.equal(committed.ok, true);
-  assert.equal(committed.state.committed.themeAccent, "#0065D1");
-  assert.equal(committed.state.committed.themeSurface, "#7E6425");
-  assert.deepEqual(themeRoot.snapshot(), {
-    themeAccent: "#0065D1",
-    themeSurface: "#7E6425",
-    tone: "dark",
-  });
-  assert.equal(preferenceStorage.writes.length, 1);
-  assert.equal(preferenceStorage.current().themeAccent, "#0065D1");
-  assert.equal(preferenceStorage.current().themeSurface, "#7E6425");
-
-  state = runtime.preview(restoreDefaultPersonalizationPreferences());
-  assert.equal(state.dirty, true);
-  assert.deepEqual(themeRoot.snapshot(), {
-    themeAccent: "#46515D",
-    themeSurface: "#F4F1EA",
-    tone: "light",
-  });
-  state = runtime.cancel();
-  assert.equal(state.draft.themeAccent, "#0065D1");
-  assert.equal(state.draft.themeSurface, "#7E6425");
-
-  runtime.preview({
-    ...state.draft,
-    themeAccent: "#101010",
-    themeSurface: "#101010",
-  });
-  assert.deepEqual(themeRoot.snapshot(), {
-    themeAccent: "#101010",
-    themeSurface: "#101010",
-    tone: "dark",
-  });
-  runtime.destroy();
-  assert.deepEqual(themeRoot.snapshot(), {
-    themeAccent: "#0065D1",
-    themeSurface: "#7E6425",
-    tone: "dark",
-  });
-
-  const restoredRoot = new FakeThemeRoot();
-  const restoredRuntime = createPersonalizationRuntime({
-    themeRoot: restoredRoot,
-    storage: preferenceStorage.service,
-  });
-  assert.equal(restoredRuntime.getState().committed.themeAccent, "#0065D1");
-  assert.equal(restoredRuntime.getState().committed.themeSurface, "#7E6425");
-  assert.deepEqual(restoredRoot.snapshot(), {
-    themeAccent: "#0065D1",
-    themeSurface: "#7E6425",
-    tone: "dark",
-  });
-  await restoredRuntime.ready();
-  assert.equal(preferenceStorage.writes.length, 1, "重新读取不得额外写存储");
-  restoredRuntime.destroy();
-});
-
-test("主题-only 预览只应用 Token，等值草稿 no-op，混合字段仍完整应用", async () => {
-  const preferenceStorage = createPersonalizationStorageFixture(
-    PERSONALIZATION_DEFAULTS,
-  );
-  const surface = createWallpaperSurfaceFixture();
-  const themeRoot = new FakeThemeRoot();
-  let motionMode = "on";
-  const motionCalls = [];
-  const motion = Object.freeze({
+  const wallpaper = { classList: new FakeClassList(["unrelated-class"]) };
+  let motionMode = "off";
+  const motionListeners = new Set();
+  const motion = {
+    previewCalls: [],
     getState() {
-      return {
-        userMode: motionMode,
-        systemReduced: false,
-        effective: motionMode === "on",
-        limitedBySystem: false,
-      };
+      return { userMode: motionMode, systemReduced: false, effective: motionMode === "on", limitedBySystem: false };
     },
     previewUserMode(mode) {
+      this.previewCalls.push(mode);
       motionMode = mode;
-      motionCalls.push(mode);
     },
-    subscribe() {
-      return () => {};
-    },
-  });
+    subscribe(listener) { motionListeners.add(listener); return () => motionListeners.delete(listener); },
+  };
   const runtime = createPersonalizationRuntime({
-    wallpaper: surface.wallpaper,
-    wallpaperImage: surface.image,
-    wallpaperMask: surface.mask,
-    windowLayer: surface.windowLayer,
-    themeRoot,
+    wallpaper,
     storage: preferenceStorage.service,
     motion,
-    urlApi: surface.urlApi,
   });
-  await runtime.ready();
-
-  let publishes = 0;
-  const unsubscribe = runtime.subscribe(() => { publishes += 1; });
-  const unrelatedOperations = () => ({
-    wallpaperClasses: surface.wallpaper.classList.operations.length,
-    imageSourceClears: surface.calls.clearImageSource,
-    backgroundImageClears: surface.calls.clearBackgroundImage,
-    windowClasses: surface.windowLayer.classList.operations.length,
-    motion: motionCalls.length,
-  });
-
-  const beforeTheme = unrelatedOperations();
-  let state = runtime.preview({
-    ...runtime.getState().draft,
-    themeAccent: "#0065d1",
-    themeSurface: "#7e6425",
-  });
-  assert.equal(publishes, 1);
-  assert.equal(state.draft.themeAccent, "#0065D1");
-  assert.equal(state.draft.themeSurface, "#7E6425");
-  assert.deepEqual(unrelatedOperations(), beforeTheme, "主题快路径不得触碰非主题运行时");
-  assert.deepEqual(themeRoot.snapshot(), {
-    themeAccent: "#0065D1",
-    themeSurface: "#7E6425",
-    tone: "dark",
-  });
-
-  const beforeNoOp = {
-    unrelated: unrelatedOperations(),
-    theme: themeRoot.operations.length,
-  };
-  state = runtime.preview({
-    ...state.draft,
-    themeAccent: "#0065d1",
-    themeSurface: "#7e6425",
-  });
-  assert.equal(publishes, 1, "等值完整草稿不得再次 publish");
-  assert.deepEqual(unrelatedOperations(), beforeNoOp.unrelated);
-  assert.equal(themeRoot.operations.length, beforeNoOp.theme, "等值草稿不得重写 Token");
-
-  const beforeMixed = unrelatedOperations();
-  state = runtime.preview({
-    ...state.draft,
+  assert.deepEqual(await runtime.ready(), runtime.getState());
+  assert.deepEqual(runtime.getState().committed, {
     animations: "off",
-    wallpaperColor: "forest",
-    windowOpacity: "soft",
-    themeAccent: "#46515D",
-    themeSurface: "#F4F1EA",
+    wallpaperColor: "graphite",
   });
-  assert.equal(publishes, 2);
-  assert.equal(state.draft.wallpaperColor, "forest");
-  assert.equal(state.draft.windowOpacity, "soft");
-  assert.ok(
-    surface.wallpaper.classList.operations.length > beforeMixed.wallpaperClasses,
-    "混合草稿必须重做壁纸固定类",
-  );
-  assert.ok(surface.calls.clearImageSource > beforeMixed.imageSourceClears);
-  assert.ok(surface.calls.clearBackgroundImage > beforeMixed.backgroundImageClears);
-  assert.ok(
-    surface.windowLayer.classList.operations.length > beforeMixed.windowClasses,
-    "混合草稿必须应用窗口透明度类",
-  );
-  assert.ok(motionCalls.length > beforeMixed.motion, "混合草稿必须应用动效");
-  assert.equal(preferenceStorage.writes.length, 0, "所有预览路径均不得写 LocalStorage");
+  assert.deepEqual(Object.keys(runtime.getState()), ["committed", "draft", "dirty", "busy", "motion"]);
+  assert.equal(wallpaper.classList.contains(WALLPAPER_COLOR_CLASSES.graphite), true);
+  assert.equal(wallpaper.classList.contains("unrelated-class"), true);
+  assert.equal(preferenceStorage.writes.length, 0);
+
+  let published = 0;
+  const unsubscribe = runtime.subscribe(() => { published += 1; });
+  const noisyUnsubscribe = runtime.subscribe(() => { throw new Error("detached view"); });
+  for (const wallpaperColor of BUILT_IN_WALLPAPER_COLOR_IDS) {
+    const state = runtime.preview({ animations: "on", wallpaperColor });
+    assert.equal(state.draft.wallpaperColor, wallpaperColor);
+    assert.equal(state.draft.animations, "on");
+    assert.equal(wallpaper.classList.contains(WALLPAPER_COLOR_CLASSES[wallpaperColor]), true);
+    assert.equal(Object.entries(WALLPAPER_COLOR_CLASSES).every(([id, className]) => (
+      wallpaper.classList.contains(className) === (id === wallpaperColor)
+    )), true);
+  }
+  const beforeNoop = published;
+  runtime.preview(runtime.getState().draft);
+  assert.equal(published, beforeNoop);
+  assert.equal(preferenceStorage.writes.length, 0);
+  const priorDraft = runtime.getState().draft;
+  assert.throws(() => runtime.preview({ animations: "on", wallpaperColor: "unknown" }), TypeError);
+  assert.deepEqual(runtime.getState().draft, priorDraft);
+
+  const cancelled = runtime.cancel();
+  assert.deepEqual(cancelled.draft, cancelled.committed);
+  assert.equal(cancelled.dirty, false);
+  assert.equal(wallpaper.classList.contains(WALLPAPER_COLOR_CLASSES.graphite), true);
+  assert.equal(motionMode, "off");
+  assert.equal(preferenceStorage.writes.length, 0);
 
   unsubscribe();
+  noisyUnsubscribe();
   runtime.destroy();
+  assert.equal(motionListeners.size, 0);
+  assert.throws(() => runtime.preview(PERSONALIZATION_DEFAULTS), /销毁/);
+  assert.throws(() => runtime.subscribe(() => {}), /销毁/);
+  assert.doesNotThrow(() => runtime.destroy());
 });
 
-test("G1 界面主题 setter 部分失败时原子回滚且启动继续使用 CSS 回退", () => {
-  const startupRoot = new FakeThemeRoot();
-  startupRoot.failNext("setProperty:--imageweave-surface");
-  let startupRuntime;
-  assert.doesNotThrow(() => {
-    startupRuntime = createPersonalizationRuntime({
-      themeRoot: startupRoot,
-      storage: createPersonalizationStorageFixture(PERSONALIZATION_DEFAULTS).service,
-    });
-  });
-  assert.deepEqual(startupRoot.snapshot(), {
-    themeAccent: "",
-    themeSurface: "",
-    tone: "light",
-  });
-  assert.deepEqual(startupRuntime.getState().draft, PERSONALIZATION_DEFAULTS);
-  startupRuntime.destroy();
-
-  const themeRoot = new FakeThemeRoot();
-  const runtime = createPersonalizationRuntime({
-    themeRoot,
-    storage: createPersonalizationStorageFixture(PERSONALIZATION_DEFAULTS).service,
-  });
-  const previous = themeRoot.snapshot();
-  themeRoot.failNext("setAttribute:data-theme-tone");
-  assert.throws(() => runtime.preview({
-    ...runtime.getState().draft,
-    themeAccent: "#FFFFFF",
-    themeSurface: "#101010",
-  }), /外观预览暂时无法应用/);
-  assert.deepEqual(themeRoot.snapshot(), previous);
-  assert.deepEqual(runtime.getState().draft, PERSONALIZATION_DEFAULTS);
-  assert.equal(runtime.getState().dirty, false);
-  assert.equal(
-    themeRoot.operations.some((operation) => (
-      operation[0] === "setAttribute"
-      && operation[2] === "dark"
-    )),
-    true,
-  );
-  runtime.destroy();
-});
-
-test("个性化运行时只预览受控类，单次提交持久化，取消与失败恢复基线", async () => {
-  const savedPreferences = {
-    ...PERSONALIZATION_DEFAULTS,
-    animations: "off",
-    wallpaperColor: "slate",
-    taskbarDensity: "compact",
-  };
-  const local = new MemoryStorage();
-  local.values.set(STORAGE_KEYS.uiPreferences, JSON.stringify(savedPreferences));
-  const storage = createStorageService({
-    localStorage: local,
-    sessionStorage: new MemoryStorage(),
-  });
-  const motionRoot = new FakeRootElement();
-  const mediaQuery = new FakeMediaQueryList(false);
-  const motion = createMotionController({
-    root: motionRoot,
-    storage,
-    matchMedia: () => mediaQuery,
-  });
-  const classList = new FakeClassList([
-    WALLPAPER_COLOR_CLASSES.graphite,
-    "desktop-wallpaper-unrelated",
-  ]);
-  const runtime = createPersonalizationRuntime({
-    wallpaper: { classList },
-    storage,
-    motion,
-  });
-
-  assert.equal(classList.contains(WALLPAPER_COLOR_CLASSES.slate), true);
-  assert.equal(classList.contains(WALLPAPER_COLOR_CLASSES.graphite), false);
-  assert.equal(classList.contains("desktop-wallpaper-unrelated"), true);
-  assert.equal(motionRoot.getAttribute("data-motion"), "off");
-  assert.equal(local.setCalls, 0);
-
-  mediaQuery.setMatches(true);
-  let state = runtime.preview({
-    ...runtime.getState().draft,
-    animations: "on",
-    wallpaperKind: "color",
-    wallpaperColor: "forest",
-  });
-  assert.equal(state.dirty, true);
-  assert.equal(classList.contains(WALLPAPER_COLOR_CLASSES.forest), true);
-  assert.equal(local.setCalls, 0, "预览不得写 LocalStorage");
-  assert.deepEqual(
-    deriveMotionLimitationState(state.draft.animations, state.motion),
-    { limited: true, message: MOTION_LIMITATION_MESSAGE },
-  );
-
-  state = runtime.cancel();
-  assert.equal(state.dirty, false);
-  assert.equal(state.draft.wallpaperColor, "slate");
-  assert.equal(classList.contains(WALLPAPER_COLOR_CLASSES.slate), true);
-  assert.equal(motionRoot.getAttribute("data-motion"), "off");
-  assert.equal(local.setCalls, 0, "取消不得写 LocalStorage");
-  assert.deepEqual(
-    deriveMotionLimitationState(state.draft.animations, state.motion),
-    { limited: false, message: "" },
-  );
-
-  runtime.preview({
-    ...state.draft,
-    animations: "on",
-    wallpaperColor: "plum-gray",
-  });
-  const committed = await runtime.commit();
-  assert.equal(committed.ok, true);
-  assert.equal(committed.code, "saved");
-  assert.equal(committed.state.dirty, false);
-  assert.equal(local.setCalls, 1, "动效和纯色必须由一次原子偏好写入提交");
-  assert.deepEqual(JSON.parse(local.values.get(STORAGE_KEYS.uiPreferences)), {
-    ...PERSONALIZATION_DEFAULTS,
-    animations: "on",
-    wallpaperColor: "plum-gray",
-    taskbarDensity: "compact",
-  });
-
-  runtime.preview({
-    ...committed.state.draft,
-    animations: "off",
-    wallpaperColor: "warm-paper",
-  });
-  const persistedBeforeFailure = local.values.get(STORAGE_KEYS.uiPreferences);
-  local.throws = true;
-  const failed = await runtime.commit();
-  assert.equal(failed.ok, false);
-  assert.equal(failed.code, "preference_storage_unavailable");
-  assert.equal(failed.state.dirty, true);
-  assert.equal(failed.state.committed.wallpaperColor, "plum-gray");
-  assert.equal(failed.state.draft.wallpaperColor, "warm-paper");
-  assert.equal(local.values.get(STORAGE_KEYS.uiPreferences), persistedBeforeFailure);
-
-  runtime.destroy();
-  assert.equal(classList.contains(WALLPAPER_COLOR_CLASSES["plum-gray"]), true);
-  assert.equal(motionRoot.getAttribute("data-motion"), "on");
-  motion.destroy();
-});
-
-test("E1 受控类实时映射并在平铺全生命周期先断开再撤销 URL", async () => {
-  const initialPreferences = {
-    ...PERSONALIZATION_DEFAULTS,
-    wallpaperKind: "custom",
-    wallpaperColor: "warm-paper",
-    wallpaperFit: "contain",
-    wallpaperPosition: "bottom-right",
-    wallpaperMaskTone: "light",
-    wallpaperMaskStrength: 75,
-    wallpaperBlur: "soft",
-    windowOpacity: "subtle",
-  };
-  const stored = storedWallpaperFixture(importedWallpaperFixture(8));
-  const preferenceStorage = createPersonalizationStorageFixture(initialPreferences);
-  const wallpaperRepository = createWallpaperRepositoryFixture(stored);
-  const surface = createWallpaperSurfaceFixture();
-  const runtime = createPersonalizationRuntime({
-    wallpaper: surface.wallpaper,
-    wallpaperImage: surface.image,
-    windowLayer: surface.windowLayer,
-    storage: preferenceStorage.service,
-    wallpaperStorage: wallpaperRepository.repository,
-    decodeWallpaperBlob: async () => ({ width: 640, height: 360 }),
-    urlApi: surface.urlApi,
-  });
-
-  assert.deepEqual(Object.keys(PERSONALIZATION_RUNTIME_CLASS_MAPS), [
-    "wallpaperFit",
-    "wallpaperPosition",
-    "wallpaperMaskTone",
-    "wallpaperMaskStrength",
-    "wallpaperBlur",
-    "windowOpacity",
-  ]);
-  for (const [field, classMap] of Object.entries(PERSONALIZATION_RUNTIME_CLASS_MAPS)) {
-    assert.deepEqual(
-      Object.keys(classMap),
-      PERSONALIZATION_OPTIONS[field].map(String),
-      `${field} 必须与安全模型白名单一一对应`,
-    );
-    assert.equal(Object.isFrozen(classMap), true, field);
-    assert.equal(
-      Object.values(classMap).every((className) => /^[a-z0-9-]+$/.test(className)),
-      true,
-      field,
-    );
-  }
-
-  const assertRuntimeClasses = (state) => {
-    for (const field of [
-      "wallpaperFit",
-      "wallpaperPosition",
-      "wallpaperMaskTone",
-      "wallpaperMaskStrength",
-      "wallpaperBlur",
-    ]) {
-      const classMap = PERSONALIZATION_RUNTIME_CLASS_MAPS[field];
-      assert.equal(
-        surface.wallpaper.classList.contains(classMap[state.draft[field]]),
-        true,
-        field,
-      );
-      assert.equal(
-        Object.values(classMap).filter(
-          (className) => surface.wallpaper.classList.contains(className),
-        ).length,
-        1,
-        field,
-      );
-    }
-    const opacityClasses = PERSONALIZATION_RUNTIME_CLASS_MAPS.windowOpacity;
-    assert.equal(
-      surface.windowLayer.classList.contains(opacityClasses[state.draft.windowOpacity]),
-      true,
-    );
-    assert.equal(
-      Object.values(opacityClasses).filter(
-        (className) => surface.windowLayer.classList.contains(className),
-      ).length,
-      1,
-    );
-  };
-  const assertDetachedBeforeRevoked = (objectUrl, clearKind) => {
-    const clearIndex = surface.events.findIndex(
-      ([kind, value]) => kind === clearKind && value.includes(objectUrl),
-    );
-    const revokeIndex = surface.events.findIndex(
-      ([kind, value]) => kind === "revoke" && value === objectUrl,
-    );
-    assert(clearIndex >= 0, `${objectUrl} 缺少 ${clearKind}`);
-    assert(revokeIndex > clearIndex, `${objectUrl} 必须先断开 DOM 引用再 revoke`);
-  };
-
-  let state = await runtime.ready();
-  const firstUrl = surface.image.src;
-  assert.equal(firstUrl, "blob:wallpaper-fixture/1");
-  assert.equal(surface.image.style.backgroundImage, "");
-  assert.equal(surface.mask.hidden, false);
-  assert.equal(surface.wallpaper.classList.contains(WALLPAPER_CUSTOM_CLASS), true);
-  assert.equal(surface.wallpaper.classList.contains(WALLPAPER_COLOR_CLASSES.graphite), true);
-  assertRuntimeClasses(state);
-
-  assert.throws(() => runtime.preview({
-    ...state.draft,
-    wallpaperFit: 'url("https://example.invalid/wallpaper")',
-  }), TypeError);
-  assert.equal(surface.image.src, firstUrl);
-
-  state = runtime.preview({
-    ...state.draft,
-    wallpaperFit: "tile",
-    wallpaperPosition: "top-left",
-    wallpaperMaskTone: "dark",
-    wallpaperMaskStrength: 80,
-    wallpaperBlur: "medium",
-    windowOpacity: "soft",
-  });
-  assertRuntimeClasses(state);
-  assert.equal(state.draft.wallpaperPosition, "top-left", "平铺不得损坏九宫格存储值");
-  assert.equal(surface.image.src, "");
-  assert.equal(surface.image.style.backgroundImage, `url(${JSON.stringify(firstUrl)})`);
-  assert.deepEqual(surface.revoked, [], "同一图片切换 fit 不应撤销仍在使用的 URL");
-
-  const replacement = importedWallpaperFixture(9);
-  assert.equal((await runtime.previewCustomImage(replacement)).ok, true);
-  const secondUrl = surface.created[1].url;
-  assert.equal(surface.image.style.backgroundImage, `url(${JSON.stringify(secondUrl)})`);
-  assertDetachedBeforeRevoked(firstUrl, "clear-background");
-
-  state = runtime.cancel();
-  const restoredUrl = surface.image.src;
-  assert.equal(state.draft.wallpaperFit, "contain");
-  assert.equal(state.draft.windowOpacity, "subtle");
-  assert.equal(surface.image.style.backgroundImage, "");
-  assert.equal(restoredUrl, "blob:wallpaper-fixture/3");
-  assertDetachedBeforeRevoked(secondUrl, "clear-background");
-  assertRuntimeClasses(state);
-
-  state = runtime.preview({
-    ...state.draft,
-    wallpaperFit: "tile",
-    wallpaperPosition: "top-left",
-    wallpaperMaskTone: "dark",
-    wallpaperMaskStrength: 80,
-    wallpaperBlur: "medium",
-    windowOpacity: "soft",
-  });
-  const committed = await runtime.commit();
-  assert.equal(committed.ok, true);
-  assert.equal(committed.state.committed.wallpaperFit, "tile");
-  assert.equal(committed.state.committed.wallpaperPosition, "top-left");
-  assertRuntimeClasses(committed.state);
-
-  const deleted = await runtime.deleteCustomWallpaper();
-  assert.equal(deleted.ok, true);
-  assert.equal(deleted.state.draft.wallpaperKind, "color");
-  assert.equal(deleted.state.draft.wallpaperFit, "tile");
-  assert.equal(deleted.state.draft.wallpaperPosition, "top-left");
-  assert.equal(deleted.state.draft.windowOpacity, "soft");
-  assert.equal(surface.mask.hidden, true);
-  assert.equal(surface.wallpaper.classList.contains(WALLPAPER_CUSTOM_CLASS), false);
-  assert.equal(surface.wallpaper.classList.contains(WALLPAPER_COLOR_CLASSES.graphite), true);
-  assertDetachedBeforeRevoked(restoredUrl, "clear-background");
-
-  assert.equal((await runtime.previewCustomImage(importedWallpaperFixture(10))).ok, true);
-  const finalTileUrl = surface.created.at(-1).url;
-  assert.equal(surface.image.style.backgroundImage, `url(${JSON.stringify(finalTileUrl)})`);
-  runtime.destroy();
-  assert.equal(surface.image.style.backgroundImage, "");
-  assert.equal(surface.mask.hidden, true);
-  assertDetachedBeforeRevoked(finalTileUrl, "clear-background");
-  assert.equal(new Set(surface.revoked).size, surface.revoked.length);
-});
-
-test("D2 本地图片预览、替换、取消与提交保持存储边界并 revoke URL", async () => {
+test("个性化 Apply 单飞且一次只保存新白名单，失败与取消恢复基线", async () => {
   const preferenceStorage = createPersonalizationStorageFixture(PERSONALIZATION_DEFAULTS);
-  const wallpaperRepository = createWallpaperRepositoryFixture();
-  const surface = createWallpaperSurfaceFixture();
-  const runtime = createPersonalizationRuntime({
-    wallpaper: surface.wallpaper,
-    wallpaperImage: surface.image,
-    storage: preferenceStorage.service,
-    wallpaperStorage: wallpaperRepository.repository,
-    decodeWallpaperBlob: async () => ({ width: 640, height: 360 }),
-    urlApi: surface.urlApi,
-  });
-  await runtime.ready();
-
-  const first = importedWallpaperFixture(1);
-  let result = await runtime.previewCustomImage(first);
-  assert.equal(result.ok, true);
-  assert.equal(result.code, "preview_ready");
-  assert.equal(result.state.customWallpaper.pending, true);
-  assert.equal(result.state.dirty, true);
-  assert.equal(preferenceStorage.writes.length, 0, "pending 预览不得写 LocalStorage");
-  assert.equal(wallpaperRepository.calls.snapshot, 0, "pending 预览不得读取提交快照");
-  assert.equal(wallpaperRepository.calls.replace, 0, "pending 预览不得写 IndexedDB");
-  assert.equal(stateContainsPrivateImageValue(result.state), false);
-
-  const second = importedWallpaperFixture(2);
-  result = await runtime.previewCustomImage(second);
-  assert.equal(result.ok, true);
-  assert.deepEqual(surface.revoked, ["blob:wallpaper-fixture/1"]);
-  assert.equal(preferenceStorage.writes.length, 0);
-  assert.equal(wallpaperRepository.calls.replace, 0);
-
-  let state = runtime.cancel();
-  assert.equal(state.draft.wallpaperKind, "color");
-  assert.equal(state.customWallpaper.pending, false);
-  assert.deepEqual(surface.revoked, [
-    "blob:wallpaper-fixture/1",
-    "blob:wallpaper-fixture/2",
-  ]);
-
-  result = await runtime.previewCustomImage(second);
-  assert.equal(result.ok, true);
-  const committed = await runtime.commit();
+  const wallpaper = { classList: new FakeClassList() };
+  const runtime = createPersonalizationRuntime({ wallpaper, storage: preferenceStorage.service });
+  runtime.preview({ animations: "off", wallpaperColor: "forest" });
+  const firstCommit = runtime.commit();
+  assert.equal(runtime.getState().busy, true);
+  const duplicateCommit = runtime.commit();
+  assert.throws(
+    () => runtime.preview({ animations: "on", wallpaperColor: "slate" }),
+    /保存/,
+  );
+  const duplicate = await duplicateCommit;
+  assert.equal(duplicate.ok, false);
+  assert.equal(duplicate.code, "busy");
+  const committed = await firstCommit;
   assert.equal(committed.ok, true);
   assert.equal(committed.code, "saved");
-  assert.equal(committed.state.dirty, false);
-  assert.equal(committed.state.committed.wallpaperKind, "custom");
-  assert.equal(committed.state.customWallpaper.saved, true);
-  assert.equal(committed.state.customWallpaper.pending, false);
-  assert.equal(wallpaperRepository.calls.snapshot, 1);
-  assert.equal(wallpaperRepository.calls.replace, 1);
-  assert.equal(wallpaperRepository.calls.restore, 0);
-  assert.equal(wallpaperRepository.current().blob, second.image.blob);
-  assert.equal(preferenceStorage.writes.length, 1);
-  assert.equal(preferenceStorage.current().wallpaperKind, "custom");
-  assert.equal(stateContainsPrivateImageValue(committed.state), false);
+  assert.deepEqual(preferenceStorage.writes, [{ animations: "off", wallpaperColor: "forest" }]);
+  assert.deepEqual(preferenceStorage.current(), { animations: "off", wallpaperColor: "forest" });
+  assert.equal(runtime.getState().dirty, false);
+  assert.equal((await runtime.commit()).code, "unchanged");
 
-  runtime.destroy();
-  assert.deepEqual(surface.revoked, surface.created.map(({ url }) => url));
-  assert.equal(new Set(surface.revoked).size, surface.revoked.length);
-});
-
-test("D2 新图片偏好写入失败 rollback 旧 IDB，删除成功共同回退 graphite", async () => {
-  const initialPreferences = {
-    ...PERSONALIZATION_DEFAULTS,
-    animations: "off",
-    wallpaperKind: "custom",
-    wallpaperColor: "warm-paper",
-  };
-  const oldImport = importedWallpaperFixture(3);
-  const oldRecord = storedWallpaperFixture(oldImport);
-  const preferenceStorage = createPersonalizationStorageFixture(initialPreferences);
-  const wallpaperRepository = createWallpaperRepositoryFixture(oldRecord);
-  const surface = createWallpaperSurfaceFixture();
-  const runtime = createPersonalizationRuntime({
-    wallpaper: surface.wallpaper,
-    wallpaperImage: surface.image,
-    storage: preferenceStorage.service,
-    wallpaperStorage: wallpaperRepository.repository,
-    decodeWallpaperBlob: async () => ({ width: 640, height: 360 }),
-    urlApi: surface.urlApi,
-  });
-  await runtime.ready();
-  assert.equal(runtime.getState().customWallpaper.saved, true);
-  assert.equal(surface.created.length, 1);
-
-  const replacement = importedWallpaperFixture(4);
-  assert.equal((await runtime.previewCustomImage(replacement)).ok, true);
   preferenceStorage.setWritesAllowed(false);
+  runtime.preview({ animations: "on", wallpaperColor: "slate" });
   const failed = await runtime.commit();
   assert.equal(failed.ok, false);
   assert.equal(failed.code, "preference_storage_unavailable");
-  assert.equal(failed.state.committed.wallpaperKind, "custom");
-  assert.equal(failed.state.customWallpaper.pending, true);
-  assert.equal(wallpaperRepository.calls.replace, 1);
-  assert.equal(wallpaperRepository.calls.restore, 1);
-  assert.equal(wallpaperRepository.current(), oldRecord, "LocalStorage 失败后必须恢复旧 IDB 快照");
-  assert.equal(preferenceStorage.current().wallpaperKind, "custom");
-
-  preferenceStorage.setWritesAllowed(true);
-  const cancelled = runtime.cancel();
-  assert.equal(cancelled.dirty, false);
-  assert.equal(cancelled.customWallpaper.pending, false);
-  assert.equal(cancelled.committed.wallpaperKind, "custom");
-
-  const deleted = await runtime.deleteCustomWallpaper();
-  assert.equal(deleted.ok, true);
-  assert.equal(deleted.code, "deleted");
-  assert.equal(wallpaperRepository.current(), null);
-  assert.equal(wallpaperRepository.calls.remove, 1);
-  assert.deepEqual({
-    committedKind: deleted.state.committed.wallpaperKind,
-    committedColor: deleted.state.committed.wallpaperColor,
-    draftKind: deleted.state.draft.wallpaperKind,
-    draftColor: deleted.state.draft.wallpaperColor,
-    saved: deleted.state.customWallpaper.saved,
-  }, {
-    committedKind: "color",
-    committedColor: "graphite",
-    draftKind: "color",
-    draftColor: "graphite",
-    saved: false,
-  });
-  assert.deepEqual({
-    kind: preferenceStorage.current().wallpaperKind,
-    color: preferenceStorage.current().wallpaperColor,
-    animations: preferenceStorage.current().animations,
-  }, {
-    kind: "color",
-    color: "graphite",
-    animations: "off",
-  });
-  assert.deepEqual(surface.revoked, surface.created.map(({ url }) => url));
+  assert.deepEqual(failed.state.committed, { animations: "off", wallpaperColor: "forest" });
+  assert.deepEqual(failed.state.draft, { animations: "on", wallpaperColor: "slate" });
+  assert.equal(failed.state.dirty, true);
+  assert.deepEqual(runtime.cancel().draft, { animations: "off", wallpaperColor: "forest" });
+  assert.equal(wallpaper.classList.contains(WALLPAPER_COLOR_CLASSES.forest), true);
   runtime.destroy();
-});
 
-test("D2 启动损坏回退与异步取消/销毁不会污染状态或泄漏 Object URL", async () => {
-  for (const mode of ["missing", "damaged"]) {
-    const preferenceStorage = createPersonalizationStorageFixture({
-      ...PERSONALIZATION_DEFAULTS,
-      wallpaperKind: "custom",
-      wallpaperColor: "slate",
-    });
-    const stored = mode === "damaged"
-      ? storedWallpaperFixture(importedWallpaperFixture(5))
-      : null;
-    const wallpaperRepository = createWallpaperRepositoryFixture(stored);
-    const surface = createWallpaperSurfaceFixture();
-    const runtime = createPersonalizationRuntime({
-      wallpaper: surface.wallpaper,
-      wallpaperImage: surface.image,
-      storage: preferenceStorage.service,
-      wallpaperStorage: wallpaperRepository.repository,
-      decodeWallpaperBlob: async () => {
-        if (mode === "damaged") throw new Error("private decoder detail");
-        return { width: 640, height: 360 };
-      },
-      urlApi: surface.urlApi,
-    });
-    const state = await runtime.ready();
-    assert.equal(state.committed.wallpaperKind, "color", mode);
-    assert.equal(state.committed.wallpaperColor, "graphite", mode);
-    assert.equal(state.draft.wallpaperKind, "color", mode);
-    assert.equal(preferenceStorage.current().wallpaperKind, "color", mode);
-    assert.equal(preferenceStorage.current().wallpaperColor, "graphite", mode);
-    assert.equal(surface.created.length, 0, mode);
-    assert.equal(wallpaperRepository.calls.remove, mode === "damaged" ? 1 : 0, mode);
-    runtime.destroy();
-  }
-
-  let releaseDecode;
-  const delayedDecode = new Promise((resolve) => { releaseDecode = resolve; });
-  const delayedSurface = createWallpaperSurfaceFixture();
-  const delayedRuntime = createPersonalizationRuntime({
-    wallpaper: delayedSurface.wallpaper,
-    wallpaperImage: delayedSurface.image,
-    storage: createPersonalizationStorageFixture(PERSONALIZATION_DEFAULTS).service,
-    wallpaperStorage: createWallpaperRepositoryFixture().repository,
-    decodeWallpaperBlob: () => delayedDecode,
-    urlApi: delayedSurface.urlApi,
-  });
-  await delayedRuntime.ready();
-  const delayedPreview = delayedRuntime.previewCustomImage(importedWallpaperFixture(6));
-  await flushPromises();
-  assert.equal(delayedRuntime.getState().busy, true);
-  const cancellingState = delayedRuntime.cancel();
-  assert.equal(cancellingState.draft.wallpaperKind, "color");
-  assert.equal(cancellingState.customWallpaper.pending, false);
-  releaseDecode({ width: 640, height: 360 });
-  const cancelled = await delayedPreview;
+  const delayedStorage = createPersonalizationStorageFixture(PERSONALIZATION_DEFAULTS);
+  const delayed = createPersonalizationRuntime({ storage: delayedStorage.service });
+  delayed.preview({ animations: "off", wallpaperColor: "plum-gray" });
+  const pending = delayed.commit();
+  delayed.destroy();
+  const cancelled = await pending;
   assert.equal(cancelled.ok, false);
   assert.equal(cancelled.code, "cancelled");
-  assert.equal(cancelled.state.busy, false);
-  assert.equal(delayedSurface.created.length, 0);
-  delayedRuntime.destroy();
+  assert.equal(delayedStorage.writes.length, 0);
+});
 
-  let raceRuntime = null;
-  let destroyOnFirstSource = true;
-  const raceSurface = createWallpaperSurfaceFixture({
-    onSourceChange(source) {
-      if (destroyOnFirstSource && source.startsWith("blob:")) {
-        destroyOnFirstSource = false;
-        raceRuntime.destroy();
-      }
+test("个性化运行时对损坏适配器与系统 reduced-motion 变化保持安全", () => {
+  const listeners = new Set();
+  let systemReduced = true;
+  let mode = "on";
+  const motion = {
+    getState() { return { userMode: mode, systemReduced }; },
+    previewUserMode(next) { mode = next; },
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+  };
+  const wallpaper = {
+    classList: {
+      toggle() { throw new Error("detached wallpaper"); },
     },
+  };
+  const runtime = createPersonalizationRuntime({
+    wallpaper,
+    storage: {
+      readUiPreferences() { throw new Error("storage unavailable"); },
+      writePersonalizationPreferences() { throw new Error("storage unavailable"); },
+    },
+    motion,
   });
-  raceRuntime = createPersonalizationRuntime({
-    wallpaper: raceSurface.wallpaper,
-    wallpaperImage: raceSurface.image,
-    storage: createPersonalizationStorageFixture(PERSONALIZATION_DEFAULTS).service,
-    wallpaperStorage: createWallpaperRepositoryFixture().repository,
-    decodeWallpaperBlob: async () => ({ width: 640, height: 360 }),
-    urlApi: raceSurface.urlApi,
+  assert.deepEqual(runtime.getState().committed, PERSONALIZATION_DEFAULTS);
+  assert.deepEqual(runtime.getState().motion, {
+    userMode: "on",
+    systemReduced: true,
+    effective: false,
+    limitedBySystem: true,
   });
-  await raceRuntime.ready();
-  const destroyed = await raceRuntime.previewCustomImage(importedWallpaperFixture(7));
-  assert.equal(destroyed.ok, false);
-  assert.equal(destroyed.code, "destroyed");
-  assert.equal(destroyed.state.customWallpaper.pending, false);
-  assert.equal(destroyed.state.busy, false);
-  assert.equal(raceSurface.image.src, "");
-  assert.deepEqual(raceSurface.revoked, ["blob:wallpaper-fixture/1"]);
-  assert.equal(raceSurface.created.length, 1);
+  let published = 0;
+  runtime.subscribe(() => { published += 1; });
+  systemReduced = false;
+  for (const listener of [...listeners]) listener();
+  assert.equal(runtime.getState().motion.effective, true);
+  assert.equal(published, 1);
+  runtime.preview({ animations: "off", wallpaperColor: "slate" });
+  assert.equal(runtime.getState().motion.effective, false);
+  runtime.destroy();
+  assert.equal(listeners.size, 0);
+
+  let subscriptionFailureRuntime;
+  assert.doesNotThrow(() => {
+    subscriptionFailureRuntime = createPersonalizationRuntime({
+      motion: {
+        previewUserMode() {},
+        subscribe() { throw new Error("subscription unavailable"); },
+      },
+    });
+  });
+  assert.deepEqual(subscriptionFailureRuntime.getState().committed, PERSONALIZATION_DEFAULTS);
+  subscriptionFailureRuntime.destroy();
 });
 
 test("状态映射始终返回图标、文本和非颜色状态类别", () => {

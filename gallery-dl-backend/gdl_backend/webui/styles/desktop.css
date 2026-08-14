@@ -40,198 +40,6 @@
   background: #E7E1D6;
 }
 
-.desktop-wallpaper__image-layer {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  background-position: 0 0;
-  background-repeat: no-repeat;
-  background-size: auto;
-  animation: none;
-  filter: none;
-  pointer-events: none;
-  transform: none;
-  transition: none;
-}
-
-.desktop-wallpaper__image,
-.desktop-wallpaper__mask {
-  position: absolute;
-  inset: 0;
-  animation: none;
-  pointer-events: none;
-  transition: none;
-}
-
-.desktop-wallpaper__image {
-  z-index: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center;
-}
-
-.desktop-wallpaper__mask {
-  z-index: 1;
-  display: none;
-  background: rgb(0 0 0);
-  opacity: 0;
-}
-
-.desktop-wallpaper--custom .desktop-wallpaper__mask {
-  display: block;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--fit-cover .desktop-wallpaper__image {
-  object-fit: cover;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--fit-contain .desktop-wallpaper__image {
-  object-fit: contain;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--fit-stretch .desktop-wallpaper__image {
-  object-fit: fill;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--fit-tile .desktop-wallpaper__image-layer {
-  background-position: 0 0;
-  background-repeat: repeat;
-  background-size: auto;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--fit-tile .desktop-wallpaper__image {
-  display: none;
-}
-
-.desktop-wallpaper--position-top-left .desktop-wallpaper__image {
-  object-position: left top;
-}
-
-.desktop-wallpaper--position-top .desktop-wallpaper__image {
-  object-position: center top;
-}
-
-.desktop-wallpaper--position-top-right .desktop-wallpaper__image {
-  object-position: right top;
-}
-
-.desktop-wallpaper--position-left .desktop-wallpaper__image {
-  object-position: left center;
-}
-
-.desktop-wallpaper--position-center .desktop-wallpaper__image {
-  object-position: center;
-}
-
-.desktop-wallpaper--position-right .desktop-wallpaper__image {
-  object-position: right center;
-}
-
-.desktop-wallpaper--position-bottom-left .desktop-wallpaper__image {
-  object-position: left bottom;
-}
-
-.desktop-wallpaper--position-bottom .desktop-wallpaper__image {
-  object-position: center bottom;
-}
-
-.desktop-wallpaper--position-bottom-right .desktop-wallpaper__image {
-  object-position: right bottom;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-tone-dark .desktop-wallpaper__mask {
-  background: rgb(0 0 0);
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-tone-light .desktop-wallpaper__mask {
-  background: rgb(255 255 255);
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-0 .desktop-wallpaper__mask {
-  opacity: 0;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-5 .desktop-wallpaper__mask {
-  opacity: 0.05;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-10 .desktop-wallpaper__mask {
-  opacity: 0.1;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-15 .desktop-wallpaper__mask {
-  opacity: 0.15;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-20 .desktop-wallpaper__mask {
-  opacity: 0.2;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-25 .desktop-wallpaper__mask {
-  opacity: 0.25;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-30 .desktop-wallpaper__mask {
-  opacity: 0.3;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-35 .desktop-wallpaper__mask {
-  opacity: 0.35;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-40 .desktop-wallpaper__mask {
-  opacity: 0.4;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-45 .desktop-wallpaper__mask {
-  opacity: 0.45;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-50 .desktop-wallpaper__mask {
-  opacity: 0.5;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-55 .desktop-wallpaper__mask {
-  opacity: 0.55;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-60 .desktop-wallpaper__mask {
-  opacity: 0.6;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-65 .desktop-wallpaper__mask {
-  opacity: 0.65;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-70 .desktop-wallpaper__mask {
-  opacity: 0.7;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-75 .desktop-wallpaper__mask {
-  opacity: 0.75;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--mask-strength-80 .desktop-wallpaper__mask {
-  opacity: 0.8;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--blur-off .desktop-wallpaper__image-layer {
-  inset: 0;
-  filter: none;
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--blur-soft .desktop-wallpaper__image-layer {
-  inset: -4px;
-  filter: blur(4px);
-}
-
-.desktop-wallpaper--custom.desktop-wallpaper--blur-medium .desktop-wallpaper__image-layer {
-  inset: -10px;
-  filter: blur(10px);
-}
-
 .window-layer {
   position: absolute;
   inset: 0;
@@ -273,21 +81,6 @@
 
 .application-window[data-window-interacting] {
   transition: none;
-}
-
-.window-layer--opacity-solid .application-window {
-  background: var(--imageweave-surface);
-  background: var(--imageweave-surface-content-solid);
-}
-
-.window-layer--opacity-subtle .application-window {
-  background: var(--imageweave-surface);
-  background: color-mix(in srgb, var(--imageweave-surface) 96%, transparent);
-}
-
-.window-layer--opacity-soft .application-window {
-  background: var(--imageweave-surface);
-  background: color-mix(in srgb, var(--imageweave-surface) 92%, transparent);
 }
 
 .application-window[data-maximized] {
@@ -399,21 +192,16 @@
 }
 
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .window-layer--opacity-subtle .application-window,
-  .window-layer--opacity-soft .application-window {
+  .application-window {
     -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-navigation)) saturate(118%);
     backdrop-filter: blur(var(--imageweave-glass-blur-navigation)) saturate(118%);
   }
-
 }
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .window-layer--opacity-solid .application-window,
-  .window-layer--opacity-subtle .application-window,
-  .window-layer--opacity-soft .application-window {
+  .application-window {
     background: var(--imageweave-surface-content-solid) !important;
   }
-
 }
 
 :root[data-motion="off"] .application-window {
@@ -433,15 +221,7 @@
     background: Canvas;
   }
 
-  .desktop-wallpaper__image-layer,
-  .desktop-wallpaper__mask {
-    display: none !important;
-  }
-
-  .application-window,
-  .window-layer--opacity-solid .application-window,
-  .window-layer--opacity-subtle .application-window,
-  .window-layer--opacity-soft .application-window {
+  .application-window {
     border-color: CanvasText;
     color: CanvasText;
     background: Canvas !important;
@@ -470,10 +250,8 @@
 }
 
 @media (prefers-contrast: more) {
-  .window-layer--opacity-solid .application-window,
-  .window-layer--opacity-subtle .application-window,
-  .window-layer--opacity-soft .application-window {
-    background: var(--imageweave-surface) !important;
+  .application-window {
+    background: var(--imageweave-surface-content-solid) !important;
   }
 }
 

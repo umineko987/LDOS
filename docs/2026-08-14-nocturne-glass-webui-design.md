@@ -1462,3 +1462,15 @@ git diff --check
 - 覆盖率：正式 runner 指标保持 core line/branch/function `86.614746% / 77.481177% / 90.622098%`、apps `74.321196% / 65.497630% / 67.821782%`、components `32.515091% / 76.374443% / 63.218391%`，全部通过既有 gate。
 - 浏览器验收：T2 没有可见挂载或视觉变化，按阶段边界不新增截图；同源 FastAPI 交付和 wheel 解包运行时已实际请求验收。
 - 剩余风险：standalone 夜航契约仍为 6 pass/10 个预期 red；噪点分组从“资源缺失 + 0 引用 + 0 CSS 规则”缩减为“0 引用 + 0 CSS 规则”，须由 T4 只挂载一次并设为 `2.5%`，不能在 T3 越界处理。T3 仍需重点守住偏好白名单、旧 custom 回退和 delete-only IndexedDB 清理 seam，同时保持本阶段静态路径、wheel 通道与业务 route 集合不变。
+
+### 实施记录：T3 Personalization 功能收缩与迁移
+
+- 完成日期：2026-08-14
+- 阶段：T3 Personalization 功能收缩与迁移
+- 提交：见本阶段独立提交
+- 行为变化：正式偏好收缩为 `animations` 与 `wallpaperColor` 两项，六个场景 ID 和默认 `graphite` 不变；仓内取证确认 `taskbarDensity` 在旧 storage 投影外没有生产消费者，故不再写回。读取时保留合法场景/动效，旧 `wallpaperKind=custom` 回退石墨，退役 theme、图片显示、遮罩和窗口透明度字段被忽略；严格写入继续拒绝非普通对象、危险键、accessor、类型污染和未知字段。Runtime/View/Controller 只保留场景、motion、只读夜航玻璃状态、Apply/Cancel/reset、dirty 与单飞离开确认；根固定 dark，删除图片 DOM、Object URL/图片运行时及 `wallpaper-image-import.js`。`main.js` 只独立触发一次不进入 Personalization 状态的兼容清理。
+- 测试：固定 Node v24.13.0 正式 runner 为 305/305 pass、0 fail、0 skipped；更新 model/storage/runtime/view/controller/import graph/Stage 4 契约，并覆盖六场景矩阵、custom/损坏/危险记录、严格新写入、Apply/Cancel/reset、busy 单飞、deactivate/unmount、真实 dialog 离开保护。delete-only seam 覆盖成功、无 IndexedDB、同步/open error、blocked 后迟到连接、无 store、transaction error、delete error、关闭连接及 0 record/Blob 读取。`tests.test_webui_modules` 为 16/16，`tests.test_api` 为 72/72；standalone 夜航目标收敛到 11 pass/5 个预期 red。
+- 验证：Linux service smoke、依赖锁检查和 `git diff --check` 通过。生产 import graph 所有相对模块可解析、0 个多文件 SCC，删除模块经正式 StaticFiles 与 wheel 解包 app 均为 404；OpenAPI 50 paths/61 operations、FastAPI 61 条业务 route 和唯一 `/ui` mount 与 T2 快照逐项相同。隔离 `uv 0.12.3 build --wheel` 得到 103/103 个精确匹配的 WebUI 成员，`noise.svg` 恰好 1 份、497 bytes、SHA-256 `9a525197b6bc88f7a64d8746a50f04aa64f29f08d06d57c3e69514b6db083529`，源与 wheel app 请求均为 200 `image/svg+xml`；T3 未挂载噪点。
+- 覆盖率：core line/branch/function `90.701754% / 78.266428% / 91.897436%`；apps `76.503844% / 65.354331% / 68.341709%`；components `27.427938% / 76.126878% / 61.087866%`，全部通过既有 floor。
+- 浏览器验收：Chromium 150 在 `1440×900` 对 `/ui/#/personalization` 完成两条真实浏览器路径与截图。成功路径先写入含 Blob 的 `imageweave-ui/wallpapers/custom` 和旧 custom 偏好，启动后 record 确认删除、偏好迁移为 `{animations:"off", wallpaperColor:"graphite"}`；失败路径在新文档启动前让 `IDBFactory.open` 抛受控 `UnknownError`，桌面仍正常激活。两条路径均为 6 场景/2 motion、0 color/file/image/mask DOM、0 shell error、0 非同源资源和 0 非预期浏览器错误，并实际验证场景实时预览、Cancel 恢复和 Apply 写回新白名单。证据位于 `/tmp/imageweave-nocturne-t3/`。
+- 剩余风险：T4 仍负责六场景径向光井、噪点唯一挂载、完整低透明无色玻璃 token、40px/60px blur、180% saturate、香槟金、16px/24px 圆角、500ms spring 与旧实色/状态装饰清理；standalone 对应 5 组 red 必须保留到 T4 真实实现，不能在 T3 用占位视觉或放宽断言提前转绿。一次性 IndexedDB seam 需保留至少一个兼容发布周期，后续删除须另行取证。

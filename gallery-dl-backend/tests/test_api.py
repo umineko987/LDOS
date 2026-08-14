@@ -773,6 +773,8 @@ class ApiTests(unittest.TestCase):
         html_tags = [attrs for tag, attrs in parser.tags if tag == "html"]
         self.assertEqual(len(html_tags), 1)
         self.assertEqual(html_tags[0].get("data-motion"), "on")
+        self.assertEqual(html_tags[0].get("data-theme-tone"), "dark")
+        self.assertIn('<meta name="color-scheme" content="dark">', index.text)
         wallpaper_tags = [
             (tag, attrs)
             for tag, attrs in parser.tags
@@ -789,18 +791,10 @@ class ApiTests(unittest.TestCase):
             "desktop-wallpaper--graphite",
             wallpaper_attrs.get("class", "").split(),
         )
-        for layer_attribute in (
-            "data-desktop-wallpaper-image",
-            "data-desktop-wallpaper-mask",
-        ):
-            layer_tags = [
-                (tag, attrs)
-                for tag, attrs in parser.tags
-                if layer_attribute in attrs
-            ]
-            self.assertEqual(len(layer_tags), 1, layer_attribute)
-            self.assertEqual(layer_tags[0][0], "div", layer_attribute)
-            self.assertNotIn("tabindex", layer_tags[0][1], layer_attribute)
+        self.assertNotIn("data-desktop-wallpaper-image", index.text)
+        self.assertNotIn("data-desktop-wallpaper-mask", index.text)
+        self.assertNotIn("desktop-wallpaper__image", index.text)
+        self.assertNotIn("desktop-wallpaper__mask", index.text)
 
         self.assertIn('data-menu-bar', index.text)
         self.assertIn('data-application-window', index.text)
@@ -863,10 +857,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn("pointer-events: none;", wallpaper_rule)
         self.assertNotIn("animation", wallpaper_rule)
         self.assertNotIn("transition", wallpaper_rule)
-        self.assertIn(
-            ".desktop-wallpaper__image,\n.desktop-wallpaper__mask {",
-            desktop_style_text,
-        )
+        self.assertNotIn("desktop-wallpaper__image", desktop_style_text)
+        self.assertNotIn("desktop-wallpaper__mask", desktop_style_text)
+        self.assertNotIn("window-layer--opacity", desktop_style_text)
         for color_id, color_value in {
             "graphite": "#20242a",
             "slate": "#384554",
@@ -931,7 +924,6 @@ class ApiTests(unittest.TestCase):
             "/ui/js/core/motion.js",
             "/ui/js/core/personalization-model.js",
             "/ui/js/core/personalization.js",
-            "/ui/js/core/wallpaper-image-import.js",
             "/ui/js/core/wallpaper-storage.js",
             "/ui/js/core/storage.js",
             "/ui/js/core/storage-contract.js",
@@ -978,6 +970,7 @@ class ApiTests(unittest.TestCase):
         for removed_asset in (
             "/ui/js/components/cloud-background.js",
             "/ui/assets/dithered-cloud-fallback.png",
+            "/ui/js/core/wallpaper-image-import.js",
         ):
             self.assertEqual(
                 self.client.get(removed_asset).status_code,
@@ -1049,7 +1042,6 @@ class ApiTests(unittest.TestCase):
             "/ui/js/core/motion.js",
             "/ui/js/core/personalization-model.js",
             "/ui/js/core/personalization.js",
-            "/ui/js/core/wallpaper-image-import.js",
             "/ui/js/core/wallpaper-storage.js",
             "/ui/js/core/polling.js",
             "/ui/js/core/proxy-model.js",
@@ -1226,21 +1218,20 @@ class ApiTests(unittest.TestCase):
         personalization_runtime_source = module_sources[
             "/ui/js/core/personalization.js"
         ]
-        wallpaper_import_source = module_sources[
-            "/ui/js/core/wallpaper-image-import.js"
-        ]
         self.assertNotIn("innerHTML", personalization_view_source)
         self.assertIn(
             "已开启界面动效，但系统“减少动态效果”设置会限制部分效果。",
             personalization_view_source,
         )
-        self.assertIn('"background-image"', personalization_runtime_source)
-        self.assertIn("ownedObjectUrls.has(objectUrl)", personalization_runtime_source)
-        self.assertIn('objectUrl.startsWith("blob:")', personalization_runtime_source)
-        self.assertNotIn("cssText", personalization_runtime_source)
-        self.assertNotIn("dataset", personalization_runtime_source)
-        self.assertNotIn('image.src = ""', wallpaper_import_source)
+        self.assertNotIn('"background-image"', personalization_runtime_source)
+        self.assertNotIn("createObjectURL", personalization_runtime_source)
+        self.assertNotIn("setProperty", personalization_runtime_source)
+        self.assertNotIn("data-theme-tone", personalization_runtime_source)
         self.assertIn("WALLPAPER_COLOR_CLASSES", personalization_runtime_source)
+        self.assertEqual(
+            self.client.get("/ui/js/core/wallpaper-image-import.js").status_code,
+            404,
+        )
         self.assertNotIn(
             "context.actions.navigateToApp",
             module_sources["/ui/js/components/empty-state.js"],

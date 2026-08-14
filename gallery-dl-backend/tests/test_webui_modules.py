@@ -993,6 +993,12 @@ class WebUiModuleTests(unittest.TestCase):
         personalization_model = (
             webui / "js" / "core" / "personalization-model.js"
         ).read_text(encoding="utf-8")
+        storage_preferences = (
+            webui / "js" / "core" / "storage-preferences.js"
+        ).read_text(encoding="utf-8")
+        wallpaper_cleanup = (
+            webui / "js" / "core" / "wallpaper-storage.js"
+        ).read_text(encoding="utf-8")
         personalization_view = (
             webui / "js" / "components" / "personalization-view.js"
         ).read_text(encoding="utf-8")
@@ -1002,276 +1008,146 @@ class WebUiModuleTests(unittest.TestCase):
         personalization_css = (
             webui / "styles" / "apps" / "personalization.css"
         ).read_text(encoding="utf-8")
-        storage_source = (webui / "js" / "core" / "storage.js").read_text(
-            encoding="utf-8"
-        )
         main = (webui / "js" / "main.js").read_text(encoding="utf-8")
         index = (webui / "index.html").read_text(encoding="utf-8")
         desktop_css = (webui / "styles" / "desktop.css").read_text(
-            encoding="utf-8"
-        )
-        dialog_css = (webui / "styles" / "dialog.css").read_text(
-            encoding="utf-8"
-        )
-        status_css = (webui / "styles" / "status.css").read_text(
             encoding="utf-8"
         )
         tokens_css = (webui / "styles" / "tokens.css").read_text(
             encoding="utf-8"
         )
 
-        def css_block(source: str, selector: str) -> str:
-            start = source.index(selector)
-            opening = source.index("{", start)
-            closing = source.index("}", opening)
-            return source[opening + 1 : closing]
-
-        # 运行时只接受安全模型投影与固定类；动态内联值仅限私有
-        # Object URL，以及严格模型投影后的两个固定六位 HEX Token。
-        self.assertIn("projectPersonalizationPreferences(preferences)", runtime)
-        self.assertIn("normalizeThemeHex(projected.themeAccent)", runtime)
-        self.assertIn("normalizeThemeHex(projected.themeSurface)", runtime)
-        self.assertIn("deriveInterfaceThemeTone(themeSurface)", runtime)
-        for symbol in (
-            "WALLPAPER_FIT_CLASSES",
-            "WALLPAPER_POSITION_CLASSES",
-            "WALLPAPER_MASK_TONE_CLASSES",
-            "WALLPAPER_MASK_STRENGTH_CLASSES",
-            "WALLPAPER_BLUR_CLASSES",
-            "WINDOW_OPACITY_CLASSES",
+        self.assertIn(
+            'export const PERSONALIZATION_PREFERENCE_KEYS = Object.freeze([\n'
+            '  "animations",\n  "wallpaperColor",\n]);',
+            personalization_model,
+        )
+        self.assertIn(
+            'export const PERSONALIZATION_DEFAULTS = Object.freeze({\n'
+            '  animations: "on",\n  wallpaperColor: "graphite",\n});',
+            personalization_model,
+        )
+        for scene in (
+            "graphite",
+            "slate",
+            "deep-ocean",
+            "forest",
+            "plum-gray",
+            "warm-paper",
         ):
-            self.assertIn(f"export const {symbol}", runtime)
-        self.assertIn('"background-image"', runtime)
-        self.assertIn("ownedObjectUrls.has(objectUrl)", runtime)
-        self.assertIn('objectUrl.startsWith("blob:")', runtime)
-        self.assertIn("JSON.stringify(objectUrl)", runtime)
-        set_property_names = re.findall(
-            r'\.setProperty\(\s*"([^"]+)"', runtime
-        )
-        self.assertEqual(len(set_property_names), runtime.count(".setProperty("))
-        self.assertEqual(
-            set(set_property_names),
-            {
-                "background-image",
-                "--imageweave-accent",
-                "--imageweave-surface",
-            },
-        )
-        set_attribute_names = re.findall(
-            r'\.setAttribute\(\s*"([^"]+)"', runtime
-        )
-        self.assertEqual(set(set_attribute_names), {"data-theme-tone"})
-        self.assertEqual(
-            len(set_attribute_names), runtime.count(".setAttribute(")
-        )
-        self.assertNotIn("cssText", runtime)
-        self.assertNotIn("dataset", runtime)
+            self.assertIn(scene, personalization_model)
+            self.assertIn(f".desktop-wallpaper--{scene}", desktop_css)
+        self.assertIn('wallpaperKind === "custom"', personalization_model)
+        self.assertIn('DANGEROUS_KEYS', personalization_model)
+        self.assertIn('Object.getOwnPropertyDescriptors', personalization_model)
+        self.assertNotIn("taskbarDensity", storage_preferences)
+        self.assertIn("normalizePersonalizationPreferences", storage_preferences)
+        self.assertIn("projectPersonalizationPreferences", storage_preferences)
 
-        # G2 设置视图只使用两个原生颜色控件和纯文本输出；颜色不会被
-        # 复制到 style/dataset。对比度只显示实际值，只有格式错误才使用
-        # aria-invalid，本地预览/持久化仍经过严格六位 HEX 投影。
-        self.assertNotIn("INTERFACE_THEME_CONTRAST_ADVISORY_RATIO", personalization_model)
-        self.assertNotIn("INTERFACE_THEME_MIN_CONTRAST_RATIO", personalization_model)
-        self.assertNotIn("界面主题对比度不足", personalization_model)
-        self.assertEqual(personalization_view.count('type: "color"'), 1)
-        self.assertIn('datasetName: "personalizationThemeAccent"', personalization_view)
-        self.assertIn('datasetName: "personalizationThemeSurface"', personalization_view)
-        self.assertIn('createElement("output"', personalization_view)
-        self.assertIn('role: "status"', personalization_view)
-        self.assertIn('"aria-live": "polite"', personalization_view)
-        self.assertIn('"aria-invalid", "true"', personalization_view)
-        self.assertIn("calculateThemeContrastRatio", personalization_view)
-        self.assertIn("可正常使用", personalization_view)
-        self.assertNotIn("仅供信息参考", personalization_view)
-        self.assertIn("isValidInterfaceTheme", personalization_view)
-        self.assertIn("deriveInterfaceThemeTone", personalization_view)
+        retired_runtime_patterns = (
+            r"wallpaper(?:Image|Mask|Fit|Position|MaskTone|MaskStrength|Blur)",
+            r"windowOpacity",
+            r"themeAccent|themeSurface|themeRoot",
+            r"createObjectURL|revokeObjectURL",
+            r"desktop-wallpaper__(?:image|mask)",
+            r"window-layer--opacity",
+        )
+        runtime_closure = "\n".join(
+            (runtime, personalization_view, personalization_app, main, index)
+        )
+        for pattern in retired_runtime_patterns:
+            self.assertNotRegex(runtime_closure, pattern)
+        self.assertNotRegex(
+            desktop_css,
+            r"desktop-wallpaper__(?:image|mask)|desktop-wallpaper--"
+            r"(?:custom|fit-|position-|mask-|blur-)|window-layer--opacity",
+        )
+        self.assertFalse(
+            (webui / "js" / "core" / "wallpaper-image-import.js").exists()
+        )
+        self.assertNotRegex(personalization_view, r'type:\s*"(?:color|file)"')
         self.assertNotIn("innerHTML", personalization_view)
         self.assertNotIn(".style", personalization_view)
-        self.assertNotRegex(
-            personalization_view,
-            r"dataset[^\n]*(?:themeAccent|themeSurface)\.input\.value",
-        )
-        for source in (personalization_view, personalization_app):
-            self.assertNotIn("/api/", source)
-            self.assertNotIn("localStorage", source)
-            self.assertNotIn("sessionStorage", source)
-        self.assertEqual(
-            personalization_app.count("event.target.matches(THEME_INPUT_SELECTOR)"),
-            2,
-        )
-        self.assertIn("suppressThemePreviewPublish", personalization_app)
-        self.assertIn("themeInputValuesMatchRuntimeDraft", personalization_app)
-        self.assertIn("view.hasLocalThemeDraft()", personalization_app)
-        self.assertIn("hasInvalidThemeDraft()", personalization_view)
-        self.assertNotIn("低对比颜色尚未预览", personalization_app)
-        self.assertNotIn("界面主题对比度不足", personalization_app)
-        self.assertIn("已保存的主题设置不受影响", personalization_app)
-        self.assertNotIn("imageweave.ui:theme", storage_source)
-        self.assertIn(".personalization-theme-grid", personalization_css)
-        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", personalization_css)
-        self.assertIn("min-height: 44px", personalization_css)
-        self.assertIn(".personalization-theme-color:focus-visible", personalization_css)
-        self.assertIn("@media (forced-colors: active)", personalization_css)
-        self.assertIn("border-color: CanvasText", personalization_css)
+        self.assertNotIn("/api/", personalization_view + personalization_app)
+        self.assertIn('datasetName: "personalizationScene"', personalization_view)
+        self.assertIn('datasetName: "personalizationMotion"', personalization_view)
+        self.assertEqual(personalization_view.count("PERSONALIZATION_SCENE_CHOICES"), 2)
+        for title in ('"场景"', '"动效"', '"应用"'):
+            self.assertIn(title, personalization_view)
+        for action in ('"apply"', '"cancel"', '"reset"'):
+            self.assertIn(action, personalization_view)
+        self.assertIn("beforeLeave()", personalization_app)
+        self.assertIn("beforeWindowHide(visibility)", personalization_app)
+        self.assertIn('globalThis.addEventListener?.("beforeunload"', personalization_app)
+        self.assertIn("discardRequest", personalization_app)
+        self.assertNotIn('addEventListener("input"', personalization_app)
 
+        self.assertEqual(
+            len(re.findall(r"cleanupLegacyCustomWallpaper\s*\(", main)),
+            1,
+        )
         self.assertIn(
-            'wallpaperMask: document.querySelector("[data-desktop-wallpaper-mask]")',
+            "void cleanupLegacyCustomWallpaper().catch(() => {});",
             main,
         )
+        self.assertNotIn("wallpaperStorage", main)
         self.assertIn(
             'const windowLayer = document.querySelector("[data-window-layer]")',
             main,
         )
         self.assertIn("measureWindowLayerViewport(windowLayer, document)", main)
         self.assertIn("windowLayerGeometryOptions()", main)
-        self.assertIn(
-            'themeRoot: document.documentElement',
-            main,
+
+        self.assertEqual(
+            wallpaper_cleanup.count(".delete("),
+            1,
         )
+        for forbidden in (
+            ".get(",
+            ".put(",
+            "readonly",
+            "Blob",
+            "createObjectStore",
+            "deleteDatabase",
+            "wallpaper-image-import",
+        ):
+            self.assertNotIn(forbidden, wallpaper_cleanup)
+        for expected in ('"imageweave-ui"', '"wallpapers"', '"custom"', '"readwrite"'):
+            self.assertIn(expected, wallpaper_cleanup)
+        self.assertIn("closeConnection(connection)", wallpaper_cleanup)
+        self.assertIn("openRequest.onblocked", wallpaper_cleanup)
+        self.assertIn("openRequest.onerror", wallpaper_cleanup)
+        self.assertIn("transaction.onerror", wallpaper_cleanup)
+        self.assertIn("transaction.onabort", wallpaper_cleanup)
+
         self.assertIn(
-            '<html lang="zh-CN" data-motion="on" data-theme-tone="light">',
+            '<html lang="zh-CN" data-motion="on" data-theme-tone="dark">',
             index,
         )
-        self.assertIn("data-desktop-wallpaper-mask", index)
+        self.assertIn('<meta name="color-scheme" content="dark">', index)
+        self.assertNotIn('data-theme-tone="light"', index + tokens_css)
+        self.assertNotIn("color-scheme: light", tokens_css)
+        self.assertIn("color-scheme: dark", tokens_css)
+        self.assertNotIn("data-desktop-wallpaper-image", index)
+        self.assertNotIn("data-desktop-wallpaper-mask", index)
+        self.assertIn("data-desktop-wallpaper", index)
         self.assertIn("data-window-layer", index)
         self.assertIn("data-application-window", index)
 
-        root_tokens = css_block(tokens_css, ":root")
-        self.assertEqual(root_tokens.count("--imageweave-accent:"), 1)
-        self.assertEqual(root_tokens.count("--imageweave-surface:"), 1)
-        self.assertIn("--imageweave-accent: #46515D", root_tokens)
-        self.assertIn("--imageweave-surface: #F4F1EA", root_tokens)
-        self.assertNotIn("--imageweave-hue", tokens_css)
-        self.assertNotIn("oklch(", tokens_css)
-        self.assertNotIn("prefers-color-scheme", tokens_css)
-        self.assertIn(
-            "color-scheme: light",
-            css_block(tokens_css, ':root[data-theme-tone="light"]'),
+        self.assertRegex(
+            personalization_css,
+            r"\.personalization-workspace\s*\{[^}]*overflow-x:\s*auto;"
+            r"[^}]*overflow-y:\s*hidden;",
         )
-        self.assertIn(
-            "color-scheme: dark",
-            css_block(tokens_css, ':root[data-theme-tone="dark"]'),
-        )
-        self.assertIn("@media (forced-colors: active)", tokens_css)
-        forced_theme = tokens_css.split("@media (forced-colors: active)", 1)[1]
-        self.assertIn("--imageweave-accent: CanvasText !important", forced_theme)
-        self.assertIn("--imageweave-surface: Canvas !important", forced_theme)
-        self.assertIn("color: CanvasText", forced_theme)
-        self.assertIn("background: Canvas", forced_theme)
-
-        fit_contract = {
-            "cover": "object-fit: cover",
-            "contain": "object-fit: contain",
-            "stretch": "object-fit: fill",
-        }
-        for fit, declaration in fit_contract.items():
-            block = css_block(
-                desktop_css,
-                ".desktop-wallpaper--custom.desktop-wallpaper--fit-"
-                f"{fit} .desktop-wallpaper__image",
-            )
-            self.assertIn(declaration, block)
-        tile_block = css_block(
-            desktop_css,
-            ".desktop-wallpaper--custom.desktop-wallpaper--fit-tile "
-            ".desktop-wallpaper__image-layer",
-        )
-        self.assertIn("background-repeat: repeat", tile_block)
-        self.assertIn("background-size: auto", tile_block)
-        self.assertIn("background-position: 0 0", tile_block)
-
-        positions = {
-            "top-left": "left top",
-            "top": "center top",
-            "top-right": "right top",
-            "left": "left center",
-            "center": "center",
-            "right": "right center",
-            "bottom-left": "left bottom",
-            "bottom": "center bottom",
-            "bottom-right": "right bottom",
-        }
-        for position, value in positions.items():
-            block = css_block(
-                desktop_css,
-                f".desktop-wallpaper--position-{position} .desktop-wallpaper__image",
-            )
-            self.assertIn(f"object-position: {value}", block)
-
-        self.assertIn(
-            ".desktop-wallpaper--custom .desktop-wallpaper__mask",
-            desktop_css,
-        )
-        self.assertIn("mask-tone-dark", desktop_css)
-        self.assertIn("mask-tone-light", desktop_css)
-        for strength in range(0, 81, 5):
-            block = css_block(
-                desktop_css,
-                ".desktop-wallpaper--custom.desktop-wallpaper--mask-strength-"
-                f"{strength} .desktop-wallpaper__mask",
-            )
-            self.assertRegex(block, rf"opacity:\s*{strength / 100:g}\s*;")
-
-        soft_blur = css_block(
-            desktop_css,
-            ".desktop-wallpaper--custom.desktop-wallpaper--blur-soft "
-            ".desktop-wallpaper__image-layer",
-        )
-        medium_blur = css_block(
-            desktop_css,
-            ".desktop-wallpaper--custom.desktop-wallpaper--blur-medium "
-            ".desktop-wallpaper__image-layer",
-        )
-        self.assertIn("inset: -4px", soft_blur)
-        self.assertIn("filter: blur(4px)", soft_blur)
-        self.assertIn("inset: -10px", medium_blur)
-        self.assertIn("filter: blur(10px)", medium_blur)
-        blur_values = [int(value) for value in re.findall(r"blur\((\d+)px\)", desktop_css)]
-        self.assertTrue(blur_values)
-        self.assertLessEqual(max(blur_values), 10)
-        image_layer = css_block(desktop_css, ".desktop-wallpaper__image-layer")
-        self.assertIn("animation: none", image_layer)
-        self.assertIn("transition: none", image_layer)
-
-        self.assertNotIn(".desktop-icons", desktop_css)
-        self.assertNotIn(".desktop-icon", desktop_css)
-
-        subtle = css_block(
-            desktop_css,
-            ".window-layer--opacity-subtle .application-window",
-        )
-        soft = css_block(
-            desktop_css,
-            ".window-layer--opacity-soft .application-window",
-        )
-        self.assertIn("96%", subtle)
-        self.assertIn("92%", soft)
-        self.assertNotIn("opacity:", subtle + soft)
-        self.assertNotRegex(desktop_css, r"imageweave-surface\)\s+(?:[0-8]\d|9[01])%")
-        self.assertIn("@media (forced-colors: active)", desktop_css)
-        forced_colors = desktop_css.split(
-            "@media (forced-colors: active)", 1
-        )[1]
-        self.assertIn(".application-window", forced_colors)
-        self.assertIn(".window-titlebar", forced_colors)
-        self.assertIn(".window-resize-handle", forced_colors)
-        self.assertIn("border-color: CanvasText", forced_colors)
-        self.assertIn("background: Canvas !important", forced_colors)
-
-        # 透明背景不使用元素 opacity，因此当前实体表面仍保持实色。
-        self.assertIn("background: var(--imageweave-surface-environment-solid)", css_block(desktop_css, ".menu-bar"))
-        self.assertIn(
-            "background: var(--imageweave-surface-environment-solid)",
-            css_block(desktop_css, ".dock__items {"),
-        )
-        self.assertIn(
-            "background: var(--imageweave-surface)",
-            css_block(dialog_css, ".imageweave-dialog"),
-        )
-        self.assertIn(
-            "background: var(--imageweave-surface)",
-            css_block(status_css, ".error-view"),
-        )
+        self.assertIn("min-width: 1120px", personalization_css)
+        self.assertIn("grid-template-columns: minmax", personalization_css)
+        self.assertIn("min-height: 44px", personalization_css)
+        self.assertIn("@media (forced-colors: active)", personalization_css)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", personalization_css)
+        self.assertIn(':root[data-motion="off"]', personalization_css)
+        self.assertIn("CanvasText", personalization_css)
+        self.assertIn("ButtonFace", personalization_css)
+        self.assertIn("Highlight", personalization_css)
 
     def test_glass_phase_one_visual_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
@@ -1316,7 +1192,7 @@ class WebUiModuleTests(unittest.TestCase):
         )
 
         # 三档表面必须各有不透明前置值，随后才使用受控 sRGB mix。
-        default_tokens = tokens.split(':root[data-theme-tone="light"]', 1)[0]
+        default_tokens = tokens.split(':root[data-theme-tone="dark"]', 1)[0]
         for tier, percentage in (
             ("content", 96),
             ("navigation", 86),
@@ -1429,24 +1305,21 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertGreaterEqual(status.count("transition-property: none !important"), 2)
         self.assertGreaterEqual(status.count("animation-name: none !important"), 2)
 
-        # 个性化边界仍只有两个主题属性；静态视觉代码不引入外部资源或新颜色语法。
+        # 个性化运行时不再写颜色属性；正式偏好只保留场景与动效。
         set_property_names = re.findall(
             r'\.setProperty\(\s*"([^"]+)"', runtime
         )
-        self.assertEqual(
-            set(set_property_names),
-            {
-                "background-image",
-                "--imageweave-accent",
-                "--imageweave-surface",
-            },
-        )
-        interface_keys = model[
-            model.index("export const INTERFACE_THEME_PREFERENCE_KEYS") :
-            model.index("];", model.index("export const INTERFACE_THEME_PREFERENCE_KEYS"))
-        ]
-        self.assertEqual(interface_keys.count('"themeAccent"'), 1)
-        self.assertEqual(interface_keys.count('"themeSurface"'), 1)
+        self.assertEqual(set_property_names, [])
+        preference_keys = re.search(
+            r"export const PERSONALIZATION_PREFERENCE_KEYS = Object\.freeze\(\["
+            r"(?P<body>.*?)\]\);",
+            model,
+            flags=re.DOTALL,
+        ).group("body")
+        self.assertEqual(preference_keys.count('"animations"'), 1)
+        self.assertEqual(preference_keys.count('"wallpaperColor"'), 1)
+        self.assertNotIn("themeAccent", preference_keys)
+        self.assertNotIn("themeSurface", preference_keys)
         for forbidden in ("oklch(", "@import", "http://", "https://", "data:image", "data:font"):
             self.assertNotIn(forbidden, production_css)
 
@@ -1589,14 +1462,9 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn(".window-layer {", desktop_css)
         self.assertIn("position: absolute", desktop_css)
         self.assertIn("inset: 0", desktop_css)
-        self.assertIn(
-            ".window-layer--opacity-subtle .application-window",
-            desktop_css,
-        )
-        self.assertIn(
-            ".window-layer--opacity-soft .application-window",
-            desktop_css,
-        )
+        self.assertNotIn("window-layer--opacity", desktop_css)
+        self.assertIn("@supports not", desktop_css)
+        self.assertIn(".application-window {", desktop_css)
         self.assertIn(':root[data-motion="off"] .application-window', desktop_css)
         self.assertIn("@media (prefers-reduced-motion: reduce)", desktop_css)
         self.assertIn("@media (forced-colors: active)", desktop_css)

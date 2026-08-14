@@ -2,7 +2,7 @@ import { createApiClient } from "./core/api.js";
 import { initializeDesktop } from "./core/desktop.js";
 import { createMotionController } from "./core/motion.js";
 import { createPersonalizationRuntime } from "./core/personalization.js";
-import { createWallpaperStorage } from "./core/wallpaper-storage.js";
+import { cleanupLegacyCustomWallpaper } from "./core/wallpaper-storage.js";
 import { createPollingManager } from "./core/polling.js";
 import { createStorePollingFocusSource } from "./core/polling-focus-source.js";
 import { createStorageService } from "./core/storage.js";
@@ -18,7 +18,6 @@ import { initializeTaskbarSummary } from "./components/taskbar-summary.js";
 let desktopController = null;
 let motionController = null;
 let personalizationController = null;
-let wallpaperStorage = null;
 let summaryController = null;
 let refreshSummary = null;
 let polling = null;
@@ -33,10 +32,13 @@ const destroy = () => {
   dialogs?.destroy();
   polling?.destroy();
   personalizationController?.destroy();
-  wallpaperStorage?.destroy();
   motionController?.destroy();
   window.removeEventListener("pagehide", destroy);
 };
+
+// One compatibility-cycle migration. Its rejection is contained independently
+// from shell startup, and the seam never becomes Personalization state.
+void cleanupLegacyCustomWallpaper().catch(() => {});
 
 try {
   const storage = createStorageService();
@@ -48,21 +50,10 @@ try {
   } catch {
     console.warn("动效偏好初始化失败；桌面将使用安全的静态回退");
   }
-  try {
-    wallpaperStorage = createWallpaperStorage();
-  } catch {
-    wallpaperStorage = null;
-    console.warn("本地壁纸存储初始化失败；桌面与纯色设置仍可正常使用");
-  }
   const windowLayer = document.querySelector("[data-window-layer]");
   personalizationController = createPersonalizationRuntime({
     wallpaper: document.querySelector("[data-desktop-wallpaper]"),
-    wallpaperImage: document.querySelector("[data-desktop-wallpaper-image]"),
-    wallpaperMask: document.querySelector("[data-desktop-wallpaper-mask]"),
-    windowLayer,
-    themeRoot: document.documentElement,
     storage,
-    wallpaperStorage,
     motion: motionController,
   });
   const api = createApiClient();
