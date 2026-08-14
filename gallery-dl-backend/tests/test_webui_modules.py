@@ -3338,6 +3338,377 @@ class WebUiModuleTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, combined)
 
+    def test_nocturne_diagnostics_t74b_visual_and_security_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        diagnostics = (
+            webui / "styles" / "apps" / "diagnostics.css"
+        ).read_text(encoding="utf-8")
+        controls = (webui / "styles" / "controls.css").read_text(
+            encoding="utf-8"
+        )
+        status_css = (webui / "styles" / "status.css").read_text(
+            encoding="utf-8"
+        )
+        controller = (
+            webui / "js" / "apps" / "diagnostics.js"
+        ).read_text(encoding="utf-8")
+        view = (
+            webui / "js" / "components" / "diagnostics-view.js"
+        ).read_text(encoding="utf-8")
+        status_view = (
+            webui / "js" / "components" / "status.js"
+        ).read_text(encoding="utf-8")
+        model = (
+            webui / "js" / "core" / "diagnostics-model.js"
+        ).read_text(encoding="utf-8")
+        store_state = (
+            webui / "js" / "core" / "store-state.js"
+        ).read_text(encoding="utf-8")
+        store_transition = (
+            webui / "js" / "core" / "store-business-transition.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str) -> str:
+            marker = f"{selector} {{"
+            start = diagnostics.find(marker)
+            self.assertNotEqual(start, -1, selector)
+            opening = diagnostics.find("{", start)
+            closing = diagnostics.find("}", opening)
+            return diagnostics[opening + 1 : closing]
+
+        # The existing summary/facts/recovery DOM remains the only layout
+        # owner. A normal window scrolls horizontally, a maximized window fits
+        # all three columns, and each column retains independent vertical scroll.
+        workspace = css_block(".diagnostics-workspace")
+        self.assertIn("padding: 24px", workspace)
+        self.assertIn("overflow-x: auto", workspace)
+        self.assertIn("overflow-y: hidden", workspace)
+        track = css_block(".diagnostics-workspace-track")
+        self.assertIn("min-width: 1120px", track)
+        self.assertIn("gap: 24px", track)
+        self.assertGreaterEqual(track.count("minmax("), 3)
+        self.assertIn(
+            ".application-window[data-maximized] "
+            ".diagnostics-workspace-track",
+            diagnostics,
+        )
+        self.assertIn("min-width: 100%", diagnostics)
+        column = css_block(".diagnostics-column")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-card)",
+            "background: var(--imageweave-glass-surface-input)",
+            "inset 0 1px 0",
+            "inset 0 -1px 0",
+        ):
+            self.assertIn(expected, column)
+        self.assertNotIn("backdrop-filter", column)
+        self.assertNotIn("var(--imageweave-shadow-", column)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-secondary)",
+            css_block(".diagnostics-column--summary"),
+        )
+        column_scroll = css_block(".diagnostics-column-scroll")
+        self.assertIn("padding: 24px", column_scroll)
+        self.assertIn("overflow-y: auto", column_scroll)
+
+        # Normal Diagnostics surfaces are canonical 4%-8% neutral glass. Only
+        # the capability fallback may use a solid token. Fact/status/help rows
+        # are 16px weak rows without an outer shadow or their own backdrop;
+        # panel/domain wrappers are transparent separators, not nested cards.
+        solid_refs = re.findall(r"--imageweave-[\w-]*-solid", diagnostics)
+        self.assertEqual(
+            solid_refs,
+            ["--imageweave-fallback-elevated-solid"],
+        )
+        self.assertNotRegex(
+            diagnostics,
+            r"--imageweave-state-[\w-]*-surface",
+        )
+        self.assertIsNone(
+            re.search(
+                r"^\s*(?:-webkit-)?backdrop-filter\s*:"
+                r"(?![^\n]*\bnone\b)",
+                diagnostics,
+                flags=re.MULTILINE,
+            )
+        )
+        self.assertNotRegex(diagnostics, r"(?m)^\s*filter\s*:")
+        self.assertRegex(
+            diagnostics,
+            r"\.diagnostics-app \.diagnostics-workspace-state,"
+            r"[\s\S]*?\.diagnostics-next-step\s*\{[\s\S]*?"
+            r"border:\s*var\(--imageweave-border-width\) solid "
+            r"var\(--imageweave-border-weak\)[\s\S]*?"
+            r"border-radius:\s*var\(--imageweave-radius-control\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-weak\)"
+            r"[\s\S]*?box-shadow:\s*none"
+            r"[\s\S]*?transform:\s*none",
+        )
+        panel = css_block(
+            ".diagnostics-app .diagnostics-panel,\n.diagnostics-domain"
+        )
+        for expected in (
+            "border-bottom",
+            "var(--imageweave-border-weak)",
+            "background: transparent",
+            "background-image: none",
+            "box-shadow: none",
+        ):
+            self.assertIn(expected, panel)
+        workspace_state = css_block(
+            ".diagnostics-app .diagnostics-workspace-state"
+        )
+        self.assertIn(
+            "grid-template-columns: minmax(0, 1fr)",
+            workspace_state,
+        )
+        self.assertIn("justify-items: start", workspace_state)
+        fact_row = css_block(".diagnostics-definitions > div")
+        self.assertGreaterEqual(fact_row.count("minmax("), 2)
+        self.assertIn("padding: 12px 16px", fact_row)
+        for selector in (
+            ".diagnostics-metric strong",
+            ".diagnostics-definitions dd",
+        ):
+            block = css_block(selector)
+            self.assertIn("color: var(--imageweave-text-code)", block)
+            self.assertIn("font-family: var(--imageweave-font-mono)", block)
+        self.assertRegex(
+            diagnostics,
+            r"\.diagnostics-column-header > p:last-child,[\s\S]*?"
+            r"\.diagnostics-app section\.empty-state p\s*\{"
+            r"[\s\S]*?color:\s*var\(--imageweave-text-secondary\)",
+        )
+        self.assertIn(
+            "color: var(--imageweave-text-primary)",
+            css_block(".diagnostics-warning p"),
+        )
+
+        # Every workspace/component state keeps badge icon + text and gains a
+        # complete semantic edge over a neutral fill. Stale and next-step rows
+        # use shaped textual markers; no 3px/4px one-sided decoration remains.
+        for state, token in (
+            ("loading", "running"),
+            ("refreshing", "running"),
+            ("content", "success"),
+            ("partial", "warning"),
+            ("stale", "warning"),
+            ("offline", "danger"),
+            ("error", "danger"),
+        ):
+            self.assertRegex(
+                diagnostics,
+                rf'data-diagnostics-workspace-state="{state}"'
+                rf"[\s\S]*?--imageweave-state-{token}",
+                state,
+            )
+        for status, token in (
+            ("ready", "success"),
+            ("running", "running"),
+            ("warning", "warning"),
+            ("error", "danger"),
+            ("disabled", "disabled"),
+        ):
+            self.assertRegex(
+                diagnostics,
+                rf"diagnostics-component:has\(\.status-badge"
+                rf'\[data-status="{status}"\]\)[\s\S]*?'
+                rf"--imageweave-state-{token}",
+                status,
+            )
+        offline = css_block(
+            '.diagnostics-workspace-state['
+            'data-diagnostics-workspace-state="offline"],\n'
+            '.diagnostics-workspace-state['
+            'data-diagnostics-workspace-state="error"]'
+        )
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            offline,
+        )
+        stale = css_block(".diagnostics-stale-marker")
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-warning)",
+            stale,
+        )
+        for marker in (
+            'content: "◆ 状态 · "',
+            'content: "△ 陈旧 · "',
+            'content: "→ "',
+        ):
+            self.assertIn(marker, diagnostics)
+        self.assertNotRegex(
+            diagnostics,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+        kicker = css_block(".diagnostics-column-kicker")
+        self.assertIn("letter-spacing: normal", kicker)
+        self.assertIn("text-transform: none", kicker)
+        self.assertNotRegex(diagnostics, r"\b(?:100|120|150|180)ms\b")
+        self.assertIn("var(--imageweave-transition-standard)", diagnostics)
+        self.assertRegex(
+            diagnostics,
+            r"\.diagnostics-app :is\([\s\S]*?\):hover\s*\{"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-secondary\)"
+            r"[\s\S]*?box-shadow:\s*none"
+            r"[\s\S]*?transform:\s*none",
+        )
+        for marker in (
+            'ready: Object.freeze({ icon: "✓"',
+            'running: Object.freeze({ icon: "▶"',
+            'warning: Object.freeze({ icon: "△"',
+            'error: Object.freeze({ icon: "!"',
+            'disabled: Object.freeze({ icon: "—"',
+            'attributes: { "aria-hidden": "true" }',
+            'element.setAttribute("aria-label", presentation.label)',
+        ):
+            self.assertIn(marker, status_view)
+        self.assertRegex(
+            status_css,
+            r"\.status-badge > span:first-child\s*\{[\s\S]*?"
+            r"border:\s*var\(--imageweave-border-width\) solid "
+            r"currentColor",
+        )
+        self.assertRegex(
+            controls,
+            r"\.diagnostics-button\.diagnostics-button--primary,"
+            r"[\s\S]*?border-color:\s*var\(--imageweave-accent\)"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-button\)",
+        )
+
+        # Capability/high-contrast/forced-color and both motion opt-outs remain
+        # explicit. Forced colors remove gradients, shadows and backdrop.
+        self.assertIn(
+            "@supports not ((-webkit-backdrop-filter: blur(1px)) or "
+            "(backdrop-filter: blur(1px)))",
+            diagnostics,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid)",
+            diagnostics,
+        )
+        self.assertIn("@media (prefers-contrast: more)", diagnostics)
+        self.assertIn("@media (forced-colors: active)", diagnostics)
+        for expected in (
+            "CanvasText",
+            "ButtonFace",
+            "Highlight",
+            "background-image: none",
+            "box-shadow: none",
+            "backdrop-filter: none",
+        ):
+            self.assertIn(expected, diagnostics)
+        self.assertIn(':root[data-motion="off"]', diagnostics)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", diagnostics)
+        self.assertGreaterEqual(
+            diagnostics.count("transition: none !important"),
+            3,
+        )
+        self.assertNotRegex(diagnostics, r"@media\s*\(max-width\s*:")
+
+        # Visual-only production change: endpoints/query, 20-second active-only
+        # polling, four-read authority cycle, stale/lifecycle gates, aborts and
+        # the strict safe model/Store projection remain owned by existing JS.
+        endpoints = (
+            'health: "/healthz"',
+            'readiness: "/readyz"',
+            'config: "/api/v1/config?view=diagnostics"',
+            'scheduler: "/api/v1/scheduler/status?view=diagnostics"',
+        )
+        for endpoint in endpoints:
+            self.assertEqual(controller.count(endpoint), 1, endpoint)
+        for marker in (
+            'DIAGNOSTICS_POLL_KEY = "diagnostics.snapshot"',
+            "Promise.all([",
+            "readOutcome(api, DIAGNOSTICS_ENDPOINTS.health",
+            "readOutcome(api, DIAGNOSTICS_ENDPOINTS.readiness",
+            "readOutcome(api, DIAGNOSTICS_ENDPOINTS.config",
+            "readOutcome(api, DIAGNOSTICS_ENDPOINTS.scheduler",
+            "requestGate.beginCycle()",
+            "requestGate.isCycleCurrent(ticket)",
+            "requestGate.advanceLifecycle()",
+            "intervalMs: DIAGNOSTICS_POLL_INTERVAL_MS",
+            "immediate: true",
+            'resume: "immediate"',
+            "polling.stop(DIAGNOSTICS_POLL_KEY)",
+            "cycleController?.abort()",
+            "activeCyclePromise = null",
+            "safeErrorResponse(error)",
+        ):
+            self.assertIn(marker, controller)
+        self.assertIn(
+            "export const DIAGNOSTICS_POLL_INTERVAL_MS = 20_000",
+            model,
+        )
+        for marker in (
+            "COMPONENTS = Object.freeze([",
+            "SECTION_NAMES = Object.freeze([",
+            "SAFE_ERROR_CODE",
+            "sanitizeHealthDiagnostics",
+            "sanitizeReadinessDiagnostics",
+            "sanitizeDiagnosticsConfig",
+            "sanitizeDiagnosticsScheduler",
+            "buildDiagnosticsSnapshot",
+            "validateDiagnosticsSnapshot",
+            "createDiagnosticsRequestGate",
+            "diagnosticsCopyText",
+            "staleSections",
+            "safeOutcomeError",
+        ):
+            self.assertIn(marker, model)
+        self.assertIn(
+            "return action(ACTION_TYPES.DIAGNOSTICS_RECEIVED, "
+            "validateDiagnosticsSnapshot(snapshot))",
+            store_state,
+        )
+        self.assertIn(
+            "diagnostics: { snapshot: "
+            "validateDiagnosticsSnapshot(action.payload) }",
+            store_transition,
+        )
+        for marker in (
+            'className: "diagnostics-workspace"',
+            'tabindex: "0"',
+            '"aria-label": "系统诊断三栏工作区；普通窗口可横向滚动"',
+            'role: "status"',
+            '"aria-live": "polite"',
+            '"aria-atomic": "true"',
+            "diagnosticsFocusToken",
+            "restoreDiagnosticsFocus",
+            "createStatusBadge",
+            "updateStatusBadge",
+            "definitionList",
+        ):
+            self.assertIn(marker, view)
+        combined = "\n".join((controller, view, model))
+        for forbidden in (
+            "fetch(",
+            "globalThis.fetch",
+            "XMLHttpRequest",
+            "localStorage",
+            "sessionStorage",
+            "indexedDB",
+            "console.",
+            "innerHTML",
+            "tests/fixtures",
+            "fixtures/webui",
+            'createElement("pre"',
+            'createElement("textarea"',
+            "伪终端",
+            "原始日志",
+            "raw log",
+        ):
+            self.assertNotIn(forbidden, combined)
+
     def test_window_manager_t12_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
         webui = backend_root / "gdl_backend" / "webui"

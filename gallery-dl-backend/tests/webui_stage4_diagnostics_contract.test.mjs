@@ -40,6 +40,15 @@ const CSS_SOURCE = readFileSync(
   "utf8",
 );
 
+function diagnosticsCssBlock(selector) {
+  const marker = `${selector} {`;
+  const start = CSS_SOURCE.indexOf(marker);
+  assert.notEqual(start, -1, selector);
+  const opening = CSS_SOURCE.indexOf("{", start);
+  const closing = CSS_SOURCE.indexOf("}", opening);
+  return CSS_SOURCE.slice(opening + 1, closing);
+}
+
 function rawHealth(overrides = {}) {
   return {
     ok: true,
@@ -987,7 +996,7 @@ test("Diagnostics view：真实 DOM builder/render 覆盖首次、内容、陈�
   }
 });
 
-test("Diagnostics DOM/CSS：三栏、聚焦横向 owner、独立纵滚、aria-live、content-solid 与稳定焦点", () => {
+test("Diagnostics DOM/CSS T7.4b：三栏低透明、事实扁平、完整状态边缘与 canonical a11y fallback", () => {
   for (const contract of [
     /diagnostics-workspace-track/,
     /className:\s*"diagnostics-workspace"[\s\S]*tabindex:\s*"0"/,
@@ -1002,22 +1011,146 @@ test("Diagnostics DOM/CSS：三栏、聚焦横向 owner、独立纵滚、aria-li
     /任务调度/,
     /下一步/,
     /data.*component.*id|componentId/,
+    /createStatusBadge/,
+    /updateStatusBadge/,
+    /diagnostics-stale-marker/,
+    /diagnostics-next-step/,
   ]) assert.match(VIEW_SOURCE, contract);
   assert.match(VIEW_SOURCE, /diagnosticsFocusToken/);
   assert.match(VIEW_SOURCE, /restoreDiagnosticsFocus/);
   assert.match(VIEW_SOURCE, /data.*diagnostics.*workspace.*state|diagnosticsWorkspaceState/);
+
   assert.match(CSS_SOURCE, /\.window-body:has\(> \.diagnostics-app\)/);
-  assert.match(CSS_SOURCE, /\.diagnostics-workspace\s*\{[^}]*overflow-x\s*:\s*auto/s);
-  assert.match(CSS_SOURCE, /\.diagnostics-workspace-track\s*\{[^}]*grid-template-columns\s*:[^;]*minmax[^;]*minmax[^;]*minmax[^;]*;/s);
-  assert.match(CSS_SOURCE, /\.diagnostics-workspace-track\s*\{[^}]*min-width\s*:\s*(?:1080|1100|1120|1140|1160)px/s);
-  assert.match(CSS_SOURCE, /\.diagnostics-column-scroll\s*\{[^}]*overflow-y\s*:\s*auto/s);
-  assert.match(CSS_SOURCE, /\.application-window\[data-maximized\] \.diagnostics-workspace-track\s*\{[^}]*min-width\s*:\s*100%/s);
-  assert.match(CSS_SOURCE, /--imageweave-surface-content-solid/);
-  assert.match(CSS_SOURCE, /forced-colors/);
-  assert.match(CSS_SOURCE, /prefers-reduced-motion/);
-  assert.match(CSS_SOURCE, /data-motion="off"/);
+  const workspace = diagnosticsCssBlock(".diagnostics-workspace");
+  assert.match(workspace, /padding:\s*24px/);
+  assert.match(workspace, /overflow-x:\s*auto/);
+  assert.match(workspace, /overflow-y:\s*hidden/);
+  const track = diagnosticsCssBlock(".diagnostics-workspace-track");
+  assert.match(track, /grid-template-columns:[^;]*minmax[^;]*minmax[^;]*minmax/);
+  assert.match(track, /gap:\s*24px/);
+  assert.match(track, /min-width:\s*1120px/);
+  const column = diagnosticsCssBlock(".diagnostics-column");
+  assert.match(column, /border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-default\)/);
+  assert.match(column, /border-radius:\s*var\(--imageweave-radius-card\)/);
+  assert.match(column, /background:\s*var\(--imageweave-glass-surface-input\)/);
+  assert.match(column, /inset 0 1px 0/);
+  assert.match(column, /inset 0 -1px 0/);
+  assert.doesNotMatch(column, /backdrop-filter|var\(--imageweave-shadow-/);
+  assert.match(diagnosticsCssBlock(".diagnostics-column--summary"), /--imageweave-glass-surface-secondary/);
+  const columnScroll = diagnosticsCssBlock(".diagnostics-column-scroll");
+  assert.match(columnScroll, /padding:\s*24px/);
+  assert.match(columnScroll, /overflow-y:\s*auto/);
+  assert.match(CSS_SOURCE, /\.application-window\[data-maximized\] \.diagnostics-workspace-track\s*\{[^}]*min-width:\s*100%/s);
+
+  const solidRefs = CSS_SOURCE.match(/--imageweave-[\w-]*-solid/g) || [];
+  assert.deepEqual(solidRefs, ["--imageweave-fallback-elevated-solid"]);
+  assert.doesNotMatch(CSS_SOURCE, /--imageweave-state-[\w-]*-surface/);
+  assert.doesNotMatch(
+    CSS_SOURCE,
+    /^\s*(?:-webkit-)?backdrop-filter\s*:(?![^\n]*\bnone\b)/m,
+  );
+  assert.doesNotMatch(CSS_SOURCE, /^\s*filter\s*:/m);
+  assert.match(
+    CSS_SOURCE,
+    /\.diagnostics-app \.diagnostics-workspace-state,[\s\S]*?\.diagnostics-next-step\s*\{[\s\S]*?border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-weak\)[\s\S]*?border-radius:\s*var\(--imageweave-radius-control\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-weak\)[\s\S]*?box-shadow:\s*none[\s\S]*?transform:\s*none/,
+  );
+  const panel = diagnosticsCssBlock(
+    ".diagnostics-app .diagnostics-panel,\n.diagnostics-domain",
+  );
+  assert.match(panel, /border-bottom:[^;]*--imageweave-border-weak/);
+  assert.match(panel, /background:\s*transparent/);
+  assert.match(panel, /background-image:\s*none/);
+  assert.match(panel, /box-shadow:\s*none/);
+  const workspaceState = diagnosticsCssBlock(".diagnostics-app .diagnostics-workspace-state");
+  assert.match(workspaceState, /grid-template-columns:\s*minmax\(0, 1fr\)/);
+  assert.match(workspaceState, /justify-items:\s*start/);
+  const facts = diagnosticsCssBlock(".diagnostics-definitions > div");
+  assert.match(facts, /grid-template-columns:[^;]*minmax[^;]*minmax/);
+  assert.match(facts, /padding:\s*12px 16px/);
+  for (const selector of [".diagnostics-metric strong", ".diagnostics-definitions dd"]) {
+    const block = diagnosticsCssBlock(selector);
+    assert.match(block, /color:\s*var\(--imageweave-text-code\)/);
+    assert.match(block, /font-family:\s*var\(--imageweave-font-mono\)/);
+  }
+  assert.match(
+    CSS_SOURCE,
+    /\.diagnostics-column-header > p:last-child,[\s\S]*?\.diagnostics-app section\.empty-state p\s*\{[\s\S]*?color:\s*var\(--imageweave-text-secondary\)/,
+  );
+  assert.match(diagnosticsCssBlock(".diagnostics-warning p"), /color:\s*var\(--imageweave-text-primary\)/);
+
+  for (const [state, token] of [
+    ["loading", "running"],
+    ["refreshing", "running"],
+    ["content", "success"],
+    ["partial", "warning"],
+    ["stale", "warning"],
+    ["offline", "danger"],
+    ["error", "danger"],
+  ]) {
+    assert.match(
+      CSS_SOURCE,
+      new RegExp(`data-diagnostics-workspace-state="${state}"[\\s\\S]*?--imageweave-state-${token}`),
+      state,
+    );
+  }
+  for (const [status, token] of [
+    ["ready", "success"],
+    ["running", "running"],
+    ["warning", "warning"],
+    ["error", "danger"],
+    ["disabled", "disabled"],
+  ]) {
+    assert.match(
+      CSS_SOURCE,
+      new RegExp(`diagnostics-component:has\\(\\.status-badge\\[data-status="${status}"\\]\\)[\\s\\S]*?--imageweave-state-${token}`),
+      status,
+    );
+  }
+  const offlineState = diagnosticsCssBlock(
+    '.diagnostics-workspace-state[data-diagnostics-workspace-state="offline"],\n' +
+    '.diagnostics-workspace-state[data-diagnostics-workspace-state="error"]',
+  );
+  assert.match(offlineState, /border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/);
+  assert.match(offlineState, /background:\s*var\(--imageweave-glass-surface-default\)/);
+  const staleMarker = diagnosticsCssBlock(".diagnostics-stale-marker");
+  assert.match(staleMarker, /border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-warning\)/);
+  assert.match(staleMarker, /background:\s*var\(--imageweave-glass-surface-default\)/);
+  assert.match(diagnosticsCssBlock(".diagnostics-stale-marker::before"), /content:\s*"△ 陈旧 · "/);
+  assert.match(CSS_SOURCE, /\.diagnostics-next-step\s*\{\s*display:\s*grid;[\s\S]*?padding:\s*12px;/);
+  assert.match(diagnosticsCssBlock(".diagnostics-next-step strong::before"), /content:\s*"→ "/);
+  assert.doesNotMatch(
+    CSS_SOURCE,
+    /(?:border-(?:left|right):\s*[34]px|inset\s+[34]px\s+0(?:px)?\s+0)/,
+  );
+
+  const hover = diagnosticsCssBlock(
+    ".diagnostics-app :is(\n  .diagnostics-note,\n  .diagnostics-metric,\n  .diagnostics-definitions > div,\n  .diagnostics-component,\n  .diagnostics-next-step\n):hover",
+  );
+  assert.match(hover, /background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  assert.match(hover, /transform:\s*none/);
+  assert.match(hover, /box-shadow:\s*none/);
+  const kicker = diagnosticsCssBlock(".diagnostics-column-kicker");
+  assert.match(kicker, /letter-spacing:\s*normal/);
+  assert.match(kicker, /text-transform:\s*none/);
+  assert.doesNotMatch(CSS_SOURCE, /\b(?:100|120|150|180)ms\b/);
+  assert.match(CSS_SOURCE, /var\(--imageweave-transition-standard\)/);
+
+  assert.match(CSS_SOURCE, /@supports not \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)/);
+  assert.match(CSS_SOURCE, /background:\s*var\(--imageweave-fallback-elevated-solid\)/);
+  assert.match(CSS_SOURCE, /@media \(prefers-contrast: more\)/);
+  assert.match(CSS_SOURCE, /@media \(forced-colors: active\)/);
+  for (const expected of [
+    "CanvasText",
+    "ButtonFace",
+    "Highlight",
+    "background-image: none",
+    "box-shadow: none",
+    "backdrop-filter: none",
+  ]) assert.match(CSS_SOURCE, new RegExp(expected));
+  assert.match(CSS_SOURCE, /:root\[data-motion="off"\]/);
+  assert.match(CSS_SOURCE, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.ok((CSS_SOURCE.match(/transition: none !important/g) || []).length >= 3);
   assert.doesNotMatch(CSS_SOURCE, /@media\s*\(max-width\s*:/);
-  assert.doesNotMatch(CSS_SOURCE, /backdrop-filter/);
 });
 
 test("Diagnostics application：默认 mount/activate/deactivate/unmount 生命周期可复用", () => {
