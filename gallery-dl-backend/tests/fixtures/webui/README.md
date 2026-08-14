@@ -36,6 +36,17 @@ and deterministic progress layouts for Gallery, Schedule, and Export. They are
 mounted only by `tests/stage5_preview_harness.py`. Production preview adapters
 remain unavailable and make zero owned business API requests.
 
+For Gallery visual acceptance, the tests-only host decorates the existing
+allow-listed `synthetic-*` media tokens with in-memory SVG `Blob` images. One
+fixed synthetic token intentionally produces an image decode error so Chromium
+covers both load and error presentation. The host records Image, Object URL,
+load/error listener and release counts, disconnects its `MutationObserver`, and
+requires those counts to balance across Quick Look step/close, deactivate,
+reactivate and destroy. Its adapter reads the currently selected fixture state,
+so reactivation cannot restore the state that happened to be mounted first.
+None of this media decorator is imported or discoverable from a production app
+closure.
+
 The Stage 6 production closure test ensures these fixture markers and modules
 never enter `gdl_backend/webui/` or the wheel. The maintained project screenshot
 is `assets/example.png` with provenance in `assets/example.json`; it comes from

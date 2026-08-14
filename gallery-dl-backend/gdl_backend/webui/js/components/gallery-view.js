@@ -327,7 +327,7 @@ export function createGalleryView({ root, app }, { onStateChange = () => {}, onM
         ]),
         mediaPreview(item, { large: true }),
         createElement("p", {
-          id: "gallery-quick-look-description",
+          attributes: { id: "gallery-quick-look-description" },
           text: `${item.sourceLabel} · ${item.kind} · ${item.width} × ${item.height}。这是安全合成预览。`,
         }),
         createElement("div", { className: "gallery-quick-look__actions" }, [previousButton, nextButton]),

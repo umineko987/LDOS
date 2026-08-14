@@ -1142,6 +1142,332 @@ class WebUiModuleTests(unittest.TestCase):
         ):
             self.assertIn(marker, view)
 
+    def test_gallery_t81_visual_and_fixture_boundary_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        fixtures = backend_root / "tests" / "fixtures" / "webui"
+        css = (webui / "styles" / "apps" / "gallery.css").read_text(
+            encoding="utf-8"
+        )
+        controller = (
+            webui / "js" / "apps" / "gallery.js"
+        ).read_text(encoding="utf-8")
+        view = (
+            webui / "js" / "components" / "gallery-view.js"
+        ).read_text(encoding="utf-8")
+        model = (
+            webui / "js" / "core" / "gallery-model.js"
+        ).read_text(encoding="utf-8")
+        fixture_host = (
+            fixtures / "stage5-preview-host.js"
+        ).read_text(encoding="utf-8")
+        fixture_html = (
+            fixtures / "stage5-preview-host.html"
+        ).read_text(encoding="utf-8")
+        fixture_states = (
+            fixtures / "stage5-preview-fixtures.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str) -> str:
+            start = css.find(selector)
+            self.assertNotEqual(start, -1, selector)
+            opening = css.find("{", start + len(selector))
+            closing = css.find("}", opening)
+            self.assertNotEqual(opening, -1, selector)
+            self.assertNotEqual(closing, -1, selector)
+            return css[opening + 1 : closing]
+
+        # Collection/content/facts preserve their desktop-only three-column
+        # ownership. Normal 800x560 windows scroll the fixed track; maximized
+        # windows fit the adaptive track and each region owns vertical scroll.
+        workspace = css_block(".gallery-workspace")
+        for expected in (
+            "padding: 24px",
+            "overflow-x: auto",
+            "overflow-y: hidden",
+            "background: transparent",
+        ):
+            self.assertIn(expected, workspace)
+        track = css_block(".gallery-workspace-track")
+        self.assertGreaterEqual(track.count("minmax("), 3)
+        self.assertIn("gap: 24px", track)
+        self.assertIn("min-width: 1100px", track)
+        column_scroll = css_block(".gallery-column-scroll,")
+        self.assertIn("padding: 24px", column_scroll)
+        self.assertIn("overflow-y: auto", column_scroll)
+        self.assertRegex(
+            css,
+            r"\.application-window\[data-maximized\] "
+            r"\.gallery-workspace-track\s*\{[^}]*min-width:\s*100%",
+        )
+        self.assertRegex(
+            css,
+            r"\.application-window:not\(\[data-maximized\]\) "
+            r"\.gallery-workspace-track\s*\{[^}]*"
+            r"grid-template-columns:\s*230px 560px 330px",
+        )
+
+        # Columns are neutral 5%-6% top-level regions with complete 15%/24px
+        # edges and inset directionality. Facts/toolbars/cards are flattened to
+        # 4%-6%/16px rows with no outer shadow or independent backdrop.
+        column = css_block(".gallery-column")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-card)",
+            "background: var(--imageweave-glass-surface-input)",
+            "inset 0 1px 0",
+            "inset 0 -1px 0",
+        ):
+            self.assertIn(expected, column)
+        self.assertNotIn("backdrop-filter", column)
+        self.assertNotIn("var(--imageweave-shadow-", column)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-secondary)",
+            css_block(".gallery-column--navigation"),
+        )
+        flattened = css_block(".gallery-panel,")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-weak)",
+            "border-radius: var(--imageweave-radius-control)",
+            "background: var(--imageweave-glass-surface-weak)",
+            "box-shadow: none",
+        ):
+            self.assertIn(expected, flattened)
+        self.assertNotIn("backdrop-filter", flattened)
+        facts = css_block(".gallery-facts > div")
+        for expected in (
+            "var(--imageweave-border-weak)",
+            "border-radius: var(--imageweave-radius-control)",
+            "background: var(--imageweave-glass-surface-weak)",
+            "box-shadow: none",
+        ):
+            self.assertIn(expected, facts)
+        self.assertIn(
+            "font-family: var(--imageweave-font-mono)",
+            css_block(".gallery-facts dd"),
+        )
+
+        # Controls stay in the canonical 4%-15% range. Selected media retains
+        # aria-selected/readable copy plus a complete 35% edge and champagne
+        # text marker; item/card hover never moves or scales.
+        controls = css_block(".gallery-nav-button,")
+        for expected in (
+            "min-height: var(--imageweave-control-height)",
+            "var(--imageweave-border-button)",
+            "border-radius: var(--imageweave-radius-control)",
+            "background: var(--imageweave-glass-surface-button)",
+            "var(--imageweave-transition-standard)",
+        ):
+            self.assertIn(expected, controls)
+        inputs = css_block(".gallery-search,")
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-input)", inputs
+        )
+        self.assertIn("var(--imageweave-border-default)", inputs)
+        hover = css_block(".gallery-media-card:hover,")
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)", hover
+        )
+        self.assertIn("transform: none", hover)
+        selected = css_block('.gallery-media-card[data-selected="true"]')
+        self.assertIn("border-color: var(--imageweave-border-focus)", selected)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-input)", selected
+        )
+        selected_marker = css_block(
+            '.gallery-media-card[data-selected="true"]::after'
+        )
+        self.assertIn('content: "◆ 已选择"', selected_marker)
+        self.assertIn("var(--imageweave-accent)", selected_marker)
+        for marker in (
+            'role: "option"',
+            '"aria-selected": String(selected)',
+            'selected ? "已选择" : "未选择"',
+            'className: "gallery-selection-fact"',
+        ):
+            self.assertIn(marker, view)
+
+        # The image stage is neutral 5%, 15% edged and 16px rounded. Synthetic
+        # fixture images are literal contain pixels with no filter, dimming,
+        # blend, transition or delayed media manipulation.
+        stage = css_block(".gallery-media-preview")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-control)",
+            "background: var(--imageweave-glass-surface-secondary)",
+        ):
+            self.assertIn(expected, stage)
+        image = css_block(".gallery-media-preview > img,")
+        for expected in (
+            "object-fit: contain",
+            "background: transparent",
+            "opacity: 1",
+            "filter: none",
+            "mix-blend-mode: normal",
+            "transition: none",
+            "animation: none",
+        ):
+            self.assertIn(expected, image)
+        self.assertIn('data-gallery-media-state="loading"', css)
+        self.assertIn('data-gallery-media-state="error"', css)
+        quick_media_stage = css_block(".gallery-media-preview--large")
+        self.assertIn("height: min(48vh, 480px)", quick_media_stage)
+        self.assertIn("aspect-ratio: auto", quick_media_stage)
+
+        # loading/empty/content/error/unavailable keep the T6 neutral status
+        # plane; semantic colors appear only in complete edges, icon and text.
+        self.assertRegex(
+            css,
+            r'\[data-gallery-workspace-state="loading"\]\s*\{[^}]*'
+            r"border-color:\s*var\(--imageweave-state-running\)"
+            r"[^}]*background:\s*"
+            r"var\(--imageweave-glass-surface-secondary\)",
+        )
+        self.assertRegex(
+            css,
+            r'\[data-gallery-workspace-state="error"\]\s*\{[^}]*'
+            r"border:\s*var\(--imageweave-border-strong-width\) solid "
+            r"var\(--imageweave-state-danger\)[^}]*background:\s*"
+            r"var\(--imageweave-glass-surface-default\)",
+        )
+        for phase in ("loading", "empty", "content", "error"):
+            self.assertRegex(
+                fixture_states,
+                rf"\b{phase}:\s*freeze\(",
+            )
+        self.assertIn(
+            "图片库后端能力尚未接入；当前不会读取下载目录或发送业务请求。",
+            model,
+        )
+
+        # Quick Look alone receives one independent 60px/180% top-level glass
+        # layer with 24px radius and the directional window shadow. Its internal
+        # rows remain weak, flat and backdrop-free.
+        quick_look = css_block(".gallery-quick-look__dialog")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-window)",
+            "background-color: var(--imageweave-glass-surface-default)",
+            "rgb(255 255 255 / 0.12)",
+            "box-shadow: var(--imageweave-shadow-window)",
+        ):
+            self.assertIn(expected, quick_look)
+        positive_backdrops = [
+            value.strip()
+            for value in re.findall(
+                r"(?m)^\s*(?:-webkit-)?backdrop-filter\s*:\s*([^;\n]+)",
+                css,
+            )
+            if value.strip() != "none"
+        ]
+        self.assertEqual(len(positive_backdrops), 2)
+        for value in positive_backdrops:
+            self.assertEqual(
+                value,
+                "blur(var(--imageweave-glass-blur-window)) "
+                "saturate(var(--imageweave-glass-saturation))",
+            )
+        quick_rows = css_block(".gallery-quick-look__dialog > header,")
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-weak)", quick_rows
+        )
+        self.assertIn("box-shadow: none", quick_rows)
+        self.assertNotIn("backdrop-filter", quick_rows)
+        for marker in (
+            'role: "dialog"',
+            '"aria-modal": "true"',
+            '"aria-labelledby": "gallery-quick-look-title"',
+            '"aria-describedby": "gallery-quick-look-description"',
+            'attributes: { id: "gallery-quick-look-description" }',
+            "quickLookReturnFocus",
+            'event.key !== "Tab"',
+            'event.key === "Escape"',
+            "preview.replaceChildren()",
+        ):
+            self.assertIn(marker, controller + view)
+
+        # T8.1 removes all ten Gallery legacy surfaces and its tracked kicker;
+        # only the canonical no-backdrop fallback retains a *-solid name.
+        self.assertEqual(
+            re.findall(r"--imageweave-[\w-]*-solid", css),
+            ["--imageweave-fallback-elevated-solid"],
+        )
+        self.assertNotRegex(css, r"--imageweave-state-[\w-]*-surface")
+        self.assertNotRegex(css, r"text-transform:\s*uppercase")
+        self.assertNotRegex(css, r"letter-spacing:\s*0\.0[6-9]em")
+        self.assertNotRegex(
+            css,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+        self.assertIn("@media (prefers-contrast: more)", css)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", css)
+        self.assertIn(':root[data-motion="off"]', css)
+        self.assertIn(
+            "@supports not ((-webkit-backdrop-filter: blur(1px)) or "
+            "(backdrop-filter: blur(1px)))",
+            css,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid)", css
+        )
+        for marker in (
+            "CanvasText",
+            "ButtonFace",
+            "Highlight",
+            "background-image: none",
+            "box-shadow: none",
+            "backdrop-filter: none",
+            "transition: none !important",
+        ):
+            self.assertIn(marker, css)
+
+        # The production controller/view/model remain formally unavailable,
+        # zero-API and runtime-image-free. Blob/Image/listener media exists only
+        # under the separately mounted tests fixture and has explicit balance
+        # and stale-event facts for browser acceptance.
+        production = "\n".join((controller, view, model))
+        self.assertIn("createGalleryUnavailableAdapter()", controller)
+        self.assertIn('projectGalleryState({ phase: "unavailable" })', controller)
+        for forbidden in (
+            "context.api",
+            "/api/",
+            "stage5-preview-fixtures",
+            "testsOnly",
+            "new Image()",
+            "URL.createObjectURL",
+            "URL.revokeObjectURL",
+            "new Blob",
+        ):
+            self.assertNotIn(forbidden, production)
+        for marker in (
+            "createGalleryMediaFixture",
+            "new Image()",
+            "URL.createObjectURL(blob)",
+            "URL.revokeObjectURL(record.objectUrl)",
+            'addEventListener("load"',
+            'addEventListener("error"',
+            'removeEventListener("load"',
+            'removeEventListener("error"',
+            "MutationObserver",
+            "adapterState || initialState",
+            "balancedImages",
+            "balancedObjectUrls",
+            "balancedListeners",
+            "ignoredLateEvents",
+            "galleryMedia?.destroy()",
+        ):
+            self.assertIn(marker, fixture_host)
+        self.assertIn('data-stage5-tests-only="true"', fixture_html)
+        self.assertIn(
+            'class="application-window stage5-fixture-window"', fixture_html
+        )
+        self.assertIn('data-theme-tone="dark"', fixture_html)
+
     def test_polling_focus_t14_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
         javascript_root = backend_root / "gdl_backend" / "webui" / "js"

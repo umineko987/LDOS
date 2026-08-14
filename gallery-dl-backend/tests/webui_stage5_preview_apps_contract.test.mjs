@@ -293,8 +293,24 @@ test("Stage 5 fixture host is explicit tests-only injection and production sourc
   assert.match(FIXTURE_HOST_SOURCE, /createGalleryController/);
   assert.match(FIXTURE_HOST_SOURCE, /createScheduleController/);
   assert.match(FIXTURE_HOST_SOURCE, /createExportController/);
+  for (const mediaBoundary of [
+    /createGalleryMediaFixture/,
+    /new Image\(\)/,
+    /URL\.createObjectURL/,
+    /URL\.revokeObjectURL/,
+    /addEventListener\("load"/,
+    /addEventListener\("error"/,
+    /removeEventListener\("load"/,
+    /removeEventListener\("error"/,
+    /MutationObserver/,
+    /adapterState\s*\|\|\s*initialState/,
+    /balancedObjectUrls/,
+    /balancedListeners/,
+    /ignoredLateEvents/,
+  ]) assert.match(FIXTURE_HOST_SOURCE, mediaBoundary);
   const production = [REGISTRY_SOURCE, ...Object.values(APP_SOURCES), ...Object.values(MODEL_SOURCES), ...Object.values(VIEW_SOURCES)].join("\n");
   assert.doesNotMatch(production, /stage5-preview-fixtures|stage5-preview-host|tests\/fixtures|fixtures\/webui|testsOnly/);
+  assert.doesNotMatch(production, /createGalleryMediaFixture|GALLERY_ERROR_MEDIA_TOKEN/);
 });
 
 test("Stage 5 static security and rendering boundaries forbid bypass I/O, unsafe DOM, runtime media, and fixture imports", () => {
@@ -310,11 +326,9 @@ test("Stage 5 static security and rendering boundaries forbid bypass I/O, unsafe
   assert.doesNotMatch(`${APP_SOURCES.schedule}\n${VIEW_SOURCES.schedule}`, /scheduler\/status|view=diagnostics/);
 });
 
-test("Stage 5 CSS contracts use content/navigation solid surfaces, local scroll owners, and accessibility media", () => {
+test("Stage 5 CSS preserves preview layouts while Gallery T8.1 uses canonical nocturne media glass", () => {
   for (const appId of PREVIEW_APPS) {
     const css = CSS_SOURCES[appId];
-    assert.match(css, /--imageweave-surface-content-solid/);
-    assert.match(css, /--imageweave-surface-navigation-solid/);
     assert.match(css, new RegExp(`\\.${appId}-workspace\\s*\\{[\\s\\S]*overflow-x:\\s*auto[\\s\\S]*overflow-y:\\s*hidden`));
     assert.match(css, new RegExp(`\\.${appId}-column-scroll(?:\\s*,[^\\{]+)?\\s*\\{[\\s\\S]*?overflow-y:\\s*auto`));
     assert.match(css, /application-window\[data-maximized\]/);
@@ -324,8 +338,61 @@ test("Stage 5 CSS contracts use content/navigation solid surfaces, local scroll 
     assert.match(css, /Canvas/);
     assert.match(css, /ButtonFace/);
     assert.match(css, /Highlight/);
-    assert.doesNotMatch(css, /@media\s*\((?:max-width|max-height)|backdrop-filter/);
+    assert.doesNotMatch(css, /@media\s*\((?:max-width|max-height)/);
   }
+
+  for (const appId of ["schedule", "export"]) {
+    assert.match(CSS_SOURCES[appId], /--imageweave-surface-content-solid/);
+    assert.match(CSS_SOURCES[appId], /--imageweave-surface-navigation-solid/);
+    assert.doesNotMatch(CSS_SOURCES[appId], /backdrop-filter/);
+  }
+
+  const css = CSS_SOURCES.gallery;
+  assert.doesNotMatch(css, /--imageweave-(?:surface-(?:content|navigation|control)-solid|state-[\w-]*-surface-solid)/);
+  assert.doesNotMatch(css, /text-transform:\s*uppercase|letter-spacing:\s*0\.0[6-9]em|inset\s+3px\s+0\s+0/);
+  for (const expected of [
+    "padding: 24px",
+    "gap: 24px",
+    "min-width: 1100px",
+    "border: var(--imageweave-border-width) solid var(--imageweave-border-default)",
+    "border-radius: var(--imageweave-radius-card)",
+    "background: var(--imageweave-glass-surface-input)",
+    "background: var(--imageweave-glass-surface-secondary)",
+    "border-radius: var(--imageweave-radius-control)",
+    "background: var(--imageweave-glass-surface-weak)",
+    "background: var(--imageweave-glass-surface-button)",
+    "background: var(--imageweave-glass-surface-hover)",
+    "border-color: var(--imageweave-border-focus)",
+    'content: "◆ 已选择"',
+    "transform: none",
+    "transition: none",
+    "height: min(48vh, 480px)",
+  ]) assert.match(css, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(css, /\.gallery-media-card:hover,[\s\S]*?transform:\s*none/);
+  assert.match(css, /\.gallery-media-card\[data-selected="true"\]\s*\{[\s\S]*?border-color:\s*var\(--imageweave-border-focus\)/);
+  assert.match(VIEW_SOURCES.gallery, /role:\s*"option"[\s\S]*?"aria-selected":\s*String\(selected\)[\s\S]*?已选择/);
+
+  assert.match(css, /\.gallery-media-preview\s*\{[\s\S]*?border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-default\)[\s\S]*?border-radius:\s*var\(--imageweave-radius-control\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  assert.match(css, /\.gallery-media-preview\s*>\s*img,[\s\S]*?object-fit:\s*contain[\s\S]*?opacity:\s*1[\s\S]*?filter:\s*none[\s\S]*?mix-blend-mode:\s*normal[\s\S]*?transition:\s*none/);
+  assert.match(css, /data-gallery-media-state="loading"/);
+  assert.match(css, /data-gallery-media-state="error"/);
+
+  assert.match(css, /data-gallery-workspace-state="loading"[\s\S]*?border-color:\s*var\(--imageweave-state-running\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  assert.match(css, /data-gallery-workspace-state="error"[\s\S]*?border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-default\)/);
+
+  assert.match(css, /\.gallery-quick-look__dialog\s*\{[\s\S]*?border-radius:\s*var\(--imageweave-radius-window\)[\s\S]*?background-color:\s*var\(--imageweave-glass-surface-default\)[\s\S]*?rgb\(255 255 255 \/ 0\.12\)[\s\S]*?box-shadow:\s*var\(--imageweave-shadow-window\)/);
+  const supported = css.split("@supports ((-webkit-backdrop-filter", 2)[1].split("@supports not", 1)[0];
+  assert.match(supported, /\.gallery-quick-look__dialog/);
+  assert.match(supported, /blur\(var\(--imageweave-glass-blur-window\)\)/);
+  assert.match(supported, /saturate\(var\(--imageweave-glass-saturation\)\)/);
+  assert.equal(
+    css.split("\n").filter((line) => /^\s*(?:-webkit-)?backdrop-filter:/.test(line) && !/:\s*none/.test(line)).length,
+    2,
+    "Quick Look must be Gallery's only independent backdrop selector",
+  );
+  assert.match(css, /@supports not[\s\S]*?--imageweave-fallback-elevated-solid/);
+  assert.match(css, /prefers-contrast:\s*more/);
+  assert.match(css, /forced-colors:\s*active[\s\S]*?background-image:\s*none[\s\S]*?backdrop-filter:\s*none/);
 });
 
 test("Stage 5 views declare disabled write reasons and Gallery Quick Look keyboard/release contracts", () => {
@@ -337,7 +404,8 @@ test("Stage 5 views declare disabled write reasons and Gallery Quick Look keyboa
   for (const phrase of ["保存计划", "启用 / 停用", "立即运行"]) assert.match(VIEW_SOURCES.schedule, new RegExp(phrase));
   for (const phrase of ["选择目标", "开始导出", "取消导出", "打开结果"]) assert.match(VIEW_SOURCES.export, new RegExp(phrase));
   for (const fingerprint of [
-    'role: "dialog"', '"aria-modal": "true"', "trapQuickLookFocus", "event.key !== \"Tab\"",
+    'role: "dialog"', '"aria-modal": "true"', 'attributes: { id: "gallery-quick-look-description" }',
+    "trapQuickLookFocus", "event.key !== \"Tab\"",
     "quickLookReturnFocus", "event.key === \"Escape\"", "view.releaseMedia()", "preview.replaceChildren()",
     "ArrowLeft", "ArrowRight", "EDITABLE_SELECTOR",
   ]) assert.match(`${APP_SOURCES.gallery}\n${VIEW_SOURCES.gallery}`, new RegExp(fingerprint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
