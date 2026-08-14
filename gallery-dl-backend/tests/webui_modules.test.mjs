@@ -1095,12 +1095,12 @@ test("应用 registry 保持 11 项元数据、默认路由与生命周期基线
   assert.deepEqual(
     applications.filter((application) => typeof application.beforeLeave === "function")
       .map((application) => application.id),
-    ["review", "policy", "personalization"],
+    ["review", "policy", "personalization", "schedule"],
   );
   assert.deepEqual(
     applications.filter((application) => typeof application.beforeWindowHide === "function")
       .map((application) => application.id),
-    ["review", "policy", "personalization"],
+    ["review", "policy", "personalization", "schedule"],
   );
 });
 

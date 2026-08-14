@@ -7,7 +7,13 @@ import {
 import { createEmptyState } from "./empty-state.js";
 import { createStatusBadge, updateStatusBadge } from "./status.js";
 
-const DISABLED_REASON = "定时任务后端能力尚未接入，当前操作不可用。";
+const DISABLED_REASON = "定时任务后端能力尚未接入，当前操作不可用且不会发送业务请求。";
+const VALIDATION_FIELD_BY_CONTROL = Object.freeze({
+  name: "name",
+  scheduleKind: "schedule-kind",
+  scheduleLabel: "schedule-label",
+  concurrency: "concurrency",
+});
 
 function button(action, label, { disabled = false, primary = false } = {}) {
   const element = createElement("button", {
@@ -55,8 +61,8 @@ function planCard(plan, selected) {
 }
 
 function field(label, control) {
-  return createElement("label", { className: "schedule-field" }, [
-    createElement("span", { text: label }),
+  return createElement("div", { className: "schedule-field" }, [
+    createElement("label", { text: label, attributes: { for: control.id } }),
     control,
   ]);
 }
@@ -80,14 +86,14 @@ export function createScheduleView({ root, app }) {
   const planHost = createElement("div", { className: "schedule-plan-list", dataset: { schedulePlanList: "" } });
   const phaseHost = createElement("div", { className: "schedule-phase-host", dataset: { schedulePhaseHost: "" } });
 
-  const nameInput = createElement("input", { className: "schedule-input", attributes: { type: "text", maxlength: "72", autocomplete: "off", "aria-describedby": "schedule-validation" }, dataset: { scheduleField: "name", scheduleFocus: "field:name" } });
-  const kindSelect = createElement("select", { className: "schedule-select", attributes: { "aria-describedby": "schedule-validation" }, dataset: { scheduleField: "scheduleKind", scheduleFocus: "field:scheduleKind" } }, [
+  const nameInput = createElement("input", { className: "schedule-input", attributes: { id: "schedule-name", type: "text", maxlength: "72", autocomplete: "off", "aria-describedby": "schedule-validation schedule-write-reason" }, dataset: { scheduleField: "name", scheduleFocus: "field:name" } });
+  const kindSelect = createElement("select", { className: "schedule-select", attributes: { id: "schedule-kind", "aria-describedby": "schedule-validation schedule-write-reason" }, dataset: { scheduleField: "scheduleKind", scheduleFocus: "field:scheduleKind" } }, [
     createElement("option", { text: "每天", attributes: { value: "daily" } }),
     createElement("option", { text: "每周", attributes: { value: "weekly" } }),
     createElement("option", { text: "固定间隔", attributes: { value: "interval" } }),
   ]);
-  const scheduleInput = createElement("input", { className: "schedule-input", attributes: { type: "text", maxlength: "80", autocomplete: "off", "aria-describedby": "schedule-validation" }, dataset: { scheduleField: "scheduleLabel", scheduleFocus: "field:scheduleLabel" } });
-  const concurrencyInput = createElement("input", { className: "schedule-input", attributes: { type: "number", min: "1", max: "128", step: "1", "aria-describedby": "schedule-validation" }, dataset: { scheduleField: "concurrency", scheduleFocus: "field:concurrency" } });
+  const scheduleInput = createElement("input", { className: "schedule-input", attributes: { id: "schedule-label", type: "text", maxlength: "80", autocomplete: "off", "aria-describedby": "schedule-validation schedule-write-reason" }, dataset: { scheduleField: "scheduleLabel", scheduleFocus: "field:scheduleLabel" } });
+  const concurrencyInput = createElement("input", { className: "schedule-input", attributes: { id: "schedule-concurrency", type: "number", min: "1", max: "128", step: "1", "aria-describedby": "schedule-validation schedule-write-reason" }, dataset: { scheduleField: "concurrency", scheduleFocus: "field:concurrency" } });
   const validation = createElement("p", { className: "schedule-validation", text: "选择计划后可编辑并验证草稿。", attributes: { id: "schedule-validation", role: "status", "aria-live": "polite", "aria-atomic": "true" }, dataset: { scheduleValidation: "idle" } });
   const resetButton = button("reset", "重置草稿");
   const saveButton = button("save", "保存计划", { disabled: true, primary: true });
@@ -125,7 +131,7 @@ export function createScheduleView({ root, app }) {
     createElement("header", { className: "schedule-column-header" }, [
       createElement("p", { className: "schedule-column-kicker", text: "03 · 下次运行" }),
       createElement("h2", { text: "运行摘要", attributes: { id: "schedule-summary-heading" } }),
-      createElement("p", { text: "只显示夹具提供的确定性事实，不计算或猜测运行时间。" }),
+      createElement("p", { text: "只显示安全投影中的确定性事实，不计算或猜测运行时间。" }),
     ]),
     createElement("div", { className: "schedule-column-scroll" }, [nextRunHost]),
   ]);
@@ -157,7 +163,17 @@ export function createScheduleView({ root, app }) {
     planHost.replaceChildren(...(state.phase === "content" ? state.plans.map((plan) => planCard(plan, plan.id === uiState.selectedId)) : []));
     const plan = state.phase === "content" ? state.plans.find((item) => item.id === uiState.selectedId) : null;
     const draft = plan ? (uiState.draft || selectSchedulePlan(state, plan.id).draft) : null;
-    for (const control of [nameInput, kindSelect, scheduleInput, concurrencyInput, resetButton]) control.disabled = !plan;
+    const fields = [nameInput, kindSelect, scheduleInput, concurrencyInput];
+    const fieldDescription = plan ? "schedule-validation" : "schedule-validation schedule-write-reason";
+    for (const control of fields) {
+      control.disabled = !plan;
+      control.setAttribute("aria-describedby", fieldDescription);
+    }
+    resetButton.disabled = !plan;
+    resetButton.setAttribute("aria-describedby", plan ? "schedule-validation" : "schedule-write-reason");
+    resetButton.title = plan ? "将当前草稿恢复为当前计划事实" : DISABLED_REASON;
+    editor.dataset.scheduleDirty = String(Boolean(plan && uiState.dirty));
+    editor.dataset.scheduleValidity = draft && !uiState.validation.valid ? "invalid" : draft ? "valid" : "idle";
     if (draft) {
       nameInput.value = draft.name;
       kindSelect.value = draft.scheduleKind;
@@ -165,18 +181,23 @@ export function createScheduleView({ root, app }) {
       concurrencyInput.value = String(draft.concurrency);
       validation.dataset.scheduleValidation = uiState.validation.valid ? (uiState.dirty ? "dirty" : "valid") : "invalid";
       validation.textContent = uiState.validation.valid
-        ? uiState.dirty ? "草稿有效且有未保存更改；正式保存仍不可用。" : "草稿与夹具事实一致。"
+        ? uiState.dirty ? "草稿有效且有未保存更改；正式保存仍不可用。" : "草稿与当前计划事实一致。"
         : uiState.validation.reason;
-      for (const control of [nameInput, kindSelect, scheduleInput, concurrencyInput]) {
-        const invalid = !uiState.validation.valid && control.dataset.scheduleField === uiState.validation.field;
+      for (const control of fields) {
+        const invalid = !uiState.validation.valid
+          && VALIDATION_FIELD_BY_CONTROL[control.dataset.scheduleField] === uiState.validation.field;
         control.setAttribute("aria-invalid", String(invalid));
       }
     } else {
       nameInput.value = "";
+      kindSelect.selectedIndex = 0;
       scheduleInput.value = "";
       concurrencyInput.value = "";
+      for (const control of fields) control.setAttribute("aria-invalid", "false");
       validation.dataset.scheduleValidation = "idle";
-      validation.textContent = "选择计划后可编辑并验证草稿。";
+      validation.textContent = state.phase === "unavailable"
+        ? "后端未接入；表单已禁用且不会发送业务请求。"
+        : "选择计划后可编辑并验证草稿。";
     }
     saveButton.disabled = true;
     toggleButton.disabled = true;

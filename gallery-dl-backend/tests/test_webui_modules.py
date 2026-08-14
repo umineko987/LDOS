@@ -1468,6 +1468,385 @@ class WebUiModuleTests(unittest.TestCase):
         )
         self.assertIn('data-theme-tone="dark"', fixture_html)
 
+    def test_schedule_t82_visual_dirty_and_fixture_boundary_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        fixtures = backend_root / "tests" / "fixtures" / "webui"
+        css = (webui / "styles" / "apps" / "schedule.css").read_text(
+            encoding="utf-8"
+        )
+        controls = (webui / "styles" / "controls.css").read_text(
+            encoding="utf-8"
+        )
+        controller = (
+            webui / "js" / "apps" / "schedule.js"
+        ).read_text(encoding="utf-8")
+        view = (
+            webui / "js" / "components" / "schedule-view.js"
+        ).read_text(encoding="utf-8")
+        model = (
+            webui / "js" / "core" / "schedule-model.js"
+        ).read_text(encoding="utf-8")
+        fixture_host = (
+            fixtures / "stage5-preview-host.js"
+        ).read_text(encoding="utf-8")
+        fixture_html = (
+            fixtures / "stage5-preview-host.html"
+        ).read_text(encoding="utf-8")
+        fixture_states = (
+            fixtures / "stage5-preview-fixtures.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str) -> str:
+            start = css.find(selector)
+            self.assertNotEqual(start, -1, selector)
+            opening = css.find("{", start + len(selector))
+            closing = css.find("}", opening)
+            self.assertNotEqual(opening, -1, selector)
+            self.assertNotEqual(closing, -1, selector)
+            return css[opening + 1 : closing]
+
+        # The real list/editor/summary layout remains desktop-only. A normal
+        # 800x560 window owns horizontal scrolling, maximized windows fit all
+        # three columns, and each column remains its vertical scroll owner.
+        workspace = css_block(".schedule-workspace")
+        for expected in (
+            "padding: 24px",
+            "overflow-x: auto",
+            "overflow-y: hidden",
+            "background: transparent",
+        ):
+            self.assertIn(expected, workspace)
+        track = css_block(".schedule-workspace-track")
+        self.assertGreaterEqual(track.count("minmax("), 3)
+        self.assertIn("gap: 24px", track)
+        self.assertIn("min-width: 1138px", track)
+        column_scroll = css_block(".schedule-column-scroll")
+        self.assertIn("padding: 24px", column_scroll)
+        self.assertIn("overflow-y: auto", column_scroll)
+        self.assertRegex(
+            css,
+            r"\.application-window\[data-maximized\] "
+            r"\.schedule-workspace-track\s*\{[^}]*min-width:\s*100%",
+        )
+        self.assertRegex(
+            css,
+            r"\.application-window:not\(\[data-maximized\]\) "
+            r"\.schedule-workspace-track\s*\{[^}]*"
+            r"grid-template-columns:\s*330px 430px 330px",
+        )
+
+        # Columns are the only top-level Schedule regions: neutral 5%-6%,
+        # complete 15%/24px edges and directional inset light, without an
+        # internal backdrop layer or an outer card shadow.
+        column = css_block(".schedule-column")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-card)",
+            "background: var(--imageweave-glass-surface-secondary)",
+            "inset 0 1px 0",
+            "inset 0 -1px 0",
+        ):
+            self.assertIn(expected, column)
+        self.assertNotIn("backdrop-filter", column)
+        self.assertNotIn("var(--imageweave-shadow-", column)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-input)",
+            css_block(".schedule-column--list"),
+        )
+
+        # Plan/form/status/fact rows are inherited 4%-6% surfaces with 10%
+        # complete separators, 16px corners, no outer shadows and no movement.
+        flattened = css_block(".schedule-workspace-state,")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-weak)",
+            "border-radius: var(--imageweave-radius-control)",
+            "background: var(--imageweave-glass-surface-weak)",
+            "box-shadow: none",
+            "transform: none",
+        ):
+            self.assertIn(expected, flattened)
+        self.assertNotIn("backdrop-filter", flattened)
+        editor_match = re.search(
+            r"(?m)^\.schedule-editor\s*\{([^}]*)\}", css
+        )
+        self.assertIsNotNone(editor_match)
+        editor = editor_match.group(1)
+        for expected in (
+            "padding: 0",
+            "border: 0",
+            "background: transparent",
+            "box-shadow: none",
+        ):
+            self.assertIn(expected, editor)
+        facts = css_block(".schedule-facts > div")
+        self.assertIn("var(--imageweave-border-weak)", facts)
+        self.assertIn("var(--imageweave-radius-control)", facts)
+        self.assertIn("var(--imageweave-glass-surface-weak)", facts)
+        self.assertIn("box-shadow: none", facts)
+        fact_value = css_block(".schedule-facts dd")
+        self.assertIn("var(--imageweave-text-code)", fact_value)
+        self.assertIn("var(--imageweave-font-mono)", fact_value)
+        plan_hover = css_block(".schedule-plan-card:hover,")
+        self.assertIn("transform: none", plan_hover)
+        self.assertIn("box-shadow: none", plan_hover)
+
+        # Inputs and select inherit the canonical T6 .app-view controls. The
+        # Schedule action class repeats the same 10%/15%/16px/500ms facts;
+        # disabled writes remain readable and explicitly unavailable.
+        self.assertIn(".app-view :is(\n  input:not([type])", controls)
+        for expected in (
+            "background: var(--imageweave-glass-surface-input)",
+            "border-radius: var(--imageweave-radius-control)",
+            "var(--imageweave-transition-standard)",
+            'input[type="number"]',
+            "select",
+            '[aria-invalid="true"]',
+        ):
+            self.assertIn(expected, controls)
+        app_inputs = css_block(".schedule-input,")
+        self.assertIn("var(--imageweave-control-height)", app_inputs)
+        self.assertNotIn("background:", app_inputs)
+        self.assertNotIn("box-shadow:", app_inputs)
+        button = css_block(".schedule-button")
+        for expected in (
+            "min-height: var(--imageweave-control-height)",
+            "var(--imageweave-border-button)",
+            "border-radius: var(--imageweave-radius-control)",
+            "background: var(--imageweave-glass-surface-button)",
+            "box-shadow: var(--imageweave-shadow-control)",
+            "var(--imageweave-transition-standard)",
+        ):
+            self.assertIn(expected, button)
+        primary = css_block(".schedule-button--primary")
+        self.assertIn("border-color: var(--imageweave-accent)", primary)
+        self.assertIn("var(--imageweave-accent-highlight)", primary)
+        self.assertIn("var(--imageweave-glass-surface-button)", primary)
+        disabled = css_block(
+            '.schedule-button:is(:disabled, [aria-disabled="true"])'
+        )
+        for expected in (
+            "var(--imageweave-glass-surface-weak)",
+            "opacity: 1",
+            "text-decoration: line-through",
+            "transform: none",
+        ):
+            self.assertIn(expected, disabled)
+
+        # Selection, enabled/disabled/running, dirty and invalid remain visible
+        # without color: native ARIA, readable text/symbols and complete edges.
+        selected = css_block('.schedule-plan-card[aria-pressed="true"]')
+        self.assertIn("var(--imageweave-border-focus)", selected)
+        self.assertIn("var(--imageweave-glass-surface-input)", selected)
+        selected_marker = css_block(
+            '.schedule-plan-card[aria-pressed="true"]::after'
+        )
+        self.assertIn('content: "◆ 已选择"', selected_marker)
+        self.assertIn("var(--imageweave-accent-highlight)", selected_marker)
+        for marker in (
+            '"aria-pressed": String(selected)',
+            'text: plan.state === "running" ? "▶"',
+            'enabled: ["ready", "已启用"]',
+            'disabled: ["disabled", "已停用"]',
+            'running: ["running", "正在运行"]',
+        ):
+            self.assertIn(marker, view)
+        dirty_marker = css_block(
+            '.schedule-validation[data-schedule-validation="dirty"]::before'
+        )
+        self.assertIn('content: "△ 未保存 ·"', dirty_marker)
+        invalid = css_block(
+            '.schedule-validation[data-schedule-validation="invalid"]'
+        )
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            invalid,
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)", invalid
+        )
+        field_invalid = css_block(
+            '.schedule-field:has([aria-invalid="true"])'
+        )
+        self.assertIn("var(--imageweave-border-strong-width)", field_invalid)
+        self.assertIn("var(--imageweave-state-danger)", field_invalid)
+        for marker in (
+            "VALIDATION_FIELD_BY_CONTROL",
+            'name: "name"',
+            'scheduleKind: "schedule-kind"',
+            'scheduleLabel: "schedule-label"',
+            'concurrency: "concurrency"',
+            'control.setAttribute("aria-invalid", String(invalid))',
+            'control.setAttribute("aria-invalid", "false")',
+            "scheduleDirty",
+            "scheduleValidity",
+        ):
+            self.assertIn(marker, view)
+
+        # Explicit ids/labels/descriptions keep keyboard and invalid
+        # associations intact; critical help and error copy is white/80+.
+        for field_id in (
+            "schedule-name",
+            "schedule-kind",
+            "schedule-label",
+            "schedule-concurrency",
+        ):
+            self.assertIn(f'id: "{field_id}"', view)
+        self.assertIn("attributes: { for: control.id }", view)
+        self.assertIn(
+            '"schedule-validation schedule-write-reason"', view
+        )
+        critical_copy = re.search(
+            r"(?m)^\.schedule-validation,\n"
+            r"\.schedule-disabled-reason\s*\{([^}]*)\}",
+            css,
+        )
+        self.assertIsNotNone(critical_copy)
+        self.assertIn(
+            "color: var(--imageweave-text-secondary)",
+            critical_copy.group(1),
+        )
+        self.assertIn("saveButton.disabled = true", view)
+        self.assertIn('button("reset", "重置草稿")', view)
+        self.assertIn("resetScheduleDraft(state, uiState)", controller)
+        self.assertIn("不会发送业务请求", view)
+
+        # loading/empty/content/error and production unavailable share the same
+        # neutral plane. Semantic colors are complete edges only.
+        self.assertRegex(
+            css,
+            r'data-schedule-workspace-state="loading"\]\s*\{[^}]*'
+            r"border-color:\s*var\(--imageweave-state-running\)"
+            r"[^}]*background:\s*"
+            r"var\(--imageweave-glass-surface-secondary\)",
+        )
+        self.assertRegex(
+            css,
+            r'data-schedule-workspace-state="error"\]\s*\{[^}]*'
+            r"border:\s*var\(--imageweave-border-strong-width\) solid "
+            r"var\(--imageweave-state-danger\)[^}]*background:\s*"
+            r"var\(--imageweave-glass-surface-default\)",
+        )
+        for phase in ("loading", "empty", "content", "error"):
+            self.assertRegex(fixture_states, rf"\b{phase}:\s*freeze\(")
+        self.assertIn(
+            "定时任务后端能力尚未接入；当前不会读取调度器状态或发送业务请求。",
+            model,
+        )
+        self.assertIn("不会调用现有 Diagnostics 调度器状态", view)
+
+        # Dirty route/minimize/close protection is one shared Promise. Dialog
+        # cancel/Escape returns focus through the canonical Dialog controller;
+        # confirm discards only the local draft. Lifecycle teardown closes the
+        # dialog, clears the draft, listeners and beforeunload hook.
+        for marker in (
+            "let discardRequest = null",
+            "if (discardRequest) return discardRequest",
+            'title: "放弃未保存的计划草稿？"',
+            'return confirmDiscard("切换应用")',
+            'visibility === "closed" ? "关闭窗口" : "最小化窗口"',
+            "uiState = cleanUiState()",
+            "dialogs?.destroy?.()",
+            'globalThis.addEventListener?.("beforeunload"',
+            'globalThis.removeEventListener?.("beforeunload"',
+            'root.removeEventListener("click"',
+            'root.removeEventListener("input"',
+            'root.removeEventListener("change"',
+            'root.removeEventListener("submit"',
+        ):
+            self.assertIn(marker, controller)
+        dialog = (
+            webui / "js" / "components" / "dialog.js"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            'event.key === "Escape"',
+            'event.key !== "Tab"',
+            "previousFocus.focus({ preventScroll: true })",
+            "if (active) throw new Error",
+        ):
+            self.assertIn(marker, dialog)
+
+        # All eleven legacy Schedule surfaces and its tracked kicker are gone.
+        # The only *-solid name is the canonical no-backdrop capability fallback.
+        self.assertEqual(
+            re.findall(r"--imageweave-[\w-]*-solid", css),
+            ["--imageweave-fallback-elevated-solid"],
+        )
+        self.assertNotRegex(css, r"--imageweave-state-[\w-]*-surface")
+        self.assertNotRegex(css, r"text-transform:\s*uppercase")
+        self.assertNotRegex(css, r"letter-spacing:\s*0\.0[6-9]em")
+        self.assertNotRegex(
+            css,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+        positive_backdrops = [
+            value.strip()
+            for value in re.findall(
+                r"(?m)^\s*(?:-webkit-)?backdrop-filter\s*:\s*([^;\n]+)",
+                css,
+            )
+            if value.strip() != "none"
+        ]
+        self.assertEqual(positive_backdrops, [])
+        self.assertIn("@media (prefers-contrast: more)", css)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", css)
+        self.assertIn(':root[data-motion="off"]', css)
+        self.assertIn(
+            "@supports not ((-webkit-backdrop-filter: blur(1px)) or "
+            "(backdrop-filter: blur(1px)))",
+            css,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid)", css
+        )
+        for marker in (
+            "CanvasText",
+            "ButtonFace",
+            "Highlight",
+            "background-image: none",
+            "box-shadow: none",
+            "backdrop-filter: none",
+            "transition: none !important",
+        ):
+            self.assertIn(marker, css)
+
+        # Production remains unavailable and owns no API or fixture reference.
+        # The explicit tests-only host alone injects Schedule content and a
+        # canonical Dialog, and exposes route/minimize/close acceptance seams.
+        production = "\n".join((controller, view, model))
+        self.assertIn("createScheduleUnavailableAdapter()", controller)
+        self.assertIn(
+            'projectScheduleState({ phase: "unavailable" })', controller
+        )
+        for forbidden in (
+            "context.api",
+            "/api/",
+            "stage5-preview-fixtures",
+            "stage5-preview-host",
+            "testsOnly",
+            "fixture",
+            "夹具",
+            "fetch(",
+            "XMLHttpRequest",
+        ):
+            self.assertNotIn(forbidden, production)
+        for marker in (
+            "createScheduleController",
+            "createDialogController",
+            "adapterState || initialState",
+            "requestRouteLeave",
+            "requestMinimize",
+            "requestClose",
+            "dialogOpen",
+        ):
+            self.assertIn(marker, fixture_host)
+        self.assertIn('data-stage5-tests-only="true"', fixture_html)
+        self.assertIn('/__webui__/styles/dialog.css', fixture_html)
+
     def test_polling_focus_t14_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
         javascript_root = backend_root / "gdl_backend" / "webui" / "js"

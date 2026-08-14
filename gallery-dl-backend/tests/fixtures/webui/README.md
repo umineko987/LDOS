@@ -47,6 +47,17 @@ so reactivation cannot restore the state that happened to be mounted first.
 None of this media decorator is imported or discoverable from a production app
 closure.
 
+For Schedule acceptance, the same tests-only host injects only the allow-listed
+loading, empty, content, and error facts through the preview adapter. It loads
+the canonical Dialog controller solely from the separately mounted production
+module tree and exposes explicit route/minimize/close leave requests so tests
+can verify one in-flight discard confirmation, Escape/cancel/confirm, focus
+return, draft reset, deactivate/reactivate, and destroy cleanup. Schedule save,
+toggle, and run controls remain disabled with an explained unavailable reason;
+the fixture does not emulate a backend write or send a business request.
+Production Schedule retains the unavailable adapter and cannot discover this
+host, its state table, or its leave-request seams.
+
 The Stage 6 production closure test ensures these fixture markers and modules
 never enter `gdl_backend/webui/` or the wheel. The maintained project screenshot
 is `assets/example.png` with provenance in `assets/example.json`; it comes from

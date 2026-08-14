@@ -218,8 +218,15 @@ async function createController(id, initialState) {
     });
   }
   if (id === "schedule") {
-    const { createScheduleController } = await import("/__webui__/js/apps/schedule.js");
-    return createScheduleController({ root: host, app: APP_DEFINITIONS.schedule }, {
+    const [{ createScheduleController }, { createDialogController }] = await Promise.all([
+      import("/__webui__/js/apps/schedule.js"),
+      import("/__webui__/js/components/dialog.js"),
+    ]);
+    return createScheduleController({
+      root: host,
+      app: APP_DEFINITIONS.schedule,
+      dialogs: createDialogController(),
+    }, {
       initialState,
       adapter: Object.freeze({ read: () => adapterState || initialState }),
     });
@@ -279,6 +286,7 @@ function snapshot() {
     phase: controller?.getState?.().phase || "",
     uiState: controller?.getUiState?.() || null,
     windowMode,
+    dialogOpen: Boolean(document.querySelector(".imageweave-dialog")),
     media: galleryMedia?.snapshot() || null,
   });
 }
@@ -294,6 +302,9 @@ window.stage5FixtureHarness = Object.freeze({
   async settleMedia() { return galleryMedia?.settle() || null; },
   deactivate() { controller?.deactivate(); return snapshot(); },
   activate() { controller?.activate(); return snapshot(); },
+  requestRouteLeave() { return controller?.beforeLeave?.() ?? true; },
+  requestMinimize() { return controller?.beforeWindowHide?.("minimized") ?? true; },
+  requestClose() { return controller?.beforeWindowHide?.("closed") ?? true; },
   destroy() {
     controller?.destroy();
     controller = null;
