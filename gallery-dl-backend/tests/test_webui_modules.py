@@ -1408,6 +1408,245 @@ class WebUiModuleTests(unittest.TestCase):
         for forbidden in ("oklch(", "@import", "http://", "https://", "data:image", "data:font"):
             self.assertNotIn(forbidden, production_css)
 
+    def test_nocturne_os_shell_visual_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        index = (webui / "index.html").read_text(encoding="utf-8")
+        desktop = (webui / "styles" / "desktop.css").read_text(
+            encoding="utf-8"
+        )
+        taskbar = (
+            webui / "js" / "components" / "taskbar-windows.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str, *, body_contains: str | None = None) -> str:
+            matches = list(re.finditer(
+                rf"(?m)^\s*{re.escape(selector)}\s*\{{",
+                desktop,
+            ))
+            self.assertTrue(matches, selector)
+            for match in matches:
+                opening = desktop.index("{", match.start())
+                closing = desktop.index("}", opening)
+                body = desktop[opening + 1 : closing]
+                if body_contains is None or body_contains in body:
+                    return body
+            self.fail(f"CSS selector 缺少目标声明：{selector} -> {body_contains}")
+
+        # T5 只改现有壳层视觉；窗口 DOM、交通灯 ARIA 和状态 marker
+        # 继续由既有 manager/component 投影，不增第二套状态所有权。
+        self.assertEqual(index.count("data-application-window"), 1)
+        self.assertEqual(index.count("window-traffic-light--"), 3)
+        self.assertEqual(index.count("data-window-close"), 1)
+        self.assertEqual(index.count("data-window-minimize"), 1)
+        self.assertEqual(index.count("data-window-maximize"), 1)
+        self.assertIn('aria-disabled="false"', index)
+        self.assertIn('aria-pressed="false"', index)
+        for marker in (
+            "data-menu-bar",
+            "data-application-center-host",
+            "data-dock",
+            "data-task-window-list",
+        ):
+            self.assertEqual(index.count(marker), 1, marker)
+
+        # 正常壳层直接消费 canonical 中性玻璃；旧 surface-*-solid
+        # 双声明不再出现在本阶段源码，实色只保留于能力/对比度 fallback。
+        self.assertNotRegex(
+            desktop,
+            r"--imageweave-surface-[\w-]*-solid",
+        )
+        self.assertNotIn("color-mix(", desktop)
+        menu_bar = css_block(".menu-bar")
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)", menu_bar
+        )
+        self.assertIn("border-bottom", menu_bar)
+        self.assertIn("var(--imageweave-border-weak)", menu_bar)
+        self.assertIn("inset 0 1px 0", menu_bar)
+        self.assertIn("inset 0 -1px 0", menu_bar)
+        self.assertIn("0 14px 36px", menu_bar)
+        menu_popover = css_block(".menu-popover")
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            menu_popover,
+        )
+        self.assertIn("min-width: 260px", menu_popover)
+        menu_item = css_block(".menu-popover__item")
+        self.assertIn("min-height: var(--imageweave-control-height)", menu_item)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-weak)", menu_item
+        )
+        self.assertNotIn("backdrop-filter", menu_item)
+
+        application_window = css_block(".application-window")
+        self.assertIn("width: 800px", application_window)
+        self.assertIn("height: 560px", application_window)
+        self.assertIn("border-radius: var(--imageweave-radius-window)", application_window)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            application_window,
+        )
+        focused_window = css_block(
+            ".application-window[data-window-focused]"
+        )
+        self.assertIn("var(--imageweave-border-focus)", focused_window)
+        self.assertIn("var(--imageweave-focus-glow)", focused_window)
+        self.assertIn("0 24px 72px", focused_window)
+        interacting_window = css_block(
+            ".application-window[data-window-interacting]"
+        )
+        self.assertIn("box-shadow: none", interacting_window)
+        self.assertIn("transition: none", interacting_window)
+        maximized_window = css_block(".application-window[data-maximized]")
+        self.assertIn("border-radius: 0", maximized_window)
+        titlebar = css_block(".window-titlebar")
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-weak)", titlebar
+        )
+        self.assertNotIn("backdrop-filter", titlebar)
+        self.assertNotIn("--imageweave-accent", titlebar)
+        window_body = css_block(".window-body")
+        self.assertIn("padding: clamp(24px, 2.25vw, 32px)", window_body)
+        self.assertIn("overflow: auto", window_body)
+
+        traffic = css_block(".window-traffic-light")
+        for minimum in (
+            "width: 30px",
+            "min-width: 30px",
+            "height: 30px",
+            "min-height: 30px",
+        ):
+            self.assertIn(minimum, traffic)
+        self.assertIn("background: transparent", traffic)
+        traffic_dot = css_block(".window-traffic-light > span")
+        self.assertIn("width: 13px", traffic_dot)
+        self.assertIn("height: 13px", traffic_dot)
+        for color in ("#FF5F57", "#FEBC2E", "#28C840"):
+            self.assertEqual(desktop.count(color), 1)
+        disabled_traffic = css_block(
+            '.window-traffic-light:is(:disabled, [aria-disabled="true"]) > span'
+        )
+        self.assertIn("border-color: currentColor", disabled_traffic)
+        self.assertIn("background: transparent", disabled_traffic)
+        disabled_symbol = css_block(
+            '.window-traffic-light:is(:disabled, [aria-disabled="true"]) > span::before'
+        )
+        self.assertIn('content: "×"', disabled_symbol)
+        self.assertIn("opacity: 1", disabled_symbol)
+        self.assertIn(".window-traffic-light:focus-visible", desktop)
+        self.assertIn("var(--imageweave-focus-width)", desktop)
+
+        center_host = css_block(".application-center-host")
+        self.assertRegex(center_host, r"background:\s*rgb\([^;]+/\s*0\.58\)")
+        center = css_block(".application-center")
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)", center
+        )
+        center_item = css_block(
+            ".application-center__item", body_contains="min-height: 78px"
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-weak)", center_item
+        )
+        self.assertIn("box-shadow: none", center_item)
+        self.assertNotIn("backdrop-filter", center_item)
+        center_group = css_block(
+            ".application-center__group h3", body_contains="letter-spacing: 0"
+        )
+        self.assertIn("letter-spacing: 0", center_group)
+        self.assertIn("text-transform: none", center_group)
+
+        dock_shell = css_block(".dock__items")
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-button)", dock_shell
+        )
+        dock_item = css_block(".dock__item")
+        self.assertIn("transform: none", dock_item)
+        self.assertNotIn("backdrop-filter", dock_item)
+        self.assertNotIn("translateY(-4px)", desktop)
+        self.assertNotIn("scale(1.05)", desktop)
+        self.assertNotRegex(desktop, r"\.dock__item\s*[+~]")
+        self.assertEqual(
+            re.findall(r"scale\(([^)]+)\)", desktop),
+            ["0.97", "0.97"],
+        )
+        focused_dock = css_block('.dock__item[data-dock-state="focused"]')
+        self.assertIn("var(--imageweave-accent)", focused_dock)
+        self.assertIn("inset 0 -2px 0", focused_dock)
+        minimized_dock = css_block('.dock__item[data-dock-state="minimized"]')
+        self.assertIn("border-color: var(--imageweave-border-default)", minimized_dock)
+        for state_copy in (
+            'closed: "已关闭"',
+            'focused: "当前聚焦"',
+            'background: "正在后台运行"',
+            'minimized: "已最小化"',
+        ):
+            self.assertIn(state_copy, taskbar)
+
+        # 每个顶层表面只有一处主 backdrop；标题栏、行、网格项不重复。
+        supported = desktop.split("@supports ((-webkit-backdrop-filter", 1)[1]
+        supported = supported.split("@supports not", 1)[0]
+        self.assertIn(
+            "blur(var(--imageweave-glass-blur-environment))", supported
+        )
+        self.assertGreaterEqual(
+            supported.count("blur(var(--imageweave-glass-blur-window))"), 4
+        )
+        for selector in (
+            ".application-window",
+            ".menu-bar",
+            ".menu-popover",
+            ".application-center",
+            ".dock__items",
+            ".dock__overflow",
+        ):
+            self.assertIn(selector, supported)
+        for selector in (
+            ".window-titlebar",
+            ".menu-popover__item",
+            ".application-center__item",
+            ".dock__item",
+        ):
+            self.assertNotRegex(
+                supported,
+                rf"(?m)^\s*{re.escape(selector)}(?![\w-])",
+            )
+        self.assertIn(".application-window[hidden]", desktop)
+        self.assertIn(
+            ".application-center-host[hidden] .application-center", desktop
+        )
+        self.assertIn(".dock__overflow[hidden]", desktop)
+        self.assertIn("backdrop-filter: none !important", desktop)
+
+        # canonical spring 仅在正常路径生效；直接操控、两类 motion off、
+        # forced-colors 与无 backdrop 路径都有独立禁用/实色契约。
+        self.assertNotRegex(desktop, r"\b(?:120|150)ms\b")
+        self.assertIn("var(--imageweave-transition-standard)", desktop)
+        self.assertIn(':root[data-motion="off"]', desktop)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", desktop)
+        self.assertIn("@media (forced-colors: active)", desktop)
+        self.assertIn("@media (prefers-contrast: more)", desktop)
+        self.assertIn("@supports not", desktop)
+        self.assertIn(
+            "background: var(--imageweave-fallback-window-solid) !important",
+            desktop,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid) !important",
+            desktop,
+        )
+        forced = desktop.split("@media (forced-colors: active)", 1)[1]
+        for expected in (
+            "background: Canvas !important",
+            "backdrop-filter: none",
+            "box-shadow: none",
+            "transform: none",
+            "Highlight",
+            "GrayText",
+        ):
+            self.assertIn(expected, forced)
+
     def test_window_manager_t12_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
         webui = backend_root / "gdl_backend" / "webui"

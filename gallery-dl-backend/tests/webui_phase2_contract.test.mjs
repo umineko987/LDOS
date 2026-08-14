@@ -225,7 +225,10 @@ test("阶段 2 正式 DOM 包含五层、交通灯与严格桌面边界", () => 
   assert.equal(responsiveCss.includes("@media (max-width: 1179px), (max-height: 719px)"), true);
   assert.equal(responsiveCss.includes("@media (max-width: 767px)"), false);
   assert.equal(responsiveCss.includes("display: none !important"), true);
-  assert.equal(desktopCss.includes(':root[data-motion="off"] .dock__item'), true);
+  assert.match(
+    desktopCss,
+    /:root\[data-motion="off"\]\s+:is\([\s\S]*?\.dock__item[\s\S]*?\)\s*\{[^}]*transition:\s*none;/u,
+  );
   assert.equal(desktopCss.includes("@media (prefers-reduced-motion: reduce)"), true);
   assert.equal(desktopCss.includes("@media (forced-colors: active)"), true);
 });
