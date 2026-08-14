@@ -1153,6 +1153,7 @@ class WebUiModuleTests(unittest.TestCase):
         backend_root = Path(__file__).resolve().parents[1]
         webui = backend_root / "gdl_backend" / "webui"
         styles = webui / "styles"
+        index = (webui / "index.html").read_text(encoding="utf-8")
         tokens = (styles / "tokens.css").read_text(encoding="utf-8")
         base = (styles / "base.css").read_text(encoding="utf-8")
         desktop = (styles / "desktop.css").read_text(encoding="utf-8")
@@ -1191,30 +1192,108 @@ class WebUiModuleTests(unittest.TestCase):
             [tokens, base, desktop, controls, status, dialog, *app_css.values()]
         )
 
-        # 三档表面必须各有不透明前置值，随后才使用受控 sRGB mix。
-        default_tokens = tokens.split(':root[data-theme-tone="dark"]', 1)[0]
-        for tier, percentage in (
-            ("content", 96),
-            ("navigation", 86),
-            ("environment", 74),
+        # T4 只有一个 dark 根主题；玻璃事实使用固定白色 alpha，旧 selector
+        # 只能通过 var alias 消费 canonical token，不能保留浅色/着色派生。
+        self.assertNotIn(':root[data-theme-tone="dark"]', tokens)
+        self.assertNotIn('data-theme-tone="light"', tokens)
+        self.assertNotIn("color-scheme: light", tokens)
+        self.assertIn("color-scheme: dark", tokens)
+        self.assertIn("--imageweave-background-deepest: #060A13", tokens)
+        self.assertIn("--imageweave-background-default: #0B1322", tokens)
+        self.assertIn("--imageweave-accent: #E4B863", tokens)
+        self.assertIn("--imageweave-accent-highlight: #F3DCA8", tokens)
+        self.assertIn("--imageweave-focus-glow: rgb(228 184 99 / 0.18)", tokens)
+        self.assertNotIn("color-mix", tokens)
+
+        canonical_surfaces = {
+            "weak": "0.04",
+            "secondary": "0.05",
+            "input": "0.06",
+            "default": "0.08",
+            "button": "0.10",
+            "environment": "0.12",
+            "hover": "0.15",
+        }
+        for name, alpha in canonical_surfaces.items():
+            self.assertIn(
+                f"--imageweave-glass-surface-{name}: "
+                f"rgb(255 255 255 / {alpha});",
+                tokens,
+            )
+        for alias, canonical in {
+            "surface-content-solid": "glass-surface-weak",
+            "surface-navigation-solid": "glass-surface-secondary",
+            "surface-control-solid": "glass-surface-input",
+            "surface-content": "glass-surface-default",
+            "surface-control": "glass-surface-button",
+            "surface-environment": "glass-surface-environment",
+            "surface-control-hover": "glass-surface-hover",
+            "border-soft": "border-weak",
+            "danger": "state-danger",
+            "warning": "state-warning",
+            "success": "state-success",
+            "radius-lg": "radius-card",
+            "radius-md": "radius-control",
+            "radius-sm": "radius-control",
+            "shadow-panel": "shadow-card",
+        }.items():
+            self.assertIn(
+                f"--imageweave-{alias}: var(--imageweave-{canonical});",
+                tokens,
+            )
+        all_css = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted(styles.rglob("*.css"))
+        )
+        defined_tokens = set(re.findall(r"(--imageweave-[\w-]+)\s*:", all_css))
+        consumed_tokens = set(re.findall(r"var\(\s*(--imageweave-[\w-]+)", all_css))
+        self.assertEqual(consumed_tokens - defined_tokens, set())
+
+        for expected in (
+            "--imageweave-glass-blur-environment: 40px",
+            "--imageweave-glass-blur-window: 60px",
+            "--imageweave-glass-saturation: 180%",
+            "--imageweave-radius-window: 24px",
+            "--imageweave-radius-card: 24px",
+            "--imageweave-radius-control: 16px",
+            "--imageweave-motion-duration: 500ms",
+            "--imageweave-motion-easing: cubic-bezier(0.16, 1, 0.3, 1)",
         ):
-            solid_name = f"--imageweave-surface-{tier}-solid"
-            token_name = f"--imageweave-surface-{tier}"
-            self.assertRegex(
-                default_tokens,
-                rf"{re.escape(solid_name)}:\s*#[0-9A-Fa-f]{{6}}\s*;",
+            self.assertIn(expected, tokens)
+        self.assertRegex(tokens, r"inset 0 1px 0 rgb\(255 255 255 / 0\.2[25]\)")
+        self.assertIn("inset 0 -1px 0 rgb(2 6 16 / 0.35)", tokens)
+
+        scene_bases = {
+            "graphite": "#080D15",
+            "slate": "#0B1322",
+            "deep-ocean": "#07111B",
+            "forest": "#081210",
+            "plum-gray": "#100C0B",
+            "warm-paper": "#120D0A",
+        }
+        for scene, base_color in scene_bases.items():
+            match = re.search(
+                rf"\.desktop-wallpaper--{re.escape(scene)}\s*\{{(?P<body>.*?)\n\}}",
+                desktop,
+                flags=re.DOTALL,
             )
-            declarations = re.findall(
-                rf"{re.escape(token_name)}:\s*([^;]+);",
-                default_tokens,
-            )
-            self.assertGreaterEqual(len(declarations), 2, token_name)
-            self.assertNotIn("color-mix", declarations[0], token_name)
-            self.assertRegex(
-                declarations[1],
-                rf"color-mix\(in srgb,.*\s{percentage}%,\s*transparent\)",
-                token_name,
-            )
+            self.assertIsNotNone(match, scene)
+            body = match.group("body")
+            self.assertGreaterEqual(body.count("radial-gradient("), 2, scene)
+            self.assertIn(base_color, body, scene)
+        self.assertEqual(desktop.count('url("../assets/noise.svg")'), 1)
+        self.assertEqual(index.count('class="desktop-noise"'), 1)
+        self.assertRegex(
+            desktop,
+            r"\.desktop-noise\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;"
+            r"[^}]*opacity:\s*0\.025;[^}]*pointer-events:\s*none;",
+        )
+        forced_desktop = desktop.split("@media (forced-colors: active)", 1)[1]
+        self.assertRegex(
+            forced_desktop,
+            r"\.desktop-noise\s*\{[^}]*display:\s*none;"
+            r"[^}]*background-image:\s*none;",
+        )
 
         token_groups = {
             "text": ("primary", "secondary", "inverse", "code"),
@@ -1238,8 +1317,11 @@ class WebUiModuleTests(unittest.TestCase):
         ):
             self.assertIn(token_name, tokens)
         self.assertIn("system-ui", tokens)
+        self.assertIn("--imageweave-font-display", tokens)
+        self.assertIn('"Songti SC", "STSong", "Noto Serif CJK SC"', tokens)
         self.assertIn("--imageweave-font-mono", tokens)
         self.assertIn("font-family: var(--imageweave-font-sans)", base)
+        self.assertIn("font-family: var(--imageweave-font-display)", base)
         self.assertIn("font-family: var(--imageweave-font-mono)", controls)
 
         # 共享 selector 覆盖全部八个真实应用按钮；面板只要求生产 DOM 中实际存在的六类。
@@ -1282,11 +1364,14 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn('role: status === "error" ? "alert" : "status"', shared_dom["empty-state"].read_text(encoding="utf-8"))
         self.assertIn('attributes: { role: "alert" }', shared_dom["error-view"].read_text(encoding="utf-8"))
 
-        # 不支持 backdrop 时使用实色；强制颜色和两种动效关闭路径可独立生效。
+        # 不支持 backdrop 时使用实色；标准/WebKit、强制颜色、对比度和
+        # 两种动效关闭路径都可独立生效。
         for source in (desktop, dialog):
             self.assertIn("@supports not", source)
             self.assertIn("backdrop-filter: blur(1px)", source)
+            self.assertIn("-webkit-backdrop-filter: blur(1px)", source)
             self.assertIn("-solid) !important", source)
+        self.assertIn("@media (prefers-contrast: more)", tokens + base + desktop)
         for source in (base, desktop, controls, status, dialog):
             self.assertIn("@media (forced-colors: active)", source)
         forced_contract = "\n".join((base, desktop, controls, status, dialog))
@@ -1369,7 +1454,7 @@ class WebUiModuleTests(unittest.TestCase):
         )
         self.assertEqual(
             re.findall(r"(?m)^\s*animation\s*:\s*([^;]+);", application_window),
-            ["imageweave-window-appear 120ms ease-out"],
+            ["imageweave-window-appear var(--imageweave-transition-standard)"],
         )
         self.assertIn("transition: none", interacting_window)
         self.assertNotRegex(
@@ -1378,7 +1463,7 @@ class WebUiModuleTests(unittest.TestCase):
         )
         self.assertEqual(
             desktop_css.count(
-                "animation: imageweave-window-appear 120ms ease-out"
+                "animation: imageweave-window-appear var(--imageweave-transition-standard)"
             ),
             1,
         )

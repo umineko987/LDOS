@@ -353,7 +353,7 @@
   height: 8px;
   margin-top: 10px;
   border-radius: var(--imageweave-radius-pill);
-  background: rgb(255 255 255 / 0.52);
+  background: var(--imageweave-glass-surface-button);
 }
 
 .personalization-preview-window__line--short {

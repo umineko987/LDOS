@@ -87,8 +87,8 @@
 
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .imageweave-dialog {
-    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(124%);
-    backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(124%);
+    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(var(--imageweave-glass-saturation));
+    backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(var(--imageweave-glass-saturation));
   }
 
   .imageweave-dialog::backdrop {
@@ -99,7 +99,7 @@
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .imageweave-dialog {
-    background: var(--imageweave-surface-environment-solid) !important;
+    background: var(--imageweave-fallback-elevated-solid) !important;
   }
 
   .imageweave-dialog::backdrop {

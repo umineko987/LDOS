@@ -791,6 +791,15 @@ class ApiTests(unittest.TestCase):
             "desktop-wallpaper--graphite",
             wallpaper_attrs.get("class", "").split(),
         )
+        noise_tags = [
+            attrs
+            for tag, attrs in parser.tags
+            if tag == "div"
+            and "desktop-noise" in attrs.get("class", "").split()
+        ]
+        self.assertEqual(len(noise_tags), 1)
+        self.assertEqual(noise_tags[0].get("aria-hidden"), "true")
+        self.assertNotIn("tabindex", noise_tags[0])
         self.assertNotIn("data-desktop-wallpaper-image", index.text)
         self.assertNotIn("data-desktop-wallpaper-mask", index.text)
         self.assertNotIn("desktop-wallpaper__image", index.text)
@@ -853,7 +862,10 @@ class ApiTests(unittest.TestCase):
         separator = ".desktop-wallpaper {"
         self.assertIn(separator, desktop_style_text)
         wallpaper_rule = desktop_style_text.partition(separator)[2].partition("}")[0]
-        self.assertIn("background: #20242a;", wallpaper_rule.lower())
+        self.assertIn(
+            "background: var(--imageweave-background-deepest);",
+            wallpaper_rule,
+        )
         self.assertIn("pointer-events: none;", wallpaper_rule)
         self.assertNotIn("animation", wallpaper_rule)
         self.assertNotIn("transition", wallpaper_rule)
@@ -861,17 +873,26 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("desktop-wallpaper__mask", desktop_style_text)
         self.assertNotIn("window-layer--opacity", desktop_style_text)
         for color_id, color_value in {
-            "graphite": "#20242a",
-            "slate": "#384554",
-            "deep-ocean": "#20364a",
-            "forest": "#294039",
-            "plum-gray": "#403341",
-            "warm-paper": "#e7e1d6",
+            "graphite": "#080d15",
+            "slate": "#0b1322",
+            "deep-ocean": "#07111b",
+            "forest": "#081210",
+            "plum-gray": "#100c0b",
+            "warm-paper": "#120d0a",
         }.items():
-            self.assertIn(
-                f".desktop-wallpaper--{color_id} {{\n  background: {color_value};",
-                desktop_style_text.lower(),
-            )
+            scene_separator = f".desktop-wallpaper--{color_id} {{"
+            self.assertIn(scene_separator, desktop_style_text)
+            scene_rule = desktop_style_text.partition(scene_separator)[2].partition("}")[0]
+            self.assertGreaterEqual(scene_rule.count("radial-gradient("), 2)
+            self.assertIn(color_value, scene_rule.lower())
+        noise_separator = ".desktop-noise {"
+        self.assertIn(noise_separator, desktop_style_text)
+        noise_rule = desktop_style_text.partition(noise_separator)[2].partition("}")[0]
+        self.assertEqual(noise_rule.count('url("../assets/noise.svg")'), 1)
+        self.assertIn("position: fixed;", noise_rule)
+        self.assertIn("inset: 0;", noise_rule)
+        self.assertIn("opacity: 0.025;", noise_rule)
+        self.assertIn("pointer-events: none;", noise_rule)
 
         static_background_sources = "\n".join(
             (index.text, desktop_style_text, main_source.text)

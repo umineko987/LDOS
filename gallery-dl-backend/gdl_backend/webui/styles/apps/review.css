@@ -447,7 +447,10 @@ a.review-button {
   color: var(--imageweave-text-primary);
   background: var(--imageweave-surface-content-solid);
   box-shadow: var(--imageweave-shadow-panel);
-  transition: opacity 120ms ease, transform 120ms ease, border-color 120ms ease;
+  transition:
+    opacity var(--imageweave-transition-standard),
+    transform var(--imageweave-transition-standard),
+    border-color var(--imageweave-transition-standard);
 }
 
 .review-image-card[aria-disabled="false"] {

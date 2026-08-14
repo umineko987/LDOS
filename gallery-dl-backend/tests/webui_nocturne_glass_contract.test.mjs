@@ -914,8 +914,10 @@ test("[glass tokens] neutral low-alpha surfaces, optical depth, blur, saturation
       check(matching.some((token) => tokenReferenceCount(token.property) > 0), `radius ${radius} token is not consumed`, violations);
     }
   }
+  const exactRadii = new Set(["16px", "24px", "999px", "50%"]);
+  const canonicalRadiusAlias = /^var\(\s*--imageweave-radius-(?:window|card|control|pill)\s*\)$/;
   for (const token of radiusTokens) {
-    if (!new Set(["16px", "24px", "999px", "50%"]).has(token.value)) {
+    if (!exactRadii.has(token.value) && !canonicalRadiusAlias.test(token.value)) {
       violations.push(`${token.property} retains non-contract radius ${token.value}`);
     }
   }

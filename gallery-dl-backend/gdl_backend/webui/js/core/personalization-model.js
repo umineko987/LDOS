@@ -1,15 +1,12 @@
-export const BUILT_IN_WALLPAPER_COLORS = Object.freeze({
-  graphite: "#20242A",
-  slate: "#384554",
-  "deep-ocean": "#20364A",
-  forest: "#294039",
-  "plum-gray": "#403341",
-  "warm-paper": "#E7E1D6",
-});
-
-export const BUILT_IN_WALLPAPER_COLOR_IDS = Object.freeze(
-  Object.keys(BUILT_IN_WALLPAPER_COLORS),
-);
+// IDs are preference facts; desktop.css is the sole source for scene colors and light wells.
+export const BUILT_IN_WALLPAPER_COLOR_IDS = Object.freeze([
+  "graphite",
+  "slate",
+  "deep-ocean",
+  "forest",
+  "plum-gray",
+  "warm-paper",
+]);
 
 export const PERSONALIZATION_OPTIONS = Object.freeze({
   animations: Object.freeze(["on", "off"]),

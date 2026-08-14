@@ -170,7 +170,6 @@ import {
   WALLPAPER_COLOR_CLASSES,
 } from "../gdl_backend/webui/js/core/personalization.js";
 import {
-  BUILT_IN_WALLPAPER_COLORS,
   BUILT_IN_WALLPAPER_COLOR_IDS,
   copyPersonalizationPreferences,
   derivePersonalizationPreview,
@@ -4476,14 +4475,6 @@ function cleanupIndexedDbFixture(mode = "success") {
 }
 
 test("个性化模型只保留场景与动效，严格投影覆盖六场景", () => {
-  assert.deepEqual(BUILT_IN_WALLPAPER_COLORS, {
-    graphite: "#20242A",
-    slate: "#384554",
-    "deep-ocean": "#20364A",
-    forest: "#294039",
-    "plum-gray": "#403341",
-    "warm-paper": "#E7E1D6",
-  });
   assert.deepEqual(BUILT_IN_WALLPAPER_COLOR_IDS, [
     "graphite", "slate", "deep-ocean", "forest", "plum-gray", "warm-paper",
   ]);

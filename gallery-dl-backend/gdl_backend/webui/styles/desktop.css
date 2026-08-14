@@ -11,33 +11,68 @@
   inset: 0;
   z-index: 0;
   overflow: hidden;
-  background: #20242A;
+  background: var(--imageweave-background-deepest);
   pointer-events: none;
   user-select: none;
 }
 
 .desktop-wallpaper--graphite {
-  background: #20242A;
+  background:
+    radial-gradient(640px circle at 85% 10%, rgb(124 156 196 / 0.25), transparent 60%),
+    radial-gradient(560px circle at 10% 90%, rgb(51 81 122 / 0.30), transparent 60%),
+    radial-gradient(420px circle at 58% 48%, rgb(228 184 99 / 0.10), transparent 64%),
+    #080D15;
 }
 
 .desktop-wallpaper--slate {
-  background: #384554;
+  background:
+    radial-gradient(680px circle at 84% 12%, rgb(142 163 184 / 0.18), transparent 62%),
+    radial-gradient(600px circle at 12% 88%, rgb(42 62 88 / 0.28), transparent 62%),
+    #0B1322;
 }
 
 .desktop-wallpaper--deep-ocean {
-  background: #20364A;
+  background:
+    radial-gradient(700px circle at 86% 12%, rgb(49 129 174 / 0.24), transparent 62%),
+    radial-gradient(620px circle at 10% 90%, rgb(21 87 91 / 0.28), transparent 62%),
+    radial-gradient(400px circle at 61% 44%, rgb(228 184 99 / 0.07), transparent 66%),
+    #07111B;
 }
 
 .desktop-wallpaper--forest {
-  background: #294039;
+  background:
+    radial-gradient(680px circle at 85% 11%, rgb(65 125 100 / 0.22), transparent 62%),
+    radial-gradient(600px circle at 9% 91%, rgb(21 78 58 / 0.28), transparent 62%),
+    radial-gradient(420px circle at 57% 48%, rgb(228 184 99 / 0.08), transparent 66%),
+    #081210;
 }
 
 .desktop-wallpaper--plum-gray {
-  background: #403341;
+  background:
+    radial-gradient(680px circle at 84% 12%, rgb(153 133 120 / 0.18), transparent 62%),
+    radial-gradient(600px circle at 10% 90%, rgb(82 52 42 / 0.26), transparent 62%),
+    radial-gradient(420px circle at 58% 45%, rgb(117 135 150 / 0.10), transparent 66%),
+    #100C0B;
 }
 
 .desktop-wallpaper--warm-paper {
-  background: #E7E1D6;
+  background:
+    radial-gradient(680px circle at 85% 10%, rgb(218 153 74 / 0.18), transparent 62%),
+    radial-gradient(600px circle at 10% 90%, rgb(96 53 29 / 0.25), transparent 62%),
+    radial-gradient(440px circle at 58% 46%, rgb(143 167 188 / 0.12), transparent 66%),
+    #120D0A;
+}
+
+.desktop-noise {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background-image: url("../assets/noise.svg");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+  opacity: 0.025;
+  pointer-events: none;
+  user-select: none;
 }
 
 .window-layer {
@@ -60,22 +95,21 @@
   border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
   border-radius: var(--imageweave-radius-window);
   color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface);
-  background: var(--imageweave-surface-content);
-  box-shadow: var(--imageweave-shadow-card);
+  background: var(--imageweave-glass-surface-default);
+  box-shadow: var(--imageweave-shadow-window);
   pointer-events: auto;
   transform: none;
-  animation: imageweave-window-appear 120ms ease-out;
+  animation: imageweave-window-appear var(--imageweave-transition-standard);
   transition:
-    left 120ms ease-out,
-    top 120ms ease-out,
-    width 120ms ease-out,
-    height 120ms ease-out,
-    box-shadow 120ms ease-out;
+    left var(--imageweave-transition-standard),
+    top var(--imageweave-transition-standard),
+    width var(--imageweave-transition-standard),
+    height var(--imageweave-transition-standard),
+    box-shadow var(--imageweave-transition-standard);
 }
 
 .application-window[data-window-focused] {
-  border-color: var(--imageweave-border-strong);
+  border-color: var(--imageweave-border-focus);
   box-shadow: var(--imageweave-shadow-window);
 }
 
@@ -109,9 +143,8 @@
   min-height: var(--imageweave-window-title-height);
   padding: 3px 4px 3px 10px;
   border-bottom: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
-  color: var(--imageweave-text-inverse);
-  background: #46515D;
-  background: color-mix(in srgb, var(--imageweave-accent) 82%, var(--imageweave-text-primary) 18%);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-surface-navigation);
   line-height: 1.2;
   cursor: move;
   touch-action: none;
@@ -193,14 +226,14 @@
 
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .application-window {
-    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-navigation)) saturate(118%);
-    backdrop-filter: blur(var(--imageweave-glass-blur-navigation)) saturate(118%);
+    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-navigation)) saturate(var(--imageweave-glass-saturation));
+    backdrop-filter: blur(var(--imageweave-glass-blur-navigation)) saturate(var(--imageweave-glass-saturation));
   }
 }
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .application-window {
-    background: var(--imageweave-surface-content-solid) !important;
+    background: var(--imageweave-fallback-window-solid) !important;
   }
 }
 
@@ -219,6 +252,11 @@
 @media (forced-colors: active) {
   .desktop-wallpaper {
     background: Canvas;
+  }
+
+  .desktop-noise {
+    display: none;
+    background-image: none;
   }
 
   .application-window {
@@ -251,7 +289,9 @@
 
 @media (prefers-contrast: more) {
   .application-window {
-    background: var(--imageweave-surface-content-solid) !important;
+    border-color: var(--imageweave-border-focus);
+    color: var(--imageweave-text-heading);
+    background: var(--imageweave-fallback-window-solid) !important;
   }
 }
 
@@ -559,7 +599,10 @@
   border: 0;
   background: transparent;
   text-align: center;
-  transition: transform 120ms ease-out, background-color 120ms ease-out;
+  transition:
+    transform var(--imageweave-transition-standard),
+    background-color var(--imageweave-transition-standard),
+    border-color var(--imageweave-transition-standard);
 }
 
 .dock__item:hover,
@@ -644,8 +687,18 @@
   .application-center,
   .dock__items,
   .dock__overflow {
-    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(124%);
-    backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(124%);
+    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(var(--imageweave-glass-saturation));
+    backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(var(--imageweave-glass-saturation));
+  }
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .menu-bar,
+  .menu-popover,
+  .application-center,
+  .dock__items,
+  .dock__overflow {
+    background: var(--imageweave-fallback-elevated-solid) !important;
   }
 }
 
