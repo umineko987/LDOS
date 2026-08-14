@@ -1903,6 +1903,192 @@ class WebUiModuleTests(unittest.TestCase):
         ):
             self.assertIn(expected, forced)
 
+    def test_nocturne_crawl_t71_visual_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        crawl = (
+            webui / "styles" / "apps" / "crawl.css"
+        ).read_text(encoding="utf-8")
+        controls = (webui / "styles" / "controls.css").read_text(
+            encoding="utf-8"
+        )
+        view = (
+            webui / "js" / "components" / "crawl-view.js"
+        ).read_text(encoding="utf-8")
+        controller = (
+            webui / "js" / "apps" / "crawl.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str) -> str:
+            match = re.search(
+                rf"(?m)^\s*{re.escape(selector)}\s*\{{(?P<body>.*?)^\s*\}}",
+                crawl,
+                flags=re.DOTALL,
+            )
+            self.assertIsNotNone(match, selector)
+            return match.group("body")
+
+        # The three existing columns remain the real scroll workspace. Each is
+        # one neutral 6% top-level region with a complete 15% edge and 24px
+        # radius; only the parent application window owns backdrop blur.
+        workspace = css_block(".crawl-workspace")
+        self.assertIn("padding: 24px", workspace)
+        self.assertIn("overflow-x: auto", workspace)
+        self.assertIn("overflow-y: hidden", workspace)
+        track = css_block(".crawl-workspace-track")
+        self.assertIn("min-width: 1020px", track)
+        self.assertIn("gap: 24px", track)
+        self.assertIn("grid-template-columns", track)
+        column = css_block(".crawl-column")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-card)",
+            "background: var(--imageweave-glass-surface-input)",
+        ):
+            self.assertIn(expected, column)
+        self.assertNotIn("backdrop-filter", column)
+        column_scroll = css_block(".crawl-column-scroll")
+        self.assertIn("padding: 24px", column_scroll)
+        self.assertIn("overflow-y: auto", column_scroll)
+
+        # Source/candidate/result/summary/fact content is flattened into 4–6%
+        # inherited rows with 10% separators, 16px radii, no outer card shadow,
+        # no independent backdrop and no legacy opaque alias.
+        solid_refs = re.findall(r"--imageweave-[\w-]*-solid", crawl)
+        self.assertEqual(
+            solid_refs,
+            ["--imageweave-fallback-elevated-solid"],
+        )
+        self.assertNotRegex(crawl, r"--imageweave-state-[\w-]*-surface")
+        self.assertNotRegex(
+            crawl,
+            r"(?m)^\s*(?:-webkit-)?backdrop-filter\s*:"
+            r"(?![^\n]*\bnone\b)",
+        )
+        self.assertNotRegex(crawl, r"(?m)^\s*filter\s*:")
+        self.assertIn("background: var(--imageweave-glass-surface-weak)", crawl)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-secondary)",
+            crawl,
+        )
+        self.assertIn(
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-weak)",
+            crawl,
+        )
+        self.assertIn("border-radius: var(--imageweave-radius-control)", crawl)
+        self.assertIn("box-shadow: none", crawl)
+        address = css_block(".crawl-address-row")
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-weak)", address
+        )
+        self.assertIn("box-shadow: none", address)
+        self.assertIn("var(--imageweave-transition-standard)", address)
+        selected = css_block(".crawl-address-row--selected")
+        self.assertIn("border-color: var(--imageweave-border-focus)", selected)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-input)", selected
+        )
+        self.assertIn("box-shadow: none", selected)
+        self.assertNotRegex(
+            crawl,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+        self.assertIn(
+            '.crawl-source-nav-select[aria-current="page"]::before', crawl
+        )
+        self.assertIn('content: "◆"', crawl)
+
+        # Running/partial/error, source warning and validation retain readable
+        # text/icon markers plus complete semantic borders over neutral fills.
+        search_error = css_block(
+            '.crawl-search-state[data-crawl-search-state="error"]'
+        )
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            search_error,
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            search_error,
+        )
+        validation = css_block(".crawl-validation-message")
+        self.assertIn("color: var(--imageweave-text-primary)", validation)
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            validation,
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            validation,
+        )
+        self.assertIn(".crawl-source-warning::before", crawl)
+        self.assertIn('content: "⚠"', crawl)
+
+        # Crawl delegates all ordinary and primary actions to T6. The local
+        # stylesheet cannot repaint the champagne-outline primary as a solid
+        # accent button, and rows/cards never lift or scale on hover.
+        self.assertNotIn(".crawl-button--primary", crawl)
+        self.assertRegex(
+            controls,
+            r"\.crawl-button\.crawl-button--primary,[\s\S]*?\{"
+            r"[\s\S]*?border-color:\s*var\(--imageweave-accent\);"
+            r"[\s\S]*?color:\s*var\(--imageweave-accent-highlight\);"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-button\);",
+        )
+        address_hover = css_block(".crawl-address-row:hover")
+        self.assertIn("transform: none", address_hover)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-input)",
+            address_hover,
+        )
+        self.assertNotIn("text-transform: uppercase", crawl)
+        self.assertNotRegex(crawl, r"letter-spacing:\s*0\.0[6-9]em")
+        self.assertNotRegex(crawl, r"\b(?:100|120|150|180)ms\b")
+
+        # Canonical capability and accessibility paths stay explicit. The sole
+        # solid token is legal only in no-backdrop fallback; forced colors use
+        # system colors and both motion-off paths disable row transitions.
+        self.assertIn(
+            "@supports not ((-webkit-backdrop-filter: blur(1px)) or "
+            "(backdrop-filter: blur(1px)))",
+            crawl,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid)", crawl
+        )
+        self.assertIn("@media (prefers-contrast: more)", crawl)
+        self.assertIn("@media (forced-colors: active)", crawl)
+        self.assertIn("CanvasText", crawl)
+        self.assertIn("ButtonFace", crawl)
+        self.assertIn(":root[data-motion=\"off\"]", crawl)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", crawl)
+        self.assertGreaterEqual(crawl.count("transition: none !important"), 2)
+
+        # Visual-only migration: Stage 3 API, payload, DOM semantics, labels,
+        # delegated events, lifecycle and screen-reader naming remain present.
+        for marker in (
+            '"aria-label": "图片采集三段工作区，可横向滚动查看全部三栏"',
+            'role: "combobox"',
+            '"aria-current": source.key === activeSourceKey ? "page" : null',
+            'setAttribute("aria-invalid"',
+            '"aria-describedby": "crawl-submit-reason"',
+        ):
+            self.assertIn(marker, view)
+        for endpoint in (
+            'search: "/api/v1/search"',
+            'autocomplete: "/api/v1/search/autocomplete"',
+            'crawls: "/api/v1/crawls"',
+        ):
+            self.assertIn(endpoint, controller)
+        self.assertIn("idempotencyKey: true", controller)
+        self.assertIn('actions.navigateToApp("tasks")', controller)
+
     def test_window_manager_t12_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
         webui = backend_root / "gdl_backend" / "webui"

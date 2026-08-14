@@ -50,6 +50,10 @@ const CRAWL_CSS_SOURCE = readFileSync(
   new URL("../gdl_backend/webui/styles/apps/crawl.css", import.meta.url),
   "utf8",
 );
+const SHARED_CONTROLS_SOURCE = readFileSync(
+  new URL("../gdl_backend/webui/styles/controls.css", import.meta.url),
+  "utf8",
+);
 
 function sourceResult(site, addresses = [], overrides = {}) {
   return {
@@ -1290,20 +1294,77 @@ test("3A view：来源和候选重绘按稳定 token 恢复焦点", () => {
   }
 });
 
-test("3A CSS：普通窗口由真实工作区拥有横向滚动，最大化仍保持三栏", () => {
+test("3A CSS：T7.1 三栏玻璃、扁平行、状态与 capability fallback 精确契约", () => {
   assert.match(CRAWL_VIEW_SOURCE, /crawl-workspace-track/);
-  assert.match(CRAWL_CSS_SOURCE, /grid-template-columns\s*:[^;]*(?:260|280|300|clamp|minmax)[^;]*;/);
-  assert.match(CRAWL_CSS_SOURCE, /\.crawl-workspace\s*\{[^}]*overflow-x\s*:\s*auto/s);
-  assert.match(CRAWL_CSS_SOURCE, /\.crawl-workspace-track\s*\{[^}]*min-width\s*:\s*1020px/s);
+  assert.match(
+    CRAWL_CSS_SOURCE,
+    /\.crawl-workspace\s*\{[^}]*padding\s*:\s*24px;[^}]*overflow-x\s*:\s*auto/s,
+  );
+  assert.match(
+    CRAWL_CSS_SOURCE,
+    /\.crawl-workspace-track\s*\{[^}]*grid-template-columns\s*:[^;]*minmax\([^;]+;[^}]*gap\s*:\s*24px;[^}]*min-width\s*:\s*1020px/s,
+  );
+  assert.match(
+    CRAWL_CSS_SOURCE,
+    /\.crawl-column\s*\{[^}]*border\s*:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-default\);[^}]*border-radius\s*:\s*var\(--imageweave-radius-card\);[^}]*background\s*:\s*var\(--imageweave-glass-surface-input\)/s,
+  );
+  assert.match(
+    CRAWL_CSS_SOURCE,
+    /\.crawl-column-scroll\s*\{[^}]*padding\s*:\s*24px;[^}]*overflow-y\s*:\s*auto/s,
+  );
+  assert.match(
+    CRAWL_CSS_SOURCE,
+    /\.crawl-site-picker,[\s\S]*?\.crawl-run-settings\s*\{[^}]*border\s*:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-weak\);[^}]*border-radius\s*:\s*var\(--imageweave-radius-control\);[^}]*background\s*:\s*var\(--imageweave-glass-surface-secondary\);[^}]*box-shadow\s*:\s*none/s,
+  );
+  assert.match(
+    CRAWL_CSS_SOURCE,
+    /\.crawl-address-row\s*\{[^}]*border-radius\s*:\s*var\(--imageweave-radius-control\);[^}]*background\s*:\s*var\(--imageweave-glass-surface-weak\);[^}]*box-shadow\s*:\s*none;[^}]*transition\s*:[^}]*var\(--imageweave-transition-standard\)/s,
+  );
+  assert.match(
+    CRAWL_CSS_SOURCE,
+    /\.crawl-address-row--selected\s*\{[^}]*border-color\s*:\s*var\(--imageweave-border-focus\);[^}]*background\s*:\s*var\(--imageweave-glass-surface-input\);[^}]*box-shadow\s*:\s*none/s,
+  );
+  assert.match(
+    CRAWL_CSS_SOURCE,
+    /\.crawl-source-nav-select\[aria-current="page"\]::before\s*\{[^}]*content\s*:\s*"◆";[^}]*color\s*:\s*var\(--imageweave-accent-highlight\)/s,
+  );
+  assert.match(
+    CRAWL_CSS_SOURCE,
+    /\.crawl-search-state\[data-crawl-search-state="error"\]\s*\{[^}]*border\s*:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\);[^}]*background\s*:\s*var\(--imageweave-glass-surface-default\)/s,
+  );
+  assert.match(
+    CRAWL_CSS_SOURCE,
+    /\.crawl-validation-message\s*\{[^}]*color\s*:\s*var\(--imageweave-text-primary\);[^}]*border\s*:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\);[^}]*background\s*:\s*var\(--imageweave-glass-surface-default\)/s,
+  );
+  assert.match(CRAWL_CSS_SOURCE, /\.crawl-source-warning::before\s*\{[^}]*content\s*:\s*"⚠"/s);
+
+  assert.doesNotMatch(CRAWL_CSS_SOURCE, /--imageweave-(?!fallback)[\w-]*-solid/);
+  assert.doesNotMatch(CRAWL_CSS_SOURCE, /--imageweave-state-[\w-]*-surface/);
+  assert.doesNotMatch(
+    CRAWL_CSS_SOURCE,
+    /(?:border-(?:left|right)\s*:\s*[34]px|inset\s+[34]px\s+0(?:px)?\s+0)/,
+  );
+  assert.doesNotMatch(CRAWL_CSS_SOURCE, /text-transform\s*:\s*uppercase/);
+  assert.doesNotMatch(CRAWL_CSS_SOURCE, /letter-spacing\s*:\s*0\.0[6-9]em/);
+  assert.doesNotMatch(CRAWL_CSS_SOURCE, /\.crawl-button--primary/);
+  assert.doesNotMatch(CRAWL_CSS_SOURCE, /^\s*(?:-webkit-)?backdrop-filter\s*:(?![^\n]*\bnone\b)/m);
+  assert.doesNotMatch(CRAWL_CSS_SOURCE, /^\s*filter\s*:/m);
+  assert.match(
+    SHARED_CONTROLS_SOURCE,
+    /\.crawl-button\.crawl-button--primary,[\s\S]*?border-color:\s*var\(--imageweave-accent\);[\s\S]*?color:\s*var\(--imageweave-accent-highlight\);[\s\S]*?background:\s*var\(--imageweave-glass-surface-button\)/,
+  );
+
+  assert.match(CRAWL_CSS_SOURCE, /@supports not \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)/);
+  assert.match(CRAWL_CSS_SOURCE, /background:\s*var\(--imageweave-fallback-elevated-solid\)/);
+  assert.match(CRAWL_CSS_SOURCE, /@media \(prefers-contrast: more\)/);
+  assert.match(CRAWL_CSS_SOURCE, /@media \(forced-colors: active\)/);
+  assert.match(CRAWL_CSS_SOURCE, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(CRAWL_CSS_SOURCE, /:root\[data-motion="off"\]/);
+  assert.doesNotMatch(CRAWL_CSS_SOURCE, /@media\s*\(max-width:\s*767px\)/);
   assert.doesNotMatch(
     CRAWL_CSS_SOURCE,
     /\.application-window:not\(\[data-maximized\]\)\s+\.crawl-app\s*\{[^}]*width\s*:\s*max/s,
   );
-  assert.match(CRAWL_CSS_SOURCE, /--imageweave-surface-content(?:-solid)?/);
-  assert.match(CRAWL_CSS_SOURCE, /forced-colors/);
-  assert.match(CRAWL_CSS_SOURCE, /prefers-reduced-motion|data-motion/);
-  assert.doesNotMatch(CRAWL_CSS_SOURCE, /@media\s*\(max-width:\s*767px\)/);
-  assert.doesNotMatch(CRAWL_CSS_SOURCE, /backdrop-filter/);
 });
 
 test("3A static boundary：唯一三个 endpoint、无旁路 I/O/fixture/console 且四生命周期不变", () => {
