@@ -2089,6 +2089,243 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn("idempotencyKey: true", controller)
         self.assertIn('actions.navigateToApp("tasks")', controller)
 
+    def test_nocturne_tasks_t72_visual_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        tasks = (
+            webui / "styles" / "apps" / "tasks.css"
+        ).read_text(encoding="utf-8")
+        controls = (webui / "styles" / "controls.css").read_text(
+            encoding="utf-8"
+        )
+        view = (
+            webui / "js" / "components" / "tasks-view.js"
+        ).read_text(encoding="utf-8")
+        controller = (
+            webui / "js" / "apps" / "tasks.js"
+        ).read_text(encoding="utf-8")
+        model = (
+            webui / "js" / "core" / "tasks-model.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str) -> str:
+            marker = f"{selector} {{"
+            start = tasks.find(marker)
+            self.assertNotEqual(start, -1, selector)
+            opening = tasks.find("{", start)
+            closing = tasks.find("}", opening)
+            return tasks[opening + 1 : closing]
+
+        # The existing recent/facts/recovery workspace remains the only layout
+        # owner: normal windows scroll horizontally, maximized windows fit all
+        # three columns, and each column retains its own vertical scroll.
+        workspace = css_block(".tasks-workspace")
+        self.assertIn("padding: 24px", workspace)
+        self.assertIn("overflow-x: auto", workspace)
+        self.assertIn("overflow-y: hidden", workspace)
+        track = css_block(".tasks-workspace-track")
+        self.assertIn("min-width: 1120px", track)
+        self.assertIn("gap: 24px", track)
+        self.assertGreaterEqual(track.count("minmax("), 3)
+        self.assertIn(
+            ".application-window[data-maximized] .tasks-workspace-track",
+            tasks,
+        )
+        self.assertIn("min-width: 100%", tasks)
+        column = css_block(".tasks-column")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-card)",
+            "background: var(--imageweave-glass-surface-input)",
+            "inset 0 1px 0",
+            "inset 0 -1px 0",
+        ):
+            self.assertIn(expected, column)
+        self.assertNotIn("backdrop-filter", column)
+        self.assertNotIn("var(--imageweave-shadow-", column)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-secondary)",
+            css_block(".tasks-column--recent"),
+        )
+        column_scroll = css_block(".tasks-column-scroll")
+        self.assertIn("padding: 24px", column_scroll)
+        self.assertIn("overflow-y: auto", column_scroll)
+
+        # Batch/source/address/table/metric structures are weak 4–6% fact rows
+        # with 10% separators, 16px radii, no outer card shadow and no internal
+        # compositing layer. The one legal solid token is capability fallback.
+        solid_refs = re.findall(r"--imageweave-[\w-]*-solid", tasks)
+        self.assertEqual(
+            solid_refs,
+            ["--imageweave-fallback-elevated-solid"],
+        )
+        self.assertNotRegex(tasks, r"--imageweave-state-[\w-]*-surface")
+        self.assertNotRegex(
+            tasks,
+            r"(?m)^\s*(?:-webkit-)?backdrop-filter\s*:"
+            r"(?![^\n]*\bnone\b)",
+        )
+        self.assertNotRegex(tasks, r"(?m)^\s*filter\s*:")
+        for selector in (
+            ".tasks-metric",
+            ".tasks-source-card",
+            ".tasks-address",
+            ".tasks-table-wrap",
+        ):
+            body = css_block(selector)
+            self.assertIn(
+                "border-radius: var(--imageweave-radius-control)",
+                body,
+                selector,
+            )
+            self.assertRegex(
+                body,
+                r"background:\s*var\(--imageweave-glass-surface-"
+                r"(?:weak|secondary)\)",
+                selector,
+            )
+            self.assertIn("box-shadow: none", body, selector)
+        self.assertIn("color: var(--imageweave-text-code)", tasks)
+        self.assertIn("font-family: var(--imageweave-font-mono)", tasks)
+        self.assertIn("border-bottom", tasks)
+        self.assertIn("var(--imageweave-border-weak)", tasks)
+
+        # Current/selected facts combine existing readable DOM and status icon
+        # with a full 35% edge plus a shaped champagne marker; no side stripe is
+        # used. Native list selection remains keyboard/AX-visible.
+        current = css_block(".tasks-address--current")
+        self.assertIn(
+            "border-color: var(--imageweave-border-focus)", current
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-input)", current
+        )
+        self.assertIn("box-shadow: none", current)
+        self.assertIn(".tasks-address--current::before", tasks)
+        self.assertIn('content: "◆ 当前地址"', tasks)
+        selected = css_block(".tasks-recent-list option:checked")
+        self.assertIn("color: var(--imageweave-accent-highlight)", selected)
+        self.assertIn("font-weight: 700", selected)
+        self.assertNotRegex(
+            tasks,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+
+        # Loading/running/ready/warning/error/writing states use neutral T6
+        # fills plus icon/text and complete semantic borders. Critical reasons
+        # remain primary/body text rather than the 50% muted token.
+        state_expectations = {
+            "loading": "--imageweave-state-running",
+            "writing": "--imageweave-state-running",
+            "content": "--imageweave-state-success",
+            "partial": "--imageweave-state-warning",
+            "terminal": "--imageweave-state-warning",
+            "error": "--imageweave-state-danger",
+        }
+        for state, token in state_expectations.items():
+            selector = (
+                ".tasks-workspace-state"
+                f'[data-tasks-workspace-state="{state}"]'
+            )
+            self.assertIn(token, css_block(selector), state)
+        error_state = css_block(
+            '.tasks-workspace-state[data-tasks-workspace-state="error"]'
+        )
+        self.assertIn(
+            "border: var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            error_state,
+        )
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            error_state,
+        )
+        self.assertNotIn("--imageweave-text-muted", tasks)
+
+        # Table shell/header/rows stay horizontally scrollable and flat; normal
+        # row hover never translates or scales. Tasks delegates all action
+        # surfaces (including primary/danger) to the T6 shared control system.
+        self.assertIn("min-width: 0", css_block(".tasks-list"))
+        table_wrap = css_block(".tasks-table-wrap")
+        self.assertIn("min-width: 0", table_wrap)
+        self.assertIn("max-width: 100%", table_wrap)
+        self.assertIn("overflow-x: auto", table_wrap)
+        self.assertIn("min-width: 790px", css_block(".tasks-table"))
+        table_header = css_block(".tasks-table th")
+        self.assertIn("color: var(--imageweave-text-primary)", table_header)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            table_header,
+        )
+        table_hover = css_block(".tasks-table tbody tr:hover")
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-default)",
+            table_hover,
+        )
+        self.assertIn("transform: none", table_hover)
+        self.assertNotIn(".tasks-button--primary", tasks)
+        self.assertRegex(
+            controls,
+            r"\.tasks-button\.tasks-button--primary,[\s\S]*?\{"
+            r"[\s\S]*?border-color:\s*var\(--imageweave-accent\);"
+            r"[\s\S]*?color:\s*var\(--imageweave-accent-highlight\);"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-button\);",
+        )
+        kicker = css_block(".tasks-column-kicker")
+        self.assertIn("letter-spacing: normal", kicker)
+        self.assertIn("text-transform: none", kicker)
+        self.assertNotRegex(tasks, r"\b(?:100|120|150|180)ms\b")
+
+        # Canonical fallback, contrast, forced-colors and both motion opt-outs
+        # remain explicit; forced colors remove optical decoration.
+        self.assertIn(
+            "@supports not ((-webkit-backdrop-filter: blur(1px)) or "
+            "(backdrop-filter: blur(1px)))",
+            tasks,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid)", tasks
+        )
+        self.assertIn("@media (prefers-contrast: more)", tasks)
+        self.assertIn("@media (forced-colors: active)", tasks)
+        self.assertIn("CanvasText", tasks)
+        self.assertIn("ButtonFace", tasks)
+        self.assertIn("Highlight", tasks)
+        self.assertIn(':root[data-motion="off"]', tasks)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", tasks)
+        self.assertGreaterEqual(tasks.count("transition: none !important"), 2)
+        self.assertNotIn("@media (max-width: 767px)", tasks)
+
+        # This is a visual-only migration: the existing DOM semantics, endpoint,
+        # model whitelist, poll cadence, exact writes, authority reads, stale gate
+        # and lifecycle cancellation remain the sole production implementation.
+        for marker in (
+            '"aria-label": "最近批次"',
+            '"aria-label": "批次管理三段工作区，可横向滚动查看最近批次、任务事实和恢复动作"',
+            'tabindex: "0"',
+            "当前活动地址",
+            'attributes: { role: "status", "aria-live": "polite" }',
+        ):
+            self.assertIn(marker, view)
+        for marker in (
+            'crawls: "/api/v1/crawls"',
+            'BATCH_POLL_KEY = "batches.active"',
+            'taskBatchPath(batchId, "/cancel")',
+            'taskBatchPath(batchId, "/retry")',
+            'taskBatchPath(batchId, "/rerun")',
+            "{ additional_attempts: 2 }",
+            "Promise.all([",
+            "Promise.allSettled([",
+            "requestGate.beginWrite()",
+            "requestGate.advanceLifecycle()",
+            "operationController?.abort()",
+        ):
+            self.assertIn(marker, controller)
+        self.assertIn("TASK_POLL_INTERVAL_MS = 1_500", model)
+
     def test_window_manager_t12_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
         webui = backend_root / "gdl_backend" / "webui"

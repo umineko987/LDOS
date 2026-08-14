@@ -1279,6 +1279,95 @@ test("4A controller：危险重试确认后只走批次路径，并按 detail/ta
   }
 });
 
+test("4A controller：取消与重新规划使用精确空 payload，并各自 detail/tasks/recent 权威重读", async () => {
+  const restore = installControllerDom();
+  try {
+    const cases = [
+      {
+        action: "cancel",
+        initial: rawBatch({ status: "running", resumable: false }),
+        authoritative: rawBatch({
+          status: "cancelled",
+          resumable: false,
+          task_count: 1,
+          succeeded_task_count: 0,
+          failed_task_count: 0,
+          cancelled_task_count: 1,
+        }),
+        path: "/api/v1/crawls/batch-stage4/cancel",
+      },
+      {
+        action: "rerun",
+        initial: rawBatch({
+          status: "succeeded",
+          resumable: false,
+          task_count: 1,
+          succeeded_task_count: 1,
+          failed_task_count: 0,
+        }),
+        authoritative: rawBatch({
+          status: "planning",
+          resumable: false,
+          task_count: 0,
+          succeeded_task_count: 0,
+          failed_task_count: 0,
+        }),
+        path: "/api/v1/crawls/batch-stage4/rerun",
+      },
+    ];
+    for (const item of cases) {
+      let detailReads = 0;
+      let taskReads = 0;
+      let recentReads = 0;
+      const harness = controllerHarness({
+        apiGet(url) {
+          if (url === "/api/v1/crawls?limit=30") {
+            recentReads += 1;
+            return Promise.resolve({ items: [detailReads > 1 ? item.authoritative : item.initial] });
+          }
+          if (url.endsWith("/tasks?limit=1000")) {
+            taskReads += 1;
+            return Promise.resolve({ items: [rawTask({
+              status: detailReads > 1 ? "cancelled" : "running",
+              last_error_class: "",
+            })] });
+          }
+          if (url === "/api/v1/crawls/batch-stage4") {
+            detailReads += 1;
+            return Promise.resolve(detailReads === 1 ? item.initial : item.authoritative);
+          }
+          throw new Error(`unexpected GET ${url}`);
+        },
+        apiPost: () => Promise.resolve({
+          batch: rawBatch({ status: "failed" }),
+          ignored_secret: SECRET,
+        }),
+      });
+      harness.controller.activate();
+      await flush();
+      const before = { detailReads, taskReads, recentReads };
+
+      harness.root.emit("click", new TestButton(item.action));
+      await flush();
+
+      const posts = harness.calls.filter((call) => call[0] === "post");
+      assert.equal(posts.length, 1, item.action);
+      assert.equal(getCallUrl(posts[0]), item.path);
+      assert.deepEqual(posts[0][2], {});
+      assert.equal(detailReads, before.detailReads + 1);
+      assert.equal(taskReads, before.taskReads + 1);
+      assert.equal(recentReads, before.recentReads + 1);
+      assert.equal(harness.store.getState().batches.active.status, item.authoritative.status);
+      assert.equal(JSON.stringify(harness.store.getState()).includes(SECRET), false);
+      assert.equal(harness.dialogOptions.length, 1);
+      assert.equal(harness.dialogOptions[0].dangerous, true);
+      harness.controller.destroy();
+    }
+  } finally {
+    restore();
+  }
+});
+
 test("4A controller：写后权威重读失败保留 partial 非颜色状态", async () => {
   const restore = installControllerDom();
   try {
@@ -1380,19 +1469,87 @@ test("4A view：三段语义、筛选/终态、来源地址任务错误文件事
   assert.doesNotMatch(TASKS_VIEW_SOURCE, /VAULT\.CPL|TASKMGR\.EXE|PROXY\.CPL/);
 });
 
-test("4A CSS：普通 800x560 有局部可聚焦横向 scroll owner，最大化三栏独立纵向滚动", () => {
+test("4A CSS T7.2：三栏低透明、事实扁平、状态非颜色且只由窗口持有 backdrop", () => {
+  const block = (selector) => {
+    const marker = `${selector} {`;
+    const start = TASKS_CSS_SOURCE.indexOf(marker);
+    assert.notEqual(start, -1, selector);
+    const opening = TASKS_CSS_SOURCE.indexOf("{", start);
+    const closing = TASKS_CSS_SOURCE.indexOf("}", opening);
+    return TASKS_CSS_SOURCE.slice(opening + 1, closing);
+  };
+
   assert.match(TASKS_CSS_SOURCE, /\.window-body:has\(> \.tasks-app\)/);
-  assert.match(TASKS_CSS_SOURCE, /\.tasks-workspace\s*\{[^}]*overflow-x\s*:\s*auto/s);
-  assert.match(TASKS_CSS_SOURCE, /\.tasks-workspace-track\s*\{[^}]*grid-template-columns\s*:[^;]*minmax[^;]*minmax[^;]*minmax[^;]*;/s);
-  assert.match(TASKS_CSS_SOURCE, /\.tasks-workspace-track\s*\{[^}]*min-width\s*:\s*(?:1080|1100|1120|1140|1160)px/s);
-  assert.match(TASKS_CSS_SOURCE, /\.tasks-column-scroll\s*\{[^}]*overflow-y\s*:\s*auto/s);
+  const workspace = block(".tasks-workspace");
+  assert.match(workspace, /padding:\s*24px/);
+  assert.match(workspace, /overflow-x:\s*auto/);
+  assert.match(workspace, /overflow-y:\s*hidden/);
+  const track = block(".tasks-workspace-track");
+  assert.match(track, /grid-template-columns:[^;]*minmax[^;]*minmax[^;]*minmax[^;]*;/s);
+  assert.match(track, /min-width:\s*1120px/);
+  assert.match(track, /gap:\s*24px/);
+  assert.match(block(".tasks-column-scroll"), /overflow-y:\s*auto/);
   assert.match(TASKS_CSS_SOURCE, /\.application-window\[data-maximized\] \.tasks-workspace-track\s*\{[^}]*min-width\s*:\s*100%/s);
-  assert.match(TASKS_CSS_SOURCE, /--imageweave-surface-content-solid/);
-  assert.match(TASKS_CSS_SOURCE, /forced-colors/);
-  assert.match(TASKS_CSS_SOURCE, /prefers-reduced-motion|data-motion/);
+
+  const column = block(".tasks-column");
+  assert.match(column, /border:\s*var\(--imageweave-border-width\) solid var\(--imageweave-border-default\)/);
+  assert.match(column, /border-radius:\s*var\(--imageweave-radius-card\)/);
+  assert.match(column, /background:\s*var\(--imageweave-glass-surface-input\)/);
+  assert.doesNotMatch(column, /backdrop-filter|var\(--imageweave-shadow-/);
+  assert.match(block(".tasks-column--recent"), /background:\s*var\(--imageweave-glass-surface-secondary\)/);
+
+  const solidRefs = [...TASKS_CSS_SOURCE.matchAll(/--imageweave-[\w-]*-solid/g)].map((match) => match[0]);
+  assert.deepEqual(solidRefs, ["--imageweave-fallback-elevated-solid"]);
+  assert.doesNotMatch(TASKS_CSS_SOURCE, /--imageweave-state-[\w-]*-surface/);
+  assert.doesNotMatch(TASKS_CSS_SOURCE, /^\s*(?:-webkit-)?backdrop-filter\s*:(?![^\n]*\bnone\b)/m);
+  assert.doesNotMatch(TASKS_CSS_SOURCE, /^\s*filter\s*:/m);
+  for (const selector of [".tasks-metric", ".tasks-source-card", ".tasks-address", ".tasks-table-wrap"]) {
+    const body = block(selector);
+    assert.match(body, /border-radius:\s*var\(--imageweave-radius-control\)/, selector);
+    assert.match(body, /background:\s*var\(--imageweave-glass-surface-(?:weak|secondary)\)/, selector);
+    assert.match(body, /box-shadow:\s*none/, selector);
+  }
+  assert.match(block(".tasks-list"), /min-width:\s*0/);
+  assert.match(block(".tasks-table-wrap"), /min-width:\s*0/);
+  assert.match(block(".tasks-table-wrap"), /max-width:\s*100%/);
+  assert.match(block(".tasks-table"), /min-width:\s*790px/);
+  assert.match(TASKS_CSS_SOURCE, /\.tasks-metric strong[\s\S]*?color:\s*var\(--imageweave-text-code\)[\s\S]*?font-family:\s*var\(--imageweave-font-mono\)/);
+  assert.match(TASKS_CSS_SOURCE, /\.tasks-address--current::before[\s\S]*?content:\s*"◆ 当前地址"/);
+  const current = block(".tasks-address--current");
+  assert.match(current, /border-color:\s*var\(--imageweave-border-focus\)/);
+  assert.match(current, /background:\s*var\(--imageweave-glass-surface-input\)/);
+  assert.match(current, /box-shadow:\s*none/);
+  assert.match(block(".tasks-recent-list option:checked"), /font-weight:\s*700/);
+
+  const errorState = block('.tasks-workspace-state[data-tasks-workspace-state="error"]');
+  assert.match(errorState, /border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)/);
+  assert.match(errorState, /background:\s*var\(--imageweave-glass-surface-default\)/);
+  assert.match(TASKS_CSS_SOURCE, /data-tasks-workspace-state="loading"[\s\S]*?var\(--imageweave-state-running\)/);
+  assert.match(TASKS_CSS_SOURCE, /data-tasks-workspace-state="content"[\s\S]*?var\(--imageweave-state-success\)/);
+  const tableHeader = block(".tasks-table th");
+  assert.match(tableHeader, /color:\s*var\(--imageweave-text-primary\)/);
+  assert.match(tableHeader, /background:\s*var\(--imageweave-glass-surface-default\)/);
+  const tableHover = block(".tasks-table tbody tr:hover");
+  assert.match(tableHover, /background:\s*var\(--imageweave-glass-surface-default\)/);
+  assert.match(tableHover, /transform:\s*none/);
+
+  const kicker = block(".tasks-column-kicker");
+  assert.match(kicker, /letter-spacing:\s*normal/);
+  assert.match(kicker, /text-transform:\s*none/);
+  assert.doesNotMatch(TASKS_CSS_SOURCE, /(?:border-(?:left|right):\s*[34]px|inset\s+[34]px\s+0(?:px)?\s+0)/);
+  assert.doesNotMatch(TASKS_CSS_SOURCE, /\b(?:100|120|150|180)ms\b/);
+  assert.doesNotMatch(TASKS_CSS_SOURCE, /\.tasks-button--primary/);
+  assert.match(TASKS_CSS_SOURCE, /@supports not \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)/);
+  assert.match(TASKS_CSS_SOURCE, /background:\s*var\(--imageweave-fallback-elevated-solid\)/);
+  assert.match(TASKS_CSS_SOURCE, /@media \(prefers-contrast: more\)/);
+  assert.match(TASKS_CSS_SOURCE, /@media \(forced-colors: active\)/);
+  assert.match(TASKS_CSS_SOURCE, /:root\[data-motion="off"\]/);
+  assert.match(TASKS_CSS_SOURCE, /@media \(prefers-reduced-motion: reduce\)/);
   assert.doesNotMatch(TASKS_CSS_SOURCE, /@media\s*\(max-width:\s*767px\)/);
-  assert.doesNotMatch(TASKS_CSS_SOURCE, /backdrop-filter/);
+
   assert.match(TASKS_VIEW_SOURCE, /className:\s*"tasks-workspace"[\s\S]*tabindex:\s*"0"/);
+  assert.match(TASKS_VIEW_SOURCE, /当前活动地址/);
+  assert.match(TASKS_VIEW_SOURCE, /aria-label.*当前地址/s);
 });
 
 test("4A static boundary：唯一 crawls endpoint、无旁路 I/O/storage/console/innerHTML 且生命周期不变", () => {
