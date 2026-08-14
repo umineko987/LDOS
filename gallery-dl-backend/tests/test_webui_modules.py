@@ -1387,8 +1387,8 @@ class WebUiModuleTests(unittest.TestCase):
             self.assertIn(declaration, forced_contract)
         self.assertIn(':root[data-motion="off"]', status)
         self.assertIn("@media (prefers-reduced-motion: reduce)", status)
-        self.assertGreaterEqual(status.count("transition-property: none !important"), 2)
-        self.assertGreaterEqual(status.count("animation-name: none !important"), 2)
+        self.assertGreaterEqual(status.count("transition: none !important"), 2)
+        self.assertGreaterEqual(status.count("animation: none !important"), 2)
 
         # 个性化运行时不再写颜色属性；正式偏好只保留场景与动效。
         set_property_names = re.findall(
@@ -1644,6 +1644,262 @@ class WebUiModuleTests(unittest.TestCase):
             "transform: none",
             "Highlight",
             "GrayText",
+        ):
+            self.assertIn(expected, forced)
+
+    def test_nocturne_shared_components_visual_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        styles = webui / "styles"
+        controls = (styles / "controls.css").read_text(encoding="utf-8")
+        status = (styles / "status.css").read_text(encoding="utf-8")
+        dialog = (styles / "dialog.css").read_text(encoding="utf-8")
+        shared = "\n".join((controls, status, dialog))
+        component_sources = {
+            name: (webui / "js" / "components" / f"{name}.js").read_text(
+                encoding="utf-8"
+            )
+            for name in ("status", "empty-state", "error-view", "dialog")
+        }
+
+        # T6 consumes the T4 canonical facts directly. Normal shared surfaces
+        # contain neither retired *-solid aliases nor semantic-colored fills;
+        # the only solid name is the canonical no-backdrop capability fallback.
+        self.assertNotRegex(
+            shared,
+            r"--imageweave-(?!fallback)[\w-]*-solid",
+        )
+        self.assertNotRegex(shared, r"--imageweave-state-[\w-]*-surface")
+        self.assertNotRegex(
+            shared,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+        self.assertNotRegex(shared, r"\b(?:100|120|150|180)ms\b")
+        self.assertNotRegex(
+            shared,
+            r"text-transform:\s*uppercase[\s\S]{0,120}"
+            r"letter-spacing:\s*0\.0[6-9]em",
+        )
+        self.assertNotIn("color-mix(", shared)
+
+        # Ordinary actions use 10% neutral glass, 20% complete edge, 16px,
+        # directional depth and canonical spring. Hover/active/focus are
+        # distinct, while disabled controls remain fully opaque and use a
+        # complete inner edge plus struck/italic non-color marker. Navigation
+        # rows never move.
+        for expected in (
+            "background: var(--imageweave-glass-surface-button)",
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-button)",
+            "border-radius: var(--imageweave-radius-control)",
+            "box-shadow: var(--imageweave-shadow-control)",
+            "var(--imageweave-transition-standard)",
+            "background: var(--imageweave-glass-surface-hover)",
+            "border-color: var(--imageweave-border-focus)",
+            "transform: translateY(-2px)",
+            "transform: scale(0.97)",
+        ):
+            self.assertIn(expected, controls)
+        self.assertIn("0 10px 32px rgb(3 7 18 / 0.55)", controls)
+        self.assertRegex(
+            controls,
+            r"\.crawl-button\.crawl-button--primary,[\s\S]*?\{"
+            r"[\s\S]*?border-color:\s*var\(--imageweave-accent\);"
+            r"[\s\S]*?color:\s*var\(--imageweave-accent-highlight\);"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-button\);",
+        )
+        self.assertRegex(
+            controls,
+            r"\.crawl-button\.crawl-button--dangerous,[\s\S]*?\{"
+            r"[\s\S]*?border:\s*var\(--imageweave-border-strong-width\)"
+            r" solid var\(--imageweave-state-danger\);"
+            r"[\s\S]*?background:\s*"
+            r"var\(--imageweave-glass-surface-button\);",
+        )
+        self.assertIn(
+            "inset 0 0 0 1px var(--imageweave-border-weak)", controls
+        )
+        self.assertIn("text-decoration: line-through", controls)
+        self.assertIn("font-style: italic", controls)
+        self.assertNotRegex(controls, r"\b(?:double|dotted|dashed)\b")
+        self.assertGreaterEqual(controls.count("opacity: 1"), 5)
+        self.assertNotRegex(controls, r"opacity:\s*0\.[0-9]+")
+        self.assertRegex(
+            controls,
+            r"\.vault-button\.vault-site-nav-button:active"
+            r"[\s\S]*?\{[^}]*transform:\s*none;",
+        )
+
+        # Text/search/password/number/select/textarea share 6% neutral glass,
+        # 15% complete edge, directional inset, 35% focus edge and an 18%
+        # champagne 3px ring. Invalid and disabled states retain neutral fills,
+        # full borders, readable text and semantic/native state.
+        for selector in (
+            'input[type="text"]',
+            'input[type="search"]',
+            'input[type="password"]',
+            'input[type="number"]',
+            "select",
+            "textarea",
+        ):
+            self.assertIn(selector, controls)
+        for expected in (
+            "background: var(--imageweave-glass-surface-input)",
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "inset 0 1px 0 rgb(255 255 255 / 0.15)",
+            "inset 0 -1px 0 rgb(2 6 16 / 0.30)",
+            "color: rgb(255 255 255 / 0.35)",
+            "0 0 0 var(--imageweave-focus-width) "
+            "var(--imageweave-focus-glow)",
+            '[aria-invalid="true"]',
+            "var(--imageweave-border-strong-width) solid "
+            "var(--imageweave-state-danger)",
+            "-webkit-text-fill-color: var(--imageweave-text-secondary)",
+        ):
+            self.assertIn(expected, controls)
+        self.assertIn('input[type="checkbox"]', controls)
+        self.assertIn('input[type="radio"]', controls)
+        self.assertIn('input[type="range"]', controls)
+        self.assertIn("progress:focus-visible", controls)
+        controls_declarations = re.sub(
+            r"/\*[\s\S]*?\*/", "", controls
+        )
+        self.assertNotIn("backdrop-filter", controls_declarations)
+        self.assertIn("aria-describedby", component_sources["dialog"])
+        crawl_view = (
+            webui / "js" / "components" / "crawl-view.js"
+        ).read_text(encoding="utf-8")
+        vault_dom = (
+            webui / "js" / "components" / "vault-dom.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn('setAttribute("aria-invalid"', crawl_view)
+        self.assertIn("crawl-search-validation", crawl_view)
+        self.assertIn('"aria-errormessage": "vault-proxy-validation"', vault_dom)
+        self.assertIn('role: "alert"', vault_dom)
+
+        # Every status has the existing icon + text presentation and a complete
+        # semantic edge over the same 5% neutral fill. Empty/error components
+        # retain icon, title and readable reason without an outer nested card.
+        for state_name in ("ready", "running", "warning", "error", "disabled"):
+            self.assertIn(f'[data-status="{state_name}"]', status)
+            self.assertIn(f"{state_name}: Object.freeze({{ icon:", component_sources["status"])
+        self.assertGreaterEqual(
+            status.count(
+                "background: var(--imageweave-glass-surface-secondary)"
+            ),
+            6,
+        )
+        self.assertIn(".status-badge > span:first-child", status)
+        self.assertIn("border: var(--imageweave-border-width) solid currentColor", status)
+        for panel_marker in (
+            "data-crawl-search-state",
+            "data-tasks-workspace-state",
+            "data-proxy-workspace-state",
+            "data-vault-workspace-state",
+            "data-policy-workspace-state",
+            "data-diagnostics-workspace-state",
+            "data-personalization-preview-state",
+            "data-gallery-workspace-state",
+            "data-schedule-workspace-state",
+            "data-export-workspace-state",
+        ):
+            self.assertIn(f"[{panel_marker}]", status)
+        self.assertIn("section.empty-state", status)
+        self.assertIn("section.error-view", status)
+        self.assertIn("background: var(--imageweave-glass-surface-default)", status)
+        self.assertNotIn("var(--imageweave-shadow-card)", status)
+        status_declarations = re.sub(r"/\*[\s\S]*?\*/", "", status)
+        self.assertNotIn("backdrop-filter", status_declarations)
+        self.assertIn('role: status === "error" ? "alert" : "status"', component_sources["empty-state"])
+        self.assertIn('attributes: { role: "alert" }', component_sources["error-view"])
+
+        # Dialog alone owns the independent 60px/180% top-level backdrop.
+        # Its panel/actions are weak inherited rows; backdrop is translucent,
+        # and dangerous confirmation remains neutral with full red edges/copy.
+        for expected in (
+            "background-color: var(--imageweave-glass-surface-default)",
+            "rgb(255 255 255 / 0.12)",
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-window)",
+            "box-shadow: var(--imageweave-shadow-window)",
+            "background: rgb(3 7 18 / 0.68)",
+            "blur(var(--imageweave-glass-blur-window))",
+            "saturate(var(--imageweave-glass-saturation))",
+            "background: var(--imageweave-glass-surface-secondary)",
+            'content: "警告："',
+        ):
+            self.assertIn(expected, dialog)
+        supported = dialog.split(
+            "@supports ((-webkit-backdrop-filter", 1
+        )[1].split("@supports not", 1)[0]
+        self.assertIn(".imageweave-dialog", supported)
+        self.assertIn(".imageweave-dialog::backdrop", supported)
+        self.assertNotIn(".imageweave-dialog__panel", supported)
+        self.assertNotIn(".imageweave-dialog__actions", supported)
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid) !important",
+            dialog,
+        )
+        self.assertNotIn("background: #000", dialog)
+
+        # Existing public exports and behavior ownership remain unchanged.
+        expected_exports = {
+            "status": {
+                "STATUS_PRESENTATION",
+                "normalizeStatus",
+                "resolveStatusPresentation",
+                "updateStatusBadge",
+                "createStatusBadge",
+            },
+            "empty-state": {"createEmptyState"},
+            "error-view": {"toSafeErrorViewModel", "createErrorView"},
+            "dialog": {"createDialogController"},
+        }
+        for name, source in component_sources.items():
+            exports = set(re.findall(
+                r"export\s+(?:const|function)\s+([A-Za-z_$][\w$]*)",
+                source,
+            ))
+            self.assertEqual(exports, expected_exports[name], name)
+        for expected in (
+            "focusableElements(dialog)",
+            'event.key === "Escape"',
+            'event.key !== "Tab"',
+            'finish("cancel")',
+            'finish("confirm")',
+            "previousFocus.focus({ preventScroll: true })",
+            "if (active) throw new Error",
+        ):
+            self.assertIn(expected, component_sources["dialog"])
+
+        # High contrast, forced colors, motion-off and capability fallback all
+        # reuse the canonical T4 system paths; normal internal rows add no blur.
+        for source in (controls, status, dialog):
+            self.assertIn("@media (forced-colors: active)", source)
+        self.assertIn("@media (prefers-contrast: more)", controls)
+        self.assertIn("@media (prefers-contrast: more)", status)
+        self.assertIn("@media (prefers-contrast: more)", dialog)
+        self.assertIn(':root[data-motion="off"]', status)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", status)
+        self.assertGreaterEqual(status.count("transition: none !important"), 2)
+        self.assertGreaterEqual(status.count("animation: none !important"), 2)
+        self.assertIn("@supports not", dialog)
+        forced = "\n".join(
+            source.split("@media (forced-colors: active)", 1)[1]
+            for source in (controls, status, dialog)
+        )
+        for expected in (
+            "CanvasText",
+            "ButtonFace",
+            "Highlight",
+            "GrayText",
+            "background-image: none",
+            "box-shadow: none",
+            "backdrop-filter: none",
         ):
             self.assertIn(expected, forced)
 

@@ -274,3 +274,87 @@ test("阶段 2 v2 strict round-trip 拒绝危险、访问器、重复、非有�
   assert.throws(() => serializeWindowPlacements([accessor]), TypeError);
   assert.equal(called, false);
 });
+
+test("T6 共享控件使用无色玻璃、完整语义边框与单一 Dialog backdrop", () => {
+  const controls = readFileSync(
+    new URL("../gdl_backend/webui/styles/controls.css", import.meta.url),
+    "utf8",
+  );
+  const status = readFileSync(
+    new URL("../gdl_backend/webui/styles/status.css", import.meta.url),
+    "utf8",
+  );
+  const dialog = readFileSync(
+    new URL("../gdl_backend/webui/styles/dialog.css", import.meta.url),
+    "utf8",
+  );
+  const shared = `${controls}\n${status}\n${dialog}`;
+
+  assert.doesNotMatch(shared, /--imageweave-(?!fallback)[\w-]*-solid/u);
+  assert.doesNotMatch(shared, /--imageweave-state-[\w-]*-surface/u);
+  assert.doesNotMatch(shared, /(?:border-(?:left|right)|inset\s+[34]px\s+0)/u);
+  assert.doesNotMatch(shared, /\b(?:100|120|150|180)ms\b/u);
+
+  for (const expected of [
+    "background: var(--imageweave-glass-surface-button)",
+    "border: var(--imageweave-border-width) solid var(--imageweave-border-button)",
+    "border-radius: var(--imageweave-radius-control)",
+    "box-shadow: var(--imageweave-shadow-control)",
+    "transform: translateY(-2px)",
+    "transform: scale(0.97)",
+    "var(--imageweave-transition-standard)",
+  ]) assert.equal(controls.includes(expected), true, expected);
+  assert.match(
+    controls,
+    /--primary[\s\S]*?border-color:\s*var\(--imageweave-accent\);[\s\S]*?color:\s*var\(--imageweave-accent-highlight\);[\s\S]*?background:\s*var\(--imageweave-glass-surface-button\)/u,
+  );
+  assert.match(
+    controls,
+    /--dangerous[\s\S]*?border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\);[\s\S]*?background:\s*var\(--imageweave-glass-surface-button\)/u,
+  );
+  assert.match(controls, /:is\(:disabled, \[aria-disabled="true"\]\)[\s\S]*?border:[^;]*solid[\s\S]*?opacity:\s*1;[\s\S]*?text-decoration:\s*line-through;[\s\S]*?transform:\s*none;/u);
+  assert.match(controls, /:is\(:disabled, \[aria-disabled="true"\]\)[\s\S]*?inset 0 0 0 1px var\(--imageweave-border-weak\)[\s\S]*?font-style:\s*italic;/u);
+
+  for (const expected of [
+    "background: var(--imageweave-glass-surface-input)",
+    "color: rgb(255 255 255 / 0.35)",
+    "background: var(--imageweave-glass-surface-button)",
+    "0 0 0 var(--imageweave-focus-width) var(--imageweave-focus-glow)",
+    "[aria-invalid=\"true\"]",
+    "input[type=\"checkbox\"]",
+    "input[type=\"radio\"]",
+  ]) assert.equal(controls.includes(expected), true, expected);
+
+  for (const state of ["ready", "running", "warning", "error", "disabled"]) {
+    assert.equal(status.includes(`[data-status="${state}"]`), true, state);
+  }
+  for (const panel of ["crawl", "tasks", "proxy", "vault", "policy", "diagnostics", "gallery", "schedule", "export"]) {
+    assert.equal(status.includes(`data-${panel}-${panel === "crawl" ? "search" : "workspace"}-state`), true, panel);
+  }
+  assert.equal(status.includes("data-personalization-preview-state"), true);
+  assert.equal(status.includes("background: var(--imageweave-glass-surface-secondary)"), true);
+  assert.equal(status.includes("section.empty-state"), true);
+  assert.equal(status.includes("section.error-view"), true);
+  assert.equal(status.includes("var(--imageweave-shadow-card)"), false);
+
+  for (const expected of [
+    "background-color: var(--imageweave-glass-surface-default)",
+    "blur(var(--imageweave-glass-blur-window))",
+    "saturate(var(--imageweave-glass-saturation))",
+    "border-radius: var(--imageweave-radius-window)",
+    "box-shadow: var(--imageweave-shadow-window)",
+    "background: rgb(3 7 18 / 0.68)",
+    "background: var(--imageweave-fallback-elevated-solid) !important",
+  ]) assert.equal(dialog.includes(expected), true, expected);
+  const supportedDialog = dialog.split("@supports ((-webkit-backdrop-filter", 2)[1].split("@supports not", 1)[0];
+  assert.equal(supportedDialog.includes(".imageweave-dialog__panel"), false);
+  assert.equal(supportedDialog.includes(".imageweave-dialog__actions"), false);
+
+  for (const source of [controls, status, dialog]) {
+    assert.equal(source.includes("@media (forced-colors: active)"), true);
+  }
+  assert.equal(status.includes(':root[data-motion="off"]'), true);
+  assert.equal(status.includes("@media (prefers-reduced-motion: reduce)"), true);
+  assert.equal(controls.includes("@media (prefers-contrast: more)"), true);
+  assert.equal(dialog.includes("@supports not"), true);
+});

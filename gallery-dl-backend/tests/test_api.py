@@ -842,11 +842,8 @@ class ApiTests(unittest.TestCase):
         )
         for immediate_rule in (
             "scroll-behavior: auto !important;",
-            "animation-duration: 0.001ms !important;",
-            "animation-delay: 0ms !important;",
-            "animation-iteration-count: 1 !important;",
-            "transition-duration: 0.001ms !important;",
-            "transition-delay: 0ms !important;",
+            "animation: none !important;",
+            "transition: none !important;",
         ):
             self.assertGreaterEqual(status_styles.text.count(immediate_rule), 2)
         self.assertLess(

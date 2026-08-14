@@ -1,18 +1,12 @@
 button {
   border-radius: var(--imageweave-radius-control);
   cursor: pointer;
-  transition:
-    color var(--imageweave-transition-fast),
-    background-color var(--imageweave-transition-fast),
-    border-color var(--imageweave-transition-fast),
-    box-shadow var(--imageweave-transition-fast),
-    transform var(--imageweave-transition-fast);
 }
 
 button:disabled,
 button[aria-disabled="true"] {
   cursor: not-allowed;
-  opacity: 0.58;
+  opacity: 1;
 }
 
 .app-view {
@@ -44,6 +38,8 @@ button[aria-disabled="true"] {
   color: var(--imageweave-text-secondary);
 }
 
+/* These are the existing top-level application panels. Their rows inherit the
+   window's single backdrop instead of creating one compositing layer each. */
 .app-view :is(
   .proxy-panel,
   .vault-panel,
@@ -52,13 +48,20 @@ button[aria-disabled="true"] {
   .diagnostics-panel,
   .personalization-panel
 ) {
-  border-color: var(--imageweave-border-subtle);
+  border-color: var(--imageweave-border-default);
   border-radius: var(--imageweave-radius-card);
-  background: var(--imageweave-surface-content-solid);
-  background: var(--imageweave-surface-content);
+  background-color: var(--imageweave-glass-surface-default);
+  background-image: linear-gradient(
+    to bottom,
+    rgb(255 255 255 / 0.08),
+    transparent 52%
+  );
   box-shadow: var(--imageweave-shadow-card);
 }
 
+/* Standard actions deliberately do not repeat backdrop-filter inside a 60px
+   application window or Dialog. The neutral 10% surface supplies the same
+   computed appearance while the parent owns the expensive blur. */
 :is(button, a):is(
   .route-button,
   .crawl-button,
@@ -69,187 +72,85 @@ button[aria-disabled="true"] {
   .policy-button,
   .diagnostics-button,
   .personalization-button
-) {
+),
+.imageweave-dialog__actions button {
   display: inline-flex;
   min-height: var(--imageweave-control-height);
   padding: 8px 14px;
   align-items: center;
   justify-content: center;
-  border: var(--imageweave-border-width) solid var(--imageweave-border-strong);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-button);
   border-radius: var(--imageweave-radius-control);
   color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-control-solid);
-  background: var(--imageweave-surface-control);
+  background: var(--imageweave-glass-surface-button);
   box-shadow: var(--imageweave-shadow-control);
   font: inherit;
   font-weight: 750;
   line-height: 1.25;
   text-align: center;
   text-decoration: none;
+  transform: none;
+  transition:
+    color var(--imageweave-transition-standard),
+    background-color var(--imageweave-transition-standard),
+    border-color var(--imageweave-transition-standard),
+    box-shadow var(--imageweave-transition-standard),
+    transform var(--imageweave-transition-standard);
+  appearance: none;
 }
 
 :is(button, a):is(
-  .route-button,
-  .crawl-button,
-  .tasks-button,
-  .proxy-button,
-  .vault-button,
-  .review-button,
-  .policy-button,
-  .diagnostics-button,
-  .personalization-button
-):hover:not(:disabled):not([aria-disabled="true"]) {
-  border-color: var(--imageweave-border-strong);
-  color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-control-hover);
-  box-shadow: var(--imageweave-shadow-card);
-  transform: translateY(-1px);
+  .crawl-button.crawl-button--primary,
+  .tasks-button.tasks-button--primary,
+  .proxy-button.proxy-button--primary,
+  .vault-button.vault-button--primary,
+  .review-button.review-button--primary,
+  .policy-button.policy-button--primary,
+  .diagnostics-button.diagnostics-button--primary,
+  .personalization-button.personalization-button--primary
+),
+.imageweave-dialog__actions .dialog-confirm {
+  border-color: var(--imageweave-accent);
+  color: var(--imageweave-accent-highlight);
+  background: var(--imageweave-glass-surface-button);
+  box-shadow:
+    0 0 0 1px rgb(228 184 99 / 0.28),
+    0 8px 24px rgb(3 7 18 / 0.35),
+    inset 0 1px 0 rgb(255 255 255 / 0.25),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
 }
 
 :is(button, a):is(
-  .route-button,
-  .crawl-button,
-  .tasks-button,
-  .proxy-button,
-  .vault-button,
-  .review-button,
-  .policy-button,
-  .diagnostics-button,
-  .personalization-button
-):active:not(:disabled):not([aria-disabled="true"]) {
-  background: var(--imageweave-surface-control-active);
-  box-shadow: none;
-  transform: translateY(0);
-}
-
-:is(button, a):is(
-  .route-button,
-  .crawl-button,
-  .tasks-button,
-  .proxy-button,
-  .vault-button,
-  .review-button,
-  .policy-button,
-  .diagnostics-button,
-  .personalization-button
-):focus-visible {
-  outline-color: var(--imageweave-focus-ring);
-  outline-offset: 3px;
-}
-
-:is(button, a):is(
-  .crawl-button,
-  .tasks-button,
-  .proxy-button,
-  .vault-button,
-  .review-button,
-  .policy-button,
-  .diagnostics-button,
-  .personalization-button
-):is(
-  .crawl-button--primary,
-  .tasks-button--primary,
-  .proxy-button--primary,
-  .vault-button--primary,
-  .review-button--primary,
-  .policy-button--primary,
-  .diagnostics-button--primary,
-  .personalization-button--primary
-) {
-  border-color: var(--imageweave-border-strong);
-  color: var(--imageweave-text-primary);
-  background: #DDE4E8;
-  background: color-mix(in srgb, var(--imageweave-accent) 18%, var(--imageweave-surface) 82%);
-  box-shadow: 0 0 0 1px var(--imageweave-border-strong), var(--imageweave-shadow-control);
-}
-
-:is(button, a):is(
-  .crawl-button,
-  .tasks-button,
-  .proxy-button,
-  .vault-button,
-  .review-button,
-  .policy-button,
-  .diagnostics-button,
-  .personalization-button
-):is(
-  .crawl-button--primary,
-  .tasks-button--primary,
-  .proxy-button--primary,
-  .vault-button--primary,
-  .review-button--primary,
-  .policy-button--primary,
-  .diagnostics-button--primary,
-  .personalization-button--primary
-):hover:not(:disabled):not([aria-disabled="true"]),
-:is(button, a):is(
-  .crawl-button,
-  .tasks-button,
-  .proxy-button,
-  .vault-button,
-  .review-button,
-  .policy-button,
-  .diagnostics-button,
-  .personalization-button
-):is(
-  .crawl-button--primary,
-  .tasks-button--primary,
-  .proxy-button--primary,
-  .vault-button--primary,
-  .review-button--primary,
-  .policy-button--primary,
-  .diagnostics-button--primary,
-  .personalization-button--primary
-):focus-visible {
-  color: var(--imageweave-text-primary);
-  background: #D1DCE2;
-  background: color-mix(in srgb, var(--imageweave-accent) 25%, var(--imageweave-surface) 75%);
-}
-
-:is(button, a):is(
-  .crawl-button,
-  .tasks-button,
-  .proxy-button,
-  .vault-button,
-  .review-button,
-  .policy-button,
-  .personalization-button
-):is(
-  .crawl-button--dangerous,
-  .tasks-button--dangerous,
-  .proxy-button--dangerous,
-  .vault-button--dangerous,
-  .review-button--dangerous,
-  .policy-button--dangerous,
-  .personalization-button--dangerous
-) {
+  .crawl-button.crawl-button--dangerous,
+  .tasks-button.tasks-button--dangerous,
+  .proxy-button.proxy-button--dangerous,
+  .vault-button.vault-button--dangerous,
+  .review-button.review-button--dangerous,
+  .policy-button.policy-button--dangerous,
+  .diagnostics-button.diagnostics-button--dangerous,
+  .personalization-button.personalization-button--dangerous
+),
+.imageweave-dialog__actions .dialog-confirm--dangerous {
   border: var(--imageweave-border-strong-width) solid var(--imageweave-state-danger);
   color: var(--imageweave-state-danger);
-  background: var(--imageweave-state-danger-surface-solid);
-  background: var(--imageweave-state-danger-surface);
-  box-shadow: inset 3px 0 0 var(--imageweave-state-danger);
+  background: var(--imageweave-glass-surface-button);
+  box-shadow: var(--imageweave-shadow-control);
 }
 
 :is(button, a):is(
-  .crawl-button,
-  .tasks-button,
-  .proxy-button,
-  .review-button,
-  .diagnostics-button
-):is(
-  .crawl-button--small,
-  .tasks-button--small,
-  .proxy-button--small,
-  .review-button--small,
-  .diagnostics-button--small
+  .crawl-button.crawl-button--small,
+  .tasks-button.tasks-button--small,
+  .proxy-button.proxy-button--small,
+  .review-button.review-button--small,
+  .diagnostics-button.diagnostics-button--small
 ) {
   min-height: var(--imageweave-control-height-compact);
   padding: 6px 10px;
-  box-shadow: none;
   font-size: 0.82rem;
 }
 
 :is(button, a):is(
+  .route-button,
   .crawl-button,
   .tasks-button,
   .proxy-button,
@@ -258,11 +159,11 @@ button[aria-disabled="true"] {
   .policy-button,
   .diagnostics-button,
   .personalization-button
-)[aria-busy="true"] {
-  background-image: none;
+)[aria-busy="true"],
+.imageweave-dialog__actions button[aria-busy="true"] {
   border-style: solid;
-  box-shadow: none;
   cursor: progress;
+  transform: none;
 }
 
 :is(button, a):is(
@@ -275,13 +176,168 @@ button[aria-disabled="true"] {
   .policy-button,
   .diagnostics-button,
   .personalization-button
-):is(:disabled, [aria-disabled="true"]) {
-  border-color: var(--imageweave-border-subtle);
-  color: var(--imageweave-state-disabled);
-  background: var(--imageweave-state-disabled-surface-solid);
-  background: var(--imageweave-state-disabled-surface);
+):hover:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]),
+.imageweave-dialog__actions button:hover:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]) {
+  border-color: var(--imageweave-border-focus);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-hover);
+  box-shadow:
+    0 10px 32px rgb(3 7 18 / 0.55),
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
+  transform: translateY(-2px);
+}
+
+:is(button, a):is(
+  .crawl-button.crawl-button--primary,
+  .tasks-button.tasks-button--primary,
+  .proxy-button.proxy-button--primary,
+  .vault-button.vault-button--primary,
+  .review-button.review-button--primary,
+  .policy-button.policy-button--primary,
+  .diagnostics-button.diagnostics-button--primary,
+  .personalization-button.personalization-button--primary
+):hover:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]),
+.imageweave-dialog__actions .dialog-confirm:hover:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]) {
+  border-color: var(--imageweave-accent-highlight);
+  color: var(--imageweave-accent-highlight);
+  background: var(--imageweave-glass-surface-hover);
+  box-shadow:
+    0 0 0 1px rgb(228 184 99 / 0.32),
+    0 10px 32px rgb(3 7 18 / 0.55),
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
+}
+
+:is(button, a):is(
+  .crawl-button.crawl-button--dangerous,
+  .tasks-button.tasks-button--dangerous,
+  .proxy-button.proxy-button--dangerous,
+  .vault-button.vault-button--dangerous,
+  .review-button.review-button--dangerous,
+  .policy-button.policy-button--dangerous,
+  .diagnostics-button.diagnostics-button--dangerous,
+  .personalization-button.personalization-button--dangerous
+):hover:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]),
+.imageweave-dialog__actions .dialog-confirm--dangerous:hover:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]) {
+  border-color: var(--imageweave-state-danger);
+  color: var(--imageweave-state-danger);
+  background: var(--imageweave-glass-surface-hover);
+  box-shadow:
+    0 10px 32px rgb(3 7 18 / 0.55),
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
+}
+
+:is(button, a):is(
+  .route-button,
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+):active:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]),
+.imageweave-dialog__actions button:active:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]) {
+  background: var(--imageweave-glass-surface-environment);
+  box-shadow: var(--imageweave-shadow-control);
+  transform: scale(0.97);
+}
+
+:is(button, a):is(
+  .route-button,
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+):focus-visible:not(:disabled):not([aria-disabled="true"]),
+.imageweave-dialog__actions button:focus-visible:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--imageweave-border-focus);
+  outline: none;
+  box-shadow:
+    0 0 0 var(--imageweave-focus-width) var(--imageweave-focus-glow),
+    var(--imageweave-shadow-control);
+}
+
+:is(button, a):is(
+  .crawl-button.crawl-button--primary,
+  .tasks-button.tasks-button--primary,
+  .proxy-button.proxy-button--primary,
+  .vault-button.vault-button--primary,
+  .review-button.review-button--primary,
+  .policy-button.policy-button--primary,
+  .diagnostics-button.diagnostics-button--primary,
+  .personalization-button.personalization-button--primary
+):focus-visible:not(:disabled):not([aria-disabled="true"]),
+.imageweave-dialog__actions .dialog-confirm:focus-visible:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--imageweave-accent-highlight);
+  color: var(--imageweave-accent-highlight);
+  background: var(--imageweave-glass-surface-button);
+  box-shadow:
+    0 0 0 var(--imageweave-focus-width) var(--imageweave-focus-glow),
+    0 8px 24px rgb(3 7 18 / 0.35),
+    inset 0 1px 0 rgb(255 255 255 / 0.25),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
+}
+
+:is(button, a):is(
+  .crawl-button.crawl-button--dangerous,
+  .tasks-button.tasks-button--dangerous,
+  .proxy-button.proxy-button--dangerous,
+  .vault-button.vault-button--dangerous,
+  .review-button.review-button--dangerous,
+  .policy-button.policy-button--dangerous,
+  .diagnostics-button.diagnostics-button--dangerous,
+  .personalization-button.personalization-button--dangerous
+):focus-visible:not(:disabled):not([aria-disabled="true"]),
+.imageweave-dialog__actions .dialog-confirm--dangerous:focus-visible:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--imageweave-state-danger);
+  color: var(--imageweave-state-danger);
+}
+
+:is(button, a):is(
+  .route-button,
+  .crawl-button,
+  .tasks-button,
+  .proxy-button,
+  .vault-button,
+  .review-button,
+  .policy-button,
+  .diagnostics-button,
+  .personalization-button
+):is(:disabled, [aria-disabled="true"]),
+.imageweave-dialog__actions button:is(:disabled, [aria-disabled="true"]) {
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  color: var(--imageweave-text-secondary);
+  background: var(--imageweave-glass-surface-weak);
+  box-shadow:
+    inset 0 0 0 1px var(--imageweave-border-weak),
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    inset 0 -1px 0 rgb(2 6 16 / 0.28);
+  cursor: not-allowed;
+  opacity: 1;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  transform: none;
+}
+
+/* A navigation row is still a button, but card/row geometry never lifts or
+   scales. Its border, surface and focus ring remain the interaction cues. */
+:is(button, a).vault-button.vault-site-nav-button,
+:is(button, a).vault-button.vault-site-nav-button:hover:not(:disabled),
+:is(button, a).vault-button.vault-site-nav-button:active:not(:disabled) {
   box-shadow: none;
-  opacity: 0.7;
+  transform: none;
+}
+
+:is(button, a).vault-button.vault-site-nav-button:focus-visible:not(:disabled) {
+  box-shadow: 0 0 0 var(--imageweave-focus-width) var(--imageweave-focus-glow);
   transform: none;
 }
 
@@ -301,17 +357,35 @@ button[aria-disabled="true"] {
   min-width: 0;
   min-height: var(--imageweave-control-height);
   padding: 8px 11px;
-  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
   border-radius: var(--imageweave-radius-control);
   color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-control-solid);
-  background: var(--imageweave-surface-control);
-  box-shadow: inset 0 1px 2px rgb(7 13 20 / 0.08);
+  background: var(--imageweave-glass-surface-input);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.15),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
   font: inherit;
+  opacity: 1;
   transition:
-    background-color var(--imageweave-transition-fast),
-    border-color var(--imageweave-transition-fast),
-    box-shadow var(--imageweave-transition-fast);
+    color var(--imageweave-transition-standard),
+    background-color var(--imageweave-transition-standard),
+    border-color var(--imageweave-transition-standard),
+    box-shadow var(--imageweave-transition-standard);
+}
+
+.app-view :is(
+  input:not([type]),
+  input[type="text"],
+  input[type="search"],
+  input[type="password"],
+  input[type="number"],
+  input[type="email"],
+  input[type="url"],
+  input[type="tel"],
+  textarea
+)::placeholder {
+  color: rgb(255 255 255 / 0.35);
+  opacity: 1;
 }
 
 .app-view :is(
@@ -325,8 +399,8 @@ button[aria-disabled="true"] {
   input[type="tel"],
   select,
   textarea
-):hover:not(:disabled):not([readonly]) {
-  border-color: var(--imageweave-border-strong);
+):hover:not(:disabled):not([aria-disabled="true"]):not([readonly]) {
+  border-color: var(--imageweave-border-button);
 }
 
 .app-view :is(
@@ -341,10 +415,13 @@ button[aria-disabled="true"] {
   select,
   textarea
 ):focus-visible {
-  border-color: var(--imageweave-focus-ring);
-  outline-color: var(--imageweave-focus-ring);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 1px var(--imageweave-focus-halo);
+  border-color: var(--imageweave-border-focus);
+  outline: none;
+  background: var(--imageweave-glass-surface-button);
+  box-shadow:
+    0 0 0 var(--imageweave-focus-width) var(--imageweave-focus-glow),
+    inset 0 1px 0 rgb(255 255 255 / 0.25),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
 }
 
 .app-view :is(
@@ -360,8 +437,11 @@ button[aria-disabled="true"] {
   textarea
 )[aria-invalid="true"] {
   border: var(--imageweave-border-strong-width) solid var(--imageweave-state-danger);
-  background: var(--imageweave-state-danger-surface-solid);
-  background: var(--imageweave-state-danger-surface);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-input);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.15),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
 }
 
 .app-view :is(
@@ -375,14 +455,59 @@ button[aria-disabled="true"] {
   input[type="tel"],
   select,
   textarea
-):is(:disabled, [readonly]) {
-  border-color: var(--imageweave-border-subtle);
-  color: var(--imageweave-state-disabled);
-  background: var(--imageweave-state-disabled-surface-solid);
-  background: var(--imageweave-state-disabled-surface);
-  box-shadow: none;
+)[aria-invalid="true"]:focus-visible {
+  border-color: var(--imageweave-state-danger);
+  background: var(--imageweave-glass-surface-button);
+  box-shadow:
+    0 0 0 var(--imageweave-focus-width) var(--imageweave-focus-glow),
+    inset 0 1px 0 rgb(255 255 255 / 0.25),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
+}
+
+.app-view :is(
+  input:not([type]),
+  input[type="text"],
+  input[type="search"],
+  input[type="password"],
+  input[type="number"],
+  input[type="email"],
+  input[type="url"],
+  input[type="tel"],
+  select,
+  textarea
+):is(:disabled, [aria-disabled="true"]) {
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
+  color: var(--imageweave-text-secondary);
+  background: var(--imageweave-glass-surface-weak);
+  box-shadow:
+    inset 0 0 0 1px var(--imageweave-border-weak),
+    inset 0 1px 0 rgb(255 255 255 / 0.10),
+    inset 0 -1px 0 rgb(2 6 16 / 0.25);
   cursor: not-allowed;
-  opacity: 0.78;
+  font-style: italic;
+  opacity: 1;
+  -webkit-text-fill-color: var(--imageweave-text-secondary);
+}
+
+.app-view :is(
+  input:not([type]),
+  input[type="text"],
+  input[type="search"],
+  input[type="password"],
+  input[type="number"],
+  input[type="email"],
+  input[type="url"],
+  input[type="tel"],
+  select,
+  textarea
+)[readonly]:not(:disabled) {
+  border-style: solid;
+  color: var(--imageweave-text-code);
+  background: var(--imageweave-glass-surface-weak);
+  box-shadow: inset 0 0 0 1px var(--imageweave-border-weak);
+  cursor: text;
+  font-style: italic;
+  opacity: 1;
 }
 
 .app-view textarea {
@@ -395,16 +520,52 @@ button[aria-disabled="true"] {
   height: 20px;
   margin: 0;
   accent-color: var(--imageweave-accent);
+  opacity: 1;
 }
 
 .app-view :is(input[type="checkbox"], input[type="radio"]):focus-visible {
-  outline-color: var(--imageweave-focus-ring);
+  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
   outline-offset: 3px;
+  box-shadow: 0 0 0 var(--imageweave-focus-width) var(--imageweave-focus-glow);
+}
+
+.app-view :is(input[type="checkbox"], input[type="radio"]):disabled {
+  cursor: not-allowed;
+  opacity: 1;
 }
 
 .app-view input[type="range"] {
   min-height: var(--imageweave-control-height);
   accent-color: var(--imageweave-accent);
+}
+
+.app-view input[type="range"]:focus-visible,
+.app-view progress:focus-visible {
+  outline: var(--imageweave-focus-width) solid var(--imageweave-focus-ring);
+  outline-offset: 3px;
+}
+
+@media (prefers-contrast: more) {
+  .app-view :is(input, textarea)::placeholder {
+    color: var(--imageweave-text-secondary) !important;
+  }
+
+  :is(button, a):is(
+    .route-button,
+    .crawl-button,
+    .tasks-button,
+    .proxy-button,
+    .vault-button,
+    .review-button,
+    .policy-button,
+    .diagnostics-button,
+    .personalization-button
+  ):is(:disabled, [aria-disabled="true"]),
+  .imageweave-dialog__actions button:is(:disabled, [aria-disabled="true"]),
+  .app-view :is(input, select, textarea):is(:disabled, [aria-disabled="true"]) {
+    color: var(--imageweave-text-primary);
+    border-color: var(--imageweave-border-focus);
+  }
 }
 
 @media (forced-colors: active) {
@@ -419,6 +580,7 @@ button[aria-disabled="true"] {
     border-color: CanvasText;
     color: CanvasText;
     background: Canvas;
+    background-image: none;
     box-shadow: none;
   }
 
@@ -433,15 +595,19 @@ button[aria-disabled="true"] {
     .diagnostics-button,
     .personalization-button
   ),
+  .imageweave-dialog__actions button,
   .menu-bar__summary-action,
   .app-view :is(input, select, textarea) {
-    transition: none !important;
     border: var(--imageweave-border-width) solid ButtonText;
     color: ButtonText;
     background: ButtonFace !important;
     background-image: none;
     box-shadow: none;
-    forced-color-adjust: none;
+    opacity: 1;
+    transform: none;
+    transition: none !important;
+    forced-color-adjust: auto;
+    -webkit-text-fill-color: currentColor;
   }
 
   .menu-bar__summary-action:focus-visible {
@@ -450,39 +616,36 @@ button[aria-disabled="true"] {
   }
 
   :is(button, a):is(
-    .crawl-button,
-    .tasks-button,
-    .proxy-button,
-    .vault-button,
-    .review-button,
-    .policy-button,
-    .diagnostics-button,
-    .personalization-button
-  ):is(
-    .crawl-button--primary,
-    .tasks-button--primary,
-    .proxy-button--primary,
-    .vault-button--primary,
-    .review-button--primary,
-    .policy-button--primary,
-    .diagnostics-button--primary,
-    .personalization-button--primary
-  ) {
+    .crawl-button.crawl-button--primary,
+    .tasks-button.tasks-button--primary,
+    .proxy-button.proxy-button--primary,
+    .vault-button.vault-button--primary,
+    .review-button.review-button--primary,
+    .policy-button.policy-button--primary,
+    .diagnostics-button.diagnostics-button--primary,
+    .personalization-button.personalization-button--primary
+  ),
+  .imageweave-dialog__actions .dialog-confirm {
     border-color: Highlight;
     color: HighlightText;
-    background: Highlight;
+    background: Highlight !important;
   }
 
   :is(button, a):is(
-    .crawl-button--dangerous,
-    .tasks-button--dangerous,
-    .proxy-button--dangerous,
-    .vault-button--dangerous,
-    .review-button--dangerous,
-    .policy-button--dangerous,
-    .personalization-button--dangerous
-  ) {
+    .crawl-button.crawl-button--dangerous,
+    .tasks-button.tasks-button--dangerous,
+    .proxy-button.proxy-button--dangerous,
+    .vault-button.vault-button--dangerous,
+    .review-button.review-button--dangerous,
+    .policy-button.policy-button--dangerous,
+    .diagnostics-button.diagnostics-button--dangerous,
+    .personalization-button.personalization-button--dangerous
+  ),
+  .imageweave-dialog__actions .dialog-confirm--dangerous,
+  .app-view :is(input, select, textarea)[aria-invalid="true"] {
     border: var(--imageweave-border-strong-width) solid CanvasText;
+    color: CanvasText;
+    background: Canvas !important;
   }
 
   :is(button, a):is(
@@ -496,10 +659,13 @@ button[aria-disabled="true"] {
     .diagnostics-button,
     .personalization-button
   ):is(:disabled, [aria-disabled="true"]),
-  .app-view :is(input, select, textarea):is(:disabled, [readonly]) {
+  .imageweave-dialog__actions button:is(:disabled, [aria-disabled="true"]),
+  .app-view :is(input, select, textarea):is(:disabled, [aria-disabled="true"]) {
     border-color: GrayText;
+    border-style: solid;
     color: GrayText;
-    background: Canvas;
+    background: Canvas !important;
     opacity: 1;
+    -webkit-text-fill-color: GrayText;
   }
 }

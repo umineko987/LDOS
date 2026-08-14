@@ -255,8 +255,10 @@ import {
 } from "../gdl_backend/webui/js/core/storage.js";
 import { createIcon } from "../gdl_backend/webui/js/components/icons.js";
 import {
+  createStatusBadge,
   normalizeStatus,
   resolveStatusPresentation,
+  updateStatusBadge,
 } from "../gdl_backend/webui/js/components/status.js";
 import {
   buildShellSnapshot,
@@ -275,7 +277,11 @@ import {
   createDock,
 } from "../gdl_backend/webui/js/components/taskbar-windows.js";
 import { createApplicationCenter } from "../gdl_backend/webui/js/components/application-center.js";
-import { toSafeErrorViewModel } from "../gdl_backend/webui/js/components/error-view.js";
+import { createEmptyState } from "../gdl_backend/webui/js/components/empty-state.js";
+import {
+  createErrorView,
+  toSafeErrorViewModel,
+} from "../gdl_backend/webui/js/components/error-view.js";
 import { createDialogController } from "../gdl_backend/webui/js/components/dialog.js";
 import { createSourceErrorWarning } from "../gdl_backend/webui/js/components/crawl-view.js";
 import {
@@ -5282,6 +5288,86 @@ test("状态映射始终返回图标、文本和非颜色状态类别", () => {
     label: "连接失败",
   });
   assert.throws(() => resolveStatusPresentation("unknown"), Error);
+});
+
+test("共享状态、空状态与错误视图保留图标文本、ARIA 和销毁生命周期", () => {
+  const fixture = installWindowManagerDomFixture();
+  try {
+    assert.throws(
+      () => updateStatusBadge({}, "ready", "已就绪"),
+      /状态徽标元素无效/,
+    );
+
+    const badge = createStatusBadge("ready", "同步完成", { compact: true });
+    assert.equal(badge.className, "status-badge status-badge--compact");
+    assert.equal(badge.dataset.status, "ready");
+    assert.equal(badge.getAttribute("aria-label"), "同步完成");
+    assert.equal(badge.children.length, 2);
+    assert.equal(badge.children[0].getAttribute("aria-hidden"), "true");
+    assert.equal(badge.children[0].textContent, "✓");
+    assert.equal(badge.children[1].textContent, "同步完成");
+
+    const icon = badge.children[0];
+    const label = badge.children[1];
+    assert.equal(updateStatusBadge(badge, "running", "同步中", {
+      title: "同步任务正在运行",
+    }), badge);
+    assert.equal(badge.dataset.status, "running");
+    assert.equal(badge.getAttribute("aria-label"), "同步中");
+    assert.equal(badge.title, "同步任务正在运行");
+    assert.equal(badge.children[0], icon);
+    assert.equal(badge.children[1], label);
+    assert.equal(icon.textContent, "▶");
+    assert.equal(label.textContent, "同步中");
+
+    const empty = createEmptyState({
+      status: "error",
+      label: "加载失败",
+      title: "没有可显示的事实",
+      message: "请检查服务状态后重试。",
+    });
+    assert.equal(empty.className, "empty-state");
+    assert.equal(empty.getAttribute("role"), "alert");
+    assert.equal(empty.children.length, 3);
+    assert.equal(empty.children[0].dataset.status, "error");
+    assert.equal(empty.children[0].children[0].textContent, "!");
+    assert.equal(empty.children[1].textContent, "没有可显示的事实");
+    assert.equal(empty.children[2].textContent, "请检查服务状态后重试。");
+
+    let actions = 0;
+    const rendered = createErrorView({
+      code: "backend_fixture",
+      message: "请求失败",
+      requestId: "request-42",
+    }, {
+      nextStep: "打开诊断查看运行状态。",
+      statusLabel: "读取失败",
+      actionLabel: "打开诊断",
+      onAction() { actions += 1; },
+    });
+    fixture.documentObject.documentElement.append(rendered.element);
+    assert.equal(rendered.element.className, "error-view");
+    assert.equal(rendered.element.getAttribute("role"), "alert");
+    assert.equal(rendered.element.children[0].dataset.status, "error");
+    assert.equal(rendered.element.children[0].children[0].textContent, "!");
+    assert.equal(rendered.element.children[1].textContent, "请求失败");
+    assert.equal(rendered.element.children[2].children[1].textContent, "request-42");
+    assert.equal(rendered.element.children[3].textContent, "打开诊断查看运行状态。");
+    const action = rendered.element.children[4];
+    assert.equal(action.className, "route-button");
+    action.emit("click");
+    assert.equal(actions, 1);
+    rendered.destroy();
+    assert.equal(rendered.element.parentNode, null);
+    action.emit("click");
+    assert.equal(actions, 1, "destroy removes the action listener");
+
+    const passive = createErrorView({ code: "network_error" });
+    assert.equal(passive.element.children.length, 3);
+    passive.destroy();
+  } finally {
+    fixture.restore();
+  }
 });
 
 test("任务栏摘要只保留健康、代理和去重的脱敏投影", () => {

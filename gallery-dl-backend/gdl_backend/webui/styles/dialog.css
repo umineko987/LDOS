@@ -3,26 +3,32 @@
   max-height: calc(100dvh - 28px);
   padding: 0;
   overflow: auto;
-  border: var(--imageweave-border-width) solid var(--imageweave-border-subtle);
+  border: var(--imageweave-border-width) solid var(--imageweave-border-default);
   border-radius: var(--imageweave-radius-window);
   color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface);
-  background: var(--imageweave-surface-environment);
-  box-shadow: var(--imageweave-shadow-flyout);
+  background-color: var(--imageweave-glass-surface-default);
+  background-image: linear-gradient(
+    to bottom,
+    rgb(255 255 255 / 0.12),
+    transparent 50%
+  );
+  box-shadow: var(--imageweave-shadow-window);
+  color-scheme: dark;
 }
 
 .imageweave-dialog::backdrop {
-  background: #111820;
-  background: color-mix(in srgb, #111820 72%, transparent);
+  background: rgb(3 7 18 / 0.68);
 }
 
 .imageweave-dialog__panel {
   padding: clamp(20px, 4vw, 30px);
+  background: transparent;
+  box-shadow: none;
 }
 
 .imageweave-dialog__panel > h2 {
   margin-bottom: 14px;
-  border-color: var(--imageweave-separator);
+  border-color: var(--imageweave-border-weak);
 }
 
 .imageweave-dialog__panel > p {
@@ -39,36 +45,6 @@
 
 .imageweave-dialog__actions button {
   min-width: 96px;
-  min-height: var(--imageweave-control-height);
-  padding: 8px 14px;
-  border: var(--imageweave-border-width) solid var(--imageweave-border-strong);
-  border-radius: var(--imageweave-radius-control);
-  color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-control-solid);
-  background: var(--imageweave-surface-control);
-  box-shadow: var(--imageweave-shadow-control);
-  font-weight: 750;
-}
-
-.imageweave-dialog__actions button:hover:not(:disabled),
-.imageweave-dialog__actions button:focus-visible {
-  color: var(--imageweave-text-primary);
-  background: var(--imageweave-surface-control-hover);
-}
-
-.imageweave-dialog__actions .dialog-confirm {
-  border-color: var(--imageweave-border-strong);
-  background: #DDE4E8;
-  background: color-mix(in srgb, var(--imageweave-accent) 18%, var(--imageweave-surface) 82%);
-  box-shadow: 0 0 0 1px var(--imageweave-border-strong), var(--imageweave-shadow-control);
-}
-
-.imageweave-dialog__actions .dialog-confirm--dangerous {
-  border: var(--imageweave-border-strong-width) solid var(--imageweave-state-danger);
-  color: var(--imageweave-state-danger);
-  background: var(--imageweave-state-danger-surface-solid);
-  background: var(--imageweave-state-danger-surface);
-  box-shadow: inset 3px 0 0 var(--imageweave-state-danger);
 }
 
 .imageweave-dialog--dangerous {
@@ -80,30 +56,57 @@
   border: var(--imageweave-border-strong-width) solid var(--imageweave-state-danger);
   border-radius: var(--imageweave-radius-control);
   color: var(--imageweave-text-primary) !important;
-  background: var(--imageweave-state-danger-surface-solid);
-  background: var(--imageweave-state-danger-surface);
+  background: var(--imageweave-glass-surface-secondary);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.14),
+    inset 0 -1px 0 rgb(2 6 16 / 0.28);
   font-weight: 700;
 }
 
+.dialog-confirmation-copy::before {
+  content: "警告：";
+  color: var(--imageweave-state-danger);
+}
+
+/* Dialog is one independent top-level 60px glass layer. Its panel, copy and
+   action rows inherit that blur and never create nested backdrop layers. */
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .imageweave-dialog {
-    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(var(--imageweave-glass-saturation));
-    backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(var(--imageweave-glass-saturation));
+    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-window)) saturate(var(--imageweave-glass-saturation));
+    backdrop-filter: blur(var(--imageweave-glass-blur-window)) saturate(var(--imageweave-glass-saturation));
   }
 
   .imageweave-dialog::backdrop {
-    -webkit-backdrop-filter: blur(3px);
-    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
   }
 }
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .imageweave-dialog {
     background: var(--imageweave-fallback-elevated-solid) !important;
+    background-image: none !important;
   }
 
   .imageweave-dialog::backdrop {
-    background: #111820;
+    background: rgb(3 7 18 / 0.92);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .imageweave-dialog {
+    border-color: var(--imageweave-border-focus);
+    background-color: var(--imageweave-fallback-elevated-solid);
+  }
+
+  .imageweave-dialog::backdrop {
+    background: rgb(3 7 18 / 0.88);
+  }
+
+  .dialog-confirmation-copy {
+    border-color: var(--imageweave-state-danger);
   }
 }
 
@@ -114,7 +117,7 @@
     border-color: CanvasText;
     color: CanvasText !important;
     background: Canvas !important;
-    background-image: none;
+    background-image: none !important;
     box-shadow: none;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -144,6 +147,10 @@
     border: var(--imageweave-border-strong-width) solid CanvasText;
     color: CanvasText;
     background: Canvas;
+  }
+
+  .dialog-confirmation-copy::before {
+    color: CanvasText;
   }
 }
 
