@@ -39,6 +39,9 @@ SOURCE_TESTS = (
     BACKEND / "tests" / "webui_stage6_closeout_contract.test.mjs",
     BACKEND / "tests" / "webui_nocturne_glass_contract.test.mjs",
 )
+SOURCE_TEST_SUPPORT = (
+    BACKEND / "tests" / "source-test-text.mjs",
+)
 BASELINES_PATH = ROOT / "scripts" / "coverage-baselines.json"
 SUMMARY_SCRIPT = ROOT / "scripts" / "summarize-node-coverage.cjs"
 GROUPS = ("core", "apps", "components")
@@ -75,7 +78,7 @@ def _prepare_tree(root: Path) -> None:
     for name in SOURCE_ASSETS:
         shutil.copy2(ROOT / "assets" / name, root / "assets" / name)
     (root / "tests").mkdir()
-    for source_test in SOURCE_TESTS:
+    for source_test in (*SOURCE_TESTS, *SOURCE_TEST_SUPPORT):
         shutil.copy2(source_test, root / "tests" / source_test.name)
     stage5_fixtures = BACKEND / "tests" / "fixtures" / "webui"
     shutil.copytree(stage5_fixtures, root / "tests" / "fixtures" / "webui")

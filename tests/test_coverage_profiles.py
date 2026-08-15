@@ -104,7 +104,13 @@ class CoverageMinimumProfileTests(unittest.TestCase):
             )
             self.assertEqual(
                 sorted(path.name for path in (staged / "tests").glob("*.mjs")),
-                sorted(path.name for path in WEBUI_COVERAGE_RUNNER.SOURCE_TESTS),
+                sorted(
+                    path.name
+                    for path in (
+                        *WEBUI_COVERAGE_RUNNER.SOURCE_TESTS,
+                        *WEBUI_COVERAGE_RUNNER.SOURCE_TEST_SUPPORT,
+                    )
+                ),
             )
 
 

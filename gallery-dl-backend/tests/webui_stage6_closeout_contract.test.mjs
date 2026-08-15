@@ -1,9 +1,18 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, extname, resolve } from "node:path";
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+  win32,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readSourceText } from "./source-test-text.mjs";
 
 const REPOSITORY = existsSync(new URL("../README.md", import.meta.url))
   ? new URL("../", import.meta.url)
@@ -12,7 +21,16 @@ const BACKEND = new URL("../", import.meta.url);
 const WEBUI = new URL("../gdl_backend/webui/", import.meta.url);
 
 function read(url) {
-  return readFileSync(url, "utf8");
+  return readSourceText(url);
+}
+
+function pathIsWithin(root, target, pathApi = { isAbsolute, relative, sep }) {
+  const candidate = pathApi.relative(root, target);
+  return (
+    candidate !== ".."
+    && !candidate.startsWith(`..${pathApi.sep}`)
+    && !pathApi.isAbsolute(candidate)
+  );
 }
 
 function productionFiles(directory, suffixes) {
@@ -214,17 +232,28 @@ test("Stage 6 README and current WebUI docs describe the final shell and preview
   }
   const repositoryPath = resolve(fileURLToPath(REPOSITORY));
   const backendDocTargets = localMarkdownTargets(new URL("docs/gallery-dl-backend.md", REPOSITORY));
+  assert.equal(
+    pathIsWithin(
+      "C:\\ImageWeave",
+      "C:\\ImageWeave\\docs\\gallery-dl-backend.md",
+      win32,
+    ),
+    true,
+  );
+  assert.equal(
+    pathIsWithin("C:\\ImageWeave", "D:\\outside\\escaped.md", win32),
+    false,
+  );
   assert.deepEqual(
     backendDocTargets
       .filter((target) => !existsSync(target))
-      .map((target) => target.replace(`${repositoryPath}/`, "")),
+      .map((target) => relative(repositoryPath, target)),
     [],
   );
   assert.equal(
-    backendDocTargets.some((target) => {
-      const relative = target.replace(`${repositoryPath}/`, "");
-      return relative === target || relative.startsWith("../") || relative.startsWith("..\\");
-    }),
+    backendDocTargets.some(
+      (target) => !pathIsWithin(repositoryPath, target),
+    ),
     false,
   );
   assert.match(backendDoc, /真实凭据和代理节点的 EH\s*烟雾脚本不属于当前仓库的提交内容/);

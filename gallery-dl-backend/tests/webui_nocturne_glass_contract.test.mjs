@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import {
   existsSync,
-  readFileSync,
   readdirSync,
 } from "node:fs";
 import {
@@ -13,6 +12,7 @@ import {
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { readSourceText as readFileSync } from "./source-test-text.mjs";
 
 const TEST_ROOT = dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = resolve(TEST_ROOT, "..");

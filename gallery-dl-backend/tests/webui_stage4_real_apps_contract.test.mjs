@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readSourceText as readFileSync } from "./source-test-text.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import mimetypes
 import os
 import re
 import tempfile
@@ -688,6 +689,62 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(modified_since.status_code, 304)
         self.assertEqual(modified_since.headers.get("cache-control"), "no-cache")
         self.assertEqual(modified_since.headers.get("etag"), html.headers["etag"])
+
+        non_javascript_paths = (
+            "/ui/",
+            "/ui/styles/desktop.css",
+            "/ui/assets/noise.svg",
+        )
+        baseline_media_types = {
+            path: self.client.get(path).headers["content-type"]
+            for path in non_javascript_paths
+        }
+        native_guess_type = mimetypes.guess_type
+
+        def windows_guess_type(path):
+            if os.fspath(path).lower().endswith(".js"):
+                return "application/javascript", None
+            return native_guess_type(path)
+
+        with patch(
+            "starlette.responses.guess_type",
+            side_effect=windows_guess_type,
+        ):
+            javascript = self.client.get("/ui/js/main.js")
+            self.assertEqual(javascript.status_code, 200)
+            self.assertEqual(
+                javascript.headers.get("content-type"),
+                "text/javascript; charset=utf-8",
+            )
+            self.assertEqual(javascript.headers.get("cache-control"), "no-cache")
+            self.assertTrue(javascript.headers.get("etag"))
+            self.assertTrue(javascript.headers.get("last-modified"))
+
+            revalidated_javascript = self.client.get(
+                "/ui/js/main.js",
+                headers={"If-None-Match": javascript.headers["etag"]},
+            )
+            self.assertEqual(revalidated_javascript.status_code, 304)
+            self.assertEqual(revalidated_javascript.content, b"")
+            self.assertEqual(
+                revalidated_javascript.headers.get("cache-control"),
+                "no-cache",
+            )
+            self.assertEqual(
+                revalidated_javascript.headers.get("etag"),
+                javascript.headers["etag"],
+            )
+
+            for path, expected_media_type in baseline_media_types.items():
+                with self.subTest(windows_mimetypes_non_javascript=path):
+                    response = self.client.get(path)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(
+                        response.headers.get("content-type"),
+                        expected_media_type,
+                    )
+                    self.assertEqual(response.headers.get("cache-control"), "no-cache")
+                    self.assertTrue(response.headers.get("etag"))
 
         for api_path in ("/", "/healthz", "/api/v1/config"):
             api = self.client.get(api_path)

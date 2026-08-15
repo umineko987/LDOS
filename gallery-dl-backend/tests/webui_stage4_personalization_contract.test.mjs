@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readSourceText as readFileSync } from "./source-test-text.mjs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";

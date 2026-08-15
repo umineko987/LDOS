@@ -13,7 +13,10 @@ import {
   resolveNavigationTarget,
 } from "../gdl_backend/webui/js/core/router.js";
 import * as desktopModule from "../gdl_backend/webui/js/core/desktop.js";
-import { readFileSync } from "node:fs";
+import {
+  normalizeSourceText,
+  readSourceText as readFileSync,
+} from "./source-test-text.mjs";
 
 import { STORAGE_KEYS } from "../gdl_backend/webui/js/core/storage-contract.js";
 import {
@@ -198,6 +201,7 @@ test("阶段 2 storage v2 验证与 v1 迁移共享 window-layer 本地工作区
 });
 
 test("阶段 2 正式 DOM 包含五层、交通灯与严格桌面边界", () => {
+  assert.equal(normalizeSourceText("lf\ncrlf\r\ncr\r"), "lf\ncrlf\ncr\n");
   assert.equal(typeof desktopModule.initializeDesktop, "function");
   assert.equal("describeApplicationLaunchers" in desktopModule, false);
   const index = readFileSync(new URL("../gdl_backend/webui/index.html", import.meta.url), "utf8");
