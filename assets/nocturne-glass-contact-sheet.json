@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "file": "nocturne-glass-contact-sheet.png",
+  "source": "production-create-app",
+  "capture_method": "Pillow contact sheet assembled from Chromium CDP screenshots of the production WebUI",
+  "browser": "Chromium 150.0.7871.186",
+  "runtime_data": false,
+  "source_viewport": {
+    "width": 1440,
+    "height": 900,
+    "device_scale_factor": 1
+  },
+  "sheet": {
+    "width": 1868,
+    "height": 1795,
+    "tiles": 17
+  },
+  "scenes": [
+    "graphite",
+    "slate",
+    "deep-ocean",
+    "forest",
+    "plum-gray",
+    "warm-paper"
+  ],
+  "apps": [
+    "crawl",
+    "tasks",
+    "proxy",
+    "vault",
+    "review",
+    "policy",
+    "diagnostics",
+    "personalization",
+    "gallery",
+    "schedule",
+    "export"
+  ],
+  "formal_unavailable_previews": [
+    "gallery",
+    "schedule",
+    "export"
+  ],
+  "sha256": "16c00c823ab300c5dae7158d6d693462fc1ead9ebe7f7c0bbac3e885ac5f3c9f"
+}

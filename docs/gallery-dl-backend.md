@@ -8,8 +8,9 @@
   EH 卡死检测心跳）由 `gdl_backend/worker_patches.py` 在 worker 进程内以运行时
   补丁实现，上游接口变化时补丁自动跳过并在任务日志输出 `[gdl-backend-patch]` 告警；
 - `gdl_backend/` 负责搜索、规划、调度、授权、代理池和状态持久化；
-- `/ui/` 提供随后端打包、已接入真实 API 的桌面化 WebUI，无需单独构建前端；旧单页资源和
-  临时 `/ui-next/` 挂载已在正式切换时删除。
+- `/ui/` 通过唯一的 `StaticFiles(..., html=True)` 挂载，同源提供随后端 wheel 打包的原生 ESM、
+  静态 CSS 和 SVG；无需 Node/npm 构建或独立前端进程。旧单页资源、临时 `/ui-next/` 挂载和退役
+  壁纸导入模块已从正式交付中删除。
 
 ## 运行要求
 
@@ -104,12 +105,13 @@ block 512 且不主动改变 Torch 线程；CPU 服务器应明确使用 `device
 - **去重审核**：显式分析、全量组选择器、待提交组精确分批保存、同步锐利镜片和危险应用确认；
 - **站点设置**：为 Danbooru、X、Pixiv、EH 与 Pawchive 调整四项“各站运行设置”；
 - **系统诊断**：20 秒只读轮询健康、就绪、最小配置能力和调度摘要，离线时保留安全旧快照；
-- **外观设置**：安全自定义强调色与窗口底色，并管理六种静态纯色、本地静态图片、可读性、动效二态和 92%–100% 窗口不透明度；不发起网络请求或调用业务 API。
+- **外观设置**：只管理“夜航石墨、月岩、深海、深林、雾褐、暖夜”六个内置深色场景与动效开关；偏好严格保持本地，不发起网络请求或调用业务 API。
 
-界面主题默认值为墨灰纸白 `#46515D / #F4F1EA`。两个字段只接受规范化严格六位 HEX；任意
-对比度（包括相同颜色和约 `1.00:1` 的组合）都可预览、应用并恢复，界面只同步显示实际对比度。
-窗口底色自动派生 `light/dark` `color-scheme`；forced-colors 使用系统色。主题与其余个性化字段
-共用同一完整草稿、Apply/Cancel 和既有 UI preference key。
+夜航玻璃是唯一正式视觉：根 `color-scheme` 固定为 dark，普通表面使用低透明中性白，主要窗口为
+`blur(60px) saturate(1.8)`，全局噪点只挂载一次。用户不能写入任意强调色、窗口底色、透明度或
+本地图片壁纸。偏好白名单只包含 `wallpaperColor` 和 `animations`；旧 custom 壁纸只经过一次性
+IndexedDB delete-only 兼容 seam 清理，失败不阻断桌面启动。低于 `1180 × 720` CSS 像素时只显示
+桌面环境 blocker。
 
 **图片库、定时任务、数据集导出**是 3 个独立 preview controller/model/view。正式运行只进入
 “后端能力尚未接入”状态，写操作禁用，合计发送 0 个对应业务 API 请求；loading/empty/content/error
@@ -242,7 +244,7 @@ Mihomo、去重 Python、Torch 实际设备及 SSCD/DINOv2 缓存。禁用组件
 ## WebUI 工作流
 
 1. 访问裸 `/ui/` 的空玻璃桌面，通过 Dock 或应用中心启动应用；也可使用 `#/应用ID` 深链接。
-2. （可选）在“外观设置”调整严格六位 HEX 的强调色、窗口底色及其他本地个性化设置；任意颜色组合均可直接预览和应用。
+2. （可选）在“外观设置”选择六个同源内置夜景之一，并开启或关闭界面动效；
 3. 查看代理池状态，按需启动、重载或探活。
 4. 在“授权管理”中完成所需站点登录。
 5. 输入关键词搜索来源，核对候选和弱证据，并调整来源/地址顺序。
@@ -259,18 +261,16 @@ Mihomo、去重 Python、Torch 实际设备及 SSCD/DINOv2 缓存。禁用组件
 原始错误和内部载荷不会进入 Store 或 DOM。新页面的中央窗口栈始终从空数组开始；session 中的当前
 应用只用于运行期协调，不是启动权威，不恢复运行、焦点、最小化或窗口栈状态。LocalStorage 的
 `imageweave.window-placements.v2` 只按应用保存经过几何校验的最近 normal rect 和可选最大化偏好；
-旧 v1 工作区仅一次迁移为位置提示，不会自动重开窗口。既有 `imageweave.ui:ui-preferences` 中的
-个性化值始终是完整偏好对象，主题只占
-`themeAccent/themeSurface` 两个规范化严格六位 HEX 字段；不建立主题专用 key，也不保存 CSS 声明、
-选择器、`var()`、颜色函数或其他 CSS 文本。LocalStorage 仍不接受图片内容、文件名、路径、
+旧 v1 工作区仅一次迁移为位置提示，不会自动重开窗口。`imageweave.ui:ui-preferences` 只保存
+`wallpaperColor`（六个合法场景 ID）和 `animations`（`on | off`）；未知字段、危险键、损坏 JSON
+和旧 `custom` 值都由白名单投影安全回退。不保存 CSS 声明、颜色函数、图片内容、文件名、路径、
 Base64/Data URL 或 Blob URL。
 
-“外观设置”不发起网络请求、调用业务 API、增加后端端点或上传主题/图片。本地 JPG/PNG/WebP 经
-解码与 Canvas 静态重编码后，只有重编码 Blob 会写入 IndexedDB；原始 `File`、文件名、路径和临时
-Object URL 不进入中央 Store 或 LocalStorage，图片也不会上传。IndexedDB 不可用或配额写入失败时
-保留旧壁纸并给出安全提示；偏好指向的记录缺失或损坏时清理无效记录并回退默认 `graphite`，这些
-故障不阻断桌面壳层启动。主题颜色不进入 IndexedDB、中央 Store、dataset、业务 API 或上传路径；
-只有通过严格六位 HEX 整对投影后的两个字段随完整偏好写入 LocalStorage；对比度不参与合法性判断。
+“外观设置”不发起网络请求、调用业务 API、增加后端端点或上传文件。本地图片导入、预览、解码、
+Canvas 重编码和显示运行时均已删除；正式代码不读取壁纸 IndexedDB。兼容期
+`js/core/wallpaper-storage.js` 在启动时最多删除旧 `imageweave-ui/wallpapers/custom` 记录，
+不执行 `get/getAll/openCursor/put`，也不创建 Blob/Object URL；IndexedDB 不支持、open/blocked
+或 delete 失败都非阻断，并保留受控默认 `graphite`。
 
 “批次管理”仅对活动批次执行一个 1.5 秒、生命周期受控且不重叠的轮询，终态、404、最小化、
 关闭或切出应用即停止；写操作加锁并在完成后读取权威快照。“去重审核”只在分析处理中轮询；
@@ -290,6 +290,25 @@ legacy API 契约保持兼容。
 异常界面只显示受控错误码与恢复动作，不渲染后端 `details`。控制台只允许固定文本的壳层故障提示，
 不记录用户输入、请求/响应、凭据、路径或异常对象。桌面 WebUI 不需要 Node/npm、打包器、跨域服务或
 独立前端进程，其模块、样式与资源均随后端 wheel 同源提供。
+
+### `/ui/` 静态交付与 wheel 边界
+
+当前生产静态清单固定为 103 项：1 个 HTML、18 个 CSS、83 个 JS 和 1 个 SVG；11 个应用的
+controller/CSS 均包含在内。`pyproject.toml` 的 package-data pattern 必须精确覆盖该集合，clean
+archive wheel 中的成员和 `RECORD` hash/size 必须与源码逐字节一致。`assets/noise.svg` 只有一份，
+为 497 bytes，SHA-256 为
+`9a525197b6bc88f7a64d8746a50f04aa64f29f08d06d57c3e69514b6db083529`，正式 HTTP 返回
+`image/svg+xml`。
+
+正式 `/ui/` 必须让全部 103 项同源返回 200，并让退役 `wallpaper-image-import.js`、旧 cloud 资源
+和 `tests/fixtures/webui/` 路径返回 404。Gallery/Schedule/Export 的 loading/empty/content/error、
+进度和 Gallery Quick Look 只由 `tests/stage5_preview_harness.py` 挂载 tests-only host；正式三项
+始终 unavailable、写操作禁用且合计 0 个所属业务 API 请求。fixture 不得进入生产 ESM 闭包、wheel、
+正式 DOM 或网络发现结果。
+
+夜航视觉交付没有修改后端业务契约：正式基线仍为 OpenAPI 50 paths/61 operations、61 条业务
+APIRoute 和唯一 `/ui` 静态挂载；ServiceContainer、数据库、任务状态机、抓取、代理、授权与 Review
+schema/语义保持不变。更完整的前端模块和合成边界见 [架构与开发约定](ARCHITECTURE.md)。
 
 ## 托管授权
 
@@ -520,11 +539,39 @@ gallery-dl 跳过。
 
 ## 测试与诊断
 
-完整单元回归：
+从仓库根目录执行完整后端回归：
 
 ```bash
-python -m unittest discover -s tests -v
+cd gallery-dl-backend
+./.venv/bin/python -m unittest discover -s tests -v
+cd ..
 ```
+
+定向核对静态 HTTP、package-data、preview fixture 隔离和正式 unavailable 边界：
+
+```bash
+cd gallery-dl-backend
+./.venv/bin/python -m unittest \
+  tests.test_api \
+  tests.test_webui_modules \
+  tests.test_stage5_preview_harness -v
+cd ..
+```
+
+固定 Node.js v24.13.0 后运行唯一正式 WebUI 行为/覆盖率门槛；当前收口基线为 324/324，
+0 fail、0 skip：
+
+```bash
+NODE_24=/absolute/path/to/node-v24.13.0/bin/node
+./gallery-dl-backend/.venv/bin/python scripts/run-webui-coverage.py \
+  --node "$NODE_24" \
+  --output /tmp/imageweave-coverage/webui
+```
+
+项目级 coverage、服务 smoke 与依赖锁命令统一维护在
+[架构与开发约定](ARCHITECTURE.md#13-测试与覆盖率门槛)。构建 wheel 时必须使用 clean archive，
+并核对 103 个 WebUI 成员、wheel `RECORD`、同源 HTTP 字节、单一 noise、兼容 seam 以及退役资源
+404；不能把开发工作树中的 fixture、浏览器 Profile、coverage 或本机文件带入包。
 
 测试默认使用本地夹具、mock 或 gallery-dl `--version`。需要真实凭据和代理节点的 EH
 烟雾脚本不属于当前仓库的提交内容；如需运行此类检查，应在受控本地环境中单独维护。

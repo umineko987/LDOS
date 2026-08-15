@@ -326,6 +326,13 @@ reducer 不得访问 DOM、storage、网络或应用 controller。嵌套 dispatc
 开始。`imageweave.window-placements.v2` 只按应用保存经过边界校验的 normal rect 和可选 maximized
 偏好；旧 v1 记录只能严格迁移成位置提示，不恢复 running/focused/minimized，也不自动打开窗口。
 
+个性化偏好 `imageweave.ui:ui-preferences` 只允许 `wallpaperColor`（六个内置场景 ID）和
+`animations`（`on | off`）两个字段。未知字段、危险键、访问器、损坏 JSON 和退役 `custom`
+记录都经同一白名单投影安全回退；不再保存强调色、窗口底色、透明度、文件名、路径、Base64、
+Data URL 或 Blob URL。`core/wallpaper-storage.js` 只是兼容期 delete-only seam：启动时最多删除
+旧 IndexedDB `imageweave-ui/wallpapers/custom`，不得读取、枚举、写入或显示记录；失败必须非阻断。
+删除该 seam 前需要单独的兼容性取证和迁移决策。
+
 修改持久化时必须保持：
 
 - `STORAGE_KEYS` 稳定，或提供显式迁移；
@@ -359,6 +366,41 @@ reducer 不得访问 DOM、storage、网络或应用 controller。嵌套 dispatc
 - store facade 可以加载而不依赖应用 controller 或视图文件。
 
 不要通过字符串搜索伪造依赖测试；使用真实静态 specifier 解析和 Tarjan SCC 检查。
+
+### 8.6 Router、应用 context 与 I/O
+
+Router 只把裸 `/ui/`、合法 `#/应用ID` 和非法 route 投影为桌面导航意图；窗口数组、焦点、
+最小化和 z-order 仍由 Store/window manager 拥有，Router 不维护第二份运行状态。
+`core/desktop.js` 为每个已挂载应用创建冻结的 context，其中的 `api`、`store`、`actions`、
+`pollingScope`、`dialogs`、`motion`、`personalization` 和 `navigate` 是应用与壳层协作的唯一入口。
+
+真实业务请求统一经过 `core/api.js` 提供的同源 client 和 `context.api`；应用 controller 不直接
+调用 `fetch`/XHR，也不把原始响应绕过 model 白名单送入 Store。deactivate、最小化和 unmount
+必须停止应用 polling scope 并取消迟到响应。Gallery、Schedule、Export 的正式 context 不获得
+对应业务能力：三者只返回 unavailable，合计发送 0 个所属业务 API 请求。
+
+### 8.7 夜航玻璃、合成与静态交付
+
+`styles/tokens.css` 是深色夜航 token 的唯一事实源；`desktop.css` 为 graphite、slate、deep-ocean、
+forest、plum-gray、warm-paper 六个同源径向光井场景提供视觉事实。正常内容只使用低透明中性表面；
+香槟金只作装饰强调，状态色必须配图标、文字、ARIA 或其他非颜色说明。最低桌面工作区为
+`1180 × 720` CSS 像素，低于边界只显示环境 blocker。
+
+合成策略必须保持：每个可见应用窗口只有窗口根本身一个 `blur(60px) saturate(1.8)` 主 backdrop，
+应用内部普通列、行和卡片不创建 backdrop；最小化/隐藏窗口没有可见合成表面。Menu、Dock、Dialog
+和 Gallery tests-only Quick Look 是各自独立的合法顶层玻璃；全局 `assets/noise.svg` 只挂载一次，
+且在 forced-colors 中移除。禁止持续 specular/blur 动画；拖拽、resize 和 Canvas 镜片等直接操控路径
+不使用 500ms 过渡。
+
+生产 WebUI 是后端 `/ui/` 同源提供的原生 ESM、静态 CSS 和 SVG，不存在 Node/npm 构建产物。
+当前 package-data 闭包为 103 项（1 HTML、18 CSS、83 JS、1 SVG），包含单一 `noise.svg` 和
+兼容期 `wallpaper-storage.js`，不包含已退役的 `wallpaper-image-import.js`。preview 内容态只由
+`tests/fixtures/webui/` 与 `tests/stage5_preview_harness.py` 的 tests-only host 提供，生产 import
+闭包、wheel 和正式 HTTP 路径不得发现 fixture。夜航改造没有改变业务 API、OpenAPI schema、
+ServiceContainer、数据库或领域服务语义。
+
+这些边界由固定 Node.js v24.13.0 的正式 WebUI runner、Python 静态/HTTP 契约、clean-archive wheel
+清单和浏览器验收共同守护；不能用截图替代 import graph、fixture isolation 或 API 契约测试。
 
 ## 9. 安全投影、日志与诊断
 
@@ -454,6 +496,8 @@ Python 直接依赖只在 `gallery-dl-backend/pyproject.toml` 维护。`requirem
 - source 边界变化必须显式更新测试和审查说明；
 - skip 数量和原因必须可见；
 - WebUI 行为和 coverage 使用固定 Node.js v24.13.0；
+- 夜航最终目标契约是正式 runner 的 source test，不是单独的可选检查；当前收口基线为 324/324，0 fail、0 skip；
+- WebUI 静态清单同时从生产源、`StaticFiles` HTTP、clean archive wheel 和 wheel `RECORD` 四个边界核对；
 - Python 源码字符串断言不计入真实 JavaScript coverage。
 
 在仓库根目录执行标准门槛：

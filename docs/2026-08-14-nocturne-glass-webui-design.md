@@ -1,7 +1,7 @@
 # ImageWeave 夜航玻璃 WebUI 设计方案
 
 - 日期：2026-08-14
-- 状态：用户决策已确认，待实施
+- 状态：实施完成，T0–T11 已验收
 - 适用范围：`gallery-dl-backend/gdl_backend/webui/` 及其 WebUI 测试
 - 风格名称：Glassmorphism（玻璃拟态）
 - 风格来源：`/styles/glassmorphism`
@@ -10,7 +10,7 @@
 
 ## 1. 目标
 
-把当前偏浅色、偏实心的玻璃桌面重绘为统一的“夜航玻璃”界面，同时完整保留 ImageWeave 已有的模拟操作系统结构、业务能力、安全边界和窗口生命周期。
+本方案的目标是把 T0 时偏浅色、偏实心的玻璃桌面重绘为统一的“夜航玻璃”界面，同时完整保留 ImageWeave 已有的模拟操作系统结构、业务能力、安全边界和窗口生命周期。
 
 目标界面应具备以下可识别特征：
 
@@ -67,9 +67,9 @@
 - 最大化窗口继续贴合现有 window layer 工作区；边界处的几何直角属于最大化状态，不引入通用方角卡片样式；
 - 菜单栏、Dock 图标、交通灯和 resize handle 仍是专用 OS 控件，不机械套用普通业务按钮的完整阴影尺寸，但必须遵守无色玻璃、交互反馈、500ms 非直接操控过渡和可见焦点原则。
 
-## 4. 当前实现基线
+## 4. 实施前基线（历史）
 
-正式 WebUI 当前已经完成上一轮玻璃桌面重构，具备：
+本方案制定时，正式 WebUI 已经完成上一轮玻璃桌面重构，具备：
 
 1. 壁纸层；
 2. 顶部菜单栏；
@@ -88,7 +88,7 @@
 - `webui/styles/desktop.css`：壁纸、窗口、菜单栏、应用中心和 Dock；
 - `webui/styles/apps/*.css`：11 个应用的专用布局。
 
-当前视觉与目标的主要差异：
+T0 实施前视觉与目标的主要差异：
 
 - 默认界面由浅色表面和深色文字组成；
 - 内容表面透明度为 92%–100%；
@@ -1668,3 +1668,46 @@ git diff --check
 - 覆盖率与门禁：WebUI core line/branch/function `90.708081% / 78.434382% / 91.897436%`，apps `79.875056% / 67.000912% / 72.330097%`，components `28.356405% / 77.724359% / 62.601626%`，九项通过原 floor。完整 backend 为 567 tests、0 skip，line/branch `80.716975% / 65.693431%`；dedup 为 43 tests、0 skip，line/branch `72.231497% / 59.863946%`；Proxy_pool 为 60 tests、1 个既有边界 skip，line/branch `59.184385% / 40.054745%`，三者均通过原精确比例 baseline。Linux service smoke 为 `healthz=200`、禁用去重 `readyz=200`、缺模型 `readyz=503`；依赖锁检查覆盖 Python 3.11–3.14 与测试/Proxy_pool/CPU/CUDA，`git diff --check` 与 commit whitespace 通过。测试中的受控 4xx/5xx、来源降级日志和 Proxy_pool 的 legacy host-project skip 均为预期负向证据，不是失败。
 - 浏览器验收：T10 不新增或替代 T11 浏览器矩阵；本阶段只用源码与 wheel 的正式 FastAPI `create_app`/TestClient 完成静态同源交付验收。T9 的代表性 Chromium 结果保持有效，但不被提升为非 headless GPU、缩放或完整 WCAG 结论。
 - 剩余风险：T10 后端静态交付与项目级门禁闭合。T11 仍须完成非 headless 多窗口 60px backdrop 合成/GPU、100%/125%/150% 缩放、六场景与 11 应用、完整键盘/WCAG/forced-colors/reduced-motion、控制台/网络、正式截图与最终文档收口；本阶段没有通过后端测试推断这些浏览器事实。
+
+### 实施记录：T11 浏览器验收、文档与最终收口
+
+- 完成日期：2026-08-15
+- 阶段：T11 浏览器验收、文档与最终收口；T0–T11 线性任务全部闭合
+- 提交：见本阶段独立提交
+- 行为变化：没有修改 WebUI 生产 HTML/CSS/ESM、Python 业务代码、API、ServiceContainer、数据库、依赖或 coverage baseline。README、架构文档和后端文档同步为最终夜航玻璃、六场景、11 应用 `8 ready + 3 preview`、1180×720 桌面边界、原生 ESM/静态 CSS、单 backdrop、个性化两字段白名单/delete-only seam、fixture/wheel 交付边界；更新 `assets/example.png`，新增明确标出三个正式 unavailable preview 的六场景/11 应用总览图及安全 provenance sidecar。
+- 正式浏览器矩阵：在活跃 niri/Wayland 桌面上以非 headless Chromium 150.0.7871.186、X11/XWayland GPU 路径运行正式 `create_app`。主矩阵 135/135、0 fail，覆盖 `1440×900`、`1180×720`、`1179×719` 仅 role=alert blocker，Crawl/Tasks/Proxy/Vault/Review/Policy/Diagnostics/Personalization/Gallery/Schedule/Export 全部普通 `800×560`、最大化和 1180×720 代表路径，六场景、motion on/off、reduced-motion、prefers-contrast、forced-colors、backdrop supported 真路径和 unsupported CSSOM 契约，以及 Menu、应用中心、Dock、交通灯、Dialog 的键盘启动、双向 trap、焦点返回、30px/44px 命中区和 AX tree。33 张原始截图、结构化证据与日志位于 `/tmp/imageweave-nocturne-t11/`；全程 remote 0、fixture 0、非预期 HTTP/loading/console/runtime/log 0，唯一取消请求按生命周期 `ERR_ABORTED` 分类。
+- 缩放：真实 Chromium HostZoomMap 100%/125%/150% 矩阵 18/18。约 1440×900 的固定物理窗口分别得到 CSS `1440×901`、`1152×721`、`960×599`，非 100% 时正确触发 blocker，DPR 比例与 zoom 一致且 `visualViewport.scale=1`，证明不是 resize/pinch 模拟；足够大的物理 surface 分别得到等价 `1440×900` CSS workspace、blocker hidden 和 `blur(60px) saturate(1.8)`。缩放与小视口没有混为同一结论。
+- 真实行为链：Crawl 85/85，真实 POST 创建批次后打开并聚焦 Tasks；Tasks 71/71，活动态 1.5 秒 polling 在最小化/deactivate/unmount 时 0 请求，恢复/重开立即权威重读；Review 50/50，所有 workspace GET 保持 `all=true`，dirty group 串行保存、失败保留原草稿并重试，锐利 Canvas 镜片像素精确，切组/最小化/关闭释放图片、listener、ResizeObserver 和 rAF；Personalization 154/154，六合法场景、unknown/损坏/危险/custom 修复，IndexedDB 只 `delete("custom")` 且不读记录，unsupported/open throw/blocked/delete error 均非阻断；Gallery 正式 unavailable 且所属 API 0，tests-only Stage 5 Quick Look 为 `role=dialog/aria-modal=true`、5 loaded/1 controlled decode error，deactivate/reactivate/destroy 后 Image/Object URL/listener 全部平衡。Schedule/Export 在正式主矩阵继续 unavailable、写入禁用、所属业务 API 0。
+- WCAG/键盘/AX：六场景共 36 个正文、辅助说明、控件、状态、真实 validation error 和 focus 指标样本，先用 `getComputedStyle` 取得 RGBA，再隐藏前景而保留实际径向夜景、窗口玻璃、边框和渐变，从 1440×900 sRGB PNG 的目标区域网格采样并做 alpha compositing；每类取最差实际像素，不以 token 对纯黑代替。最差正文为 warm-paper 控件 `7.364:1`，辅助说明均为白色/80 而非白色/50，最差计算 focus 为 `7.240:1`，交通灯 3px focus outline 的最差实像素为 `4.114:1`，全部通过目标阈值。状态均有图标+文本/ARIA，主矩阵 Menu、应用中心、Dock、交通灯、Dialog 与路由 AX/键盘路径全部通过；forced-colors 去除渐变、噪点、阴影和 backdrop，reduced-motion/motion off 使非必要时长为 0。
+- GPU 与性能：当前会话是本机非远程 niri，物理 `eDP-1 3120×2080@120Hz`、scale 1.7，Intel Core Ultra 9 285H 与 Arrow Lake-P Intel Arc iGPU；Chromium GPU process 使用 `/dev/dri/renderD128`。原生 Wayland 单窗口和 X11 单窗口 probe 均为硬件 ANGLE Intel/Mesa、gpu compositing/rasterization/WebGL enabled、非 SwiftShader，2 秒 rAF 各 242 帧，均值约 `8.28ms`，最大 `11.4/8.5ms`，`>16.7ms` 为 0。六可见窗口保持每窗单一 60px backdrop、内部 0 backdrop、噪点 1、持续动画 0；两个最小化窗口为 `hidden + display:none + backdrop:none + 0×0`。带 trace 的 drag/resize/scroll/switch 指标分别均值 `9.251/9.201/10.069/16.122ms`，最大 `34.9/28.6/61.1/48.9ms`；trace 完整、无 data loss，273,310 events/3,963 frame events/532 `DroppedFrame` 信号，Long Task 和 Long Animation Frame observer 均为 0。三轮无 trace X11 重复中 drag/resize 无 `>50ms`，scroll 共 3、快速窗口切换共 4 个 `>50ms` rAF 间隔；native Wayland 三轮结果同量级且偶发 58–75ms 峰值。没有发现持续主线程阻塞或内部重复 blur，故未为偶发 compositor 峰值越界改动视觉契约。
+- 性能能力边界与剩余风险：这是真实 headed/物理 iGPU 结果，不是 headless/Xvfb，也不外推为其他 GPU 或显示器结论。X11 多窗口压力路径记录 1–3 次 `GetVSyncParametersIfAvailable()` 警告；native Wayland 记录 Chromium 的 Wayland/Vulkan 不兼容提示。机器没有 `intel_gpu_top`、`glxinfo` 或 `vulkaninfo`，因此无法把 532 个 compositor `DroppedFrame` trace 信号进一步归因到驱动、XWayland/niri VSync 或 blur 成本，也不能给出独立 GPU 利用率/显存 profiler 结论。该能力边界不留下未验收的第 20 节条目，但多窗口快速滚动/切换的偶发 50–75ms compositor 峰值是明确剩余风险，应在更多 GPU/刷新率组合上复测后再考虑改变 60px 视觉契约。
+- 正式截图：`assets/example.png` 为生产 `#/tasks`、1440×900、DSF 1，SHA-256 `17f07d18b41c7e1c8b2b4ca11435e68993f9956dd3789c04bfa277e29260af06`；`assets/nocturne-glass-contact-sheet.png` 为 1868×1795、17 tiles，SHA-256 `16c00c823ab300c5dae7158d6d693462fc1ead9ebe7f7c0bbac3e885ac5f3c9f`。两者来自正式 production `create_app` 的隔离安全配置，runtime data 为 false；总览图中的三个 preview 只截正式 unavailable 状态，不把 tests-only Quick Look/内容态宣传为生产能力。README alt 文本和两个 JSON sidecar 均无本机绝对路径或秘密。
+- 覆盖率与最终门禁：固定 Node v24.13.0 正式 runner 324/324、0 fail、0 skip；core line/branch/function `90.708081% / 78.434382% / 91.897436%`，apps `79.875056% / 67.000912% / 72.330097%`，components `28.356405% / 77.724359% / 62.601626%`，九项通过原 floor。Python WebUI modules/Stage 5/API 定向 104/104；backend 567/567、0 skip、line/branch `80.716975% / 65.693431%`；dedup 43/43、0 skip、`72.231497% / 59.863946%`；Proxy_pool 60/60、1 个既有边界 skip、`59.184385% / 40.054745%`，全部通过精确 baseline。service smoke 为 healthz 200、禁用去重 readyz 200、缺模型 readyz 503；依赖锁覆盖 Python 3.11–3.14 和 test/Proxy_pool/CPU/CUDA。README checker 0 error/0 warning，Stage 6 文档/链接/截图 contract 10/10，所有本地 Markdown target 存在，`git diff --check` 通过。
+- Wheel/API/架构保护：clean `git archive HEAD:gallery-dl-backend` wheel 为 179 成员，174 个 `gdl_backend`（71 Python + 103 WebUI：1 HTML/18 CSS/83 JS/1 SVG），11/11 controller/CSS，noise/seam 各 1、importer 0；源码与 wheel 逐字节相同，`RECORD` 179 行与成员全集相同且 178 个 hash/size 全部复算正确。wheel 独占导入的 `create_app` 对 103 项全部 200/正确 MIME/相同 bytes，退役 importer/cloud/fixture 404；OpenAPI 50 paths/61 operations、schema SHA-256 `96607b97c5e81d9c5a69c67f967bd9ac6ec8da7c36d79d4be803c5907858c5db`、61 APIRoute 和唯一 `html=true` `/ui` mount 不变。T0 `39a2fec8b535b6bf8d1b343419d1596a0f9062f1` 到 T11 的 71 个 `gdl_backend/**/*.py` 相对路径与字节聚合完全相同、变化文件 0；生产 ESM 在 T11 零改，既有 83 modules/236 edges、0 多文件 SCC、Store closure 17 且排除 app/view、fixture isolation 继续由 30/30 Python module contract 和 324/324 runner 守护。
+
+#### 第 20 节逐项结论
+
+| # | 完成定义 | T11 结论与证据 |
+| ---: | --- | --- |
+| 1 | 只有深色夜航玻璃主题 | **满足**：根 dark、六场景主矩阵与正式目标契约通过。 |
+| 2 | 无用户可写任意强调色/窗口底色 | **满足**：偏好白名单只有 scene/motion，正式 DOM 无 color/opacity 入口。 |
+| 3 | 本地图片壁纸删除，仅保留 delete-only seam | **满足**：importer 404；DOM/Storage/Network/Object URL 0；IndexedDB 成功与四类失败链通过。 |
+| 4 | 六背景均为深墨光井，无纯色/紫粉渐变 | **满足**：六场景逐一实际 radial 采样和截图，2–3 个光井。 |
+| 5 | OS 壳层与 11 应用统一无色玻璃 | **满足**：11 应用普通/最大化/最小边界与壳层矩阵通过。 |
+| 6 | 正常表面 4%–12%，hover ≤15% | **满足**：正式目标扫描四类遗留均 0；浏览器 computed 正常窗口/行符合边界。 |
+| 7 | 主要玻璃 40px/60px + 180% saturate | **满足**：Menu/Window/顶层浮层静态与浏览器 computed 双重契约通过。 |
+| 8 | 方向性高光、暗缘和深阴影 | **满足**：canonical token、壳层 computed style 与截图核对通过。 |
+| 9 | 全局 2%–3% 噪点且仅一层 | **满足**：2.5%、节点/引用/包成员均恰好 1；forced-colors 移除。 |
+| 10 | 香槟金唯一装饰强调，状态色小面积且非颜色说明完整 | **满足**：目标扫描、status 图标+文字/ARIA 与主矩阵 AX 通过。 |
+| 11 | 普通组件统一 16px/24px 圆角 | **满足**：shared/app 静态契约与 11 应用 computed 样本通过。 |
+| 12 | 无嵌套卡片、单侧粗条、渐变文字、重复 kicker | **满足**：最终四类 legacy scanner 均为 0。 |
+| 13 | 500ms spring，直接操控/reduced-motion 例外正确 | **满足**：motion on `0.5s`；motion off/reduced 为 `0s`；drag/resize/Canvas 无延迟过渡。 |
+| 14 | OS 窗口、路由、Dock、菜单、应用中心无回归 | **满足**：主矩阵键盘/焦点/交通灯及 drag/resize/minimize/restore 行为通过。 |
+| 15 | 八个真实应用 API/状态/安全/轮询/lifecycle 无回归 | **满足**：11 应用正式矩阵、代表性四条深行为链与 T7 既有全应用契约共同通过。 |
+| 16 | 三个 preview 正式 unavailable、0 所属 API | **满足**：三者正式边界逐一 0 API；Gallery fixture/Quick Look 仅 tests-only。 |
+| 17 | 1180×720 稳定，低于边界阻断 | **满足**：1440×900、1180×720 和 1179×719 逐像素边界；100/125/150% 物理 zoom 与等价 workspace 分开验证。 |
+| 18 | WCAG AA、键盘、焦点、forced-colors、reduced-motion、backdrop fallback | **满足**：36 个实像素合成样本最差正文 `7.364:1`、focus `4.114:1`；AX/键盘/media 与 CSSOM fallback 通过。 |
+| 19 | import/Store/fixture/coverage/smoke/锁/diff 全部通过 | **满足**：324/324、30/30 modules、三组 Python coverage、service/lock/diff 与 wheel gate 全绿。 |
+| 20 | 文档和截图同步 | **满足**：README、ARCHITECTURE、后端说明、设计记录、两张正式 PNG 及 sidecar 同步并通过 checker/link contract。 |
+
+第 20 节没有因当前硬件而标记“未完成”的条目；真实 headed iGPU 已覆盖该节要求。无法完成的是跨 GPU/驱动的外推和独立 GPU profiler 归因，它们已明确保留为性能风险，不被包装为本机之外的验收结论。

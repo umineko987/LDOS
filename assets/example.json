@@ -8,8 +8,8 @@
   },
   "route": "#/tasks",
   "source": "production-create-app",
-  "capture_method": "Chromium WebDriver screenshot from an isolated tests-only backend configuration",
+  "capture_method": "Chromium CDP screenshot from production create_app under an isolated safe backend configuration",
   "browser": "Chromium 150.0.7871.186",
   "runtime_data": false,
-  "sha256": "00c71628d080b5aefe3300f36c1135c9ef053f3363857a708c24cc4dc37963a0"
+  "sha256": "17f07d18b41c7e1c8b2b4ca11435e68993f9956dd3789c04bfa277e29260af06"
 }
