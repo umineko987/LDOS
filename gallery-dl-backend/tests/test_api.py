@@ -22,6 +22,38 @@ from gdl_backend.site import SiteInfo
 from tests.helpers import local_test_client, make_settings
 
 
+WEBUI_ROOT = Path(__file__).resolve().parents[1] / "gdl_backend" / "webui"
+WEBUI_APP_ROUTES = {
+    "crawl": "/crawl",
+    "tasks": "/tasks",
+    "proxy": "/proxy",
+    "vault": "/vault",
+    "review": "/review",
+    "policy": "/policy",
+    "diagnostics": "/diagnostics",
+    "personalization": "/personalization",
+    "gallery": "/gallery",
+    "schedule": "/schedule",
+    "export": "/export",
+}
+WEBUI_MEDIA_TYPES = {
+    ".html": "text/html",
+    ".css": "text/css",
+    ".js": "text/javascript",
+    ".svg": "image/svg+xml",
+}
+
+
+def _webui_source_inventory() -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            path.relative_to(WEBUI_ROOT).as_posix()
+            for path in WEBUI_ROOT.rglob("*")
+            if path.is_file()
+        )
+    )
+
+
 def _json_strings(value: object):
     if isinstance(value, str):
         yield value
@@ -905,133 +937,97 @@ class ApiTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, static_background_sources)
 
-        source_webui = Path(__file__).resolve().parents[1] / "gdl_backend" / "webui"
-        source_inventory = sorted(
-            path.relative_to(source_webui).as_posix()
-            for path in source_webui.rglob("*")
-            if path.is_file()
-        )
+        source_inventory = _webui_source_inventory()
         self.assertEqual(len(source_inventory), 103)
         self.assertEqual(sum(path.endswith(".html") for path in source_inventory), 1)
         self.assertEqual(sum(path.endswith(".svg") for path in source_inventory), 1)
         self.assertEqual(sum(path.endswith(".css") for path in source_inventory), 18)
         self.assertEqual(sum(path.endswith(".js") for path in source_inventory), 83)
+        self.assertEqual(
+            {Path(path).suffix for path in source_inventory},
+            set(WEBUI_MEDIA_TYPES),
+        )
+
         inventory_routes = {f"/ui/{path}" for path in source_inventory}
-        for path in sorted(inventory_routes):
-            response = self.client.get(path)
-            self.assertEqual(response.status_code, 200, path)
+        expected_app_controllers = {
+            f"/ui/js/apps/{app_id}.js" for app_id in WEBUI_APP_ROUTES
+        }
+        expected_app_styles = {
+            f"/ui/styles/apps/{app_id}.css" for app_id in WEBUI_APP_ROUTES
+        }
+        self.assertEqual(
+            {
+                path
+                for path in inventory_routes
+                if path.startswith("/ui/js/apps/")
+            },
+            expected_app_controllers,
+        )
+        self.assertEqual(
+            {
+                path
+                for path in inventory_routes
+                if path.startswith("/ui/styles/apps/")
+            },
+            expected_app_styles,
+        )
+        self.assertIn("/ui/js/core/wallpaper-storage.js", inventory_routes)
 
-        static_assets = [
-            "/ui/styles/tokens.css",
-            "/ui/styles/desktop.css",
-            "/ui/styles/dialog.css",
-            "/ui/styles/apps/crawl.css",
-            "/ui/styles/apps/tasks.css",
-            "/ui/styles/apps/review.css",
-            "/ui/styles/apps/policy.css",
-            "/ui/styles/apps/diagnostics.css",
-            "/ui/styles/apps/personalization.css",
-            "/ui/js/main.js",
-            "/ui/js/core/api.js",
-            "/ui/js/core/actions.js",
-            "/ui/js/core/app-definitions.js",
-            "/ui/js/core/app-registry-factory.js",
-            "/ui/js/core/app-registry.js",
-            "/ui/js/core/router.js",
-            "/ui/js/core/store.js",
-            "/ui/js/core/store-business-transition.js",
-            "/ui/js/core/store-contract.js",
-            "/ui/js/core/store-data.js",
-            "/ui/js/core/store-factory.js",
-            "/ui/js/core/store-runtime.js",
-            "/ui/js/core/store-state.js",
-            "/ui/js/core/store-transition.js",
-            "/ui/js/core/store-window-transition.js",
-            "/ui/js/core/polling.js",
-            "/ui/js/core/proxy-model.js",
-            "/ui/js/core/vault-model.js",
-            "/ui/js/core/policy-model.js",
-            "/ui/js/core/crawl-model.js",
-            "/ui/js/core/tasks-model.js",
-            "/ui/js/core/review-model.js",
-            "/ui/js/core/diagnostics-model.js",
-            "/ui/js/core/motion.js",
-            "/ui/js/core/personalization-model.js",
-            "/ui/js/core/personalization.js",
-            "/ui/js/core/wallpaper-storage.js",
-            "/ui/js/core/storage.js",
-            "/ui/js/core/storage-contract.js",
-            "/ui/js/core/storage-layout.js",
-            "/ui/js/core/storage-persistence.js",
-            "/ui/js/core/storage-preferences.js",
-            "/ui/js/core/storage-service.js",
-            "/ui/js/core/storage-snapshot.js",
-            "/ui/js/core/window-dom-lifecycle.js",
-            "/ui/js/core/window-hide-controller.js",
-            "/ui/js/core/window-interaction.js",
-            "/ui/js/core/window-manager.js",
-            "/ui/js/core/window-policy.js",
-            "/ui/js/components/dialog.js",
-            "/ui/js/components/error-view.js",
-            "/ui/js/components/proxy-dom.js",
-            "/ui/js/components/proxy-view.js",
-            "/ui/js/components/vault-dom.js",
-            "/ui/js/components/vault-view.js",
-            "/ui/js/components/policy-dom.js",
-            "/ui/js/components/policy-view.js",
-            "/ui/js/components/crawl-view.js",
-            "/ui/js/components/tasks-view.js",
-            "/ui/js/components/review-view.js",
-            "/ui/js/components/diagnostics-view.js",
-            "/ui/js/components/personalization-view.js",
-            "/ui/js/components/taskbar-summary.js",
-            "/ui/js/components/taskbar-windows.js",
-            "/ui/js/components/application-center.js",
-            "/ui/js/components/menu-bar.js",
-            "/ui/js/apps/proxy.js",
-            "/ui/js/apps/vault.js",
-            "/ui/js/apps/policy.js",
-            "/ui/js/apps/crawl.js",
-            "/ui/js/apps/tasks.js",
-            "/ui/js/apps/review.js",
-            "/ui/js/apps/diagnostics.js",
-            "/ui/js/apps/personalization.js",
-        ]
-        for path in static_assets:
-            response = self.client.get(path)
-            self.assertEqual(response.status_code, 200, path)
+        for relative_path in source_inventory:
+            route = f"/ui/{relative_path}"
+            with self.subTest(static_resource=relative_path):
+                response = self.client.get(route)
+                self.assertEqual(response.status_code, 200, route)
+                self.assertEqual(
+                    response.headers.get("content-type", "")
+                    .partition(";")[0]
+                    .lower(),
+                    WEBUI_MEDIA_TYPES[Path(relative_path).suffix],
+                    route,
+                )
+                self.assertEqual(
+                    response.content,
+                    (WEBUI_ROOT / relative_path).read_bytes(),
+                    route,
+                )
+                self.assertEqual(response.request.url.path, route)
+                self.assertFalse(response.request.url.query)
+                self.assertEqual(
+                    (
+                        response.request.url.scheme,
+                        response.request.url.host,
+                        response.request.url.port,
+                    ),
+                    (
+                        self.client.base_url.scheme,
+                        self.client.base_url.host,
+                        self.client.base_url.port,
+                    ),
+                )
+                self.assertFalse(response.history)
 
-        removed_assets = (
+        retired_or_isolated_assets = (
             "/ui/js/components/cloud-background.js",
             "/ui/assets/dithered-cloud-fallback.png",
             "/ui/js/core/wallpaper-image-import.js",
+            "/ui/stage5-preview-host.js",
+            "/ui/tests/fixtures/webui/stage5-preview-host.html",
+            "/__stage5__/stage5-preview-host.html",
+            "/__stage5__/stage5-preview-fixtures.js",
         )
-        self.assertTrue(inventory_routes.isdisjoint(removed_assets))
-        for removed_asset in removed_assets:
+        self.assertTrue(inventory_routes.isdisjoint(retired_or_isolated_assets))
+        for asset_path in retired_or_isolated_assets:
             self.assertEqual(
-                self.client.get(removed_asset).status_code,
+                self.client.get(asset_path).status_code,
                 404,
-                removed_asset,
+                asset_path,
             )
 
         registry = self.client.get("/ui/js/core/app-registry.js")
         definitions = self.client.get("/ui/js/core/app-definitions.js")
         self.assertEqual(registry.status_code, 200)
         self.assertEqual(definitions.status_code, 200)
-        app_contract = {
-            "crawl": "/crawl",
-            "tasks": "/tasks",
-            "proxy": "/proxy",
-            "vault": "/vault",
-            "review": "/review",
-            "policy": "/policy",
-            "diagnostics": "/diagnostics",
-            "personalization": "/personalization",
-            "gallery": "/gallery",
-            "schedule": "/schedule",
-            "export": "/export",
-        }
-        for app_id, route in app_contract.items():
+        for app_id, route in WEBUI_APP_ROUTES.items():
             self.assertEqual(definitions.text.count(f'id: "{app_id}"'), 1)
             self.assertEqual(definitions.text.count(f'route: "{route}"'), 1)
         self.assertEqual(definitions.text.count('availability: "ready"'), 8)

@@ -8,6 +8,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -265,6 +266,82 @@ class WebUiModuleTests(unittest.TestCase):
             for component in components
         ]
         self.assertEqual(rendered, [], f"WebUI 静态 import graph 存在循环：{rendered}")
+
+    def test_webui_package_data_selects_complete_production_inventory(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        package_root = backend_root / "gdl_backend"
+        webui_root = package_root / "webui"
+        pyproject = tomllib.loads(
+            (backend_root / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        patterns = pyproject["tool"]["setuptools"]["package-data"][
+            "gdl_backend"
+        ]
+
+        self.assertEqual(len(patterns), len(set(patterns)))
+        self.assertLessEqual(
+            {
+                "webui/*.html",
+                "webui/assets/*.svg",
+                "webui/styles/*.css",
+                "webui/styles/apps/*.css",
+                "webui/js/*.js",
+                "webui/js/core/*.js",
+                "webui/js/components/*.js",
+                "webui/js/apps/*.js",
+            },
+            set(patterns),
+        )
+
+        selected: set[str] = set()
+        for pattern in patterns:
+            pattern_path = Path(pattern)
+            self.assertFalse(pattern_path.is_absolute(), pattern)
+            self.assertNotIn("..", pattern_path.parts, pattern)
+            self.assertEqual(pattern_path.parts[0], "webui", pattern)
+            matches = {
+                path.relative_to(package_root).as_posix()
+                for path in package_root.glob(pattern)
+                if path.is_file()
+            }
+            self.assertTrue(matches, pattern)
+            selected.update(matches)
+
+        source_inventory = {
+            path.relative_to(package_root).as_posix()
+            for path in webui_root.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(selected, source_inventory)
+        self.assertEqual(len(selected), 103)
+        self.assertEqual(
+            {Path(path).suffix for path in selected},
+            {".html", ".css", ".js", ".svg"},
+        )
+        self.assertEqual(
+            len(
+                {
+                    path
+                    for path in selected
+                    if path.startswith("webui/js/apps/")
+                }
+            ),
+            11,
+        )
+        self.assertEqual(
+            len(
+                {
+                    path
+                    for path in selected
+                    if path.startswith("webui/styles/apps/")
+                }
+            ),
+            11,
+        )
+        self.assertIn("webui/assets/noise.svg", selected)
+        self.assertIn("webui/js/core/wallpaper-storage.js", selected)
+        self.assertNotIn("webui/js/core/wallpaper-image-import.js", selected)
+        self.assertFalse(any("fixture" in path.lower() for path in selected))
 
     def test_webui_fixtures_are_test_only_and_absent_from_production_sources(self):
         backend_root = Path(__file__).resolve().parents[1]
