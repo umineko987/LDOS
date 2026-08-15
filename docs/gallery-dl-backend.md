@@ -8,7 +8,8 @@
   EH 卡死检测心跳）由 `gdl_backend/worker_patches.py` 在 worker 进程内以运行时
   补丁实现，上游接口变化时补丁自动跳过并在任务日志输出 `[gdl-backend-patch]` 告警；
 - `gdl_backend/` 负责搜索、规划、调度、授权、代理池和状态持久化；
-- `/ui/` 通过唯一的 `StaticFiles(..., html=True)` 挂载，同源提供随后端 wheel 打包的原生 ESM、
+- `/ui/` 通过唯一的 `WebUIStaticFiles(..., html=True)` 挂载；该小型 `StaticFiles` 子类只为 WebUI
+  保留 ETag/Last-Modified 并添加 `Cache-Control: no-cache`，同源提供随后端 wheel 打包的原生 ESM、
   静态 CSS 和 SVG；无需 Node/npm 构建或独立前端进程。旧单页资源、临时 `/ui-next/` 挂载和退役
   壁纸导入模块已从正式交付中删除。
 
@@ -245,7 +246,8 @@ Mihomo、去重 Python、Torch 实际设备及 SSCD/DINOv2 缓存。禁用组件
 
 1. 访问裸 `/ui/` 的空玻璃桌面，通过 Dock 或应用中心启动应用；也可使用 `#/应用ID` 深链接。
    当前聚焦窗口最大化时 Dock 完全隐藏，窗口保留菜单栏并延伸到视口底部；恢复、最小化、关闭或切到
-   普通窗口后 Dock 自动返回。
+   普通窗口后 Dock 自动返回。Bootstrap 的普通桌面默认显示 Dock；即使滚动升级暂时复用旧 ESM，
+   版本化 `desktop.css` 也会从 focused/maximized/hidden DOM 事实接管 Dock 与全高几何，不要求强制刷新。
 2. （可选）在“外观设置”选择六个同源内置夜景之一，并开启或关闭界面动效；
 3. 查看代理池状态，按需启动、重载或探活。
 4. 在“授权管理”中完成所需站点登录。
@@ -303,7 +305,10 @@ archive wheel 中的成员和 `RECORD` hash/size 必须与源码逐字节一致�
 `image/svg+xml`。
 
 正式 `/ui/` 必须让全部 103 项同源返回 200，并让退役 `wallpaper-image-import.js`、旧 cloud 资源
-和 `tests/fixtures/webui/` 路径返回 404。Gallery/Schedule/Export 的 loading/empty/content/error、
+和 `tests/fixtures/webui/` 路径返回 404。全部 HTML/CSS/JS/SVG 响应都必须是
+`Cache-Control: no-cache`，同时保留 ETag/Last-Modified；条件请求返回 304，业务 API 不继承该 header。
+`index.html` 只对本次缓存敏感的 `desktop.css` 使用显式版本 query，不给 103 项资源手工散加 hash。
+Gallery/Schedule/Export 的 loading/empty/content/error、
 进度和 Gallery Quick Look 只由 `tests/stage5_preview_harness.py` 挂载 tests-only host；正式三项
 始终 unavailable、写操作禁用且合计 0 个所属业务 API 请求。fixture 不得进入生产 ESM 闭包、wheel、
 正式 DOM 或网络发现结果。
@@ -560,7 +565,7 @@ cd gallery-dl-backend
 cd ..
 ```
 
-固定 Node.js v24.13.0 后运行唯一正式 WebUI 行为/覆盖率门槛；当前收口基线为 324/324，
+固定 Node.js v24.13.0 后运行唯一正式 WebUI 行为/覆盖率门槛；当前收口基线为 326/326，
 0 fail、0 skip：
 
 ```bash
@@ -573,7 +578,9 @@ NODE_24=/absolute/path/to/node-v24.13.0/bin/node
 项目级 coverage、服务 smoke 与依赖锁命令统一维护在
 [架构与开发约定](ARCHITECTURE.md#13-测试与覆盖率门槛)。构建 wheel 时必须使用 clean archive，
 并核对 103 个 WebUI 成员、wheel `RECORD`、同源 HTTP 字节、单一 noise、兼容 seam 以及退役资源
-404；不能把开发工作树中的 fixture、浏览器 Profile、coverage 或本机文件带入包。
+404；当前 wheel 清单为 180 个成员，其中 `gdl_backend` 175 项（72 Python + 103 WebUI），并对全部
+103 个静态资源同时核对 200/MIME/字节、`no-cache`/validator 与条件 304。不能把开发工作树中的 fixture、
+浏览器 Profile、coverage 或本机文件带入包。
 
 测试默认使用本地夹具、mock 或 gallery-dl `--version`。需要真实凭据和代理节点的 EH
 烟雾脚本不属于当前仓库的提交内容；如需运行此类检查，应在受控本地环境中单独维护。

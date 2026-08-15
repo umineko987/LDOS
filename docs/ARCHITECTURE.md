@@ -42,6 +42,7 @@ Browser
 | 路径 | 职责 |
 | --- | --- |
 | `gallery-dl-backend/gdl_backend/app.py` | 组合根、服务生命周期、middleware、统一错误处理和 router 装配 |
+| `gallery-dl-backend/gdl_backend/webui_static.py` | `/ui` 静态响应的 validator 与强制 revalidation 合同 |
 | `gallery-dl-backend/gdl_backend/api_routes/` | HTTP 输入、业务调用和安全响应投影 |
 | `gallery-dl-backend/gdl_backend/database.py` | SQLite 连接、读写边界、事务所有权和兼容 facade |
 | `gallery-dl-backend/gdl_backend/_database_*.py` | 按领域拆分的 schema、repository 和行投影 |
@@ -79,7 +80,7 @@ app.py ──> 所有实现（仅用于装配）
 - 创建或接收 `ServiceContainer`；
 - FastAPI lifespan；
 - 本机来源保护、request ID、CORS 和统一异常处理；
-- WebUI 静态资源挂载；
+- WebUI 静态资源挂载；`WebUIStaticFiles` 独立为 `/ui` 添加 `Cache-Control: no-cache`，不得把该响应合同塞进业务 middleware；
 - 跨服务回调装配；
 - `include_router()`。
 
@@ -281,7 +282,11 @@ WebUI 使用后端直接提供的原生 ES modules，不需要单独前端构建
 不是独立状态：window manager 每次只从 Store 的窗口栈与 `focusedAppId` 派生工作区。当前聚焦且可见
 窗口为 `maximized` 时，顶部菜单栏保留，window-layer 扩展到视口底部，Dock 以 `hidden`、`inert` 与
 `aria-hidden` 完全退出视觉、指针、键盘和 AX 路径；恢复、最小化、关闭或聚焦普通窗口时恢复普通
-Dock 工作区。后台最大化窗口本身不会隐藏 Dock。
+Dock 工作区。后台最大化窗口本身不会隐藏 Dock。Bootstrap HTML 必须以普通空桌面为安全默认：Dock
+不得预置 `hidden`、`inert` 或 `aria-hidden`，因此 JS 尚未运行、加载失败或旧 manager 被缓存时也不会
+把普通 Dock 永久隐藏。`desktop.css` 还必须从现有窗口 DOM 事实派生兼容路径：只有同一 layer 内存在
+`data-window-focused + data-maximized + 非 hidden` 窗口时，才把 layer 扩到视口底部、以
+`!important` 覆盖该窗口的旧 inline 几何并隐藏 Dock；后台最大化配前台普通窗口不得命中。
 
 `core/app-definitions.js` 是 11 个应用以下信息的唯一来源：
 
@@ -356,10 +361,13 @@ Data URL 或 Blob URL。`core/wallpaper-storage.js` 只是兼容期 delete-only 
 - pointermove 只做临时 DOM 反馈，不持续写 store；
 - pointer interaction 结束时统一提交一次；
 - 每次 render 只从 Store 窗口栈与 `focusedAppId` 派生 `normal | maximized` 工作区，并在读取任何
-  maximized rect 前先同步 `data-window-workspace` layer marker；
+  maximized rect 前先同步 `data-window-workspace` layer marker；该 marker-before-measurement 顺序是
+  canonical JS 路径，不能因 CSS 兼容 fallback 存在而删除；
 - 聚焦最大化工作区的 layer `bottom: 0`，Dock 必须关闭 overflow 并使用原生 `hidden`、`inert` 和
   `aria-hidden`；焦点若来自即将隐藏的 Dock，先释放该焦点并在目标窗口同步后转入 window body；
 - restore、minimize、close、聚焦普通窗口、初始化失败与 `destroy()` 都必须恢复普通 Dock 工作区；
+- CSS `:has()` 兼容规则只读取 window lifecycle 已投影的 focused/maximized/hidden 属性，不创建新状态；
+  它必须覆盖旧 manager 写入的 inline `left/top/width/height`，并在旧 JS 缓存期间保证 Dock/AX 与几何正确；
 - window-layer 工作区变化会取消不再有效的 interaction；低于 1180×720 时壳层显示桌面环境 blocker；
 - async `beforeHide` 去重并阻止 stale completion；
 - mount 失败会清理半创建 DOM；
@@ -403,6 +411,11 @@ forced-colors 中移除。禁止持续 specular/blur 动画；拖拽、resize �
 500ms 过渡。
 
 生产 WebUI 是后端 `/ui/` 同源提供的原生 ESM、静态 CSS 和 SVG，不存在 Node/npm 构建产物。
+`WebUIStaticFiles` 只用于该 mount，并让 HTML/CSS/JS/SVG 在保留 ETag 与 Last-Modified 的同时返回
+`Cache-Control: no-cache`，使浏览器可以存储但每次复用前必须 revalidate；业务 API 不继承该 header。
+`index.html` 对缓存敏感的 `desktop.css` 使用显式 `?v=` URL，修改相关壳层兼容规则时必须同步递增，
+无需也不得给全部 103 项资源手工追加散乱 hash。ESM 仍可能在一次滚动升级中暂时来自旧代，因此安全
+bootstrap 与 DOM 事实 CSS fallback 必须独立于新 manager 生效，不能把强制刷新写成产品修复。
 当前 package-data 闭包为 103 项（1 HTML、18 CSS、83 JS、1 SVG），包含单一 `noise.svg` 和
 兼容期 `wallpaper-storage.js`，不包含已退役的 `wallpaper-image-import.js`。preview 内容态只由
 `tests/fixtures/webui/` 与 `tests/stage5_preview_harness.py` 的 tests-only host 提供，生产 import
@@ -507,7 +520,7 @@ Python 直接依赖只在 `gallery-dl-backend/pyproject.toml` 维护。`requirem
 - skip 数量和原因必须可见；
 - WebUI 行为和 coverage 使用固定 Node.js v24.13.0；
 - 夜航最终目标契约是正式 runner 的 source test，不是单独的可选检查；当前收口基线为 326/326，0 fail、0 skip；
-- WebUI 静态清单同时从生产源、`StaticFiles` HTTP、clean archive wheel 和 wheel `RECORD` 四个边界核对；
+- WebUI 静态清单同时从生产源、`WebUIStaticFiles` HTTP、clean archive wheel 和 wheel `RECORD` 四个边界核对；
 - Python 源码字符串断言不计入真实 JavaScript coverage。
 
 在仓库根目录执行标准门槛：
@@ -592,6 +605,8 @@ RepoWise 是发现候选问题的辅助工具，不是缺陷计数器或自动�
 - [ ] 是否复用已有模型 sanitizer 和窗口几何规则？
 - [ ] import graph 是否仍为 0 个多文件 SCC？
 - [ ] store closure 是否仍排除 `apps/` 和 `components/*-view.js`？
+- [ ] 普通 bootstrap 是否默认显示 Dock，`:has()` fallback 与版本化 `desktop.css` 是否仍覆盖旧 ESM？
+- [ ] `/ui` 是否保留 ETag/Last-Modified、返回 `Cache-Control: no-cache`，且业务 API 未被污染？
 
 ### 验证与交付
 

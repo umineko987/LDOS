@@ -9,7 +9,8 @@
   <title>ImageWeave</title>
   <link rel="stylesheet" href="./styles/tokens.css">
   <link rel="stylesheet" href="./styles/base.css">
-  <link rel="stylesheet" href="./styles/desktop.css">
+  <!-- Bump this version whenever cache-sensitive desktop shell CSS changes. -->
+  <link rel="stylesheet" href="./styles/desktop.css?v=20260815.1">
   <link rel="stylesheet" href="./styles/controls.css">
   <link rel="stylesheet" href="./styles/status.css">
   <link rel="stylesheet" href="./styles/dialog.css">
@@ -93,14 +94,7 @@
 
     <div class="application-center-host" data-application-center-host hidden></div>
 
-    <nav
-      class="dock"
-      data-dock
-      aria-label="ImageWeave Dock"
-      aria-hidden="true"
-      hidden
-      inert
-    >
+    <nav class="dock" data-dock aria-label="ImageWeave Dock">
       <div class="dock__items" data-task-window-list></div>
     </nav>
   </div>

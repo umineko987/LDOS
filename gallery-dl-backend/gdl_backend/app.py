@@ -17,7 +17,6 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api_routes import (
@@ -58,6 +57,7 @@ from .schemas import (
 )
 from .site_policy import EDITABLE_SITE_POLICY_FIELDS
 from .site import SiteResolver
+from .webui_static import WebUIStaticFiles
 
 _BACKGROUND_LOOP_WARNING_INTERVAL_SECONDS = 60.0
 
@@ -321,7 +321,7 @@ def create_app(
     app.state.container = service
     app.mount(
         "/ui",
-        StaticFiles(directory=str(Path(__file__).resolve().parent / "webui"), html=True),
+        WebUIStaticFiles(directory=str(Path(__file__).resolve().parent / "webui"), html=True),
         name="webui",
     )
     if settings.server.cors_origins:

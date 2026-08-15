@@ -223,10 +223,19 @@ test("阶段 2 正式 DOM 包含五层、交通灯与严格桌面边界", () => 
     "data-route-announcer",
   ]) assert.equal(index.includes(marker), true, marker);
   assert.equal(index.includes('data-window-workspace="normal"'), true);
-  assert.match(
-    index,
-    /<nav\s+class="dock"\s+data-dock\s+aria-label="ImageWeave Dock"\s+aria-hidden="true"\s+hidden\s+inert\s*>/u,
+  const dockTag = index.match(/<nav[^>]*\bdata-dock\b[^>]*>/u)?.[0] ?? "";
+  assert.equal(dockTag, '<nav class="dock" data-dock aria-label="ImageWeave Dock">');
+  for (const unsafeBootstrapAttribute of ["hidden", "inert", "aria-hidden"]) {
+    assert.doesNotMatch(
+      dockTag,
+      new RegExp(`(?:^|\\s)${unsafeBootstrapAttribute}(?:\\s|=|>)`, "u"),
+    );
+  }
+  assert.equal(
+    index.split('href="./styles/desktop.css?v=20260815.1"').length - 1,
+    1,
   );
+  assert.equal(index.includes('href="./styles/desktop.css"'), false);
   assert.equal(index.includes("data-start-menu"), false);
   assert.equal(index.includes("data-desktop-icons"), false);
   const trafficOrder = ["data-window-close", "data-window-minimize", "data-window-maximize"];
@@ -248,6 +257,21 @@ test("阶段 2 正式 DOM 包含五层、交通灯与严格桌面边界", () => 
     desktopCss,
     /\.window-layer\[data-window-workspace="maximized"\]\s*\{[^}]*bottom:\s*0;/u,
   );
+  const fallbackPredicate = ".window-layer:has(> .application-window[data-window-focused][data-maximized]:not([hidden]))";
+  assert.equal(desktopCss.split(fallbackPredicate).length - 1 >= 4, true);
+  assert.equal(
+    desktopCss.includes(`${fallbackPredicate} {\n  bottom: 0;\n}`),
+    true,
+  );
+  assert.equal(
+    desktopCss.includes(`${fallbackPredicate}\n  > .application-window[data-window-focused][data-maximized]:not([hidden]) {\n  left: 0 !important;\n  top: 0 !important;\n  width: 100% !important;\n  height: 100% !important;\n}`),
+    true,
+  );
+  assert.equal(
+    desktopCss.includes(`${fallbackPredicate} ~ .dock {\n  display: none;\n  -webkit-backdrop-filter: none !important;\n  backdrop-filter: none !important;\n}`),
+    true,
+  );
+  assert.equal(desktopCss.includes("~ .dock :is(.dock__items, .dock__overflow)"), true);
   assert.match(desktopCss, /\.dock\[hidden\] \.dock__items/u);
   for (const contract of [
     'windowLayer.setAttribute("data-window-workspace", mode)',

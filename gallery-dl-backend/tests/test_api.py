@@ -18,6 +18,7 @@ from gdl_backend.discovery import DiscoveryError
 from gdl_backend.encrypted_dns import EncryptedDNSError, NetworkTargetValidator
 from gdl_backend.proxy import ProxyLease
 from gdl_backend.site import SiteInfo
+from gdl_backend.webui_static import WebUIStaticFiles
 
 from tests.helpers import local_test_client, make_settings
 
@@ -653,6 +654,46 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/ui/app.js").status_code, 404)
         self.assertEqual(self.client.get("/ui/styles.css").status_code, 404)
 
+    def test_webui_static_assets_require_revalidation_with_validators(self):
+        for asset_path in (
+            "/ui/",
+            "/ui/styles/desktop.css?v=20260815.1",
+            "/ui/js/main.js",
+            "/ui/assets/noise.svg",
+        ):
+            with self.subTest(asset_path=asset_path):
+                response = self.client.get(asset_path)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.headers.get("cache-control"), "no-cache")
+                self.assertTrue(response.headers.get("etag"))
+                self.assertTrue(response.headers.get("last-modified"))
+
+                revalidated = self.client.get(
+                    asset_path,
+                    headers={"If-None-Match": response.headers["etag"]},
+                )
+                self.assertEqual(revalidated.status_code, 304, asset_path)
+                self.assertEqual(revalidated.content, b"")
+                self.assertEqual(revalidated.headers.get("cache-control"), "no-cache")
+                self.assertEqual(
+                    revalidated.headers.get("etag"),
+                    response.headers["etag"],
+                )
+
+        html = self.client.get("/ui/")
+        modified_since = self.client.get(
+            "/ui/",
+            headers={"If-Modified-Since": html.headers["last-modified"]},
+        )
+        self.assertEqual(modified_since.status_code, 304)
+        self.assertEqual(modified_since.headers.get("cache-control"), "no-cache")
+        self.assertEqual(modified_since.headers.get("etag"), html.headers["etag"])
+
+        for api_path in ("/", "/healthz", "/api/v1/config"):
+            api = self.client.get(api_path)
+            self.assertEqual(api.status_code, 200, api_path)
+            self.assertNotIn("cache-control", api.headers, api_path)
+
     def test_webui_noise_svg_is_safe_same_origin_static_asset(self):
         asset_path = "/ui/assets/noise.svg"
         response = self.client.get(asset_path)
@@ -679,6 +720,7 @@ class ApiTests(unittest.TestCase):
             and isinstance(getattr(route, "app", None), StaticFiles)
         ]
         self.assertEqual(len(ui_mounts), 1)
+        self.assertIsInstance(ui_mounts[0].app, WebUIStaticFiles)
         self.assertNotIn(asset_path, self.app.openapi()["paths"])
 
         source = response.content.decode("utf-8")
@@ -841,6 +883,12 @@ class ApiTests(unittest.TestCase):
         self.assertIn('data-application-window', index.text)
         self.assertIn('data-application-center-host', index.text)
         self.assertIn('data-dock', index.text)
+        dock_tags = [
+            attrs for tag, attrs in parser.tags if tag == "nav" and "data-dock" in attrs
+        ]
+        self.assertEqual(len(dock_tags), 1)
+        for unsafe_bootstrap_attribute in ("hidden", "inert", "aria-hidden"):
+            self.assertNotIn(unsafe_bootstrap_attribute, dock_tags[0])
         self.assertIn('data-task-window-list', index.text)
         self.assertIn('data-desktop-size-blocker', index.text)
         self.assertNotIn('data-desktop-icons', index.text)
@@ -853,6 +901,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(index.text.count("data-taskbar-diagnostics"), 1)
         self.assertIn('type="module" src="./js/main.js"', index.text)
         self.assertIn('href="./styles/tokens.css"', index.text)
+        self.assertEqual(
+            index.text.count('href="./styles/desktop.css?v=20260815.1"'),
+            1,
+        )
+        self.assertNotIn('href="./styles/desktop.css"', index.text)
         self.assertIn('href="./styles/apps/personalization.css"', index.text)
         self.assertIn('href="./styles/responsive.css"', index.text)
         self.assertNotIn("聚合爬取测试台", index.text)
@@ -985,6 +1038,9 @@ class ApiTests(unittest.TestCase):
                     WEBUI_MEDIA_TYPES[Path(relative_path).suffix],
                     route,
                 )
+                self.assertEqual(response.headers.get("cache-control"), "no-cache", route)
+                self.assertTrue(response.headers.get("etag"), route)
+                self.assertTrue(response.headers.get("last-modified"), route)
                 self.assertEqual(
                     response.content,
                     (WEBUI_ROOT / relative_path).read_bytes(),

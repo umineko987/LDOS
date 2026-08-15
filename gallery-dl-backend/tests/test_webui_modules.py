@@ -5757,11 +5757,24 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertEqual(index.count("data-dock"), 1)
         self.assertEqual(index.count("data-application-center-host"), 1)
         self.assertEqual(index.count('data-window-workspace="normal"'), 1)
-        self.assertRegex(
-            index,
-            r'<nav\s+class="dock"\s+data-dock\s+aria-label="ImageWeave Dock"\s+'
-            r'aria-hidden="true"\s+hidden\s+inert\s*>',
+        self.assertEqual(
+            index.count(
+                '<nav class="dock" data-dock aria-label="ImageWeave Dock">'
+            ),
+            1,
         )
+        dock_tag = re.search(r"<nav[^>]*\bdata-dock\b[^>]*>", index)
+        self.assertIsNotNone(dock_tag)
+        for unsafe_bootstrap_attribute in ("hidden", "inert", "aria-hidden"):
+            self.assertNotRegex(
+                dock_tag.group(0),
+                rf"(?:^|\s){re.escape(unsafe_bootstrap_attribute)}(?:\s|=|>)",
+            )
+        self.assertEqual(
+            index.count('href="./styles/desktop.css?v=20260815.1"'),
+            1,
+        )
+        self.assertNotIn('href="./styles/desktop.css"', index)
         self.assertNotIn("data-start-menu", index)
         self.assertNotIn("data-desktop-icons", index)
         self.assertIn("DOCK_FIXED_APP_IDS", taskbar)
@@ -5863,6 +5876,33 @@ class WebUiModuleTests(unittest.TestCase):
             desktop_css,
             r'\.window-layer\[data-window-workspace="maximized"\]\s*\{[^}]*bottom:\s*0;',
         )
+        fallback_predicate = (
+            ".window-layer:has(> .application-window[data-window-focused]"
+            "[data-maximized]:not([hidden]))"
+        )
+        self.assertGreaterEqual(desktop_css.count(fallback_predicate), 4)
+        self.assertRegex(
+            desktop_css,
+            rf"{re.escape(fallback_predicate)}\s*\{{[^}}]*bottom:\s*0;",
+        )
+        self.assertRegex(
+            desktop_css,
+            rf"{re.escape(fallback_predicate)}\s*>\s*"
+            r"\.application-window\[data-window-focused\]"
+            r"\[data-maximized\]:not\(\[hidden\]\)\s*\{"
+            r"[^}]*left:\s*0\s*!important;"
+            r"[^}]*top:\s*0\s*!important;"
+            r"[^}]*width:\s*100%\s*!important;"
+            r"[^}]*height:\s*100%\s*!important;",
+        )
+        self.assertRegex(
+            desktop_css,
+            rf"{re.escape(fallback_predicate)}\s*~\s*\.dock\s*\{{"
+            r"[^}]*display:\s*none;"
+            r"[^}]*-webkit-backdrop-filter:\s*none\s*!important;"
+            r"[^}]*backdrop-filter:\s*none\s*!important;",
+        )
+        self.assertIn("~ .dock :is(.dock__items, .dock__overflow)", desktop_css)
         self.assertIn(".dock[hidden] .dock__items", desktop_css)
         self.assertIn(".dock[hidden] .dock__overflow", desktop_css)
         self.assertIn(".application-center", desktop_css)

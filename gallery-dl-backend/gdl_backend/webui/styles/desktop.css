@@ -534,6 +534,34 @@
   bottom: 0;
 }
 
+/*
+ * Rolling-upgrade fallback: older window managers still project the focused,
+ * maximized, and hidden facts but do not own the workspace marker or Dock.
+ */
+.window-layer:has(> .application-window[data-window-focused][data-maximized]:not([hidden])) {
+  bottom: 0;
+}
+
+.window-layer:has(> .application-window[data-window-focused][data-maximized]:not([hidden]))
+  > .application-window[data-window-focused][data-maximized]:not([hidden]) {
+  left: 0 !important;
+  top: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.window-layer:has(> .application-window[data-window-focused][data-maximized]:not([hidden])) ~ .dock {
+  display: none;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.window-layer:has(> .application-window[data-window-focused][data-maximized]:not([hidden]))
+  ~ .dock :is(.dock__items, .dock__overflow) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
 .application-center-host {
   position: fixed;
   inset: var(--imageweave-menubar-height) 0 0;
