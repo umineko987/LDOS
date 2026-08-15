@@ -530,6 +530,10 @@
   bottom: calc(var(--imageweave-dock-height) + 28px);
 }
 
+.window-layer[data-window-workspace="maximized"] {
+  bottom: 0;
+}
+
 .application-center-host {
   position: fixed;
   inset: var(--imageweave-menubar-height) 0 0;
@@ -868,6 +872,9 @@
 .application-window[hidden],
 .menu-popover[hidden],
 .application-center-host[hidden] .application-center,
+.dock[hidden],
+.dock[hidden] .dock__items,
+.dock[hidden] .dock__overflow,
 .dock__overflow[hidden] {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;

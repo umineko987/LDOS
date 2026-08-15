@@ -173,6 +173,10 @@ export function createDock({
   if (!documentObject || typeof documentObject.addEventListener !== "function") {
     throw new TypeError("Dock 需要可用的 document");
   }
+  const dockHost = container.closest?.("[data-dock]") || null;
+  const isUnavailable = () => Boolean(
+    dockHost && (dockHost.hidden || dockHost.hasAttribute("inert")),
+  );
 
   const primary = createElement("div", {
     className: "dock__primary",
@@ -237,7 +241,7 @@ export function createDock({
     const wasOpen = overflowButton.getAttribute("aria-expanded") === "true";
     overflowButton.setAttribute("aria-expanded", "false");
     overflowPanel.hidden = true;
-    if (returnFocus && wasOpen && !overflowButton.hidden) {
+    if (returnFocus && wasOpen && !overflowButton.hidden && !isUnavailable()) {
       overflowButton.focus({ preventScroll: true });
     }
     return wasOpen;
@@ -265,7 +269,7 @@ export function createDock({
     return item ? { item, button } : null;
   };
   const onClick = (event) => {
-    if (event.target === overflowButton) return;
+    if (isUnavailable() || event.target === overflowButton) return;
     const match = itemFromEvent(event);
     if (!match) return;
     closeOverflow();
@@ -278,6 +282,7 @@ export function createDock({
     });
   };
   const onOverflowClick = () => {
+    if (isUnavailable()) return;
     const open = overflowButton.getAttribute("aria-expanded") !== "true";
     overflowButton.setAttribute("aria-expanded", String(open));
     overflowPanel.hidden = !open;
@@ -291,7 +296,11 @@ export function createDock({
     ) closeOverflow();
   };
   const onKeyDown = (event) => {
-    if (event.key !== "Escape" || overflowButton.getAttribute("aria-expanded") !== "true") return;
+    if (
+      isUnavailable()
+      || event.key !== "Escape"
+      || overflowButton.getAttribute("aria-expanded") !== "true"
+    ) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     closeOverflow({ returnFocus: true });
@@ -306,6 +315,7 @@ export function createDock({
     render,
     closeOverflow,
     focusButton(appId) {
+      if (isUnavailable()) return false;
       const key = appId === null ? "application-center" : `app:${appId}`;
       const visibleButton = primary.querySelector(`[data-dock-item="${key}"]`);
       if (visibleButton instanceof HTMLButtonElement) {

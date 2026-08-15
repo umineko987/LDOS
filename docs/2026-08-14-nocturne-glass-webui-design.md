@@ -64,7 +64,7 @@
 - 窗口拖拽和 resize 属于直接操控，交互期间必须关闭过渡，不能为了 500ms 动效产生输入延迟；
 - forced-colors、backdrop 不支持和高对比度回退可以使用系统实色，这是无障碍/能力回退，不属于正常主题；
 - 交通灯、圆形状态点、复选框、单选框和进度指示属于语义或系统控件，不强制使用普通卡片圆角；
-- 最大化窗口继续贴合现有 window layer 工作区；边界处的几何直角属于最大化状态，不引入通用方角卡片样式；
+- 当前聚焦且可见窗口最大化时，顶部菜单栏保持可见，window layer 的底边切换为视口底部并让窗口填满；Dock 必须完全隐藏，不在底边唤出，也不浮在窗口上；恢复、最小化、关闭或聚焦普通窗口时恢复普通 Dock 工作区；边界处的几何直角属于最大化状态，不引入通用方角卡片样式；
 - 菜单栏、Dock 图标、交通灯和 resize handle 仍是专用 OS 控件，不机械套用普通业务按钮的完整阴影尺寸，但必须遵守无色玻璃、交互反馈、500ms 非直接操控过渡和可见焦点原则。
 
 ## 4. 实施前基线（历史）
@@ -481,6 +481,15 @@ background:
 ### 10.4 Dock
 
 保留固定应用、动态运行应用、focused/background/minimized 状态和 overflow。
+
+行为合同：
+
+- 普通窗口、后台窗口、最小化窗口和空桌面继续显示 Dock，并保留原有 window-layer 底部工作区；
+- 只有当前聚焦且可见的窗口为 `maximized` 时，window-layer 才扩展到视口底部，Dock 同步使用原生
+  `hidden`、`inert` 与 `aria-hidden` 完全退出视觉、指针、键盘和 AX 路径；
+- Dock overflow 在隐藏前关闭；焦点若来自即将隐藏的 Dock，必须可靠转入目标窗口；
+- 后台最大化窗口配前台普通窗口时 Dock 可见，切回该最大化窗口时才隐藏；
+- 不提供底边唤出，不使用浏览器 Fullscreen API，也不让 Dock 覆盖窗口内容。
 
 视觉与交互：
 
@@ -1711,3 +1720,17 @@ git diff --check
 | 20 | 文档和截图同步 | **满足**：README、ARCHITECTURE、后端说明、设计记录、两张正式 PNG 及 sidecar 同步并通过 checker/link contract。 |
 
 第 20 节没有因当前硬件而标记“未完成”的条目；真实 headed iGPU 已覆盖该节要求。无法完成的是跨 GPU/驱动的外推和独立 GPU profiler 归因，它们已明确保留为性能风险，不被包装为本机之外的验收结论。
+
+### 用户反馈修正：最大化自动隐藏 Dock
+
+- 完成日期：2026-08-15
+- 阶段：T11 后用户反馈修正；独立 WebUI 窗口/Dock 行为提交
+- 根因与决策：旧 `.window-layer` 无条件使用 `bottom: calc(var(--imageweave-dock-height) + 28px)`，window manager 又按该 layer 的本地尺寸计算 maximized rect，所以最大化窗口始终停在 Dock 上方；这是既有设计而非浏览器缺陷。用户明确否决该行为。新合同为：只有当前聚焦且可见窗口为 `maximized` 时隐藏 Dock、保留菜单栏并把 layer `bottom` 切为 `0`；restore、minimize、close、聚焦普通窗口和 destroy 均恢复普通 Dock 工作区。后台最大化配前台普通窗口时 Dock 可见，不提供底边唤出，也不使用 Fullscreen API 或让 Dock 覆盖内容。
+- 状态与几何实现：`window-workspace.js` 新增纯 `deriveWindowWorkspaceMode(windowStack, focusedAppId)` 与 DOM 投影；不新增 Store/Router transition、窗口状态副本或 storage 字段。`window-manager.js` 在每次 render stack 中先由现有 Store 窗口栈和 `focusedAppId` 派生模式、同步 `data-window-workspace`，再创建/同步窗口并读取 layer-local viewport，保证首次默认最大化也直接取得完整高度。普通 rect、最大化偏好与 `window-geometry.js` 的可选 `taskbarHeight` 纯函数能力保持；后者没有为本次文本需求清零或删除。
+- Dock、焦点与无障碍：最大化投影先关闭 overflow，再对 Dock 同步原生 `hidden`、`inert`、`aria-hidden="true"`；隐藏 descendant 的 backdrop 显式为 `none`。Dock component 在隐藏/inert 时拒绝 click、overflow keyboard 与程序化 `focusButton`。若激活来源位于即将隐藏的 Dock，manager 先把焦点移出该树，并在目标窗口完成同步后聚焦 window body；bootstrap HTML 先以同一 native 合同隐藏 Dock，普通空桌面由首次 Store render 立即恢复，因此默认最大化 Review 深链接不会先绘制旧 Dock 工作区。初始化失败和幂等 `destroy()` 都重置为 `normal` 并移除 hidden/inert/ARIA。
+- 单元与静态合同：正式 Node runner 增至 326/326、0 fail、0 skip，精确覆盖焦点窗口模式派生、marker-before-measurement、默认最大化首次 render、normal rect 恢复、多窗口切焦、overflow、隐藏 Dock 拒绝动作/焦点、minimize/close/destroy 恢复；Phase 2 与 Python 静态合同同步检查 bootstrap HTML、CSS `bottom: 0`、native hidden/inert/ARIA、无 backdrop 和 render 顺序。`tests.test_webui_modules` 为 30/30，`tests.test_api` 为 72/72。固定 Node v24.13.0 coverage 为 core line/branch/function `90.801290% / 78.567814% / 92.032686%`，apps `79.875056% / 67.000912% / 72.330097%`，components `28.435031% / 78.178964% / 63.157895%`，九项通过既有 floor，baseline 未降低。
+- 正式 Chromium：Chromium 150.0.7871.186 通过正式 `create_app`、隔离安全配置与生产 `/ui/` 完成 `1440×900`、`1180×720` 矩阵，证据位于 `/tmp/imageweave-maximized-browser/`。1440 下菜单栏为 `(0,0,1440,32)`，Tasks 普通/恢复全局 rect 均为 `(160,96,800,560)`，最大化为 `(0,32,1440,868)`、底边精确 900；1180 下普通/恢复均为 `(160,60,800,560)`，最大化为 `(0,32,1180,688)`、底边精确 720。两尺寸最大化时 layer 与窗口均从菜单栏下沿到视口底部，Dock computed `display:none`、items backdrop `none`、overflow closed，native hidden/inert/ARIA 全真，程序化 focus 不进入 Dock，AX tree 中 Dock 节点为 0；恢复后 AX navigation `ImageWeave Dock` 恰好 1。
+- 浏览器边界矩阵：默认最大化 Review 深链接记录 38 个含窗口的连续 rAF 样本，全部从第一帧就是 `workspace=maximized`、layer bottom 900、Dock hidden/inert/ARIA 且窗口 maximized；另从 Dock 以键盘启动默认最大化 Review，焦点直接进入其 window body。Review minimize、Dock restore、再次最大化和 close 均恢复正确。多窗口真实覆盖“后台 Tasks max + 前台 Proxy/Vault normal”，Window Menu 来回聚焦时 Dock 按焦点切换；Dock closed/background/minimized/focused 四状态同时可见并通过 overflow 恢复。交通灯、Dock keyboard、Menu Escape、应用中心 Escape/launch 的焦点返回通过；真实 `data-motion=off`、emulated reduced-motion 与 forced-colors 代表路径均为 0 非必要窗口 transition，forced-colors 移除噪点。四个浏览器上下文共 433 个请求，remote 0、fixture 越界 0、非预期 HTTP 0、request failure 0、console warning/error/assert 0、runtime exception 0。
+- 后端与门禁：Linux service smoke 为 healthz 200、禁用去重 readyz 200、缺模型 readyz 503；依赖锁检查覆盖 Python 3.11–3.14 和 test/Proxy_pool/CPU/CUDA，`git diff --check` 通过。正式 OpenAPI 保持 50 paths/61 operations 与唯一 `/ui` mount；生产业务 Python、API、ServiceContainer、数据库、依赖、coverage baseline 和 `window-geometry.js` 均未修改。
+- 文档与正式截图：README、ARCHITECTURE、gallery 后端说明和本设计同步当前合同。`assets/example.png` 是普通 Tasks；contact sheet 的 Review tile 与其他 app tile 一样是普通窗口并显示普通工作区 Dock，不包含默认最大化 Review，也没有“最大化仍显示 Dock”的正式画面，因此两张 PNG 与 sidecar 均不做无意义重生成。README checker、本地 Markdown 链接与 Stage 6 文档/截图合同继续作为提交门禁。
+- 历史覆盖关系与剩余风险：本记录明确覆盖第 3 节旧“最大化贴合保留 Dock 的 window layer 工作区”决策，以及 T5/T11 在当时实现基础上形成的最大化/Dock 验收结论；这些段落保留为历史事实，当前行为以本记录为准。浏览器证据来自本机真实 Chromium 的 headless CDP 路径，不替代 T11 已有 headed iGPU 性能结论，也不外推到其他浏览器/GPU；本修正没有新增持续动画、blur 层或底边感应路径。

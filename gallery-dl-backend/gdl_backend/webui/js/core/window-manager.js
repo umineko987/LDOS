@@ -1,7 +1,10 @@
 import { getApplicationById } from "./app-registry.js";
 import { applyWindowRect, createWindowDomLifecycle } from "./window-dom-lifecycle.js";
 import {
+  deriveWindowWorkspaceMode,
   measureWindowLayerViewport,
+  syncWindowWorkspaceMode,
+  WINDOW_WORKSPACE_MODES,
   windowLayerGeometryOptions,
 } from "./window-workspace.js";
 import { createWindowHideController } from "./window-hide-controller.js";
@@ -25,6 +28,7 @@ export function createWindowManager({
   windowLayer,
   windowTemplate,
   taskList,
+  dock = taskList?.closest?.("[data-dock]") || null,
   store,
   actions,
   onMount,
@@ -34,6 +38,7 @@ export function createWindowManager({
   onBeforeHide,
   onOpenApplicationCenter = () => {},
 }) {
+  if (!(dock instanceof HTMLElement)) throw new TypeError("Dock 宿主无效");
   const mobileViewport = { matches: false, addEventListener() {}, removeEventListener() {} };
   const pendingRectRepairs = new Map();
   let windows = null;
@@ -101,9 +106,15 @@ export function createWindowManager({
   const focusBody = (appId = selectors.focusedAppId(store.getState())) => (
     appId === null ? false : windows.focusBody(appId)
   );
+  const releaseDockFocus = (appId) => {
+    const activeElement = document.activeElement;
+    if (!(activeElement instanceof Node) || !dock.contains(activeElement)) return false;
+    if (!focusBody(appId) && activeElement instanceof HTMLElement) activeElement.blur?.();
+    return true;
+  };
   const focusDockTarget = (appId) => {
     const focus = () => {
-      if (!destroying && !destroyed) taskbarWindows?.focusButton(appId);
+      if (!destroying && !destroyed && !dock.hidden) taskbarWindows?.focusButton(appId);
     };
     queueMicrotask(focus);
     globalThis.requestAnimationFrame?.(focus);
@@ -243,6 +254,16 @@ export function createWindowManager({
     if (destroying || destroyed) return;
     currentStack = stack;
     currentView = selectors.windowView(store.getState());
+    const focusedAppId = selectors.focusedAppId(store.getState());
+    const workspaceMode = deriveWindowWorkspaceMode(stack, focusedAppId);
+    const transferFocus = workspaceMode === WINDOW_WORKSPACE_MODES.maximized
+      && releaseDockFocus(focusedAppId);
+    if (workspaceMode === WINDOW_WORKSPACE_MODES.maximized) {
+      taskbarWindows?.closeOverflow();
+    }
+    // This projection must precede every displayedRect() read in this render.
+    syncWindowWorkspaceMode(windowLayer, dock, workspaceMode);
+
     const nextIds = new Set(stack.map((record) => record.appId));
     for (const appId of [...windows.keys()]) {
       if (!nextIds.has(appId)) removeInstance(appId);
@@ -250,12 +271,12 @@ export function createWindowManager({
     for (const record of stack) {
       if (!windows.has(record.appId)) createInstance(record.appId);
     }
-    const focusedAppId = selectors.focusedAppId(store.getState());
     const renderPlan = deriveWindowRenderPlan(stack, focusedAppId, mobileViewport.matches);
     for (const { record, view, zIndex } of renderPlan) {
       syncInstance(windows.get(record.appId), record, view, zIndex, focusedAppId);
     }
     taskbarWindows?.render(stack, focusedAppId);
+    if (transferFocus) focusBody(focusedAppId);
   };
 
   const activate = (activation, appId) => {
@@ -304,6 +325,8 @@ export function createWindowManager({
   } catch (error) {
     destroying = true;
     for (const appId of [...windows.keys()]) removeInstance(appId);
+    taskbarWindows?.closeOverflow();
+    syncWindowWorkspaceMode(windowLayer, dock, WINDOW_WORKSPACE_MODES.normal);
     taskbarWindows?.destroy();
     window.removeEventListener("resize", onViewportChange);
     throw error;
@@ -323,6 +346,7 @@ export function createWindowManager({
     },
     focusBody,
     focusDockButton(appId) {
+      if (dock.hidden || dock.hasAttribute("inert")) return false;
       return taskbarWindows?.focusButton(appId) === true;
     },
     activate(command, appId) {
@@ -338,6 +362,8 @@ export function createWindowManager({
       for (const instance of windows.values()) finishPointerInteraction(instance);
       unsubscribe();
       window.removeEventListener("resize", onViewportChange);
+      taskbarWindows?.closeOverflow();
+      syncWindowWorkspaceMode(windowLayer, dock, WINDOW_WORKSPACE_MODES.normal);
       for (const appId of [...windows.keys()]) removeInstance(appId);
       hideController.destroy();
       taskbarWindows?.destroy();

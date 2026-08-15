@@ -205,6 +205,14 @@ test("阶段 2 正式 DOM 包含五层、交通灯与严格桌面边界", () => 
     new URL("../gdl_backend/webui/styles/desktop.css", import.meta.url),
     "utf8",
   );
+  const windowManager = readFileSync(
+    new URL("../gdl_backend/webui/js/core/window-manager.js", import.meta.url),
+    "utf8",
+  );
+  const windowWorkspace = readFileSync(
+    new URL("../gdl_backend/webui/js/core/window-workspace.js", import.meta.url),
+    "utf8",
+  );
   const responsiveCss = readFileSync(
     new URL("../gdl_backend/webui/styles/responsive.css", import.meta.url),
     "utf8",
@@ -214,6 +222,11 @@ test("阶段 2 正式 DOM 包含五层、交通灯与严格桌面边界", () => 
     "data-application-center-host", "data-dock", "data-desktop-size-blocker",
     "data-route-announcer",
   ]) assert.equal(index.includes(marker), true, marker);
+  assert.equal(index.includes('data-window-workspace="normal"'), true);
+  assert.match(
+    index,
+    /<nav\s+class="dock"\s+data-dock\s+aria-label="ImageWeave Dock"\s+aria-hidden="true"\s+hidden\s+inert\s*>/u,
+  );
   assert.equal(index.includes("data-start-menu"), false);
   assert.equal(index.includes("data-desktop-icons"), false);
   const trafficOrder = ["data-window-close", "data-window-minimize", "data-window-maximize"];
@@ -231,6 +244,25 @@ test("阶段 2 正式 DOM 包含五层、交通灯与严格桌面边界", () => 
   );
   assert.equal(desktopCss.includes("@media (prefers-reduced-motion: reduce)"), true);
   assert.equal(desktopCss.includes("@media (forced-colors: active)"), true);
+  assert.match(
+    desktopCss,
+    /\.window-layer\[data-window-workspace="maximized"\]\s*\{[^}]*bottom:\s*0;/u,
+  );
+  assert.match(desktopCss, /\.dock\[hidden\] \.dock__items/u);
+  for (const contract of [
+    'windowLayer.setAttribute("data-window-workspace", mode)',
+    "setElementInert(dock, true)",
+    'dock.toggleAttribute("hidden", true)',
+    'dock.setAttribute("aria-hidden", "true")',
+  ]) assert.equal(windowWorkspace.includes(contract), true, contract);
+  const workspaceProjection = windowManager.indexOf(
+    "syncWindowWorkspaceMode(windowLayer, dock, workspaceMode)",
+  );
+  const renderGeometry = windowManager.indexOf(
+    "deriveWindowRenderPlan(stack, focusedAppId",
+    workspaceProjection,
+  );
+  assert.equal(workspaceProjection >= 0 && workspaceProjection < renderGeometry, true);
 });
 
 test("阶段 2 v2 strict round-trip 拒绝危险、访问器、重复、非有限和非法 rect", () => {

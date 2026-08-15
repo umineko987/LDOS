@@ -5714,6 +5714,9 @@ class WebUiModuleTests(unittest.TestCase):
         window_policy = (
             webui / "js" / "core" / "window-policy.js"
         ).read_text(encoding="utf-8")
+        window_workspace = (
+            webui / "js" / "core" / "window-workspace.js"
+        ).read_text(encoding="utf-8")
         taskbar = (
             webui / "js" / "components" / "taskbar-windows.js"
         ).read_text(encoding="utf-8")
@@ -5753,6 +5756,12 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertEqual(index.count("data-task-window-list"), 1)
         self.assertEqual(index.count("data-dock"), 1)
         self.assertEqual(index.count("data-application-center-host"), 1)
+        self.assertEqual(index.count('data-window-workspace="normal"'), 1)
+        self.assertRegex(
+            index,
+            r'<nav\s+class="dock"\s+data-dock\s+aria-label="ImageWeave Dock"\s+'
+            r'aria-hidden="true"\s+hidden\s+inert\s*>',
+        )
         self.assertNotIn("data-start-menu", index)
         self.assertNotIn("data-desktop-icons", index)
         self.assertIn("DOCK_FIXED_APP_IDS", taskbar)
@@ -5768,7 +5777,41 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn('documentObject.addEventListener("pointerdown"', taskbar)
         self.assertIn('"aria-label": item.ariaLabel', taskbar)
         self.assertIn('dataset: { dockItem: item.key, dockState: item.state }', taskbar)
+        self.assertIn('dockHost.hidden || dockHost.hasAttribute("inert")', taskbar)
+        self.assertIn("if (isUnavailable()) return false", taskbar)
         self.assertNotIn("innerHTML", taskbar)
+
+        self.assertIn("deriveWindowWorkspaceMode", window_workspace)
+        self.assertIn('focusedWindow?.windowState === "maximized"', window_workspace)
+        self.assertIn('windowLayer.setAttribute("data-window-workspace", mode)', window_workspace)
+        for contract in (
+            "setElementInert(dock, true)",
+            'dock.toggleAttribute("hidden", true)',
+            'dock.setAttribute("aria-hidden", "true")',
+            'dock.removeAttribute("aria-hidden")',
+            "setElementInert(dock, false)",
+            'dock.toggleAttribute("hidden", false)',
+        ):
+            self.assertIn(contract, window_workspace)
+        self.assertNotIn("localStorage", window_workspace + manager)
+
+        render_stack = javascript_block(manager, "const renderStack =")
+        derive_position = render_stack.index("deriveWindowWorkspaceMode(stack, focusedAppId)")
+        marker_position = render_stack.index(
+            "syncWindowWorkspaceMode(windowLayer, dock, workspaceMode)"
+        )
+        geometry_position = render_stack.index("deriveWindowRenderPlan")
+        self.assertLess(derive_position, marker_position)
+        self.assertLess(marker_position, geometry_position)
+        self.assertIn("releaseDockFocus(focusedAppId)", render_stack)
+        self.assertIn("taskbarWindows?.closeOverflow()", render_stack)
+        self.assertIn("if (transferFocus) focusBody(focusedAppId)", render_stack)
+        self.assertIn(
+            "syncWindowWorkspaceMode(windowLayer, dock, WINDOW_WORKSPACE_MODES.normal)",
+            javascript_block(manager, "    destroy()"),
+        )
+        self.assertIn("const dock = requireElement(\"[data-dock]\", desktop)", desktop)
+        self.assertIn("dock,", desktop)
 
         task_activation = javascript_block(manager, "const activate =")
         self.assertIn('requestHide(instance, "minimized"', task_activation)
@@ -5816,6 +5859,12 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn('.dock__item[data-dock-state="focused"]', desktop_css)
         self.assertIn('.dock__item[data-dock-state="minimized"]', desktop_css)
         self.assertIn(".dock__overflow", desktop_css)
+        self.assertRegex(
+            desktop_css,
+            r'\.window-layer\[data-window-workspace="maximized"\]\s*\{[^}]*bottom:\s*0;',
+        )
+        self.assertIn(".dock[hidden] .dock__items", desktop_css)
+        self.assertIn(".dock[hidden] .dock__overflow", desktop_css)
         self.assertIn(".application-center", desktop_css)
         self.assertIn(".menu-bar", desktop_css)
         self.assertIn("@media (max-width: 1179px), (max-height: 719px)", responsive_css)

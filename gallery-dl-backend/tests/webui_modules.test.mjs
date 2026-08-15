@@ -199,7 +199,10 @@ import {
 import { createWindowHideController } from "../gdl_backend/webui/js/core/window-hide-controller.js";
 import { createWindowInteractionController } from "../gdl_backend/webui/js/core/window-interaction.js";
 import {
+  deriveWindowWorkspaceMode,
   measureWindowLayerViewport,
+  syncWindowWorkspaceMode,
+  WINDOW_WORKSPACE_MODES,
   windowLayerGeometryOptions,
 } from "../gdl_backend/webui/js/core/window-workspace.js";
 import {
@@ -654,6 +657,13 @@ class FakeDomElement extends FakeDomNode {
     }
   }
 
+  blur() {
+    this.focused = false;
+    if (globalThis.document?.activeElement === this) {
+      globalThis.document.activeElement = null;
+    }
+  }
+
   setPointerCapture(pointerId) {
     this.pointerCaptures.add(pointerId);
   }
@@ -749,7 +759,10 @@ function installWindowManagerDomFixture() {
     width: windowLayer.clientWidth,
     height: windowLayer.clientHeight,
   });
+  const dock = new FakeDomHtmlElement("nav");
+  dock.setAttribute("data-dock", "");
   const taskList = new FakeDomHtmlElement("div");
+  dock.append(taskList);
   const windowTemplate = {
     content: {
       cloneNode() {
@@ -774,6 +787,7 @@ function installWindowManagerDomFixture() {
 
   return Object.freeze({
     computedValues,
+    dock,
     documentObject,
     mobileViewport,
     windowObject,
@@ -2121,7 +2135,7 @@ test("clampRect 在四个视口边缘都保留至少 32px 可见区域", () => {
   assert.equal(viewport.width - bottomRight.x, 32);
 });
 
-test("clampRect 与 maximizedRect 始终停在任务栏可用区上方", () => {
+test("window-geometry 保留可选 taskbarHeight 的纯函数扣减能力", () => {
   const viewport = { width: 1024, height: 768 };
   const options = { minW: 360, minH: 240, taskbarHeight: 48 };
   const normal = clampRect(
@@ -2507,9 +2521,58 @@ test("window hide collaborator 独立去重 async 请求并淘汰失效实例", 
   controller.destroy();
 });
 
-test("window-layer 工作区投影使用真实本地尺寸且几何选项不重复扣 Dock", () => {
+test("window-layer 工作区模式严格派生焦点窗口并原子投影 Dock 合同", () => {
   const fixture = installWindowManagerDomFixture();
   try {
+    const stack = [
+      windowRecord("review", "maximized"),
+      windowRecord("tasks", "normal"),
+    ];
+    assert.equal(Object.isFrozen(WINDOW_WORKSPACE_MODES), true);
+    assert.equal(
+      deriveWindowWorkspaceMode(stack, "review"),
+      WINDOW_WORKSPACE_MODES.maximized,
+    );
+    assert.equal(
+      deriveWindowWorkspaceMode(stack, "tasks"),
+      WINDOW_WORKSPACE_MODES.normal,
+    );
+    assert.equal(deriveWindowWorkspaceMode(stack, null), WINDOW_WORKSPACE_MODES.normal);
+    assert.equal(
+      deriveWindowWorkspaceMode([windowRecord("review", "minimized")], "review"),
+      WINDOW_WORKSPACE_MODES.normal,
+    );
+    assert.throws(() => deriveWindowWorkspaceMode({}, null), TypeError);
+    assert.throws(() => deriveWindowWorkspaceMode([], 1), TypeError);
+
+    syncWindowWorkspaceMode(
+      fixture.windowLayer,
+      fixture.dock,
+      WINDOW_WORKSPACE_MODES.maximized,
+    );
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "maximized");
+    assert.equal(fixture.dock.hidden, true);
+    assert.equal(fixture.dock.hasAttribute("hidden"), true);
+    assert.equal(fixture.dock.hasAttribute("inert"), true);
+    assert.equal(fixture.dock.inert, true);
+    assert.equal(fixture.dock.getAttribute("aria-hidden"), "true");
+
+    syncWindowWorkspaceMode(
+      fixture.windowLayer,
+      fixture.dock,
+      WINDOW_WORKSPACE_MODES.normal,
+    );
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "normal");
+    assert.equal(fixture.dock.hidden, false);
+    assert.equal(fixture.dock.hasAttribute("hidden"), false);
+    assert.equal(fixture.dock.hasAttribute("inert"), false);
+    assert.equal(fixture.dock.inert, false);
+    assert.equal(fixture.dock.hasAttribute("aria-hidden"), false);
+    assert.throws(
+      () => syncWindowWorkspaceMode(fixture.windowLayer, fixture.dock, "fullscreen"),
+      TypeError,
+    );
+
     fixture.windowLayer.clientWidth = 1_440;
     fixture.windowLayer.clientHeight = 772;
     assert.deepEqual(measureWindowLayerViewport(fixture.windowLayer, fixture.documentObject), {
@@ -2533,11 +2596,19 @@ test("window-layer 工作区投影使用真实本地尺寸且几何选项不重�
   }
 });
 
-test("window manager 最大化严格使用 window-layer 本地工作区且不重复扣 Dock", () => {
+test("window manager 先扩展 layer 再测量最大化 rect，恢复精确保留 normal rect", () => {
   const fixture = installWindowManagerDomFixture();
   fixture.windowLayer.clientWidth = 1_000;
   fixture.windowLayer.clientHeight = 600;
-  fixture.computedValues.set("--imageweave-dock-height", "72px");
+  const measurements = [];
+  fixture.windowLayer.getBoundingClientRect = () => {
+    const mode = fixture.windowLayer.getAttribute("data-window-workspace");
+    measurements.push(mode);
+    return {
+      width: fixture.windowLayer.clientWidth,
+      height: mode === "maximized" ? 700 : fixture.windowLayer.clientHeight,
+    };
+  };
   const rect = windowRect({ x: 91, y: 73, w: 640, h: 420 });
   const store = createStore({
     initialState: createInitialState({ windows: [windowRecord("crawl", "normal", rect)] }),
@@ -2553,6 +2624,9 @@ test("window manager 最大化严格使用 window-layer 本地工作区且不重
       actions: createManagerActions(store),
     });
     const element = windowElementFor(fixture.windowLayer, "crawl");
+    const maximize = element.querySelector("[data-window-maximize]");
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "normal");
+    assert.equal(fixture.dock.hidden, false);
     assert.deepEqual({
       left: element.style.left,
       top: element.style.top,
@@ -2560,17 +2634,37 @@ test("window manager 最大化严格使用 window-layer 本地工作区且不重
       height: element.style.height,
     }, { left: "91px", top: "73px", width: "640px", height: "420px" });
 
-    element.querySelector("[data-window-maximize]").emit("click", { detail: 1 });
+    maximize.focus();
+    measurements.length = 0;
+    maximize.emit("click", { detail: 1 });
+    assert.equal(measurements.length > 0, true);
+    assert.equal(measurements.every((mode) => mode === "maximized"), true);
     assert.equal(element.hasAttribute("data-maximized"), true);
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "maximized");
+    assert.equal(fixture.dock.hidden, true);
+    assert.equal(fixture.dock.hasAttribute("inert"), true);
+    assert.equal(fixture.dock.getAttribute("aria-hidden"), "true");
+    assert.equal(manager.focusDockButton("crawl"), false);
     assert.deepEqual({
       left: element.style.left,
       top: element.style.top,
       width: element.style.width,
       height: element.style.height,
-    }, { left: "0px", top: "0px", width: "1000px", height: "600px" });
+    }, { left: "0px", top: "0px", width: "1000px", height: "700px" });
 
-    element.querySelector("[data-window-maximize]").emit("click", { detail: 1 });
+    const hiddenDockButton = fixture.taskList.querySelector('[data-dock-item="app:crawl"]');
+    hiddenDockButton.emit("click");
+    assert.equal(selectors.windowStack(store.getState())[0].windowState, "maximized");
+
+    measurements.length = 0;
+    maximize.emit("click", { detail: 1 });
+    assert.equal(measurements.length > 0, true);
+    assert.equal(measurements.every((mode) => mode === "normal"), true);
     assert.equal(element.hasAttribute("data-maximized"), false);
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "normal");
+    assert.equal(fixture.dock.hidden, false);
+    assert.equal(fixture.dock.hasAttribute("inert"), false);
+    assert.equal(fixture.dock.hasAttribute("aria-hidden"), false);
     assert.deepEqual(selectors.windowStack(store.getState())[0].rect, rect);
     assert.deepEqual({
       left: element.style.left,
@@ -2578,6 +2672,141 @@ test("window manager 最大化严格使用 window-layer 本地工作区且不重
       width: element.style.width,
       height: element.style.height,
     }, { left: "91px", top: "73px", width: "640px", height: "420px" });
+  } finally {
+    manager?.destroy();
+    fixture.restore();
+  }
+});
+
+test("默认最大化窗口首次 render 无旧 Dock 高度并接管 Dock 启动焦点", () => {
+  const fixture = installWindowManagerDomFixture();
+  fixture.windowLayer.clientWidth = 1_180;
+  fixture.windowLayer.clientHeight = 600;
+  const measurements = [];
+  fixture.windowLayer.getBoundingClientRect = () => {
+    const mode = fixture.windowLayer.getAttribute("data-window-workspace");
+    measurements.push(mode);
+    return { width: 1_180, height: mode === "maximized" ? 672 : 600 };
+  };
+  const store = createStore({ reportError: () => {} });
+  let manager = null;
+  try {
+    manager = createWindowManager({
+      windowLayer: fixture.windowLayer,
+      windowTemplate: fixture.windowTemplate,
+      taskList: fixture.taskList,
+      store,
+      actions: createManagerActions(store),
+    });
+    const launcher = fixture.taskList.querySelector('[data-dock-item="app:review"]');
+    launcher.focus();
+    measurements.length = 0;
+    store.dispatch(actionCreators.windowOpened("review"));
+
+    const reviewWindow = windowElementFor(fixture.windowLayer, "review");
+    assert.equal(selectors.windowStack(store.getState())[0].windowState, "maximized");
+    assert.equal(measurements.length > 0, true);
+    assert.equal(measurements.every((mode) => mode === "maximized"), true);
+    assert.deepEqual({
+      left: reviewWindow.style.left,
+      top: reviewWindow.style.top,
+      width: reviewWindow.style.width,
+      height: reviewWindow.style.height,
+    }, { left: "0px", top: "0px", width: "1180px", height: "672px" });
+    assert.equal(fixture.documentObject.activeElement, manager.getFocusedBody());
+    assert.equal(fixture.dock.hidden, true);
+
+    manager.destroy();
+    manager = null;
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "normal");
+    assert.equal(fixture.dock.hidden, false);
+    assert.equal(fixture.dock.hasAttribute("inert"), false);
+    assert.equal(fixture.dock.hasAttribute("aria-hidden"), false);
+  } finally {
+    manager?.destroy();
+    fixture.restore();
+  }
+});
+
+test("聚焦窗口独占决定 Dock：后台最大化、overflow、最小化与关闭均正确恢复", async () => {
+  const fixture = installWindowManagerDomFixture();
+  const reviewRect = windowRect({ x: 80, y: 52, w: 760, h: 500 });
+  const store = createStore({
+    initialState: createInitialState({ windows: [
+      windowRecord("review", "maximized", reviewRect),
+      windowRecord("vault", "normal"),
+      windowRecord("proxy", "normal"),
+    ] }),
+    reportError: () => {},
+  });
+  const actions = createManagerActions(store);
+  let manager = null;
+  try {
+    manager = createWindowManager({
+      windowLayer: fixture.windowLayer,
+      windowTemplate: fixture.windowTemplate,
+      taskList: fixture.taskList,
+      store,
+      actions,
+    });
+    assert.equal(selectors.focusedAppId(store.getState()), "proxy");
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "normal");
+    assert.equal(fixture.dock.hidden, false);
+
+    const overflowButton = fixture.taskList.querySelector("[data-dock-overflow-button]");
+    const overflowPanel = fixture.taskList.querySelector("[data-dock-overflow]");
+    overflowButton.emit("click");
+    assert.equal(overflowButton.getAttribute("aria-expanded"), "true");
+    assert.equal(overflowPanel.hidden, false);
+
+    const reviewDockButton = fixture.taskList.querySelector('[data-dock-item="app:review"]');
+    reviewDockButton.focus();
+    reviewDockButton.emit("click");
+    assert.equal(selectors.focusedAppId(store.getState()), "review");
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "maximized");
+    assert.equal(fixture.dock.hidden, true);
+    assert.equal(overflowButton.getAttribute("aria-expanded"), "false");
+    assert.equal(overflowPanel.hidden, true);
+    assert.equal(fixture.documentObject.activeElement, manager.getFocusedBody());
+
+    assert.equal(manager.activate("focus", "proxy"), true);
+    assert.equal(selectors.focusedAppId(store.getState()), "proxy");
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "normal");
+    assert.equal(fixture.dock.hidden, false);
+
+    assert.equal(manager.activate("focus", "review"), true);
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "maximized");
+    const reviewWindow = windowElementFor(fixture.windowLayer, "review");
+    reviewWindow.querySelector("[data-window-minimize]").emit("click");
+    await flushPromises();
+    assert.equal(
+      selectors.windowStack(store.getState()).find((record) => record.appId === "review").windowState,
+      "minimized",
+    );
+    assert.equal(selectors.focusedAppId(store.getState()), "proxy");
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "normal");
+    assert.equal(fixture.dock.hidden, false);
+    assert.equal(fixture.documentObject.activeElement?.dataset?.dockItem, "app:review");
+
+    const minimizedReviewButton = fixture.taskList.querySelector('[data-dock-item="app:review"]');
+    minimizedReviewButton.emit("click");
+    assert.equal(selectors.focusedAppId(store.getState()), "review");
+    assert.equal(
+      selectors.windowStack(store.getState()).find((record) => record.appId === "review").windowState,
+      "normal",
+    );
+    assert.deepEqual(
+      selectors.windowStack(store.getState()).find((record) => record.appId === "review").rect,
+      reviewRect,
+    );
+    assert.equal(fixture.dock.hidden, false);
+
+    reviewWindow.querySelector("[data-window-maximize]").emit("click", { detail: 1 });
+    assert.equal(fixture.dock.hidden, true);
+    reviewWindow.querySelector("[data-window-close]").emit("click");
+    assert.equal(selectors.windowStack(store.getState()).some((record) => record.appId === "review"), false);
+    assert.equal(fixture.windowLayer.getAttribute("data-window-workspace"), "normal");
+    assert.equal(fixture.dock.hidden, false);
   } finally {
     manager?.destroy();
     fixture.restore();
@@ -3403,15 +3632,17 @@ test("Dock 应用中心动作显式传递实际 launcher button", () => {
   }
 });
 
-test("Dock overflow Escape 只关闭自己且隐藏项 focusButton 回退可见 trigger", () => {
+test("Dock overflow Escape 只关闭自己，隐藏宿主拒绝动作与程序化焦点", () => {
   const fixture = installWindowManagerDomFixture();
   const container = new FakeDomHtmlElement("div");
-  fixture.documentObject.documentElement.append(container);
+  fixture.dock.append(container);
+  fixture.documentObject.documentElement.append(fixture.dock);
   let dock = null;
+  let activationCount = 0;
   try {
     dock = createDock({
       container,
-      onActivate() {},
+      onActivate() { activationCount += 1; },
       onOpenApplicationCenter() {},
       documentObject: fixture.documentObject,
     });
@@ -3430,6 +3661,31 @@ test("Dock overflow Escape 只关闭自己且隐藏项 focusButton 回退可见 
     assert.equal(secondaryEscapeCount, 0);
     assert.equal(overflowTrigger.getAttribute("aria-expanded"), "false");
     assert.equal(fixture.documentObject.activeElement, overflowTrigger);
+
+    overflowTrigger.emit("click");
+    assert.equal(overflowTrigger.getAttribute("aria-expanded"), "true");
+    syncWindowWorkspaceMode(
+      fixture.windowLayer,
+      fixture.dock,
+      WINDOW_WORKSPACE_MODES.maximized,
+    );
+    assert.equal(dock.focusButton("proxy"), false);
+    overflowTrigger.emit("click");
+    assert.equal(overflowTrigger.getAttribute("aria-expanded"), "true");
+    const unavailableEscape = fixture.documentObject.emit("keydown", { key: "Escape" });
+    assert.equal(unavailableEscape.immediatePropagationStopped, false);
+    assert.equal(secondaryEscapeCount, 1);
+    container.querySelector('[data-dock-item="app:crawl"]').emit("click");
+    assert.equal(activationCount, 0);
+    assert.equal(dock.closeOverflow({ returnFocus: true }), true);
+    assert.equal(overflowTrigger.getAttribute("aria-expanded"), "false");
+
+    syncWindowWorkspaceMode(
+      fixture.windowLayer,
+      fixture.dock,
+      WINDOW_WORKSPACE_MODES.normal,
+    );
+    assert.equal(dock.focusButton("proxy"), true);
   } finally {
     dock?.destroy();
     fixture.restore();

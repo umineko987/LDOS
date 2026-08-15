@@ -56,6 +56,7 @@ export function initializeDesktop(root = document, services = {}) {
   const menuBarElement = requireElement("[data-menu-bar]", desktop);
   const applicationCenterHost = requireElement("[data-application-center-host]", desktop);
   const windowLayer = requireElement("[data-window-layer]", desktop);
+  const dock = requireElement("[data-dock]", desktop);
   const windowTemplate = requireElement("[data-window-template]", desktop);
   if (!(windowTemplate instanceof HTMLTemplateElement)) {
     throw new Error("窗口模板节点无效");
@@ -220,6 +221,7 @@ export function initializeDesktop(root = document, services = {}) {
     windowLayer,
     windowTemplate,
     taskList,
+    dock,
     store,
     actions,
     onMount(app, bodyElement) {

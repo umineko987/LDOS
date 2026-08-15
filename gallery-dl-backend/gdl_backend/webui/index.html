@@ -65,7 +65,7 @@
       </div>
     </header>
 
-    <div class="window-layer" data-window-layer></div>
+    <div class="window-layer" data-window-layer data-window-workspace="normal"></div>
 
     <template data-window-template>
       <section class="application-window" data-application-window role="group">
@@ -93,7 +93,14 @@
 
     <div class="application-center-host" data-application-center-host hidden></div>
 
-    <nav class="dock" data-dock aria-label="ImageWeave Dock">
+    <nav
+      class="dock"
+      data-dock
+      aria-label="ImageWeave Dock"
+      aria-hidden="true"
+      hidden
+      inert
+    >
       <div class="dock__items" data-task-window-list></div>
     </nav>
   </div>

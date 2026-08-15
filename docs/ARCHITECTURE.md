@@ -277,7 +277,11 @@ WebUI 使用后端直接提供的原生 ES modules，不需要单独前端构建
 打开应用；合法 `#/应用ID` 深链接只打开一个目标窗口。应用中心、Dock、菜单中的窗口列表都只是
 中央 definitions/Store 窗口栈的纯投影，不拥有第二份应用清单、运行状态、焦点或 z-order。
 `components/taskbar-summary.js` 与 `components/taskbar-windows.js` 的文件名是兼容 seam；前者实际
-服务菜单栏系统摘要，后者拥有 Dock 的纯投影和激活函数，不表示旧任务栏仍存在。
+服务菜单栏系统摘要，后者拥有 Dock 的纯投影和激活函数，不表示旧任务栏仍存在。Dock 的可见性同样
+不是独立状态：window manager 每次只从 Store 的窗口栈与 `focusedAppId` 派生工作区。当前聚焦且可见
+窗口为 `maximized` 时，顶部菜单栏保留，window-layer 扩展到视口底部，Dock 以 `hidden`、`inert` 与
+`aria-hidden` 完全退出视觉、指针、键盘和 AX 路径；恢复、最小化、关闭或聚焦普通窗口时恢复普通
+Dock 工作区。后台最大化窗口本身不会隐藏 Dock。
 
 `core/app-definitions.js` 是 11 个应用以下信息的唯一来源：
 
@@ -351,6 +355,11 @@ Data URL 或 Blob URL。`core/wallpaper-storage.js` 只是兼容期 delete-only 
 - DOM `zIndex` 只是 render plan 的投影；
 - pointermove 只做临时 DOM 反馈，不持续写 store；
 - pointer interaction 结束时统一提交一次；
+- 每次 render 只从 Store 窗口栈与 `focusedAppId` 派生 `normal | maximized` 工作区，并在读取任何
+  maximized rect 前先同步 `data-window-workspace` layer marker；
+- 聚焦最大化工作区的 layer `bottom: 0`，Dock 必须关闭 overflow 并使用原生 `hidden`、`inert` 和
+  `aria-hidden`；焦点若来自即将隐藏的 Dock，先释放该焦点并在目标窗口同步后转入 window body；
+- restore、minimize、close、聚焦普通窗口、初始化失败与 `destroy()` 都必须恢复普通 Dock 工作区；
 - window-layer 工作区变化会取消不再有效的 interaction；低于 1180×720 时壳层显示桌面环境 blocker；
 - async `beforeHide` 去重并阻止 stale completion；
 - mount 失败会清理半创建 DOM；
@@ -387,10 +396,11 @@ forest、plum-gray、warm-paper 六个同源径向光井场景提供视觉事实
 `1180 × 720` CSS 像素，低于边界只显示环境 blocker。
 
 合成策略必须保持：每个可见应用窗口只有窗口根本身一个 `blur(60px) saturate(1.8)` 主 backdrop，
-应用内部普通列、行和卡片不创建 backdrop；最小化/隐藏窗口没有可见合成表面。Menu、Dock、Dialog
-和 Gallery tests-only Quick Look 是各自独立的合法顶层玻璃；全局 `assets/noise.svg` 只挂载一次，
-且在 forced-colors 中移除。禁止持续 specular/blur 动画；拖拽、resize 和 Canvas 镜片等直接操控路径
-不使用 500ms 过渡。
+应用内部普通列、行和卡片不创建 backdrop；最小化/隐藏窗口没有可见合成表面。Menu、普通工作区中的
+Dock、Dialog 和 Gallery tests-only Quick Look 是各自独立的合法顶层玻璃；聚焦最大化时隐藏的 Dock
+不得保留可见 backdrop 合成，也不得浮在窗口上。全局 `assets/noise.svg` 只挂载一次，且在
+forced-colors 中移除。禁止持续 specular/blur 动画；拖拽、resize 和 Canvas 镜片等直接操控路径不使用
+500ms 过渡。
 
 生产 WebUI 是后端 `/ui/` 同源提供的原生 ESM、静态 CSS 和 SVG，不存在 Node/npm 构建产物。
 当前 package-data 闭包为 103 项（1 HTML、18 CSS、83 JS、1 SVG），包含单一 `noise.svg` 和
@@ -496,7 +506,7 @@ Python 直接依赖只在 `gallery-dl-backend/pyproject.toml` 维护。`requirem
 - source 边界变化必须显式更新测试和审查说明；
 - skip 数量和原因必须可见；
 - WebUI 行为和 coverage 使用固定 Node.js v24.13.0；
-- 夜航最终目标契约是正式 runner 的 source test，不是单独的可选检查；当前收口基线为 324/324，0 fail、0 skip；
+- 夜航最终目标契约是正式 runner 的 source test，不是单独的可选检查；当前收口基线为 326/326，0 fail、0 skip；
 - WebUI 静态清单同时从生产源、`StaticFiles` HTTP、clean archive wheel 和 wheel `RECORD` 四个边界核对；
 - Python 源码字符串断言不计入真实 JavaScript coverage。
 
