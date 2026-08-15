@@ -2907,8 +2907,8 @@ class WebUiModuleTests(unittest.TestCase):
             [tokens, base, desktop, controls, status, dialog, *app_css.values()]
         )
 
-        # T4 只有一个 dark 根主题；玻璃事实使用固定白色 alpha，旧 selector
-        # 只能通过 var alias 消费 canonical token，不能保留浅色/着色派生。
+        # T4 只有一个 dark 根主题；玻璃事实使用固定白色 alpha。T9 只保留
+        # 仍有真实生产消费者的语义 alias，不保留零引用迁移 alias 或着色派生。
         self.assertNotIn(':root[data-theme-tone="dark"]', tokens)
         self.assertNotIn('data-theme-tone="light"', tokens)
         self.assertNotIn("color-scheme: light", tokens)
@@ -2935,31 +2935,82 @@ class WebUiModuleTests(unittest.TestCase):
                 f"rgb(255 255 255 / {alpha});",
                 tokens,
             )
-        for alias, canonical in {
-            "surface-content-solid": "glass-surface-weak",
-            "surface-navigation-solid": "glass-surface-secondary",
-            "surface-control-solid": "glass-surface-input",
-            "surface-content": "glass-surface-default",
-            "surface-control": "glass-surface-button",
-            "surface-environment": "glass-surface-environment",
-            "surface-control-hover": "glass-surface-hover",
-            "border-soft": "border-weak",
-            "danger": "state-danger",
-            "warning": "state-warning",
-            "success": "state-success",
-            "radius-lg": "radius-card",
-            "radius-md": "radius-control",
-            "radius-sm": "radius-control",
-            "shadow-panel": "shadow-card",
-        }.items():
-            self.assertIn(
-                f"--imageweave-{alias}: var(--imageweave-{canonical});",
-                tokens,
-            )
         all_css = "\n".join(
             path.read_text(encoding="utf-8")
             for path in sorted(styles.rglob("*.css"))
         )
+        retained_aliases = {
+            "text-primary": "text-heading",
+            "text-secondary": "text-body",
+            "text-code": "text-fact",
+            "border-strong": "border-button",
+            "separator": "border-weak",
+            "focus-ring": "accent",
+            "focus-halo": "focus-glow",
+            "shadow-menu": "shadow-window",
+            "shadow-dock": "shadow-window",
+        }
+        for alias, canonical in retained_aliases.items():
+            token = f"--imageweave-{alias}"
+            self.assertIn(
+                f"{token}: var(--imageweave-{canonical});",
+                tokens,
+            )
+            self.assertGreater(
+                len(re.findall(rf"var\(\s*{re.escape(token)}\s*\)", all_css)),
+                0,
+                f"保留 alias 必须有生产消费者：{token}",
+            )
+        retired_aliases = (
+            "surface",
+            "text-inverse",
+            "surface-content-solid",
+            "surface-navigation-solid",
+            "surface-environment-solid",
+            "surface-control-solid",
+            "surface-content",
+            "surface-navigation",
+            "surface-environment",
+            "surface-control",
+            "surface-control-hover",
+            "surface-control-active",
+            "border-strong-solid",
+            "border-subtle",
+            "border-soft",
+            "state-danger-surface-solid",
+            "state-danger-surface",
+            "state-warning-surface-solid",
+            "state-warning-surface",
+            "state-success-surface-solid",
+            "state-success-surface",
+            "state-running-surface-solid",
+            "state-running-surface",
+            "state-disabled-surface-solid",
+            "state-disabled-surface",
+            "danger",
+            "warning",
+            "success",
+            "radius-lg",
+            "radius-md",
+            "radius-sm",
+            "shadow-panel",
+            "shadow-flyout",
+            "glass-blur-navigation",
+            "transition-fast",
+        )
+        for alias in retired_aliases:
+            token = f"--imageweave-{alias}"
+            self.assertNotRegex(
+                all_css,
+                rf"{re.escape(token)}(?=\s*[:),])",
+                f"零消费者迁移 alias 必须删除：{token}",
+            )
+        for fallback in (
+            "--imageweave-fallback-window-solid",
+            "--imageweave-fallback-elevated-solid",
+        ):
+            self.assertIn(f"{fallback}:", tokens)
+            self.assertGreater(all_css.count(f"var({fallback})"), 0)
         defined_tokens = set(re.findall(r"(--imageweave-[\w-]+)\s*:", all_css))
         consumed_tokens = set(re.findall(r"var\(\s*(--imageweave-[\w-]+)", all_css))
         self.assertEqual(consumed_tokens - defined_tokens, set())
@@ -3011,9 +3062,9 @@ class WebUiModuleTests(unittest.TestCase):
         )
 
         token_groups = {
-            "text": ("primary", "secondary", "inverse", "code"),
-            "border": ("subtle", "strong"),
-            "shadow": ("window", "menu", "dock", "flyout", "card", "control"),
+            "text": ("primary", "secondary", "code"),
+            "border": ("strong",),
+            "shadow": ("window", "menu", "dock", "card", "control"),
             "radius": ("window", "card", "control", "pill"),
             "state": ("danger", "warning", "success", "running", "disabled"),
         }
@@ -3039,11 +3090,10 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn("font-family: var(--imageweave-font-display)", base)
         self.assertIn("font-family: var(--imageweave-font-mono)", controls)
 
-        # 共享 selector 覆盖全部八个真实应用按钮；面板只要求生产 DOM 中实际存在的六类。
+        # 共享 selector 覆盖全部八个真实应用按钮；面板只要求生产 DOM 中实际存在的五类。
         for app_id in app_ids:
             self.assertIn(f".{app_id}-button", controls, app_id)
         for app_id in (
-            "proxy",
             "vault",
             "review",
             "policy",

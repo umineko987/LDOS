@@ -103,6 +103,7 @@ test("Stage 6 production CSS contains no retired desktop selectors or taskbar to
     ".taskbar-summary-action",
     ".crawl-panel",
     ".tasks-panel",
+    ".proxy-panel",
     ".proxy-panel-heading",
   ]) {
     const pattern = new RegExp(`(?:^|[,\\s])${selector.replace(".", "\\.")}(?=[\\s,:.{#\\[]|$)`, "m");
@@ -111,7 +112,50 @@ test("Stage 6 production CSS contains no retired desktop selectors or taskbar to
   for (const token of [
     "--imageweave-taskbar-height",
     "--imageweave-window-action-size",
-  ]) assert.doesNotMatch(productionCss, new RegExp(token), token);
+    "--imageweave-surface",
+    "--imageweave-text-inverse",
+    "--imageweave-surface-content-solid",
+    "--imageweave-surface-navigation-solid",
+    "--imageweave-surface-environment-solid",
+    "--imageweave-surface-control-solid",
+    "--imageweave-surface-content",
+    "--imageweave-surface-navigation",
+    "--imageweave-surface-environment",
+    "--imageweave-surface-control",
+    "--imageweave-surface-control-hover",
+    "--imageweave-surface-control-active",
+    "--imageweave-border-strong-solid",
+    "--imageweave-border-subtle",
+    "--imageweave-border-soft",
+    "--imageweave-state-danger-surface-solid",
+    "--imageweave-state-danger-surface",
+    "--imageweave-state-warning-surface-solid",
+    "--imageweave-state-warning-surface",
+    "--imageweave-state-success-surface-solid",
+    "--imageweave-state-success-surface",
+    "--imageweave-state-running-surface-solid",
+    "--imageweave-state-running-surface",
+    "--imageweave-state-disabled-surface-solid",
+    "--imageweave-state-disabled-surface",
+    "--imageweave-danger",
+    "--imageweave-warning",
+    "--imageweave-success",
+    "--imageweave-radius-lg",
+    "--imageweave-radius-md",
+    "--imageweave-radius-sm",
+    "--imageweave-shadow-panel",
+    "--imageweave-shadow-flyout",
+    "--imageweave-glass-blur-navigation",
+    "--imageweave-transition-fast",
+  ]) {
+    const pattern = new RegExp(`${token}(?=\\s*[:),])`);
+    assert.doesNotMatch(productionCss, pattern, token);
+  }
+  for (const fallback of [
+    "--imageweave-fallback-window-solid",
+    "--imageweave-fallback-elevated-solid",
+  ]) assert.match(productionCss, new RegExp(`${fallback}\\s*:`), fallback);
+  assert.equal(existsSync(new URL("js/core/wallpaper-image-import.js", WEBUI)), false);
   assert.match(productionCss, /\.dock__/);
   assert.match(productionCss, /\.menu-bar/);
   assert.match(productionCss, /\.window-traffic-light/);

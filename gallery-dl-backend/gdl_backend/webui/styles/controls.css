@@ -41,7 +41,6 @@ button[aria-disabled="true"] {
 /* These are the existing top-level application panels. Their rows inherit the
    window's single backdrop instead of creating one compositing layer each. */
 .app-view :is(
-  .proxy-panel,
   .vault-panel,
   .review-panel,
   .policy-panel,
@@ -570,7 +569,6 @@ button[aria-disabled="true"] {
 
 @media (forced-colors: active) {
   .app-view :is(
-    .proxy-panel,
     .vault-panel,
     .review-panel,
     .policy-panel,

@@ -77,55 +77,17 @@
   --imageweave-desktop-min-width: 1180px;
   --imageweave-desktop-min-height: 720px;
 
-  /* Compatibility aliases: old selectors consume the canonical facts above. */
-  --imageweave-surface: var(--imageweave-background-default);
+  /* These semantic aliases still have production consumers. T9 removes every
+     compatibility alias whose reference count reached zero. */
   --imageweave-text-primary: var(--imageweave-text-heading);
   --imageweave-text-secondary: var(--imageweave-text-body);
-  --imageweave-text-inverse: var(--imageweave-text-heading);
   --imageweave-text-code: var(--imageweave-text-fact);
-
-  --imageweave-surface-content-solid: var(--imageweave-glass-surface-weak);
-  --imageweave-surface-navigation-solid: var(--imageweave-glass-surface-secondary);
-  --imageweave-surface-environment-solid: var(--imageweave-glass-surface-environment);
-  --imageweave-surface-control-solid: var(--imageweave-glass-surface-input);
-  --imageweave-surface-content: var(--imageweave-glass-surface-default);
-  --imageweave-surface-navigation: var(--imageweave-glass-surface-secondary);
-  --imageweave-surface-environment: var(--imageweave-glass-surface-environment);
-  --imageweave-surface-control: var(--imageweave-glass-surface-button);
-  --imageweave-surface-control-hover: var(--imageweave-glass-surface-hover);
-  --imageweave-surface-control-active: var(--imageweave-glass-surface-environment);
-
-  --imageweave-border-strong-solid: var(--imageweave-border-button);
-  --imageweave-border-subtle: var(--imageweave-border-default);
   --imageweave-border-strong: var(--imageweave-border-button);
-  --imageweave-border-soft: var(--imageweave-border-weak);
   --imageweave-separator: var(--imageweave-border-weak);
   --imageweave-focus-ring: var(--imageweave-accent);
   --imageweave-focus-halo: var(--imageweave-focus-glow);
-
-  --imageweave-state-danger-surface-solid: var(--imageweave-glass-surface-default);
-  --imageweave-state-danger-surface: var(--imageweave-glass-surface-default);
-  --imageweave-state-warning-surface-solid: var(--imageweave-glass-surface-default);
-  --imageweave-state-warning-surface: var(--imageweave-glass-surface-default);
-  --imageweave-state-success-surface-solid: var(--imageweave-glass-surface-default);
-  --imageweave-state-success-surface: var(--imageweave-glass-surface-default);
-  --imageweave-state-running-surface-solid: var(--imageweave-glass-surface-default);
-  --imageweave-state-running-surface: var(--imageweave-glass-surface-default);
-  --imageweave-state-disabled-surface-solid: var(--imageweave-glass-surface-weak);
-  --imageweave-state-disabled-surface: var(--imageweave-glass-surface-weak);
-  --imageweave-danger: var(--imageweave-state-danger);
-  --imageweave-warning: var(--imageweave-state-warning);
-  --imageweave-success: var(--imageweave-state-success);
-
-  --imageweave-radius-lg: var(--imageweave-radius-card);
-  --imageweave-radius-md: var(--imageweave-radius-control);
-  --imageweave-radius-sm: var(--imageweave-radius-control);
-  --imageweave-shadow-panel: var(--imageweave-shadow-card);
   --imageweave-shadow-menu: var(--imageweave-shadow-window);
   --imageweave-shadow-dock: var(--imageweave-shadow-window);
-  --imageweave-shadow-flyout: var(--imageweave-shadow-window);
-  --imageweave-glass-blur-navigation: var(--imageweave-glass-blur-window);
-  --imageweave-transition-fast: var(--imageweave-transition-standard);
 
   color-scheme: dark;
   color: var(--imageweave-text-body);

@@ -905,6 +905,22 @@ class ApiTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, static_background_sources)
 
+        source_webui = Path(__file__).resolve().parents[1] / "gdl_backend" / "webui"
+        source_inventory = sorted(
+            path.relative_to(source_webui).as_posix()
+            for path in source_webui.rglob("*")
+            if path.is_file()
+        )
+        self.assertEqual(len(source_inventory), 103)
+        self.assertEqual(sum(path.endswith(".html") for path in source_inventory), 1)
+        self.assertEqual(sum(path.endswith(".svg") for path in source_inventory), 1)
+        self.assertEqual(sum(path.endswith(".css") for path in source_inventory), 18)
+        self.assertEqual(sum(path.endswith(".js") for path in source_inventory), 83)
+        inventory_routes = {f"/ui/{path}" for path in source_inventory}
+        for path in sorted(inventory_routes):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+
         static_assets = [
             "/ui/styles/tokens.css",
             "/ui/styles/desktop.css",
@@ -985,11 +1001,13 @@ class ApiTests(unittest.TestCase):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200, path)
 
-        for removed_asset in (
+        removed_assets = (
             "/ui/js/components/cloud-background.js",
             "/ui/assets/dithered-cloud-fallback.png",
             "/ui/js/core/wallpaper-image-import.js",
-        ):
+        )
+        self.assertTrue(inventory_routes.isdisjoint(removed_assets))
+        for removed_asset in removed_assets:
             self.assertEqual(
                 self.client.get(removed_asset).status_code,
                 404,
