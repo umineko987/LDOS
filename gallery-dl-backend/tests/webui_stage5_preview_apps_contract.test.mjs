@@ -223,10 +223,22 @@ test("Export source/config and deterministic running/success/error facts never u
   state = updateExportConfig(state, { format: "coco", shardSize: 50, includeRejected: true });
   assert.equal(state.config.format, "coco");
   assert.equal(state.config.shardSize, 50);
-  assert.equal(projectExportState(exportFixtures.running).progress.completed, 148);
-  assert.equal(projectExportState(exportFixtures.success).progress.state, "success");
-  assert.equal(projectExportState(exportFixtures.resultError).progress.code, "export_fixture_interrupted");
-  assert.doesNotMatch(`${APP_SOURCES.export}\n${MODEL_SOURCES.export}`, /setTimeout|setInterval|requestAnimationFrame/);
+  assert.deepEqual(
+    ["running", "success", "resultError"].map((name) => {
+      const progress = projectExportState(exportFixtures[name]).progress;
+      return [progress.state, progress.completed, progress.total, progress.code, progress.category];
+    }),
+    [
+      ["running", 148, 276, "", ""],
+      ["success", 276, 276, "", ""],
+      ["error", 148, 276, "export_fixture_interrupted", "capability"],
+    ],
+  );
+  assert.doesNotMatch(`${APP_SOURCES.export}\n${MODEL_SOURCES.export}\n${VIEW_SOURCES.export}`, /setTimeout|setInterval|requestAnimationFrame/);
+  assert.match(VIEW_SOURCES.export, /aria-valuenow/);
+  assert.match(VIEW_SOURCES.export, /aria-valuetext/);
+  assert.match(VIEW_SOURCES.export, /\$\{percent\}%/);
+  assert.match(VIEW_SOURCES.export, /下一步：检查导出能力状态后重试/);
 });
 
 test("Stage 5 controllers use unavailable adapters, make zero API calls, and stale reads stay inert", async () => {
@@ -274,6 +286,7 @@ test("Stage 5 controllers use unavailable adapters, make zero API calls, and sta
       assert.equal(root.inert, true);
       controller.destroy();
       assert.equal(viewLog.at(-1), "destroy");
+      for (const listeners of root.listeners.values()) assert.equal(listeners.size, 0);
     }
 
     const root = new TestRoot();
@@ -406,9 +419,10 @@ test("Stage 5 static security and rendering boundaries forbid bypass I/O, unsafe
   assert.doesNotMatch(`${VIEW_SOURCES.gallery}\n${MODEL_SOURCES.gallery}`, /<img|document\.createElement\(["']img|\.src\s*=/i);
   assert.doesNotMatch(`${APP_SOURCES.schedule}\n${VIEW_SOURCES.schedule}`, /scheduler\/status|view=diagnostics/);
   assert.doesNotMatch(`${APP_SOURCES.schedule}\n${MODEL_SOURCES.schedule}\n${VIEW_SOURCES.schedule}`, /fixture|夹具/i);
+  assert.doesNotMatch(`${APP_SOURCES.export}\n${MODEL_SOURCES.export}\n${VIEW_SOURCES.export}`, /fixture|夹具|setTimeout|setInterval|requestAnimationFrame/i);
 });
 
-test("Stage 5 CSS preserves preview layouts while Gallery T8.1 and Schedule T8.2 use canonical nocturne glass", () => {
+test("Stage 5 CSS preserves preview layouts while all T8 previews use canonical nocturne glass", () => {
   for (const appId of PREVIEW_APPS) {
     const css = CSS_SOURCES[appId];
     assert.match(css, new RegExp(`\\.${appId}-workspace\\s*\\{[\\s\\S]*overflow-x:\\s*auto[\\s\\S]*overflow-y:\\s*hidden`));
@@ -423,9 +437,43 @@ test("Stage 5 CSS preserves preview layouts while Gallery T8.1 and Schedule T8.2
     assert.doesNotMatch(css, /@media\s*\((?:max-width|max-height)/);
   }
 
-  assert.match(CSS_SOURCES.export, /--imageweave-surface-content-solid/);
-  assert.match(CSS_SOURCES.export, /--imageweave-surface-navigation-solid/);
-  assert.doesNotMatch(CSS_SOURCES.export, /backdrop-filter/);
+  const exportCss = CSS_SOURCES.export;
+  assert.doesNotMatch(exportCss, /--imageweave-(?:surface-(?:content|navigation|control)-solid|state-[\w-]*-surface(?:-solid)?)/);
+  assert.doesNotMatch(exportCss, /text-transform:\s*uppercase|letter-spacing:\s*0\.0[6-9]em|inset\s+3px\s+0\s+0/);
+  for (const expected of [
+    "padding: 24px",
+    "gap: 24px",
+    "min-width: 1100px",
+    "border: var(--imageweave-border-width) solid var(--imageweave-border-default)",
+    "border-radius: var(--imageweave-radius-card)",
+    "background: var(--imageweave-glass-surface-secondary)",
+    "background: var(--imageweave-glass-surface-input)",
+    "background: var(--imageweave-glass-surface-weak)",
+    "border-radius: var(--imageweave-radius-control)",
+    "background: var(--imageweave-glass-surface-button)",
+    "background: var(--imageweave-glass-surface-hover)",
+    "border-color: var(--imageweave-border-focus)",
+    'content: "◆ 已选择"',
+    "transform: none",
+    "transition: width var(--imageweave-transition-standard)",
+  ]) assert.match(exportCss, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(exportCss, /\.export-column\s*\{[\s\S]*?background:\s*var\(--imageweave-glass-surface-secondary\)[\s\S]*?inset 0 1px 0[\s\S]*?inset 0 -1px 0/);
+  assert.match(exportCss, /\.export-source-card:hover,[\s\S]*?transform:\s*none/);
+  assert.match(exportCss, /\.export-source-card\[data-selected="true"\]\s*\{[\s\S]*?border-color:\s*var\(--imageweave-border-focus\)/);
+  assert.match(exportCss, /data-export-workspace-state="loading"[\s\S]*?border-color:\s*var\(--imageweave-state-running\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  assert.match(exportCss, /data-export-workspace-state="error"[\s\S]*?border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-secondary\)/);
+  for (const [state, color] of [["running", "running"], ["success", "success"], ["error", "danger"]]) {
+    assert.match(exportCss, new RegExp(`\\.export-progress-card--${state}\\s*\\{[\\s\\S]*?(?:border(?:-color)?:)[\\s\\S]*?var\\(--imageweave-state-${color}\\)`));
+    assert.match(exportCss, new RegExp(`\\.export-progress-card--${state} \\.export-progress-fill\\s*\\{[\\s\\S]*?background:\\s*var\\(--imageweave-state-${color}\\)`));
+  }
+  assert.equal(
+    exportCss.split("\n").filter((line) => /^\s*(?:-webkit-)?backdrop-filter:/.test(line) && !/:\s*none/.test(line)).length,
+    0,
+    "Export rows must inherit the application window backdrop",
+  );
+  assert.match(exportCss, /@supports not[\s\S]*?--imageweave-fallback-elevated-solid/);
+  assert.match(exportCss, /prefers-contrast:\s*more/);
+  assert.match(exportCss, /forced-colors:\s*active[\s\S]*?background-image:\s*none[\s\S]*?backdrop-filter:\s*none/);
 
   const scheduleCss = CSS_SOURCES.schedule;
   assert.doesNotMatch(scheduleCss, /--imageweave-(?:surface-(?:content|navigation|control)-solid|state-[\w-]*-surface(?:-solid)?)/);
@@ -535,9 +583,24 @@ test("Stage 5 views declare disabled write reasons and Gallery Quick Look keyboa
   ]) assert.match(FIXTURE_HOST_SOURCE, new RegExp(fingerprint));
   for (const phrase of ["选择目标", "开始导出", "取消导出", "打开结果"]) assert.match(VIEW_SOURCES.export, new RegExp(phrase));
   for (const fingerprint of [
+    "动作已禁用，不会写入文件、读取路径或发送业务请求",
+    'role: "progressbar"', '"aria-valuemin": "0"', '"aria-valuemax": String(maximum)',
+    '"aria-valuenow": String(progress.completed)', '"aria-valuetext": valueText',
+    'role: "status"', '"aria-live": "polite"', '"aria-atomic": "true"',
+    "受控状态提供确定性进度", "错误事实：", "下一步：", "界面不会自行启动计时器",
+  ]) assert.match(VIEW_SOURCES.export, new RegExp(fingerprint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  for (const stateName of ["loading", "empty", "content", "running", "success", "resultError", "error"]) {
+    assert.match(FIXTURE_SOURCE, new RegExp(`\\b${stateName}:\\s*freeze\\(`));
+  }
+  for (const fingerprint of [
     'role: "dialog"', '"aria-modal": "true"', 'attributes: { id: "gallery-quick-look-description" }',
     "trapQuickLookFocus", "event.key !== \"Tab\"",
     "quickLookReturnFocus", "event.key === \"Escape\"", "view.releaseMedia()", "preview.replaceChildren()",
     "ArrowLeft", "ArrowRight", "EDITABLE_SELECTOR",
   ]) assert.match(`${APP_SOURCES.gallery}\n${VIEW_SOURCES.gallery}`, new RegExp(fingerprint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(APP_SOURCES.export, /createExportUnavailableAdapter\(\)/);
+  assert.match(APP_SOURCES.export, /projectExportState\(\{ phase: "unavailable" \}\)/);
+  assert.doesNotMatch(`${APP_SOURCES.export}\n${MODEL_SOURCES.export}\n${VIEW_SOURCES.export}`, /context\.api|\/api\/|stage5-preview-fixtures|testsOnly|fetch\(|XMLHttpRequest/);
+  assert.match(FIXTURE_HOST_SOURCE, /createExportController/);
+  assert.match(FIXTURE_HOST_SOURCE, /adapterState\s*\|\|\s*initialState/);
 });

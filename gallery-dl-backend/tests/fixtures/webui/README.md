@@ -58,6 +58,18 @@ the fixture does not emulate a backend write or send a business request.
 Production Schedule retains the unavailable adapter and cannot discover this
 host, its state table, or its leave-request seams.
 
+For Export acceptance, the host injects only the allow-listed loading, empty,
+content, error, running, success, and result-error objects. Progress is a fixed
+state fact, not a clock: the host creates no Export timer, polling loop,
+filesystem handle, download, or request path. Source and configuration
+interactions update only the controller's projected in-memory state; all write,
+destination, cancel, and open-result actions stay disabled and reference the
+production unavailable explanation. Deactivate leaves the production root
+listeners inert, reactivation reads the currently selected fixture generation,
+and destroy removes those listeners and the rendered DOM so late state cannot
+revive it. Production Export retains the unavailable adapter and cannot import
+or discover this state table or host.
+
 The Stage 6 production closure test ensures these fixture markers and modules
 never enter `gdl_backend/webui/` or the wheel. The maintained project screenshot
 is `assets/example.png` with provenance in `assets/example.json`; it comes from

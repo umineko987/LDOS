@@ -1847,6 +1847,364 @@ class WebUiModuleTests(unittest.TestCase):
         self.assertIn('data-stage5-tests-only="true"', fixture_html)
         self.assertIn('/__webui__/styles/dialog.css', fixture_html)
 
+    def test_export_t83_visual_progress_and_fixture_boundary_contract(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        webui = backend_root / "gdl_backend" / "webui"
+        fixtures = backend_root / "tests" / "fixtures" / "webui"
+        css = (webui / "styles" / "apps" / "export.css").read_text(
+            encoding="utf-8"
+        )
+        controls = (webui / "styles" / "controls.css").read_text(
+            encoding="utf-8"
+        )
+        controller = (
+            webui / "js" / "apps" / "export.js"
+        ).read_text(encoding="utf-8")
+        view = (
+            webui / "js" / "components" / "export-view.js"
+        ).read_text(encoding="utf-8")
+        model = (
+            webui / "js" / "core" / "export-model.js"
+        ).read_text(encoding="utf-8")
+        fixture_host = (
+            fixtures / "stage5-preview-host.js"
+        ).read_text(encoding="utf-8")
+        fixture_html = (
+            fixtures / "stage5-preview-host.html"
+        ).read_text(encoding="utf-8")
+        fixture_states = (
+            fixtures / "stage5-preview-fixtures.js"
+        ).read_text(encoding="utf-8")
+
+        def css_block(selector: str) -> str:
+            start = css.find(selector)
+            self.assertNotEqual(start, -1, selector)
+            opening = css.find("{", start + len(selector))
+            closing = css.find("}", opening)
+            self.assertNotEqual(opening, -1, selector)
+            self.assertNotEqual(closing, -1, selector)
+            return css[opening + 1 : closing]
+
+        def css_exact_block(selector: str) -> str:
+            matches = re.findall(
+                rf"(?m)^{re.escape(selector)}\s*\{{([^}}]*)\}}", css
+            )
+            self.assertTrue(matches, selector)
+            return matches[-1]
+
+        # Source/configuration/progress remains the real desktop-only layout.
+        # A normal 800x560 window owns horizontal scrolling, a maximized window
+        # fits all three regions, and every column keeps vertical ownership.
+        workspace = css_block(".export-workspace")
+        for expected in (
+            "padding: 24px",
+            "overflow-x: auto",
+            "overflow-y: hidden",
+            "background: transparent",
+        ):
+            self.assertIn(expected, workspace)
+        track = css_block(".export-workspace-track")
+        self.assertGreaterEqual(track.count("minmax("), 3)
+        self.assertIn("gap: 24px", track)
+        self.assertIn("min-width: 1100px", track)
+        column_scroll = css_block(".export-column-scroll")
+        self.assertIn("padding: 24px", column_scroll)
+        self.assertIn("overflow-y: auto", column_scroll)
+        self.assertRegex(
+            css,
+            r"\.application-window\[data-maximized\] "
+            r"\.export-workspace-track\s*\{[^}]*min-width:\s*100%",
+        )
+        self.assertRegex(
+            css,
+            r"\.application-window:not\(\[data-maximized\]\) "
+            r"\.export-workspace-track\s*\{[^}]*"
+            r"grid-template-columns:\s*350px 410px 340px",
+        )
+
+        # Columns are the only top-level regions: neutral 5%-6%, complete
+        # 15%/24px edges and directional inset light, with no app-internal
+        # backdrop or outer card shadow.
+        column = css_block(".export-column")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-default)",
+            "border-radius: var(--imageweave-radius-card)",
+            "background: var(--imageweave-glass-surface-secondary)",
+            "inset 0 1px 0",
+            "inset 0 -1px 0",
+        ):
+            self.assertIn(expected, column)
+        self.assertNotIn("backdrop-filter", column)
+        self.assertNotIn("var(--imageweave-shadow-", column)
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-input)",
+            css_block(".export-column--sources"),
+        )
+
+        # Source/option/fact/progress/status/action rows are 4%-6%, 10% edged,
+        # 16px rounded and flat. The configuration wrapper is structural only.
+        flattened = css_block(".export-workspace-state,")
+        for expected in (
+            "border: var(--imageweave-border-width) solid "
+            "var(--imageweave-border-weak)",
+            "border-radius: var(--imageweave-radius-control)",
+            "background: var(--imageweave-glass-surface-weak)",
+            "box-shadow: none",
+            "transform: none",
+        ):
+            self.assertIn(expected, flattened)
+        self.assertNotIn("backdrop-filter", flattened)
+        config = css_block(".export-config-panel")
+        for expected in (
+            "padding: 0",
+            "border: 0",
+            "background: transparent",
+            "box-shadow: none",
+        ):
+            self.assertIn(expected, config)
+        source_hover = css_block(".export-source-card:hover,")
+        self.assertIn("box-shadow: none", source_hover)
+        self.assertIn("transform: none", source_hover)
+        field_hover = css_block(".export-field:hover,")
+        self.assertIn("box-shadow: none", field_hover)
+        self.assertIn("transform: none", field_hover)
+
+        # Inputs/select consume canonical T6 .app-view styling. Export's action
+        # class repeats the same 10%/15%/16px/500ms facts; formal writes remain
+        # disabled, readable, and explicitly promise zero file/API activity.
+        self.assertIn(".app-view :is(\n  input:not([type])", controls)
+        app_inputs = css_block(".export-input,")
+        self.assertIn("var(--imageweave-control-height)", app_inputs)
+        self.assertNotIn("background:", app_inputs)
+        self.assertNotIn("box-shadow:", app_inputs)
+        button = css_block(".export-button")
+        for expected in (
+            "min-height: var(--imageweave-control-height)",
+            "var(--imageweave-border-button)",
+            "border-radius: var(--imageweave-radius-control)",
+            "background: var(--imageweave-glass-surface-button)",
+            "box-shadow: var(--imageweave-shadow-control)",
+            "var(--imageweave-transition-standard)",
+        ):
+            self.assertIn(expected, button)
+        primary = css_block(".export-button--primary")
+        self.assertIn("border-color: var(--imageweave-accent)", primary)
+        self.assertIn("var(--imageweave-accent-highlight)", primary)
+        self.assertIn("var(--imageweave-glass-surface-button)", primary)
+        disabled = css_block(
+            '.export-button:is(:disabled, [aria-disabled="true"])'
+        )
+        for expected in (
+            "var(--imageweave-glass-surface-weak)",
+            "opacity: 1",
+            "text-decoration: line-through",
+            "transform: none",
+        ):
+            self.assertIn(expected, disabled)
+        for phrase in (
+            "选择目标",
+            "开始导出",
+            "取消导出",
+            "打开结果",
+            "动作已禁用，不会写入文件、读取路径或发送业务请求",
+        ):
+            self.assertIn(phrase, view)
+        self.assertGreaterEqual(view.count('"aria-describedby": "export-write-reason"'), 1)
+
+        # Selection and all safe facts use native checked/text plus a complete
+        # edge and readable marker. Counts/destination/progress stay white/85
+        # monospace instead of relying on color.
+        selected = css_block('.export-source-card[data-selected="true"]')
+        self.assertIn("var(--imageweave-border-focus)", selected)
+        self.assertIn("var(--imageweave-glass-surface-input)", selected)
+        selected_marker = css_block(
+            '.export-source-card[data-selected="true"]::after'
+        )
+        self.assertIn('content: "◆ 已选择"', selected_marker)
+        self.assertIn("var(--imageweave-accent-highlight)", selected_marker)
+        for selector in (
+            ".export-source-card__copy small",
+            ".export-selection-facts",
+            ".export-destination",
+            ".export-progress-count",
+        ):
+            fact = css_exact_block(selector)
+            self.assertIn("var(--imageweave-text-fact)", fact)
+            self.assertIn("var(--imageweave-font-mono)", fact)
+        self.assertIn('attributes: { type: "checkbox", "aria-label":', view)
+        self.assertIn('dataset: { selected: String(source.selected) }', view)
+
+        # unavailable/loading/empty/content/error share neutral status planes.
+        # running/success/error use badge icon+text, complete semantic edges,
+        # a narrow progress fill and deterministic text/next-step facts.
+        self.assertRegex(
+            css,
+            r'data-export-workspace-state="loading"\]\s*\{[^}]*'
+            r"border-color:\s*var\(--imageweave-state-running\)"
+            r"[^}]*background:\s*"
+            r"var\(--imageweave-glass-surface-secondary\)",
+        )
+        self.assertRegex(
+            css,
+            r'data-export-workspace-state="error"\]\s*\{[^}]*'
+            r"border:\s*var\(--imageweave-border-strong-width\) solid "
+            r"var\(--imageweave-state-danger\)[^}]*background:\s*"
+            r"var\(--imageweave-glass-surface-secondary\)",
+        )
+        for state_name, color_name in (
+            ("running", "running"),
+            ("success", "success"),
+            ("error", "danger"),
+        ):
+            progress = css_block(f".export-progress-card--{state_name}")
+            self.assertIn(f"var(--imageweave-state-{color_name})", progress)
+            fill = css_block(
+                f".export-progress-card--{state_name} .export-progress-fill"
+            )
+            self.assertIn(f"var(--imageweave-state-{color_name})", fill)
+        progress_card = css_exact_block(".export-progress-card")
+        self.assertIn(
+            "background: var(--imageweave-glass-surface-secondary)",
+            progress_card,
+        )
+        next_step = css_block(".export-progress-message,")
+        self.assertIn("color: var(--imageweave-text-secondary)", next_step)
+        progress_fill = css_block(".export-progress-fill")
+        self.assertIn(
+            "transition: width var(--imageweave-transition-standard)",
+            progress_fill,
+        )
+        for marker in (
+            'role: "status"',
+            '"aria-live": "polite"',
+            '"aria-atomic": "true"',
+            'role: "progressbar"',
+            '"aria-valuemin": "0"',
+            '"aria-valuemax": String(maximum)',
+            '"aria-valuenow": String(progress.completed)',
+            '"aria-valuetext": valueText',
+            "`${percent}% · ${progress.completed} / ${progress.total}`",
+            "受控状态提供确定性进度",
+            "错误事实：",
+            "下一步：检查导出能力状态后重试",
+        ):
+            self.assertIn(marker, view)
+        for phase in (
+            "loading",
+            "empty",
+            "content",
+            "running",
+            "success",
+            "resultError",
+            "error",
+        ):
+            self.assertRegex(fixture_states, rf"\b{phase}:\s*freeze\(")
+        self.assertIn(
+            "数据集导出后端能力尚未接入；当前不会读取文件系统或发送业务请求。",
+            model,
+        )
+
+        # All ten legacy Export surfaces and its tracked kicker are gone. Only
+        # the canonical no-backdrop fallback retains a *-solid name; internal
+        # positive backdrop/filter layers remain exactly zero.
+        self.assertEqual(
+            re.findall(r"--imageweave-[\w-]*-solid", css),
+            ["--imageweave-fallback-elevated-solid"],
+        )
+        self.assertNotRegex(css, r"--imageweave-state-[\w-]*-surface")
+        self.assertNotRegex(css, r"text-transform:\s*uppercase")
+        self.assertNotRegex(css, r"letter-spacing:\s*0\.0[6-9]em")
+        self.assertNotRegex(
+            css,
+            r"(?:border-(?:left|right):\s*[34]px|"
+            r"inset\s+[34]px\s+0(?:px)?\s+0)",
+        )
+        positive_backdrops = [
+            value.strip()
+            for value in re.findall(
+                r"(?m)^\s*(?:-webkit-)?backdrop-filter\s*:\s*([^;\n]+)",
+                css,
+            )
+            if value.strip() != "none"
+        ]
+        self.assertEqual(positive_backdrops, [])
+        self.assertIn("@media (prefers-contrast: more)", css)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", css)
+        self.assertIn(':root[data-motion="off"]', css)
+        self.assertIn(
+            "@supports not ((-webkit-backdrop-filter: blur(1px)) or "
+            "(backdrop-filter: blur(1px)))",
+            css,
+        )
+        self.assertIn(
+            "background: var(--imageweave-fallback-elevated-solid)", css
+        )
+        for marker in (
+            "CanvasText",
+            "ButtonFace",
+            "Highlight",
+            "background-image: none",
+            "box-shadow: none",
+            "backdrop-filter: none",
+            "transition: none !important",
+        ):
+            self.assertIn(marker, css)
+
+        # Production keeps its unavailable adapter, owns no API/filesystem/
+        # download/timer path, and cannot discover the separately mounted
+        # tests-only fixture. Lifecycle generations reject late reads and
+        # destroy removes both root listeners; the fixture changes state only
+        # through direct deterministic setState injection.
+        production = "\n".join((controller, view, model))
+        self.assertIn("createExportUnavailableAdapter()", controller)
+        self.assertIn(
+            'projectExportState({ phase: "unavailable" })', controller
+        )
+        for forbidden in (
+            "context.api",
+            "/api/",
+            "stage5-preview-fixtures",
+            "stage5-preview-host",
+            "testsOnly",
+            "fixture",
+            "夹具",
+            "fetch(",
+            "XMLHttpRequest",
+            "showSaveFilePicker",
+            "FileSystem",
+            "URL.createObjectURL",
+            "new Blob",
+            "download =",
+            "setTimeout",
+            "setInterval",
+            "requestAnimationFrame",
+        ):
+            self.assertNotIn(forbidden, production)
+        for marker in (
+            "let lifecycle = 0",
+            "ticket !== lifecycle",
+            "if (!active || destroyed",
+            'root.addEventListener("change"',
+            'root.addEventListener("input"',
+            'root.removeEventListener("change"',
+            'root.removeEventListener("input"',
+            "view.destroy()",
+        ):
+            self.assertIn(marker, controller)
+        for marker in (
+            "createExportController",
+            "adapterState || initialState",
+            "controller.setState(state)",
+            "controller?.deactivate()",
+            "controller?.activate()",
+            "controller?.destroy()",
+        ):
+            self.assertIn(marker, fixture_host)
+        self.assertNotRegex(fixture_host, r"\b(?:setTimeout|setInterval)\s*\(")
+        self.assertIn('data-stage5-tests-only="true"', fixture_html)
+        self.assertIn('/__webui__/styles/apps/export.css', fixture_html)
+
     def test_polling_focus_t14_static_contract(self):
         backend_root = Path(__file__).resolve().parents[1]
         javascript_root = backend_root / "gdl_backend" / "webui" / "js"

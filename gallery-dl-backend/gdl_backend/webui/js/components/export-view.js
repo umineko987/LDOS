@@ -3,7 +3,7 @@ import { exportPresentation, exportSelectionFacts } from "../core/export-model.j
 import { createEmptyState } from "./empty-state.js";
 import { createStatusBadge, updateStatusBadge } from "./status.js";
 
-const DISABLED_REASON = "数据集导出后端能力尚未接入，当前操作不可用。";
+const DISABLED_REASON = "数据集导出后端能力尚未接入；动作已禁用，不会写入文件、读取路径或发送业务请求。";
 
 function button(action, label, { primary = false } = {}) {
   const element = createElement("button", {
@@ -46,21 +46,28 @@ function phaseState(state, presentation) {
 function progressCard(progress) {
   if (!progress) return null;
   const labels = {
-    idle: ["disabled", "尚未开始", "等待正式导出能力接入。"],
-    running: ["running", "正在导出", `夹具提供确定性进度 ${progress.completed} / ${progress.total}。`],
-    success: ["ready", "导出完成", progress.resultLabel || "安全结果事实已提供。"],
-    error: ["error", "导出失败", `${progress.category || "unknown"} · ${progress.code || "export_failed"}`],
+    idle: ["disabled", "尚未开始", "等待正式导出能力接入。", "下一步：等待后端能力接入；界面不会自行启动导出。"],
+    running: ["running", "正在导出", `受控状态提供确定性进度 ${progress.completed} / ${progress.total}。`, "下一步：等待受控状态更新；界面不会自行启动计时器。"],
+    success: ["ready", "导出完成", progress.resultLabel || "安全结果事实已提供。", "下一步：正式能力接入前不会打开或写入任何结果。"],
+    error: ["error", "导出失败", `错误事实：${progress.category || "unknown"} · ${progress.code || "export_failed"}`, "下一步：检查导出能力状态后重试；界面不会自动写入文件。"],
   };
-  const [kind, label, message] = labels[progress.state];
+  const [kind, label, message, nextStep] = labels[progress.state];
   const percent = progress.total > 0 ? Math.round(progress.completed * 100 / progress.total) : 0;
-  return createElement("article", { className: `export-progress-card export-progress-card--${progress.state}`, dataset: { exportProgressState: progress.state } }, [
+  const maximum = progress.total > 0 ? progress.total : 100;
+  const valueText = `${percent}% · ${progress.completed} / ${progress.total}`;
+  return createElement("article", {
+    className: `export-progress-card export-progress-card--${progress.state}`,
+    attributes: { role: "status", "aria-live": "polite", "aria-atomic": "true", "aria-labelledby": "export-progress-state-title" },
+    dataset: { exportProgressState: progress.state },
+  }, [
     createStatusBadge(kind, label),
-    createElement("h3", { text: label }),
-    createElement("p", { text: message }),
-    createElement("div", { className: "export-progress-track", attributes: { role: "progressbar", "aria-label": "导出进度", "aria-valuemin": "0", "aria-valuemax": String(progress.total), "aria-valuenow": String(progress.completed) } }, [
+    createElement("h3", { text: label, attributes: { id: "export-progress-state-title" } }),
+    createElement("p", { className: "export-progress-message", text: message }),
+    createElement("div", { className: "export-progress-track", attributes: { role: "progressbar", "aria-label": "导出进度", "aria-valuemin": "0", "aria-valuemax": String(maximum), "aria-valuenow": String(progress.completed), "aria-valuetext": valueText } }, [
       createElement("span", { className: "export-progress-fill", attributes: { style: `--export-progress: ${percent}%` } }),
     ]),
-    createElement("strong", { className: "export-progress-count", text: `${progress.completed} / ${progress.total}` }),
+    createElement("strong", { className: "export-progress-count", text: valueText }),
+    createElement("p", { className: "export-progress-next", text: nextStep }),
   ]);
 }
 
@@ -117,7 +124,7 @@ export function createExportView({ root, app }) {
     createElement("header", { className: "export-column-header" }, [
       createElement("p", { className: "export-column-kicker", text: "03 · 进度与结果" }),
       createElement("h2", { text: "确定性运行事实", attributes: { id: "export-progress-heading" } }),
-      createElement("p", { text: "进度只由夹具状态提供，不使用计时器或模拟运行。" }),
+      createElement("p", { text: "进度只由受控状态提供，不使用计时器或模拟运行。" }),
     ]),
     createElement("div", { className: "export-column-scroll" }, [progressHost]),
   ]);
