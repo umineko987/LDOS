@@ -22,6 +22,7 @@ Desktop.ini
 /desktop/node_modules/
 /desktop/coverage/
 /desktop/src-tauri/target/
+/desktop/src-tauri/gen/
 /.models/
 **/dist/
 **/build/

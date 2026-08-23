@@ -1,0 +1,9 @@
+{
+  "identifier": "main",
+  "description": "Only scoped external URL opening for the main WebView.",
+  "windows": ["main"],
+  "permissions": [
+    "opener:allow-open-url",
+    "opener:allow-default-urls"
+  ]
+}

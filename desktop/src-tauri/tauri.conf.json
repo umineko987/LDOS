@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ImageWeave",
+  "version": "0.1.0",
+  "identifier": "dev.imageweave.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "ImageWeave",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1180,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": false,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "capabilities": ["main"],
+      "csp": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* http://[::1]:*; img-src 'self' data: http://127.0.0.1:* http://localhost:* http://[::1]:*; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "devCsp": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://127.0.0.1:* http://localhost:* http://[::1]:*; img-src 'self' data: http://127.0.0.1:* http://localhost:* http://[::1]:*; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}
