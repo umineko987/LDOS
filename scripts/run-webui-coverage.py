@@ -38,6 +38,7 @@ SOURCE_TESTS = (
     BACKEND / "tests" / "webui_stage5_preview_apps_contract.test.mjs",
     BACKEND / "tests" / "webui_stage6_closeout_contract.test.mjs",
     BACKEND / "tests" / "webui_nocturne_glass_contract.test.mjs",
+    BACKEND / "tests" / "webui_p0_current_contract.test.mjs",
 )
 SOURCE_TEST_SUPPORT = (
     BACKEND / "tests" / "source-test-text.mjs",
