@@ -134,6 +134,9 @@ mod tests {
         assert_eq!(config["bundle"]["active"], false);
         assert!(config["bundle"].get("externalBin").is_none());
         assert!(config["bundle"].get("resources").is_none());
+        assert_eq!(config["identifier"], "dev.imageweave.desktop");
+        assert_eq!(config["app"]["windows"][0]["decorations"], true);
+        assert_eq!(config["app"]["windows"][0]["dataDirectory"], "webview");
         assert_eq!(
             config["app"]["security"]["capabilities"],
             serde_json::json!(["main"])
