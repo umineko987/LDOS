@@ -25,12 +25,12 @@ import {
   serializeWindowPlacements,
 } from "../gdl_backend/webui/js/core/storage-layout.js";
 
-const PREVIEW_APP_IDS = Object.freeze(["gallery", "schedule", "export"]);
+const PREVIEW_APP_IDS = Object.freeze(["gallery", "export"]);
 const EXPECTED_GROUPS = Object.freeze([
   Object.freeze({
     id: "workflow",
     title: "工作流",
-    appIds: Object.freeze(["crawl", "tasks", "gallery", "review", "schedule", "export"]),
+    appIds: Object.freeze(["crawl", "tasks", "gallery", "review", "export"]),
   }),
   Object.freeze({
     id: "connections",
@@ -388,7 +388,7 @@ test("T6 共享控件使用无色玻璃、完整语义边框与单一 Dialog bac
   for (const state of ["ready", "running", "warning", "error", "disabled"]) {
     assert.equal(status.includes(`[data-status="${state}"]`), true, state);
   }
-  for (const panel of ["crawl", "tasks", "proxy", "vault", "policy", "diagnostics", "gallery", "schedule", "export"]) {
+  for (const panel of ["crawl", "tasks", "proxy", "vault", "policy", "diagnostics", "gallery", "export"]) {
     assert.equal(status.includes(`data-${panel}-${panel === "crawl" ? "search" : "workspace"}-state`), true, panel);
   }
   assert.equal(status.includes("data-personalization-preview-state"), true);

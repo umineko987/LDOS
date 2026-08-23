@@ -2,7 +2,6 @@ import { TESTS_ONLY_STAGE5, stage5Fixture } from "./stage5-preview-fixtures.js";
 
 const APP_DEFINITIONS = Object.freeze({
   gallery: Object.freeze({ id: "gallery", label: "图片库", windowTitle: "图片库" }),
-  schedule: Object.freeze({ id: "schedule", label: "定时任务", windowTitle: "定时任务" }),
   export: Object.freeze({ id: "export", label: "数据集导出", windowTitle: "数据集导出" }),
 });
 
@@ -217,20 +216,6 @@ async function createController(id, initialState) {
       adapter: Object.freeze({ read: () => adapterState || initialState }),
     });
   }
-  if (id === "schedule") {
-    const [{ createScheduleController }, { createDialogController }] = await Promise.all([
-      import("/__webui__/js/apps/schedule.js"),
-      import("/__webui__/js/components/dialog.js"),
-    ]);
-    return createScheduleController({
-      root: host,
-      app: APP_DEFINITIONS.schedule,
-      dialogs: createDialogController(),
-    }, {
-      initialState,
-      adapter: Object.freeze({ read: () => adapterState || initialState }),
-    });
-  }
   if (id === "export") {
     const { createExportController } = await import("/__webui__/js/apps/export.js");
     return createExportController({ root: host, app: APP_DEFINITIONS.export }, {
@@ -286,7 +271,6 @@ function snapshot() {
     phase: controller?.getState?.().phase || "",
     uiState: controller?.getUiState?.() || null,
     windowMode,
-    dialogOpen: Boolean(document.querySelector(".imageweave-dialog")),
     media: galleryMedia?.snapshot() || null,
   });
 }
@@ -302,9 +286,6 @@ window.stage5FixtureHarness = Object.freeze({
   async settleMedia() { return galleryMedia?.settle() || null; },
   deactivate() { controller?.deactivate(); return snapshot(); },
   activate() { controller?.activate(); return snapshot(); },
-  requestRouteLeave() { return controller?.beforeLeave?.() ?? true; },
-  requestMinimize() { return controller?.beforeWindowHide?.("minimized") ?? true; },
-  requestClose() { return controller?.beforeWindowHide?.("closed") ?? true; },
   destroy() {
     controller?.destroy();
     controller = null;

@@ -35,7 +35,6 @@ WEBUI_APP_ROUTES = {
     "diagnostics": "/diagnostics",
     "personalization": "/personalization",
     "gallery": "/gallery",
-    "schedule": "/schedule",
     "export": "/export",
 }
 WEBUI_MEDIA_TYPES = {
@@ -1048,11 +1047,11 @@ class ApiTests(unittest.TestCase):
             self.assertNotIn(forbidden, static_background_sources)
 
         source_inventory = _webui_source_inventory()
-        self.assertEqual(len(source_inventory), 103)
+        self.assertEqual(len(source_inventory), 99)
         self.assertEqual(sum(path.endswith(".html") for path in source_inventory), 1)
         self.assertEqual(sum(path.endswith(".svg") for path in source_inventory), 1)
-        self.assertEqual(sum(path.endswith(".css") for path in source_inventory), 18)
-        self.assertEqual(sum(path.endswith(".js") for path in source_inventory), 83)
+        self.assertEqual(sum(path.endswith(".css") for path in source_inventory), 17)
+        self.assertEqual(sum(path.endswith(".js") for path in source_inventory), 80)
         self.assertEqual(
             {Path(path).suffix for path in source_inventory},
             set(WEBUI_MEDIA_TYPES),
@@ -1144,7 +1143,7 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(definitions.text.count(f'id: "{app_id}"'), 1)
             self.assertEqual(definitions.text.count(f'route: "{route}"'), 1)
         self.assertEqual(definitions.text.count('availability: "ready"'), 8)
-        self.assertEqual(definitions.text.count('availability: "preview"'), 3)
+        self.assertEqual(definitions.text.count('availability: "preview"'), 2)
         self.assertIn('defaultWindowState: "maximized"', definitions.text)
 
         javascript_paths = [

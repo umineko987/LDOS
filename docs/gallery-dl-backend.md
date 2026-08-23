@@ -96,7 +96,7 @@ block 512 且不主动改变 Torch 线程；CPU 服务器应明确使用 `device
 | --- | ---: | --- |
 | `scheduler.max_concurrent_batches` | `4` | 同时推进发现与规划的活跃批次数，范围 `1..16`；每个批次内部仍一次只推进一个地址。 |
 
-`/ui/` 的应用中心按 3 组列出 11 个应用。8 个真实应用中，7 个业务应用接入正式 API，外观设置
+`/ui/` 的应用中心按 3 组列出 10 个应用。8 个真实应用中，7 个业务应用接入正式 API，外观设置
 严格保持本地：
 
 - **图片采集**：autocomplete、聚合搜索、弱证据/EH 标签过滤、来源与地址排序，以及严格批次提交；
@@ -114,7 +114,7 @@ block 512 且不主动改变 Torch 线程；CPU 服务器应明确使用 `device
 IndexedDB delete-only 兼容 seam 清理，失败不阻断桌面启动。低于 `1180 × 720` CSS 像素时只显示
 桌面环境 blocker。
 
-**图片库、定时任务、数据集导出**是 3 个独立 preview controller/model/view。正式运行只进入
+**图片库、数据集导出**是 2 个独立 preview controller/model/view。正式运行只进入
 “后端能力尚未接入”状态，写操作禁用，合计发送 0 个对应业务 API 请求；loading/empty/content/error
 及进度等布局只由 tests-only fixture host 驱动，不进入生产依赖闭包，也不代表后端能力存在。
 “授权管理”不提供后端不存在的手工 Cookie/Token、浏览器导入、文件路径导入或远端验证按钮；来源
@@ -297,19 +297,19 @@ legacy API 契约保持兼容。
 
 ### `/ui/` 静态交付与 wheel 边界
 
-当前生产静态清单固定为 103 项：1 个 HTML、18 个 CSS、83 个 JS 和 1 个 SVG；11 个应用的
+当前生产静态清单固定为 99 项：1 个 HTML、17 个 CSS、80 个 JS 和 1 个 SVG；10 个应用的
 controller/CSS 均包含在内。`pyproject.toml` 的 package-data pattern 必须精确覆盖该集合，clean
 archive wheel 中的成员和 `RECORD` hash/size 必须与源码逐字节一致。`assets/noise.svg` 只有一份，
 为 497 bytes，SHA-256 为
 `9a525197b6bc88f7a64d8746a50f04aa64f29f08d06d57c3e69514b6db083529`，正式 HTTP 返回
 `image/svg+xml`。
 
-正式 `/ui/` 必须让全部 103 项同源返回 200，并让退役 `wallpaper-image-import.js`、旧 cloud 资源
+正式 `/ui/` 必须让全部 99 项同源返回 200，并让退役 `wallpaper-image-import.js`、旧 cloud 资源
 和 `tests/fixtures/webui/` 路径返回 404。全部 HTML/CSS/JS/SVG 响应都必须是
 `Cache-Control: no-cache`，同时保留 ETag/Last-Modified；条件请求返回 304，业务 API 不继承该 header。
-`index.html` 只对本次缓存敏感的 `desktop.css` 使用显式版本 query，不给 103 项资源手工散加 hash。
-Gallery/Schedule/Export 的 loading/empty/content/error、
-进度和 Gallery Quick Look 只由 `tests/stage5_preview_harness.py` 挂载 tests-only host；正式三项
+`index.html` 只对本次缓存敏感的 `desktop.css` 使用显式版本 query，不给 99 项资源手工散加 hash。
+Gallery/Export 的 loading/empty/content/error、
+进度和 Gallery Quick Look 只由 `tests/stage5_preview_harness.py` 挂载 tests-only host；正式两项
 始终 unavailable、写操作禁用且合计 0 个所属业务 API 请求。fixture 不得进入生产 ESM 闭包、wheel、
 正式 DOM 或网络发现结果。
 
@@ -565,7 +565,7 @@ cd gallery-dl-backend
 cd ..
 ```
 
-固定 Node.js v24.13.0 后运行唯一正式 WebUI 行为/覆盖率门槛；当前收口基线为 326/326，
+固定 Node.js v24.13.0 后运行唯一正式 WebUI 行为/覆盖率门槛；当前收口基线为 325/325，
 0 fail、0 skip：
 
 ```bash
@@ -577,9 +577,9 @@ NODE_24=/absolute/path/to/node-v24.13.0/bin/node
 
 项目级 coverage、服务 smoke 与依赖锁命令统一维护在
 [架构与开发约定](ARCHITECTURE.md#13-测试与覆盖率门槛)。构建 wheel 时必须使用 clean archive，
-并核对 103 个 WebUI 成员、wheel `RECORD`、同源 HTTP 字节、单一 noise、兼容 seam 以及退役资源
-404；当前 wheel 清单为 180 个成员，其中 `gdl_backend` 175 项（72 Python + 103 WebUI），并对全部
-103 个静态资源同时核对 200/MIME/字节、`no-cache`/validator 与条件 304。不能把开发工作树中的 fixture、
+并核对 99 个 WebUI 成员、wheel `RECORD`、同源 HTTP 字节、单一 noise、兼容 seam 以及退役资源
+404；当前 wheel 清单为 176 个成员，其中 `gdl_backend` 171 项（72 Python + 99 WebUI），并对全部
+99 个静态资源同时核对 200/MIME/字节、`no-cache`/validator 与条件 304。不能把开发工作树中的 fixture、
 浏览器 Profile、coverage 或本机文件带入包。
 
 测试默认使用本地夹具、mock 或 gallery-dl `--version`。需要真实凭据和代理节点的 EH

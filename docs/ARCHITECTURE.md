@@ -288,14 +288,14 @@ Dock 工作区。后台最大化窗口本身不会隐藏 Dock。Bootstrap HTML �
 `data-window-focused + data-maximized + 非 hidden` 窗口时，才把 layer 扩到视口底部、以
 `!important` 覆盖该窗口的旧 inline 几何并隐藏 Dock；后台最大化配前台普通窗口不得命中。
 
-`core/app-definitions.js` 是 11 个应用以下信息的唯一来源：
+`core/app-definitions.js` 是 10 个应用以下信息的唯一来源：
 
 - `id`、`label`、`icon`、`route`、分组、说明与应用中心顺序；
 - 自然语言 `windowTitle`、`availability`、`defaultWindowState`；
 - `DEFAULT_APP_ID` 和 `DEFAULT_ROUTE`。
 
-`availability` 只接受 `ready | preview`：8 个真实应用为 `ready`，图片库、定时任务和数据集导出为
-`preview`。3 个 preview 各有独立 controller/model/view，正式 adapter 只返回 unavailable 且发送
+`availability` 只接受 `ready | preview`：8 个真实应用为 `ready`，图片库和数据集导出为
+`preview`。2 个 preview 各有独立 controller/model/view，正式 adapter 只返回 unavailable 且发送
 0 个对应业务 API；内容、加载和错误状态只由 `tests/fixtures/webui/` 的显式 tests-only host 注入。
 `app-registry-factory.js` 只负责按 ID 将 controller 与元数据一对一合并。新增应用时必须：
 
@@ -414,9 +414,9 @@ forced-colors 中移除。禁止持续 specular/blur 动画；拖拽、resize �
 `WebUIStaticFiles` 只用于该 mount，并让 HTML/CSS/JS/SVG 在保留 ETag 与 Last-Modified 的同时返回
 `Cache-Control: no-cache`，使浏览器可以存储但每次复用前必须 revalidate；业务 API 不继承该 header。
 `index.html` 对缓存敏感的 `desktop.css` 使用显式 `?v=` URL，修改相关壳层兼容规则时必须同步递增，
-无需也不得给全部 103 项资源手工追加散乱 hash。ESM 仍可能在一次滚动升级中暂时来自旧代，因此安全
+无需也不得给全部 99 项资源手工追加散乱 hash。ESM 仍可能在一次滚动升级中暂时来自旧代，因此安全
 bootstrap 与 DOM 事实 CSS fallback 必须独立于新 manager 生效，不能把强制刷新写成产品修复。
-当前 package-data 闭包为 103 项（1 HTML、18 CSS、83 JS、1 SVG），包含单一 `noise.svg` 和
+当前 package-data 闭包为 99 项（1 HTML、17 CSS、80 JS、1 SVG），包含单一 `noise.svg` 和
 兼容期 `wallpaper-storage.js`，不包含已退役的 `wallpaper-image-import.js`。preview 内容态只由
 `tests/fixtures/webui/` 与 `tests/stage5_preview_harness.py` 的 tests-only host 提供，生产 import
 闭包、wheel 和正式 HTTP 路径不得发现 fixture。夜航改造没有改变业务 API、OpenAPI schema、
@@ -519,7 +519,7 @@ Python 直接依赖只在 `gallery-dl-backend/pyproject.toml` 维护。`requirem
 - source 边界变化必须显式更新测试和审查说明；
 - skip 数量和原因必须可见；
 - WebUI 行为和 coverage 使用固定 Node.js v24.13.0；
-- 夜航最终目标契约是正式 runner 的 source test，不是单独的可选检查；当前收口基线为 326/326，0 fail、0 skip；
+- 夜航最终目标契约是正式 runner 的 source test，不是单独的可选检查；当前收口基线为 325/325，0 fail、0 skip；
 - WebUI 静态清单同时从生产源、`WebUIStaticFiles` HTTP、clean archive wheel 和 wheel `RECORD` 四个边界核对；
 - Python 源码字符串断言不计入真实 JavaScript coverage。
 

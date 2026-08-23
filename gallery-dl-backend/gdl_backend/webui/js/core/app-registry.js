@@ -7,7 +7,6 @@ import policyApplication from "../apps/policy.js";
 import diagnosticsApplication from "../apps/diagnostics.js";
 import personalizationApplication from "../apps/personalization.js";
 import galleryApplication from "../apps/gallery.js";
-import scheduleApplication from "../apps/schedule.js";
 import exportApplication from "../apps/export.js";
 import {
   applicationDefinitions,
@@ -26,7 +25,6 @@ const controllers = [
   ["diagnostics", diagnosticsApplication],
   ["personalization", personalizationApplication],
   ["gallery", galleryApplication],
-  ["schedule", scheduleApplication],
   ["export", exportApplication],
 ];
 

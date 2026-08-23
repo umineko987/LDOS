@@ -326,8 +326,7 @@ const EXPECTED_APPLICATION_METADATA = Object.freeze([
   ["diagnostics", "系统诊断", "activity", "/diagnostics", "系统诊断", "system", "检查服务、配置能力与调度器健康状态。", 0, "ready", "normal"],
   ["personalization", "外观设置", "sliders", "/personalization", "外观设置", "system", "调整主题、壁纸、窗口可读性与动效。", 1, "ready", "normal"],
   ["gallery", "图片库", "folder", "/gallery", "图片库", "workflow", "浏览、搜索和整理已下载的图片。", 2, "preview", "normal"],
-  ["schedule", "定时任务", "calendar", "/schedule", "定时任务", "workflow", "查看与编辑自动采集计划。", 4, "preview", "normal"],
-  ["export", "数据集导出", "archive", "/export", "数据集导出", "workflow", "配置来源并导出审核后的数据集。", 5, "preview", "normal"],
+  ["export", "数据集导出", "archive", "/export", "数据集导出", "workflow", "配置来源并导出审核后的数据集。", 4, "preview", "normal"],
 ].map(([id, label, icon, route, windowTitle, group, description, applicationCenterOrder, availability, defaultWindowState]) => Object.freeze({
   id, label, icon, route, windowTitle, group, description, applicationCenterOrder, availability, defaultWindowState,
 })));
@@ -1082,7 +1081,7 @@ function createFakePolling(options = {}) {
   return { manager, timers, visibility, errors };
 }
 
-test("应用 registry 保持 11 项元数据、默认路由与生命周期基线", async () => {
+test("应用 registry 保持 10 项元数据、默认路由与生命周期基线", async () => {
   const registryModule = await import("../gdl_backend/webui/js/core/app-registry.js");
   assert.deepEqual(Object.keys(registryModule).sort(), [
     "DEFAULT_APP_ID",
@@ -1093,12 +1092,12 @@ test("应用 registry 保持 11 项元数据、默认路由与生命周期基线
   ]);
   assert.equal(DEFAULT_APP_ID, "crawl");
   assert.equal(DEFAULT_ROUTE, "/crawl");
-  assert.equal(applications.length, 11);
+  assert.equal(applications.length, 10);
   assert.deepEqual(applicationMetadataSnapshot(applications), EXPECTED_APPLICATION_METADATA);
   assert.deepEqual(
     applications.filter((application) => application.availability === "preview")
       .map((application) => application.id),
-    ["gallery", "schedule", "export"],
+    ["gallery", "export"],
   );
   for (const application of applications) {
     assert.equal(Object.isFrozen(application), true, application.id);
@@ -1109,12 +1108,12 @@ test("应用 registry 保持 11 项元数据、默认路由与生命周期基线
   assert.deepEqual(
     applications.filter((application) => typeof application.beforeLeave === "function")
       .map((application) => application.id),
-    ["review", "policy", "personalization", "schedule"],
+    ["review", "policy", "personalization"],
   );
   assert.deepEqual(
     applications.filter((application) => typeof application.beforeWindowHide === "function")
       .map((application) => application.id),
-    ["review", "policy", "personalization", "schedule"],
+    ["review", "policy", "personalization"],
   );
 });
 
@@ -3843,7 +3842,7 @@ test("退出移动断点后窗口 rect 原样恢复且源窗口栈不被改写",
 });
 
 test("preview 应用 hash 与导航目标可启动，畸形路由回桌面", () => {
-  for (const target of ["gallery", "schedule", "export"]) {
+  for (const target of ["gallery", "export"]) {
     const app = getApplicationById(target);
     assert.equal(app?.availability, "preview", target);
     assert.equal(parseHashRoute(`#${app.route}`), app.route);
@@ -3918,7 +3917,7 @@ test("DESKTOP.CPL 以 ready 应用注册且不改变既有应用相对顺序", (
     applications.filter((app) => app.id !== "personalization").map((app) => app.id),
     [
       "crawl", "tasks", "proxy", "vault", "review", "policy", "diagnostics",
-      "gallery", "schedule", "export",
+      "gallery", "export",
     ],
   );
   assert.equal(

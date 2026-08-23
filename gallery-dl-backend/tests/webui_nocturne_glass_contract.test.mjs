@@ -82,7 +82,6 @@ const APP_ROUTE_SNAPSHOT = Object.freeze([
   ["diagnostics", "/diagnostics", "ready"],
   ["personalization", "/personalization", "ready"],
   ["gallery", "/gallery", "preview"],
-  ["schedule", "/schedule", "preview"],
   ["export", "/export", "preview"],
 ]);
 
@@ -1111,7 +1110,7 @@ test("[gradient safety] no purple-pink gradient combination or gradient text, wh
   assertNoViolations("gradient safety contract", violations);
 });
 
-test("[architecture] registry and Router preserve the 11-app desktop/deep-link boundary", async () => {
+test("[architecture] registry and Router preserve the 10-app desktop/deep-link boundary", async () => {
   const definitions = await import(moduleUrl("core/app-definitions.js"));
   const registry = await import(moduleUrl("core/app-registry.js"));
   const router = await import(moduleUrl("core/router.js"));
@@ -1120,7 +1119,7 @@ test("[architecture] registry and Router preserve the 11-app desktop/deep-link b
     definitions.applicationDefinitions.map(({ id, route, availability }) => [id, route, availability]),
     APP_ROUTE_SNAPSHOT,
   );
-  assert.equal(registry.applications.length, 11);
+  assert.equal(registry.applications.length, 10);
   for (const [id, route] of APP_ROUTE_SNAPSHOT) {
     const application = registry.getApplicationById(id);
     assert.equal(application?.route, route, id);
@@ -1194,9 +1193,9 @@ test("[API boundary] real applications preserve exported business endpoint snaps
   assert.deepEqual(bypasses, [], "context.api must remain the only business request outlet");
 });
 
-test("[preview boundary] Personalization and three preview closures own zero business APIs or production fixtures", () => {
+test("[preview boundary] Personalization and two preview closures own zero business APIs or production fixtures", () => {
   const violations = [];
-  for (const appId of ["personalization", "gallery", "schedule", "export"]) {
+  for (const appId of ["personalization", "gallery", "export"]) {
     const entrypoint = resolve(JAVASCRIPT_ROOT, "apps", `${appId}.js`);
     const closure = [...dependencyClosure(entrypoint)];
     const relativeClosure = closure.map(label).sort();

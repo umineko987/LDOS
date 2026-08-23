@@ -11,12 +11,12 @@ import * as storageContractModule from "../gdl_backend/webui/js/core/storage-con
 import * as storageLayoutModule from "../gdl_backend/webui/js/core/storage-layout.js";
 import * as dockModule from "../gdl_backend/webui/js/components/taskbar-windows.js";
 
-const PREVIEW_APP_IDS = Object.freeze(["gallery", "schedule", "export"]);
+const PREVIEW_APP_IDS = Object.freeze(["gallery", "export"]);
 const APPLICATION_CENTER_GROUPS = Object.freeze([
   Object.freeze({
     id: "workflow",
     title: "工作流",
-    appIds: Object.freeze(["crawl", "tasks", "gallery", "review", "schedule", "export"]),
+    appIds: Object.freeze(["crawl", "tasks", "gallery", "review", "export"]),
   }),
   Object.freeze({
     id: "connections",
@@ -84,7 +84,7 @@ test("目标 availability：preview 可校验、可启动且三项预览应用�
   }
 });
 
-test("目标应用中心：分组、职责与全部 11 项完全由 application definitions 投影", async () => {
+test("目标应用中心：分组、职责与全部 10 项完全由 application definitions 投影", async () => {
   for (const definition of applicationDefinitions) {
     assert.equal(typeof definition.group, "string", `${definition.id}.group`);
     assert.equal(typeof definition.description, "string", `${definition.id}.description`);

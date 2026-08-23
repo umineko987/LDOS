@@ -18,19 +18,6 @@ export const galleryFixtures = freeze({
   error: freeze({ phase: "error", error: freeze({ code: "gallery_fixture_failed", status: 503, requestId: "request-gallery-01", category: "capability" }) }),
 });
 
-export const schedulePlans = freeze([
-  freeze({ id: "plan-daily", name: "每日精选采集", state: "enabled", scheduleKind: "daily", scheduleLabel: "每天 08:30", concurrency: 6, sourceCount: 3, nextRunLabel: "明日 08:30", lastRunLabel: "今日 08:31 · 已完成" }),
-  freeze({ id: "plan-weekly", name: "周末归档", state: "disabled", scheduleKind: "weekly", scheduleLabel: "每周六 21:00", concurrency: 3, sourceCount: 2, nextRunLabel: "计划已停用", lastRunLabel: "上周六 · 已完成" }),
-  freeze({ id: "plan-running", name: "高频观察", state: "running", scheduleKind: "interval", scheduleLabel: "每 4 小时", concurrency: 8, sourceCount: 4, nextRunLabel: "当前运行完成后重新计算", lastRunLabel: "本轮正在运行" }),
-]);
-
-export const scheduleFixtures = freeze({
-  loading: freeze({ phase: "loading" }),
-  empty: freeze({ phase: "empty" }),
-  content: freeze({ phase: "content", plans: schedulePlans }),
-  error: freeze({ phase: "error", error: freeze({ code: "schedule_fixture_failed", status: 503, requestId: "request-schedule-01", category: "capability" }) }),
-});
-
 const exportSources = freeze([
   freeze({ id: "source-reviewed", label: "审核完成集", itemCount: 240, reviewedCount: 240, selected: true }),
   freeze({ id: "source-partial", label: "待复核集合", itemCount: 80, reviewedCount: 52, selected: false }),
@@ -50,7 +37,7 @@ export const exportFixtures = freeze({
 });
 
 export function stage5Fixture(appId, stateName) {
-  const tables = { gallery: galleryFixtures, schedule: scheduleFixtures, export: exportFixtures };
+  const tables = { gallery: galleryFixtures, export: exportFixtures };
   const table = tables[appId];
   if (!table || !Object.prototype.hasOwnProperty.call(table, stateName)) throw new TypeError("未知 Stage 5 测试夹具");
   return table[stateName];

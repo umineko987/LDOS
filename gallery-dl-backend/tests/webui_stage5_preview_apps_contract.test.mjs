@@ -4,7 +4,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import galleryApplication, { createGalleryController } from "../gdl_backend/webui/js/apps/gallery.js";
-import scheduleApplication, { createScheduleController } from "../gdl_backend/webui/js/apps/schedule.js";
 import exportApplication, { createExportController } from "../gdl_backend/webui/js/apps/export.js";
 import {
   createGalleryUiState,
@@ -14,15 +13,6 @@ import {
   updateGalleryUiState,
   visibleGalleryItems,
 } from "../gdl_backend/webui/js/core/gallery-model.js";
-import {
-  createScheduleUiState,
-  projectScheduleState,
-  resetScheduleDraft,
-  schedulePresentation,
-  selectSchedulePlan,
-  updateScheduleDraft,
-  validateScheduleDraft,
-} from "../gdl_backend/webui/js/core/schedule-model.js";
 import {
   exportPresentation,
   exportSelectionFacts,
@@ -34,17 +24,16 @@ import {
   TESTS_ONLY_STAGE5,
   exportFixtures,
   galleryFixtures,
-  scheduleFixtures,
 } from "./fixtures/webui/stage5-preview-fixtures.js";
 
 const WEBUI = new URL("../gdl_backend/webui/", import.meta.url);
 const REGISTRY_SOURCE = readFileSync(new URL("js/core/app-registry.js", WEBUI), "utf8");
 const INDEX_SOURCE = readFileSync(new URL("index.html", WEBUI), "utf8");
 
-const PREVIEW_APPS = Object.freeze(["gallery", "schedule", "export"]);
+const PREVIEW_APPS = Object.freeze(["gallery", "export"]);
 const SECRET_PARTS = ["stage5", "private", "value", "271828"];
 const SECRET = SECRET_PARTS.join("-");
-const APP_MODULES = Object.freeze({ gallery: galleryApplication, schedule: scheduleApplication, export: exportApplication });
+const APP_MODULES = Object.freeze({ gallery: galleryApplication, export: exportApplication });
 const APP_SOURCES = Object.fromEntries(PREVIEW_APPS.map((appId) => [appId, readFileSync(new URL(`js/apps/${appId}.js`, WEBUI), "utf8")]));
 const MODEL_SOURCES = Object.fromEntries(PREVIEW_APPS.map((appId) => [appId, readFileSync(new URL(`js/core/${appId}-model.js`, WEBUI), "utf8")]));
 const VIEW_SOURCES = Object.fromEntries(PREVIEW_APPS.map((appId) => [appId, readFileSync(new URL(`js/components/${appId}-view.js`, WEBUI), "utf8")]));
@@ -56,7 +45,7 @@ function sourceExists(path) {
   return existsSync(new URL(path, WEBUI));
 }
 
-test("Stage 5 registry uses three independent preview controllers instead of placeholders", () => {
+test("Stage 5 registry uses two independent preview controllers instead of placeholders", () => {
   for (const appId of PREVIEW_APPS) {
     assert.match(
       REGISTRY_SOURCE,
@@ -105,7 +94,6 @@ test("Stage 5 model state machines project loading/empty/content/error fixtures 
   assert.equal(TESTS_ONLY_STAGE5, true);
   const tables = [
     [projectGalleryState, galleryFixtures, ["loading", "empty", "content", "error"]],
-    [projectScheduleState, scheduleFixtures, ["loading", "empty", "content", "error"]],
     [projectExportState, exportFixtures, ["loading", "empty", "content", "error"]],
   ];
   for (const [project, fixtures, phases] of tables) {
@@ -117,12 +105,11 @@ test("Stage 5 model state machines project loading/empty/content/error fixtures 
     assert.equal(project({ phase: "unavailable" }).phase, "unavailable");
   }
   assert.equal(galleryPresentation(galleryFixtures.content).state, "content");
-  assert.equal(schedulePresentation(scheduleFixtures.error).state, "error");
   assert.equal(exportPresentation(exportFixtures.loading).state, "loading");
 });
 
 test("Stage 5 strict projections reject non-plain, dangerous, accessor, enum/count/text, and secret-shaped fields", () => {
-  const projectors = [projectGalleryState, projectScheduleState, projectExportState];
+  const projectors = [projectGalleryState, projectExportState];
   for (const project of projectors) {
     assert.throws(() => project([]), TypeError);
     assert.throws(() => project(new (class State { constructor() { this.phase = "empty"; } })()), TypeError);
@@ -145,12 +132,6 @@ test("Stage 5 strict projections reject non-plain, dangerous, accessor, enum/cou
   assert.throws(() => projectGalleryState({ phase: "content", items: [{
     ...galleryFixtures.content.items[0], path: `/private/${SECRET}`,
   }] }), TypeError);
-  assert.throws(() => projectScheduleState({ phase: "content", plans: [{
-    ...scheduleFixtures.content.plans[0], concurrency: Infinity,
-  }] }), TypeError);
-  assert.throws(() => projectScheduleState({ phase: "content", plans: [{
-    ...scheduleFixtures.content.plans[0], state: "paused",
-  }] }), TypeError);
   assert.throws(() => projectExportState({ phase: "content", ...exportFixtures.content, progress: {
     ...exportFixtures.content.progress, total: Number.NaN,
   } }), TypeError);
@@ -162,18 +143,15 @@ test("Stage 5 strict projections reject non-plain, dangerous, accessor, enum/cou
 test("Stage 5 projections never retain paths, URLs, credentials, raw errors, filenames, or runtime image fields", () => {
   const gallery = structuredClone(galleryFixtures.content);
   gallery.items[0].url = `https://private.invalid/${SECRET}`;
-  const schedule = structuredClone(scheduleFixtures.content);
-  schedule.plans[0].token = SECRET;
   const exported = structuredClone(exportFixtures.content);
   exported.config.destinationPath = `/private/${SECRET}`;
   for (const [project, value] of [
-    [projectGalleryState, gallery], [projectScheduleState, schedule], [projectExportState, exported],
+    [projectGalleryState, gallery], [projectExportState, exported],
   ]) {
     assert.throws(() => project(value), TypeError);
   }
   const safe = JSON.stringify({
     gallery: projectGalleryState(galleryFixtures.content),
-    schedule: projectScheduleState(scheduleFixtures.content),
     exported: projectExportState(exportFixtures.content),
   });
   for (const forbidden of [SECRET, "https://", "/private/", "filename", "cookie", "password", "secret", "raw error", "details"] ) {
@@ -196,24 +174,6 @@ test("Gallery interactions are deterministic: collection, search, sort, mode, se
   assert.equal(ui.inspectorOpen, false);
   assert.equal(ui.quickLookId, "media-03");
   assert.throws(() => updateGalleryUiState(ui, { quickLookId: "missing" }, state.items), TypeError);
-});
-
-test("Schedule selection, validation, dirty/reset and running state are pure model facts", () => {
-  const state = projectScheduleState(scheduleFixtures.content);
-  let ui = selectSchedulePlan(state, "plan-daily");
-  assert.equal(ui.dirty, false);
-  ui = updateScheduleDraft(state, ui, { name: "更新后的计划", concurrency: 12 });
-  assert.equal(ui.dirty, true);
-  assert.equal(ui.validation.valid, true);
-  ui = updateScheduleDraft(state, ui, { concurrency: 0 });
-  assert.deepEqual(ui.validation, { valid: false, field: "concurrency", reason: "并发数需为 1–128 的整数。" });
-  assert.equal(validateScheduleDraft({ ...ui.draft, name: "" }).field, "name");
-  assert.equal(validateScheduleDraft({ ...ui.draft, scheduleKind: "cron" }).field, "schedule-kind");
-  assert.equal(validateScheduleDraft({ ...ui.draft, scheduleLabel: "" }).field, "schedule-label");
-  ui = resetScheduleDraft(state, ui);
-  assert.equal(ui.dirty, false);
-  assert.equal(state.plans.find((plan) => plan.id === "plan-running").state, "running");
-  assert.deepEqual(createScheduleUiState(), { selectedId: "", draft: null, dirty: false, validation: { valid: true, field: "", reason: "" } });
 });
 
 test("Export source/config and deterministic running/success/error facts never use timers", () => {
@@ -258,7 +218,6 @@ test("Stage 5 controllers use unavailable adapters, make zero API calls, and sta
   try {
     const constructors = [
       [createGalleryController, { phase: "content", items: galleryFixtures.content.items }],
-      [createScheduleController, { phase: "content", plans: scheduleFixtures.content.plans }],
       [createExportController, exportFixtures.content],
     ];
     for (const [createController, fixture] of constructors) {
@@ -290,79 +249,6 @@ test("Stage 5 controllers use unavailable adapters, make zero API calls, and sta
       for (const listeners of root.listeners.values()) assert.equal(listeners.size, 0);
     }
 
-    const root = new TestRoot();
-    const renderedUi = [];
-    let activeDialog = null;
-    const dialogOptions = [];
-    let dialogDestroyCount = 0;
-    const dialogs = {
-      open(options) {
-        dialogOptions.push(options);
-        return new Promise((resolve) => { activeDialog = resolve; });
-      },
-      resolve(choice) {
-        const resolve = activeDialog;
-        activeDialog = null;
-        resolve?.(choice);
-      },
-      destroy() {
-        dialogDestroyCount += 1;
-        this.resolve("cancel");
-      },
-    };
-    const controller = createScheduleController({ root, app: {}, dialogs }, {
-      initialState: scheduleFixtures.content,
-      adapter: { read: () => scheduleFixtures.content },
-      createView: () => ({
-        elements: { editor: new TestRoot() },
-        render(_state, uiState) { renderedUi.push(uiState); },
-        destroy() { renderedUi.push("destroy"); },
-      }),
-    });
-    controller.activate();
-    await Promise.resolve();
-    await Promise.resolve();
-    assert.equal(controller.getUiState().selectedId, "plan-daily");
-
-    const edit = (value) => {
-      const control = new TestRoot();
-      control.dataset.scheduleField = "name";
-      control.value = value;
-      for (const listener of root.listeners.get("input") || []) listener({ target: control });
-    };
-    edit("夜航更新计划");
-    assert.equal(controller.getUiState().dirty, true);
-    assert.equal(controller.getUiState().validation.valid, true);
-
-    const routeLeave = controller.beforeLeave();
-    const minimize = controller.beforeWindowHide("minimized");
-    const close = controller.beforeWindowHide("closed");
-    assert.equal(routeLeave, minimize);
-    assert.equal(routeLeave, close);
-    assert.equal(dialogOptions.length, 1);
-    assert.match(dialogOptions[0].message, /切换应用/);
-    assert.match(dialogOptions[0].confirmationText, /不发送业务请求/);
-    dialogs.resolve("cancel");
-    assert.deepEqual(await Promise.all([routeLeave, minimize, close]), [false, false, false]);
-    assert.equal(controller.getUiState().dirty, true);
-
-    const confirmed = controller.beforeWindowHide("closed");
-    assert.equal(dialogOptions.length, 2);
-    dialogs.resolve("confirm");
-    assert.equal(await confirmed, true);
-    assert.equal(controller.getUiState().dirty, false);
-    assert.equal(await controller.beforeLeave(), true);
-
-    edit("关闭前仍未保存");
-    const interrupted = controller.beforeWindowHide("minimized");
-    controller.deactivate();
-    assert.equal(await interrupted, false);
-    assert.equal(controller.getUiState().dirty, false);
-    assert.equal(dialogDestroyCount, 1);
-    controller.destroy();
-    assert.equal(dialogDestroyCount, 2);
-    assert.equal(renderedUi.at(-1), "destroy");
-    for (const listeners of root.listeners.values()) assert.equal(listeners.size, 0);
   } finally {
     if (previousElement === undefined) delete globalThis.Element;
     else Object.defineProperty(globalThis, "Element", { configurable: true, value: previousElement });
@@ -375,9 +261,6 @@ test("Stage 5 applications expose complete lifecycle and production registry has
   for (const [appId, application] of Object.entries(APP_MODULES)) {
     for (const hook of ["mount", "activate", "deactivate", "unmount"]) assert.equal(typeof application[hook], "function", `${appId}.${hook}`);
   }
-  for (const hook of ["beforeLeave", "beforeWindowHide"]) {
-    assert.equal(typeof scheduleApplication[hook], "function", `schedule.${hook}`);
-  }
   assert.doesNotMatch(REGISTRY_SOURCE, /createPlaceholderApplication/);
   assert.doesNotMatch(REGISTRY_SOURCE, /apps\/placeholder\.js/);
 });
@@ -386,7 +269,6 @@ test("Stage 5 fixture host is explicit tests-only injection and production sourc
   assert.match(FIXTURE_SOURCE, /TESTS_ONLY_STAGE5\s*=\s*true/);
   assert.match(FIXTURE_HOST_SOURCE, /testsOnly:\s*true/);
   assert.match(FIXTURE_HOST_SOURCE, /createGalleryController/);
-  assert.match(FIXTURE_HOST_SOURCE, /createScheduleController/);
   assert.match(FIXTURE_HOST_SOURCE, /createExportController/);
   for (const mediaBoundary of [
     /createGalleryMediaFixture/,
@@ -418,8 +300,6 @@ test("Stage 5 static security and rendering boundaries forbid bypass I/O, unsafe
     ]) assert.doesNotMatch(combined, forbidden, `${appId}: ${forbidden}`);
   }
   assert.doesNotMatch(`${VIEW_SOURCES.gallery}\n${MODEL_SOURCES.gallery}`, /<img|document\.createElement\(["']img|\.src\s*=/i);
-  assert.doesNotMatch(`${APP_SOURCES.schedule}\n${VIEW_SOURCES.schedule}`, /scheduler\/status|view=diagnostics/);
-  assert.doesNotMatch(`${APP_SOURCES.schedule}\n${MODEL_SOURCES.schedule}\n${VIEW_SOURCES.schedule}`, /fixture|夹具/i);
   assert.doesNotMatch(`${APP_SOURCES.export}\n${MODEL_SOURCES.export}\n${VIEW_SOURCES.export}`, /fixture|夹具|setTimeout|setInterval|requestAnimationFrame/i);
 });
 
@@ -476,41 +356,6 @@ test("Stage 5 CSS preserves preview layouts while all T8 previews use canonical 
   assert.match(exportCss, /prefers-contrast:\s*more/);
   assert.match(exportCss, /forced-colors:\s*active[\s\S]*?background-image:\s*none[\s\S]*?backdrop-filter:\s*none/);
 
-  const scheduleCss = CSS_SOURCES.schedule;
-  assert.doesNotMatch(scheduleCss, /--imageweave-(?:surface-(?:content|navigation|control)-solid|state-[\w-]*-surface(?:-solid)?)/);
-  assert.doesNotMatch(scheduleCss, /text-transform:\s*uppercase|letter-spacing:\s*0\.0[6-9]em|inset\s+3px\s+0\s+0/);
-  for (const expected of [
-    "padding: 24px",
-    "gap: 24px",
-    "min-width: 1138px",
-    "border: var(--imageweave-border-width) solid var(--imageweave-border-default)",
-    "border-radius: var(--imageweave-radius-card)",
-    "background: var(--imageweave-glass-surface-secondary)",
-    "background: var(--imageweave-glass-surface-input)",
-    "background: var(--imageweave-glass-surface-weak)",
-    "border-radius: var(--imageweave-radius-control)",
-    "background: var(--imageweave-glass-surface-button)",
-    "background: var(--imageweave-glass-surface-hover)",
-    "border-color: var(--imageweave-border-focus)",
-    'content: "◆ 已选择"',
-    'content: "△ 未保存 ·"',
-    'content: "⚠ 校验失败 ·"',
-    "transform: none",
-  ]) assert.match(scheduleCss, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(scheduleCss, /\.schedule-column\s*\{[\s\S]*?background:\s*var\(--imageweave-glass-surface-secondary\)[\s\S]*?inset 0 1px 0[\s\S]*?inset 0 -1px 0/);
-  assert.match(scheduleCss, /\.schedule-plan-card:hover,[\s\S]*?transform:\s*none/);
-  assert.match(scheduleCss, /\.schedule-plan-card\[aria-pressed="true"\]\s*\{[\s\S]*?border-color:\s*var\(--imageweave-border-focus\)/);
-  assert.match(scheduleCss, /data-schedule-workspace-state="loading"[\s\S]*?border-color:\s*var\(--imageweave-state-running\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-secondary\)/);
-  assert.match(scheduleCss, /data-schedule-workspace-state="error"[\s\S]*?border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-default\)/);
-  assert.match(scheduleCss, /data-schedule-validation="invalid"[\s\S]*?border:\s*var\(--imageweave-border-strong-width\) solid var\(--imageweave-state-danger\)[\s\S]*?background:\s*var\(--imageweave-glass-surface-default\)/);
-  assert.equal(
-    scheduleCss.split("\n").filter((line) => /^\s*(?:-webkit-)?backdrop-filter:/.test(line) && !/:\s*none/.test(line)).length,
-    0,
-    "Schedule rows must inherit the application window backdrop",
-  );
-  assert.match(scheduleCss, /@supports not[\s\S]*?--imageweave-fallback-elevated-solid/);
-  assert.match(scheduleCss, /prefers-contrast:\s*more/);
-  assert.match(scheduleCss, /forced-colors:\s*active[\s\S]*?background-image:\s*none[\s\S]*?backdrop-filter:\s*none/);
 
   const css = CSS_SOURCES.gallery;
   assert.doesNotMatch(css, /--imageweave-(?:surface-(?:content|navigation|control)-solid|state-[\w-]*-surface-solid)/);
@@ -566,22 +411,6 @@ test("Stage 5 views declare disabled write reasons and Gallery Quick Look keyboa
     assert.match(source, /aria-describedby/);
   }
   for (const phrase of ["导入", "删除", "在文件夹中显示", "写入标签", "导出所选"]) assert.match(VIEW_SOURCES.gallery, new RegExp(phrase));
-  for (const phrase of ["保存计划", "启用 / 停用", "立即运行"]) assert.match(VIEW_SOURCES.schedule, new RegExp(phrase));
-  for (const fingerprint of [
-    'id: "schedule-name"', 'id: "schedule-kind"', 'id: "schedule-label"',
-    'id: "schedule-concurrency"', 'attributes: { for: control.id }',
-    "VALIDATION_FIELD_BY_CONTROL", 'control.setAttribute("aria-invalid"',
-    "scheduleDirty", "scheduleValidity", "不会发送业务请求",
-  ]) assert.match(VIEW_SOURCES.schedule, new RegExp(fingerprint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  for (const fingerprint of [
-    "confirmDiscard", 'title: "放弃未保存的计划草稿？"',
-    'beforeLeave()', 'beforeWindowHide(visibility)', 'dialogs?.destroy?.()',
-    'globalThis.addEventListener?.("beforeunload"',
-    'globalThis.removeEventListener?.("beforeunload"',
-  ]) assert.match(APP_SOURCES.schedule, new RegExp(fingerprint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  for (const fingerprint of [
-    "createDialogController", "requestRouteLeave", "requestMinimize", "requestClose",
-  ]) assert.match(FIXTURE_HOST_SOURCE, new RegExp(fingerprint));
   for (const phrase of ["选择目标", "开始导出", "取消导出", "打开结果"]) assert.match(VIEW_SOURCES.export, new RegExp(phrase));
   for (const fingerprint of [
     "动作已禁用，不会写入文件、读取路径或发送业务请求",

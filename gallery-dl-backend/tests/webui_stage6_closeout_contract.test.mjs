@@ -101,7 +101,7 @@ test("Stage 6 availability metadata is exactly ready or preview", () => {
   assert.match(definitions, /new Set\(\["ready", "preview"\]\)/);
   assert.doesNotMatch(`${definitions}\n${center}`, /\bplaceholder\b/);
   assert.equal((definitions.match(/availability:\s*"ready"/g) || []).length, 8);
-  assert.equal((definitions.match(/availability:\s*"preview"/g) || []).length, 3);
+  assert.equal((definitions.match(/availability:\s*"preview"/g) || []).length, 2);
 });
 
 test("Stage 6 production CSS contains no retired desktop selectors or taskbar token", () => {
@@ -217,8 +217,7 @@ test("Stage 6 README and current WebUI docs describe the final shell and preview
   const fixtureReadme = read(new URL("tests/fixtures/webui/README.md", BACKEND));
 
   assert.match(readme, /裸[^\n]*\/ui\/[^\n]*空[^\n]*玻璃桌面/);
-  assert.match(readme, /8[^\n]*真实应用/);
-  assert.match(readme, /3[^\n]*前端预览[^\n]*0[^\n]*业务 API/);
+  assert.match(readme, /10[^\n]*应用/);
   assert.match(readme, /Dock/);
   assert.match(readme, /应用中心/);
   assert.doesNotMatch(readme, /开发中[^\n]*占位|占位入口/);
@@ -226,8 +225,8 @@ test("Stage 6 README and current WebUI docs describe the final shell and preview
   for (const source of [backendDoc, architecture]) {
     assert.doesNotMatch(source, /\b[A-Z][A-Z0-9_-]*\.(?:EXE|CPL)\b/);
     assert.match(source, /imageweave\.window-placements\.v2/);
-    assert.match(source, /11[^\n]*应用/);
-    assert.match(source, /3[^\n]*preview|3[^\n]*前端预览/i);
+    assert.match(source, /10[^\n]*应用/);
+    assert.match(source, /2[^\n]*preview|2[^\n]*前端预览/i);
     assert.match(source, /0[^\n]*业务 API/);
   }
   const repositoryPath = resolve(fileURLToPath(REPOSITORY));

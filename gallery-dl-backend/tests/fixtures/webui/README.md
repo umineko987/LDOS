@@ -32,7 +32,7 @@ migration starting point.
 
 `stage5-preview-host.html`, its controller host, and
 `stage5-preview-fixtures.js` explicitly drive loading, empty, content, error,
-and deterministic progress layouts for Gallery, Schedule, and Export. They are
+and deterministic progress layouts for Gallery and Export. They are
 mounted only by `tests/stage5_preview_harness.py`. Production preview adapters
 remain unavailable and make zero owned business API requests.
 
@@ -46,17 +46,6 @@ reactivate and destroy. Its adapter reads the currently selected fixture state,
 so reactivation cannot restore the state that happened to be mounted first.
 None of this media decorator is imported or discoverable from a production app
 closure.
-
-For Schedule acceptance, the same tests-only host injects only the allow-listed
-loading, empty, content, and error facts through the preview adapter. It loads
-the canonical Dialog controller solely from the separately mounted production
-module tree and exposes explicit route/minimize/close leave requests so tests
-can verify one in-flight discard confirmation, Escape/cancel/confirm, focus
-return, draft reset, deactivate/reactivate, and destroy cleanup. Schedule save,
-toggle, and run controls remain disabled with an explained unavailable reason;
-the fixture does not emulate a backend write or send a business request.
-Production Schedule retains the unavailable adapter and cannot discover this
-host, its state table, or its leave-request seams.
 
 For Export acceptance, the host injects only the allow-listed loading, empty,
 content, error, running, success, and result-error objects. Progress is a fixed

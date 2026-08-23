@@ -78,7 +78,6 @@
   [data-diagnostics-workspace-state],
   [data-personalization-preview-state],
   [data-gallery-workspace-state],
-  [data-schedule-workspace-state],
   [data-export-workspace-state]
 ) {
   background: var(--imageweave-glass-surface-secondary);
