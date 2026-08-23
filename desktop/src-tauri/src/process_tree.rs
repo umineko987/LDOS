@@ -8,6 +8,10 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt as WindowsCommandExt;
+#[cfg(windows)]
+use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 pub struct ProcessTree {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -20,6 +24,8 @@ impl ProcessTree {
         command.stdin(Stdio::piped());
         #[cfg(unix)]
         command.process_group(0);
+        #[cfg(windows)]
+        command.creation_flags(CREATE_NO_WINDOW);
 
         let mut child = command.spawn()?;
         let stdin = child
