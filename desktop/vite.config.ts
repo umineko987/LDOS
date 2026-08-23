@@ -12,6 +12,18 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    coverage: {
+      provider: "v8",
+      include: ["src/core/**/*.ts"],
+      exclude: ["src/core/**/*.test.ts"],
+      reporter: ["text", "json-summary"],
+      thresholds: {
+        branches: 100,
+        functions: 100,
+        lines: 100,
+        statements: 100,
+      },
+    },
     include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
   },
 });

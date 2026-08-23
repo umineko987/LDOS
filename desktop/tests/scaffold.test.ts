@@ -9,6 +9,6 @@ describe("P1 Svelte scaffold", () => {
 
     expect(body).toContain('data-product-contract="nocturne-glass-desktop"');
     expect(body).toContain("ImageWeave");
-    expect(body).toContain("基础设施准备中");
+    expect(body).toContain("正在启动本地服务");
   });
 });

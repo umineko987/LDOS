@@ -88,6 +88,20 @@ body,
   color: rgba(255, 255, 255, 0.64);
 }
 
+.bootstrap-status[data-phase="ready"] {
+  color: #b8d7c1;
+}
+
+.bootstrap-status[data-phase="failed"] {
+  color: #efb3ad;
+}
+
+.bootstrap-window small {
+  display: block;
+  margin-top: 12px;
+  color: rgba(255, 255, 255, 0.48);
+}
+
 .bootstrap-dock {
   position: absolute;
   bottom: 18px;
