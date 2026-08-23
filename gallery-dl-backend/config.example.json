@@ -14,7 +14,11 @@
   "server": {
     "host": "127.0.0.1",
     "port": 8787,
-    "cors_origins": [],
+    "cors_origins": [
+      "tauri://localhost",
+      "http://tauri.localhost",
+      "http://localhost:1420"
+    ],
     "allow_private_targets": false,
     "strict_target_dns": true
   },

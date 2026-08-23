@@ -67,9 +67,6 @@ class LocalOriginGuardTests(unittest.TestCase):
             f"[::1]:{port}",
             f"localhost.:{port}",
             f" LOCALHOST.:{port} ",
-            "127.0.0.1",
-            "localhost",
-            "[::1]",
         )
         for host in hosts:
             with self.subTest(host=host):
@@ -107,6 +104,19 @@ class LocalOriginGuardTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["error"]["code"], "forbidden_host")
+
+    def test_rejects_loopback_host_without_configured_port(self) -> None:
+        hosts = (
+            "127.0.0.1",
+            "localhost",
+            "[::1]",
+            f"127.0.0.1:{self.settings.server.port + 1}",
+        )
+        for host in hosts:
+            with self.subTest(host=host):
+                response = self.client.get("/healthz", headers={"Host": host})
+                self.assertEqual(response.status_code, 403, response.text)
+                self.assertEqual(response.json()["error"]["code"], "forbidden_host")
 
     def test_rejects_missing_host(self) -> None:
         status, payload = asyncio.run(_get_without_host(self.app, "/healthz"))

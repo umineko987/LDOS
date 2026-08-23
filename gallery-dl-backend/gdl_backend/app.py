@@ -296,11 +296,9 @@ def create_app(
             f"127.0.0.1:{port}",
             f"localhost:{port}",
             f"[::1]:{port}",
-            "127.0.0.1",
-            "localhost",
-            "[::1]",
         }
     )
+    allowed_origins = frozenset(settings.server.cors_origins)
     service = container or ServiceContainer(settings)
 
     @asynccontextmanager
@@ -329,8 +327,24 @@ def create_app(
             CORSMiddleware,
             allow_origins=settings.server.cors_origins,
             allow_methods=["GET", "POST", "PUT", "DELETE"],
-            allow_headers=["*"],
+            allow_headers=[
+                "Accept",
+                "Content-Type",
+                "Idempotency-Key",
+                "X-Request-ID",
+            ],
+            expose_headers=["X-Request-ID"],
         )
+
+    @app.middleware("http")
+    async def media_response_headers(request: Request, call_next):
+        response = await call_next(request)
+        media_type = (
+            response.headers.get("Content-Type", "").partition(";")[0].lower()
+        )
+        if media_type.startswith(("image/", "audio/", "video/")):
+            response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+        return response
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
@@ -350,10 +364,16 @@ def create_app(
             host = host[:-1]
 
         fetch_site = request.headers.get("sec-fetch-site", "").strip().lower()
+        origin = request.headers.get("origin", "").strip()
+        same_origin = f"{request.url.scheme}://{host}"
+        configured_origin = origin in allowed_origins
         if host not in allowed_hosts:
             error_code = "forbidden_host"
             error_message = "仅允许从本机回环地址访问"
-        elif fetch_site in {"cross-site", "same-site"}:
+        elif fetch_site in {"cross-site", "same-site"} and not configured_origin:
+            error_code = "forbidden_cross_site"
+            error_message = "仅允许同源访问"
+        elif origin and origin != same_origin and not configured_origin:
             error_code = "forbidden_cross_site"
             error_message = "仅允许同源访问"
         else:

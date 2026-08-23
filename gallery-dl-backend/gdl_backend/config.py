@@ -72,6 +72,58 @@ def normalize_authorization_proxy(value: Any) -> str:
     return f"{scheme}://{userinfo}{host}:{port}"
 
 
+def normalize_desktop_origin(value: Any) -> str:
+    """只接受可精确匹配的 Tauri 生产 origin 或回环 Vite origin。"""
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > 256:
+        raise ValueError("server.cors_origins 只允许精确 Tauri/Vite origin")
+    try:
+        parsed = urlsplit(value.strip())
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("server.cors_origins 包含无效 origin") from exc
+    scheme = parsed.scheme.lower()
+    hostname = (parsed.hostname or "").lower()
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("server.cors_origins 必须是无凭证、路径或查询的精确 origin")
+    tauri_origin = (
+        (scheme == "tauri" and hostname == "localhost" and port is None)
+        or (
+            scheme in {"http", "https"}
+            and hostname == "tauri.localhost"
+            and port is None
+        )
+    )
+    vite_origin = (
+        scheme == "http"
+        and hostname in {"127.0.0.1", "localhost", "::1"}
+        and port is not None
+    )
+    if not tauri_origin and not vite_origin:
+        raise ValueError("server.cors_origins 只允许精确 Tauri/Vite origin")
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    port_suffix = f":{port}" if port is not None else ""
+    return f"{scheme}://{host}{port_suffix}"
+
+
+def _desktop_origins(values: Any) -> list[str]:
+    if values is None:
+        return []
+    if not isinstance(values, (list, tuple)):
+        raise ValueError("server.cors_origins 必须是 origin 列表")
+    normalized: list[str] = []
+    for value in values:
+        origin = normalize_desktop_origin(value)
+        if origin not in normalized:
+            normalized.append(origin)
+    return normalized
+
+
 def _path(value: str | os.PathLike[str] | None, base: Path, default: Path) -> Path:
     if value in (None, ""):
         path = default
@@ -346,7 +398,7 @@ class AppSettings:
         server = ServerSettings(
             host=str(os.environ.get("GDL_BACKEND_HOST", server_data.get("host", "127.0.0.1"))),
             port=int(os.environ.get("GDL_BACKEND_PORT", server_data.get("port", 8787))),
-            cors_origins=[str(x) for x in server_data.get("cors_origins", [])],
+            cors_origins=_desktop_origins(server_data.get("cors_origins", [])),
             allow_private_targets=bool(server_data.get("allow_private_targets", False)),
             strict_target_dns=server_data.get("strict_target_dns", True),
         )
@@ -500,6 +552,7 @@ class AppSettings:
         )
         if not 1 <= int(self.server.port) <= 65535:
             raise ValueError("server.port 超出范围")
+        self.server.cors_origins = _desktop_origins(self.server.cors_origins)
         if not isinstance(self.server.strict_target_dns, bool):
             raise ValueError("server.strict_target_dns 必须是布尔值")
         if not isinstance(self.encrypted_dns.enabled, bool):
