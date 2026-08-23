@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "kind": "target-contract-not-current-measurement",
+  "source": "docs/2026-08-23-tauri-svelte-desktop-refactor-design.md#66-性能预算",
+  "budgets": {
+    "drag_60hz": {
+      "duration_seconds": 10,
+      "p95_frame_interval_ms_max": 16.7,
+      "long_tasks_over_50ms_max": 0,
+      "verification": "headed-tauri-webview",
+      "execution": "not-executed-by-task-constraint"
+    },
+    "resize": {
+      "duration_seconds": 10,
+      "size_writes_per_frame_max": 1,
+      "long_tasks_over_50ms_max": 0,
+      "verification": "unit-and-headed-tauri-webview",
+      "headed_execution": "not-executed-by-task-constraint"
+    },
+    "tasks_active_page": {
+      "rows_max": 100,
+      "state_commits_per_poll_max": 1,
+      "long_tasks_over_50ms_max": 0,
+      "verification": "unit-and-headed-tauri-webview",
+      "headed_execution": "not-executed-by-task-constraint"
+    },
+    "tasks_large_batch": {
+      "total_tasks_min": 1000,
+      "dom_rows_max": 100,
+      "verification": "unit-and-headed-tauri-webview",
+      "headed_execution": "not-executed-by-task-constraint"
+    },
+    "minimized_application": {
+      "observation_poll_cycles": 2,
+      "business_requests_max": 0,
+      "verification": "unit"
+    },
+    "resource_lifecycle": {
+      "open_close_cycles": 20,
+      "listeners_return_to_baseline": true,
+      "timers_return_to_baseline": true,
+      "observers_return_to_baseline": true,
+      "image_references_return_to_baseline": true,
+      "verification": "unit-and-headed-tauri-webview",
+      "headed_execution": "not-executed-by-task-constraint"
+    },
+    "composition_idle": {
+      "visible_windows": 6,
+      "minimized_windows": 2,
+      "continuous_animations_max": 0,
+      "main_backdrops_per_visible_window_max": 1,
+      "internal_backdrops_per_application_max": 0,
+      "verification": "static-and-headed-tauri-webview",
+      "headed_execution": "not-executed-by-task-constraint"
+    }
+  }
+}
