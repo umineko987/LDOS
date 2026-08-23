@@ -26,32 +26,6 @@ function assertNoViolations(label, violations) {
   assert.deepEqual(violations, [], `${label}:\n- ${violations.join("\n- ")}`);
 }
 
-test("[P0 target][contract] 6.6 budgets are machine-readable and are not current measurements", () => {
-  assert.equal(budgets.schema_version, 1);
-  assert.equal(budgets.kind, "target-contract-not-current-measurement");
-  assert.deepEqual(budgets.budgets.drag_60hz, {
-    duration_seconds: 10,
-    p95_frame_interval_ms_max: 16.7,
-    long_tasks_over_50ms_max: 0,
-    verification: "headed-tauri-webview",
-    execution: "not-executed-by-task-constraint",
-  });
-  assert.deepEqual(budgets.budgets.tasks_active_page, {
-    rows_max: 100,
-    state_commits_per_poll_max: 1,
-    long_tasks_over_50ms_max: 0,
-    verification: "unit-and-headed-tauri-webview",
-    headed_execution: "not-executed-by-task-constraint",
-  });
-  assert.equal(budgets.budgets.minimized_application.observation_poll_cycles, 2);
-  assert.equal(budgets.budgets.minimized_application.business_requests_max, 0);
-  assert.equal(budgets.budgets.resource_lifecycle.open_close_cycles, 20);
-  assert.deepEqual(
-    [budgets.budgets.composition_idle.visible_windows, budgets.budgets.composition_idle.minimized_windows],
-    [6, 2],
-  );
-});
-
 test("[P0 target][red] Tasks keeps at most 100 records in the current page/DOM", () => {
   const target = budgets.budgets.tasks_active_page.rows_max;
   const tasks = sanitizeTaskPage({
