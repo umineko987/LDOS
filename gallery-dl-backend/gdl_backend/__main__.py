@@ -2,12 +2,44 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+import threading
 from pathlib import Path
+from typing import BinaryIO
 
 import uvicorn
 
 from .app import create_app
 from .config import AppSettings, PROJECT_DIR
+
+
+def _watch_parent_pipe(server: uvicorn.Server, stream: BinaryIO) -> None:
+    try:
+        stream.read()
+    except (OSError, ValueError):
+        pass
+    server.should_exit = True
+
+
+def _run_server(settings: AppSettings, parent_stream: BinaryIO | None = None) -> None:
+    app = create_app(settings)
+    options = {
+        "host": settings.server.host,
+        "port": settings.server.port,
+        "log_level": "info",
+    }
+    if parent_stream is None:
+        uvicorn.run(app, **options)
+        return
+
+    server = uvicorn.Server(uvicorn.Config(app, **options))
+    threading.Thread(
+        target=_watch_parent_pipe,
+        args=(server, parent_stream),
+        name="gdl-backend-parent-pipe",
+        daemon=True,
+    ).start()
+    server.run()
 
 
 def main() -> None:
@@ -35,12 +67,12 @@ def main() -> None:
     if args.port:
         settings.server.port = args.port
     settings.validate()
-    uvicorn.run(
-        create_app(settings),
-        host=settings.server.host,
-        port=settings.server.port,
-        log_level="info",
+    parent_stream = (
+        sys.stdin.buffer
+        if os.environ.get("GDL_BACKEND_PARENT_PIPE") == "1"
+        else None
     )
+    _run_server(settings, parent_stream)
 
 
 if __name__ == "__main__":
