@@ -45,6 +45,11 @@ export interface ShellPersistence {
   writeCurrentApp(appId: ApplicationId | null): boolean;
 }
 
+interface UnsavedRegistration {
+  readonly reader: () => boolean;
+  readonly discard?: () => void;
+}
+
 export interface ShellStore {
   subscribe(listener: (state: ShellState) => void): () => void;
   getState(): ShellState;
@@ -60,6 +65,7 @@ export interface ShellStore {
   setOpenMenu(menu: ShellMenuId | null): void;
   setDockOverflow(open: boolean): void;
   resolveConfirmation(confirmed: boolean): boolean;
+  registerUnsavedChanges(appId: ApplicationId, reader: () => boolean, discard?: () => void): () => void;
   destroy(): void;
 }
 
@@ -122,6 +128,7 @@ export function createShellStore({
   const listeners = new Set<(next: ShellState) => void>();
   let pendingOperation: PendingOperation | null = null;
   let destroyed = false;
+  const unsavedReaders = new Map<ApplicationId, UnsavedRegistration>();
 
   const publish = (next: ShellState): void => {
     if (destroyed) return;
@@ -198,7 +205,8 @@ export function createShellStore({
 
   const needsConfirmation = (appId: ApplicationId): boolean => {
     try {
-      return hasUnsavedChanges(appId) === true;
+      const registration = unsavedReaders.get(appId);
+      return registration ? registration.reader() === true : hasUnsavedChanges(appId) === true;
     } catch {
       return true;
     }
@@ -217,7 +225,11 @@ export function createShellStore({
 
     let resolveChoice!: (confirmed: boolean) => void;
     const choice = new Promise<boolean>((resolve) => { resolveChoice = resolve; });
-    const promise = choice.then((confirmed) => confirmed && operation()).finally(() => {
+    const promise = choice.then((confirmed) => {
+      if (!confirmed) return false;
+      unsavedReaders.get(appId)?.discard?.();
+      return operation();
+    }).finally(() => {
       if (pendingOperation?.key === key) pendingOperation = null;
     });
     pendingOperation = { key, promise, resolve: resolveChoice };
@@ -300,11 +312,19 @@ export function createShellStore({
       pending.resolve(confirmed);
       return true;
     },
+    registerUnsavedChanges(appId, reader, discard) {
+      if (destroyed) return () => {};
+      getApplicationDefinition(appId);
+      const registration = { reader, discard };
+      unsavedReaders.set(appId, registration);
+      return () => { if (unsavedReaders.get(appId) === registration) unsavedReaders.delete(appId); };
+    },
     destroy() {
       if (destroyed) return;
       pendingOperation?.resolve(false);
       pendingOperation = null;
       listeners.clear();
+      unsavedReaders.clear();
       destroyed = true;
     },
   } satisfies ShellStore);

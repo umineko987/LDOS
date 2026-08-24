@@ -160,6 +160,39 @@ describe("desktop shell state owner", () => {
     await expect(leave).resolves.toBe(true);
   });
 
+  it("lets a domain register dirty state and discard only after confirmed window exit", async () => {
+    const shell = createShellStore();
+    shell.openApplication("vault");
+    let dirty = true;
+    const discard = vi.fn(() => { dirty = false; });
+    const unregister = shell.registerUnsavedChanges("vault", () => dirty, discard);
+    const replacementUnregister = shell.registerUnsavedChanges("vault", () => dirty, discard);
+    unregister();
+
+    const cancelled = shell.requestClose("vault");
+    expect(shell.getState().confirmation?.appId).toBe("vault");
+    shell.resolveConfirmation(false);
+    await expect(cancelled).resolves.toBe(false);
+    expect(discard).not.toHaveBeenCalled();
+    expect(shell.getState().windows).toHaveLength(1);
+
+    const confirmed = shell.requestClose("vault");
+    shell.resolveConfirmation(true);
+    await expect(confirmed).resolves.toBe(true);
+    expect(discard).toHaveBeenCalledOnce();
+    expect(shell.getState().windows).toHaveLength(0);
+
+    unregister();
+    replacementUnregister();
+    replacementUnregister();
+    const destroyedShell = createShellStore();
+    destroyedShell.destroy();
+    const destroyedRegistration = destroyedShell.registerUnsavedChanges("vault", () => false);
+    destroyedRegistration();
+    shell.openApplication("vault");
+    await expect(shell.requestClose("vault")).resolves.toBe(true);
+  });
+
   it("fails closed when the unsaved boundary throws and cancels pending work on destroy", async () => {
     const shell = createShellStore({ hasUnsavedChanges: () => { throw new Error("domain failure"); } });
     shell.openApplication("vault");

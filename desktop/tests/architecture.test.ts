@@ -90,6 +90,9 @@ describe("desktop architecture boundaries", () => {
     const proxy = sourceEnding("/apps/proxy/Proxy.svelte");
     const proxyState = sourceEnding("/apps/proxy/state.ts");
     const proxyModel = sourceEnding("/apps/proxy/model.ts");
+    const vault = sourceEnding("/apps/vault/Vault.svelte");
+    const vaultState = sourceEnding("/apps/vault/state.ts");
+    const vaultModel = sourceEnding("/apps/vault/model.ts");
     const window = sourceEnding("/shell/AppWindow.svelte");
     expect(crawl.match(/createCrawlStore\s*\(/g)).toHaveLength(1);
     expect(crawlState.match(/export function createCrawlStore\s*\(/g)).toHaveLength(1);
@@ -100,14 +103,18 @@ describe("desktop architecture boundaries", () => {
     expect(proxy.match(/createProxyStore\s*\(/g)).toHaveLength(1);
     expect(proxyState.match(/export function createProxyStore\s*\(/g)).toHaveLength(1);
     expect(proxyModel).toContain("nodes: Readonly<Record<string, ProxyNode>>");
+    expect(vault.match(/createVaultStore\s*\(/g)).toHaveLength(1);
+    expect(vaultState.match(/export function createVaultStore\s*\(/g)).toHaveLength(1);
+    expect(vaultModel).toContain("sites: Readonly<Record<string, VaultSiteStatus>>");
     expect(window.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
     expect(window).toContain('record.appId === "crawl"');
     expect(window).toContain('record.appId === "tasks"');
     expect(window).toContain('record.appId === "proxy"');
+    expect(window).toContain('record.appId === "vault"');
     expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/CrawlState|TasksState|BatchSummary|TaskEntity|ProxyState|ProxyStatus/);
     for (const [path, source] of Object.entries(productionSources)) {
       if (!path.includes("/core/")) continue;
-      expect(source, path).not.toMatch(/from ["'][^"']*apps\/(?:crawl|tasks|proxy)/);
+      expect(source, path).not.toMatch(/from ["'][^"']*apps\/(?:crawl|tasks|proxy|vault)/);
     }
   });
 });

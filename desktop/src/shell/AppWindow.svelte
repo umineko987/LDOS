@@ -1,5 +1,6 @@
 <script lang="ts">
   import Crawl from "../apps/crawl/Crawl.svelte";
+  import Vault from "../apps/vault/Vault.svelte";
   import Proxy from "../apps/proxy/Proxy.svelte";
   import Tasks from "../apps/tasks/Tasks.svelte";
   import { getApplicationDefinition, type ApplicationId } from "../core/applications/definitions";
@@ -16,6 +17,7 @@
     api: ApiClient;
     polling: PollingService;
     persistence: PersistenceService;
+    shellUnsaved?: (appId: ApplicationId, reader: () => boolean, discard?: () => void) => () => void;
     focused: boolean;
     onNavigate: (appId: ApplicationId) => void;
     onFocus: (appId: ApplicationId) => void;
@@ -31,6 +33,7 @@
     api,
     polling,
     persistence,
+    shellUnsaved,
     onNavigate,
     focused,
     onFocus,
@@ -107,6 +110,8 @@
       <Tasks {api} {polling} {persistence} {onNavigate} />
     {:else if record.appId === "proxy"}
       <Proxy {api} {polling} />
+    {:else if record.appId === "vault"}
+      <Vault {api} {polling} registerUnsavedChanges={shellUnsaved ? (reader, discard) => shellUnsaved("vault", reader, discard) : undefined} />
     {:else}
       <ApplicationPlaceholder {application} />
     {/if}
