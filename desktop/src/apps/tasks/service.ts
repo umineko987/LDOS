@@ -43,14 +43,25 @@ export function createTasksService(api: ApiClient): TasksService {
       return sanitizeRecentBatches(await api.get(`${TASKS_ENDPOINTS.crawls}?limit=30`, { signal }));
     },
     async readAuthority(query: TaskPageQuery, signal: AbortSignal) {
-      const [rawSummary, rawPage] = await Promise.all([
-        api.get(taskBatchPath(query.batchId), { signal }),
-        api.get(taskPagePath(query), { signal }),
-      ]);
-      return Object.freeze({
-        summary: sanitizeBatchSummary(rawSummary, query.batchId),
-        page: sanitizeTaskPage(rawPage, query),
-      });
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+      try {
+        const [rawSummary, rawPage] = await Promise.all([
+          api.get(taskBatchPath(query.batchId), { signal: controller.signal }),
+          api.get(taskPagePath(query), { signal: controller.signal }),
+        ]);
+        return Object.freeze({
+          summary: sanitizeBatchSummary(rawSummary, query.batchId),
+          page: sanitizeTaskPage(rawPage, query),
+        });
+      } catch (error) {
+        controller.abort();
+        throw error;
+      } finally {
+        signal.removeEventListener("abort", abort);
+      }
     },
     async write(operation: TasksOperation, batchId: string, signal: AbortSignal) {
       if (operation === "retry") {

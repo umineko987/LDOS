@@ -89,7 +89,10 @@ describe("Tasks API service", () => {
       "/api/v1/crawls/batch%3Aservice.1",
       "/api/v1/crawls/batch%3Aservice.1/tasks?limit=100&offset=100",
     ]);
-    expect(client.get.mock.calls.every(([, options]) => options.signal === controller.signal)).toBe(true);
+    const signals = client.get.mock.calls.map(([, options]) => options.signal as AbortSignal);
+    expect(signals[0]).toBe(signals[1]);
+    expect(signals[0]).not.toBe(controller.signal);
+    expect(signals[0].aborted).toBe(false);
 
     page.resolve({ items: [rawTask()], limit: 100, offset: 100 });
     await Promise.resolve();
@@ -139,5 +142,38 @@ describe("Tasks API service", () => {
       { batchId: "batch:service.1", offset: 0, addressId: "" },
       new AbortController().signal,
     )).rejects.toThrow("invalid_task_page_limit");
+  });
+
+  it("aborts the sibling on partial failure and propagates an external abort to both reads", async () => {
+    const never = deferred<unknown>();
+    const failure = new Error("summary failed");
+    const partialGet = vi.fn((path: string) => path.endsWith("/tasks?limit=100&offset=0")
+      ? never.promise
+      : Promise.reject(failure));
+    const partialClient = api(partialGet as ApiClient["get"]);
+    const partialService = createTasksService(partialClient);
+    await expect(partialService.readAuthority(
+      { batchId: "batch:service.1", offset: 0, addressId: "" },
+      new AbortController().signal,
+    )).rejects.toBe(failure);
+    const partialSignals = partialClient.get.mock.calls.map(([, options]) => options.signal as AbortSignal);
+    expect(partialSignals[0]).toBe(partialSignals[1]);
+    expect(partialSignals[0].aborted).toBe(true);
+
+    const abortGet = vi.fn((_path: string, options?: { signal?: AbortSignal }) => new Promise<unknown>((_resolve, reject) => {
+      options?.signal?.addEventListener("abort", () => reject(new DOMException("stopped", "AbortError")), { once: true });
+    }));
+    const abortClient = api(abortGet as ApiClient["get"]);
+    const abortService = createTasksService(abortClient);
+    const external = new AbortController();
+    const pending = abortService.readAuthority(
+      { batchId: "batch:service.1", offset: 0, addressId: "" },
+      external.signal,
+    );
+    external.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    const abortSignals = abortClient.get.mock.calls.map(([, options]) => options.signal as AbortSignal);
+    expect(abortSignals).toHaveLength(2);
+    expect(abortSignals.every((signal) => signal.aborted)).toBe(true);
   });
 });
