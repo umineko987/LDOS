@@ -87,6 +87,9 @@ describe("desktop architecture boundaries", () => {
     const crawlModel = sourceEnding("/apps/crawl/model.ts");
     const tasks = sourceEnding("/apps/tasks/Tasks.svelte");
     const tasksState = sourceEnding("/apps/tasks/state.ts");
+    const proxy = sourceEnding("/apps/proxy/Proxy.svelte");
+    const proxyState = sourceEnding("/apps/proxy/state.ts");
+    const proxyModel = sourceEnding("/apps/proxy/model.ts");
     const window = sourceEnding("/shell/AppWindow.svelte");
     expect(crawl.match(/createCrawlStore\s*\(/g)).toHaveLength(1);
     expect(crawlState.match(/export function createCrawlStore\s*\(/g)).toHaveLength(1);
@@ -94,13 +97,17 @@ describe("desktop architecture boundaries", () => {
     expect(tasks.match(/createTasksStore\s*\(/g)).toHaveLength(1);
     expect(tasksState.match(/export function createTasksStore\s*\(/g)).toHaveLength(1);
     expect(tasksState).toContain("entities: Readonly<Record<string, TaskEntity>>");
+    expect(proxy.match(/createProxyStore\s*\(/g)).toHaveLength(1);
+    expect(proxyState.match(/export function createProxyStore\s*\(/g)).toHaveLength(1);
+    expect(proxyModel).toContain("nodes: Readonly<Record<string, ProxyNode>>");
     expect(window.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
     expect(window).toContain('record.appId === "crawl"');
     expect(window).toContain('record.appId === "tasks"');
-    expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/CrawlState|TasksState|BatchSummary|TaskEntity/);
+    expect(window).toContain('record.appId === "proxy"');
+    expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/CrawlState|TasksState|BatchSummary|TaskEntity|ProxyState|ProxyStatus/);
     for (const [path, source] of Object.entries(productionSources)) {
       if (!path.includes("/core/")) continue;
-      expect(source, path).not.toMatch(/from ["'][^"']*apps\/(?:crawl|tasks)/);
+      expect(source, path).not.toMatch(/from ["'][^"']*apps\/(?:crawl|tasks|proxy)/);
     }
   });
 });

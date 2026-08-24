@@ -1,5 +1,6 @@
 <script lang="ts">
   import Crawl from "../apps/crawl/Crawl.svelte";
+  import Proxy from "../apps/proxy/Proxy.svelte";
   import Tasks from "../apps/tasks/Tasks.svelte";
   import { getApplicationDefinition, type ApplicationId } from "../core/applications/definitions";
   import type { ApiClient } from "../core/api/client";
@@ -104,6 +105,8 @@
       <Crawl {api} {persistence} {onNavigate} />
     {:else if record.appId === "tasks"}
       <Tasks {api} {polling} {persistence} {onNavigate} />
+    {:else if record.appId === "proxy"}
+      <Proxy {api} {polling} />
     {:else}
       <ApplicationPlaceholder {application} />
     {/if}
