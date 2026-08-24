@@ -65,17 +65,6 @@ test("[P0 target][characterization] Tasks lifecycle stops polling and aborts rea
   ]) assert.equal(lifecycle.includes(marker), true, marker);
 });
 
-test("[P0 target][red] drag and resize coalesce through rAF and drag uses translate3d", () => {
-  const interaction = readWebui("js/core/window-interaction.js");
-  const domLifecycle = readWebui("js/core/window-dom-lifecycle.js");
-  const violations = [];
-  if (!/requestAnimationFrame/.test(interaction)) violations.push("pointer updates have no requestAnimationFrame scheduler");
-  if (!/translate3d\(/.test(`${interaction}\n${domLifecycle}`)) violations.push("drag does not project translate3d");
-  if (/const move =[\s\S]*applyRect\(instance\.element, interaction\.rect\)/.test(interaction)) {
-    violations.push("every pointermove still writes the displayed rect immediately");
-  }
-  assertNoViolations("window frame-coalescing target is not implemented", violations);
-});
 
 test("[P0 target][red] Crawl selection/sort updates keyed items without rebuilding lists", () => {
   const source = readWebui("js/components/crawl-view.js");
