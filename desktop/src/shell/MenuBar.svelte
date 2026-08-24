@@ -220,7 +220,7 @@
       </div>
     {/each}
   </nav>
-  <div class="menu-bar__summary" aria-label="桌面状态">
+  <div class="menu-bar__summary" role="group" aria-label="桌面状态">
     <span class="menu-bar__ready"><span aria-hidden="true">◆</span> 本地服务已连接</span>
     <span class="menu-bar__clock"><Icon name="clock" size={15} /> <time>{clock}</time></span>
   </div>

@@ -396,6 +396,11 @@
   cursor: nwse-resize;
 }
 
+.resize-handle:focus-visible {
+  outline-offset: -4px;
+  background: var(--imageweave-focus-glow);
+}
+
 .app-window[data-maximized] .resize-handle {
   display: none;
 }

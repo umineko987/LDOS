@@ -97,6 +97,7 @@ describe("five-layer Svelte OS shell", () => {
     const dock = componentSources["../src/shell/Dock.svelte"];
     const dialog = componentSources["../src/shell/Dialog.svelte"];
     const layer = componentSources["../src/shell/WindowLayer.svelte"];
+    const appWindow = componentSources["../src/shell/AppWindow.svelte"];
     for (const source of [menu, center, dock, dialog]) {
       expect(source).toContain("Escape");
       expect(source).toContain("onkeydown");
@@ -111,6 +112,9 @@ describe("five-layer Svelte OS shell", () => {
     expect(dock).toContain('removeEventListener("pointerdown"');
     expect(layer).toContain("observer?.disconnect()");
     expect(layer).toContain('removeEventListener("resize"');
+    expect(appWindow).toContain('role="document"');
+    expect(appWindow).not.toContain("<main");
+    expect(appWindow).toContain('role="group" aria-label="窗口操作"');
   });
 
   it("uses one minimal application-content boundary and never accesses storage or APIs from shell views", () => {

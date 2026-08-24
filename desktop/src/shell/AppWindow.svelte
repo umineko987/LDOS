@@ -58,7 +58,7 @@
     tabindex="-1"
     onpointerdown={beginMove}
   >
-    <div class="traffic-lights" aria-label="窗口操作">
+    <div class="traffic-lights" role="group" aria-label="窗口操作">
       <button
         type="button"
         class="traffic-light traffic-light--close"
@@ -86,9 +86,9 @@
     <span class="app-window__title-balance" aria-hidden="true"></span>
   </header>
 
-  <main class="app-window__body" data-window-body tabindex="-1">
+  <div class="app-window__body" data-window-body role="document" tabindex="-1">
     <ApplicationPlaceholder {application} />
-  </main>
+  </div>
 
   <button
     type="button"
