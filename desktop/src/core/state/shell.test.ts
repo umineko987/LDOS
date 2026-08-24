@@ -75,7 +75,11 @@ describe("desktop shell state owner", () => {
     expect(shell.commitWindowRect("crawl", { x: 72, y: 48, w: 760, h: 510 })).toBe(false);
     expect(shell.commitWindowRect(unknown, { x: 0, y: 0, w: 400, h: 300 })).toBe(false);
 
-    await expect(shell.requestMinimize("crawl")).resolves.toBe(true);
+    const beforeMinimize = vi.fn(() => {
+      expect(shell.getState().windows.find(({ appId }) => appId === "crawl")?.state).toBe("normal");
+    });
+    await expect(shell.requestMinimize("crawl", beforeMinimize)).resolves.toBe(true);
+    expect(beforeMinimize).toHaveBeenCalledOnce();
     expect(shell.getState().focusedAppId).toBe("review");
     expect(shell.getState().windows.find(({ appId }) => appId === "crawl")?.state).toBe("minimized");
     expect(shell.focusApplication("crawl")).toBe(false);
@@ -84,7 +88,11 @@ describe("desktop shell state owner", () => {
 
     expect(shell.restoreApplication("crawl")).toBe(true);
     expect(shell.getState().windows.at(-1)?.state).toBe("normal");
-    await expect(shell.requestClose("crawl")).resolves.toBe(true);
+    const beforeClose = vi.fn(() => {
+      expect(shell.getState().windows.some(({ appId }) => appId === "crawl")).toBe(true);
+    });
+    await expect(shell.requestClose("crawl", beforeClose)).resolves.toBe(true);
+    expect(beforeClose).toHaveBeenCalledOnce();
     expect(shell.getState().focusedAppId).toBe("review");
     await expect(shell.requestClose("crawl")).resolves.toBe(false);
     await expect(shell.requestLeave("crawl")).resolves.toBe(false);
@@ -136,9 +144,12 @@ describe("desktop shell state owner", () => {
     await expect(first).resolves.toBe(false);
     expect(shell.getState().windows.find(({ appId }) => appId === "policy")?.state).toBe("normal");
 
-    const close = shell.requestClose("policy");
+    const beforeConfirmedClose = vi.fn();
+    const close = shell.requestClose("policy", beforeConfirmedClose);
+    expect(beforeConfirmedClose).not.toHaveBeenCalled();
     expect(shell.resolveConfirmation(true)).toBe(true);
     await expect(close).resolves.toBe(true);
+    expect(beforeConfirmedClose).toHaveBeenCalledOnce();
     expect(shell.getState().confirmation).toBeNull();
     expect(shell.resolveConfirmation(true)).toBe(false);
 

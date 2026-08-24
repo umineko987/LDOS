@@ -2,12 +2,18 @@
   import { onMount } from "svelte";
 
   import { ApiError, createApiClient } from "./core/api/client";
+  import { createPersistenceAdapter } from "./core/persistence/adapter";
+  import { createPersistenceService } from "./core/persistence/service";
   import { createPlatformAdapter } from "./core/platform/adapter";
   import { sanitizeHealthSnapshot, type BackendStatus } from "./core/runtime/sanitize";
+  import { createShellStore } from "./core/state/shell";
+  import Desktop from "./shell/Desktop.svelte";
 
   type BootstrapPhase = "starting" | "ready" | "failed";
 
   const platform = createPlatformAdapter();
+  const persistence = createPersistenceService(createPersistenceAdapter());
+  const shell = createShellStore({ persistence });
   let phase = $state<BootstrapPhase>("starting");
   let message = $state("正在启动本地服务");
   let backendVersion = $state<string | null>(null);
@@ -65,23 +71,24 @@
       active = false;
       controller?.abort();
       stopWatching();
+      shell.destroy();
     };
   });
 </script>
 
 <svelte:head>
-  <meta name="theme-color" content="#090d16" />
+  <meta name="theme-color" content="#060a13" />
 </svelte:head>
 
-<main class="bootstrap-desktop" data-product-contract="nocturne-glass-desktop">
-  <div class="bootstrap-menu" aria-hidden="true">ImageWeave</div>
-  <section class="bootstrap-window" aria-labelledby="bootstrap-title" aria-live="polite">
-    <span class="bootstrap-kicker">TAURI · SVELTE</span>
-    <h1 id="bootstrap-title">ImageWeave</h1>
-    <p class="bootstrap-status" data-phase={phase}>{message}</p>
-    {#if backendVersion}
-      <small>Backend {backendVersion}</small>
-    {/if}
-  </section>
-  <div class="bootstrap-dock" aria-hidden="true"></div>
-</main>
+{#if phase === "ready"}
+  <Desktop {shell} {persistence} />
+{:else}
+  <main class="startup-gate" data-startup-phase={phase} aria-labelledby="startup-title" aria-live="polite">
+    <section>
+      <p>ImageWeave Desktop</p>
+      <h1 id="startup-title">{phase === "failed" ? "桌面宿主暂时不可用" : "正在准备夜航桌面"}</h1>
+      <p class="startup-gate__status">{message}</p>
+      {#if backendVersion}<small>Backend {backendVersion}</small>{/if}
+    </section>
+  </main>
+{/if}

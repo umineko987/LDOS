@@ -51,8 +51,8 @@ export interface ShellStore {
   openApplication(appId: ApplicationId): boolean;
   focusApplication(appId: ApplicationId): boolean;
   restoreApplication(appId: ApplicationId): boolean;
-  requestMinimize(appId: ApplicationId): Promise<boolean>;
-  requestClose(appId: ApplicationId): Promise<boolean>;
+  requestMinimize(appId: ApplicationId, beforeHide?: () => void): Promise<boolean>;
+  requestClose(appId: ApplicationId, beforeHide?: () => void): Promise<boolean>;
   requestLeave(appId: ApplicationId): Promise<boolean>;
   toggleMaximized(appId: ApplicationId): boolean;
   commitWindowRect(appId: ApplicationId, rect: WindowRect): boolean;
@@ -241,14 +241,20 @@ export function createShellStore({
     openApplication,
     focusApplication,
     restoreApplication: openApplication,
-    requestMinimize(appId) {
+    requestMinimize(appId, beforeHide) {
       return recordFor(appId)
-        ? protectedOperation(appId, "minimize", () => minimizeNow(appId))
+        ? protectedOperation(appId, "minimize", () => {
+            beforeHide?.();
+            return minimizeNow(appId);
+          })
         : Promise.resolve(false);
     },
-    requestClose(appId) {
+    requestClose(appId, beforeHide) {
       return recordFor(appId)
-        ? protectedOperation(appId, "close", () => closeNow(appId))
+        ? protectedOperation(appId, "close", () => {
+            beforeHide?.();
+            return closeNow(appId);
+          })
         : Promise.resolve(false);
     },
     requestLeave(appId) {
