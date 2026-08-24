@@ -34,6 +34,7 @@ export interface PollingRegistration<T> {
   readonly intervalMs: number;
   readonly immediate?: boolean;
   readonly critical: boolean;
+  readonly alwaysFocusRate?: boolean;
   readonly task: (signal: AbortSignal) => Promise<T>;
   readonly onResult: (result: T) => void;
   readonly onError?: (error: unknown) => void;
@@ -66,6 +67,7 @@ interface Entry {
   readonly scope: string;
   readonly intervalMs: number;
   readonly critical: boolean;
+  readonly alwaysFocusRate: boolean;
   readonly task: (signal: AbortSignal) => Promise<unknown>;
   readonly onResult: (result: unknown) => void;
   readonly onError: (error: unknown) => void;
@@ -156,7 +158,7 @@ export function createPollingService({
     const state = scopeState(entry.scope);
     if (state === POLLING_SCOPE_STATES.MINIMIZED || state === POLLING_SCOPE_STATES.CLOSED) return null;
     if (!entry.critical && visibilitySource.getState() === "hidden") return null;
-    if (state === POLLING_SCOPE_STATES.OPEN && focusedScope() !== entry.scope) {
+    if (state === POLLING_SCOPE_STATES.OPEN && !entry.alwaysFocusRate && focusedScope() !== entry.scope) {
       return entry.intervalMs * BACKGROUND_POLL_MULTIPLIER;
     }
     return entry.intervalMs;
@@ -269,6 +271,7 @@ export function createPollingService({
       intervalMs,
       immediate = true,
       critical,
+      alwaysFocusRate = false,
       task,
       onResult,
       onError = () => {},
@@ -295,6 +298,7 @@ export function createPollingService({
         scope: normalizedScope,
         intervalMs,
         critical,
+        alwaysFocusRate,
         task: task as (signal: AbortSignal) => Promise<unknown>,
         onResult: onResult as (result: unknown) => void,
         onError,

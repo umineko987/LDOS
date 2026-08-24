@@ -62,6 +62,7 @@ class MutableLifecycle implements PollingLifecycleSource {
   readonly states = new Map<string, (typeof POLLING_SCOPE_STATES)[keyof typeof POLLING_SCOPE_STATES]>([
     ["app:tasks", POLLING_SCOPE_STATES.OPEN],
     ["app:crawl", POLLING_SCOPE_STATES.OPEN],
+    ["app:vault", POLLING_SCOPE_STATES.OPEN],
   ]);
   readonly listeners = new Set<() => void>();
 
@@ -272,6 +273,29 @@ describe("the one frontend polling service", () => {
     expect(service.stopScope("app:tasks")).toBe(0);
     expect(service.stopScope("global")).toBe(1);
     expect(() => service.stopScope("bad scope")).toThrow("invalid_polling_scope");
+    service.destroy();
+  });
+
+  it("keeps an always-focus-rate app at its declared interval when unfocused", () => {
+    const { timers, lifecycle, service } = runtime();
+    const handle = service.start({
+      key: "vault.authorization",
+      scope: "app:vault",
+      intervalMs: 800,
+      immediate: false,
+      critical: false,
+      alwaysFocusRate: true,
+      task: async () => "ok",
+      onResult() {},
+    });
+    lifecycle.focused = "app:tasks";
+    lifecycle.emit();
+    expect(service.getSummary()).toEqual([expect.objectContaining({
+      key: "vault.authorization",
+      effectiveIntervalMs: 800,
+    })]);
+    expect(timers.delays()).toEqual([800]);
+    expect(handle.stop()).toBe(true);
     service.destroy();
   });
 
