@@ -4,8 +4,8 @@ import test from "node:test";
 import { readSourceText } from "./source-test-text.mjs";
 
 // This suite is intentionally excluded from scripts/run-webui-coverage.py.
-// P3 Tasks targets now live under desktop/. This legacy source target retains
-// only the P4 Crawl expected red and frozen lifecycle characterizations.
+// P3 Tasks and P4 Crawl targets now live under desktop/. This legacy source
+// target retains only lifecycle characterizations that still protect the frozen WebUI.
 const WEBUI = new URL("../gdl_backend/webui/", import.meta.url);
 const readWebui = (path) => readSourceText(new URL(path, WEBUI));
 
@@ -17,9 +17,6 @@ function section(source, start, end) {
   return source.slice(first, last);
 }
 
-function assertNoViolations(label, violations) {
-  assert.deepEqual(violations, [], `${label}:\n- ${violations.join("\n- ")}`);
-}
 
 
 test("[P0 target][characterization] Tasks lifecycle stops polling and aborts reads", () => {
@@ -35,16 +32,6 @@ test("[P0 target][characterization] Tasks lifecycle stops polling and aborts rea
 });
 
 
-test("[P0 target][red] Crawl selection/sort updates keyed items without rebuilding lists", () => {
-  const source = readWebui("js/components/crawl-view.js");
-  const navigation = section(source, "const renderSourceNavigation =", "const renderCurrentSource =");
-  const currentSource = section(source, "const renderCurrentSource =", "const renderSummary =");
-  const violations = [];
-  if (navigation.includes("replaceChildren(")) violations.push("source navigation is rebuilt with replaceChildren");
-  if (currentSource.includes("replaceChildren(")) violations.push("current candidate list is rebuilt with replaceChildren");
-  if (!/sourceKey|candidateKey/.test(`${navigation}\n${currentSource}`)) violations.push("stable business keys are absent");
-  assertNoViolations("Crawl keyed-update target is not implemented", violations);
-});
 
 test("[P0 target][characterization] Review releases listeners, observer, rAF and images", () => {
   const source = readWebui("js/components/review-view.js");
