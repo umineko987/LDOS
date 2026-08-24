@@ -1,0 +1,233 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  min-width: 320px;
+  color: var(--imageweave-text-body);
+  background: var(--imageweave-background-deepest);
+  font-size: 16px;
+  line-height: 1.55;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--imageweave-border-button);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-heading);
+  background: var(--imageweave-glass-surface-button);
+  box-shadow: var(--imageweave-shadow-control);
+  cursor: pointer;
+  transition:
+    color var(--imageweave-transition-standard),
+    background-color var(--imageweave-transition-standard),
+    border-color var(--imageweave-transition-standard),
+    box-shadow var(--imageweave-transition-standard),
+    transform var(--imageweave-transition-standard);
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--imageweave-border-focus);
+  background: var(--imageweave-glass-surface-hover);
+  transform: translateY(-2px);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+button:disabled,
+button[aria-disabled="true"] {
+  color: var(--imageweave-text-muted);
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--imageweave-accent);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--imageweave-focus-glow);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--imageweave-text-heading);
+  font-family: var(--imageweave-font-display);
+  font-weight: 600;
+}
+
+.visually-hidden {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
+}
+
+.startup-gate {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 32px;
+  background:
+    radial-gradient(640px circle at 85% 10%, rgb(124 156 196 / 0.25), transparent 60%),
+    radial-gradient(560px circle at 10% 90%, rgb(51 81 122 / 0.30), transparent 60%),
+    #080d15;
+}
+
+.startup-gate > section {
+  width: min(540px, 100%);
+  padding: 32px;
+  border: 1px solid var(--imageweave-border-default);
+  border-radius: var(--imageweave-radius-window);
+  background: var(--imageweave-fallback-elevated-solid);
+  box-shadow: var(--imageweave-shadow-window);
+  text-align: center;
+}
+
+.startup-gate h1 {
+  margin-bottom: 12px;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+
+.startup-gate > section > p:first-child {
+  margin-bottom: 8px;
+  color: var(--imageweave-accent-highlight);
+}
+
+.startup-gate__status {
+  color: var(--imageweave-text-body);
+}
+
+.startup-gate small {
+  color: var(--imageweave-text-muted);
+  font-family: var(--imageweave-font-mono);
+}
+
+.skip-link {
+  position: fixed;
+  top: 7px;
+  left: 8px;
+  z-index: 200;
+  transform: translateY(-180%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.desktop-size-blocker {
+  display: none;
+}
+
+:root[data-motion="off"] *,
+:root[data-motion="off"] *::before,
+:root[data-motion="off"] *::after {
+  scroll-behavior: auto !important;
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 1179px), (max-height: 719px) {
+  .desktop {
+    display: none !important;
+  }
+
+  .desktop-size-blocker {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    color: CanvasText;
+    background: Canvas;
+  }
+
+  .desktop-size-blocker > div {
+    width: min(540px, 100%);
+    padding: 28px;
+    border: 2px solid CanvasText;
+    border-radius: var(--imageweave-radius-window);
+    text-align: center;
+  }
+}
+
+@media (forced-colors: active) {
+  *,
+  *::before,
+  *::after {
+    background-image: none !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    filter: none !important;
+    opacity: 1 !important;
+    animation: none !important;
+    transition: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  html,
+  body,
+  #app {
+    color: CanvasText;
+    background: Canvas;
+  }
+
+  button {
+    border-color: ButtonText;
+    color: ButtonText;
+    background: ButtonFace;
+    forced-color-adjust: auto;
+  }
+
+  button:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 3px solid Highlight !important;
+  }
+}

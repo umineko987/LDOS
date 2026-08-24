@@ -1,0 +1,77 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  font-synthesis: none;
+  color: rgb(255 255 255 / 0.84);
+  background: #060a13;
+
+  --imageweave-font-display: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif;
+  --imageweave-font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+
+  --imageweave-background-deepest: #060a13;
+  --imageweave-background-default: #0b1322;
+  --imageweave-fallback-window-solid: #0b1322;
+  --imageweave-fallback-elevated-solid: #111a29;
+  --imageweave-interaction-surface: rgb(11 19 34 / 0.96);
+
+  --imageweave-text-heading: rgb(255 255 255 / 1);
+  --imageweave-text-body: rgb(255 255 255 / 0.84);
+  --imageweave-text-muted: rgb(255 255 255 / 0.62);
+  --imageweave-text-fact: rgb(255 255 255 / 0.88);
+
+  --imageweave-accent: #e4b863;
+  --imageweave-accent-highlight: #f3dca8;
+  --imageweave-focus-glow: rgb(228 184 99 / 0.18);
+  --imageweave-state-danger: #ff8f88;
+  --imageweave-state-warning: #f3c66d;
+  --imageweave-state-success: #72d6a5;
+  --imageweave-state-running: #8cc8ff;
+
+  --imageweave-glass-surface-weak: rgb(255 255 255 / 0.04);
+  --imageweave-glass-surface-secondary: rgb(255 255 255 / 0.05);
+  --imageweave-glass-surface-input: rgb(255 255 255 / 0.06);
+  --imageweave-glass-surface-default: rgb(255 255 255 / 0.08);
+  --imageweave-glass-surface-button: rgb(255 255 255 / 0.10);
+  --imageweave-glass-surface-environment: rgb(255 255 255 / 0.12);
+  --imageweave-glass-surface-hover: rgb(255 255 255 / 0.15);
+
+  --imageweave-border-weak: rgb(255 255 255 / 0.10);
+  --imageweave-border-default: rgb(255 255 255 / 0.15);
+  --imageweave-border-button: rgb(255 255 255 / 0.20);
+  --imageweave-border-focus: rgb(255 255 255 / 0.35);
+
+  --imageweave-glass-blur-environment: 40px;
+  --imageweave-glass-blur-window: 60px;
+  --imageweave-glass-saturation: 180%;
+  --imageweave-radius-window: 24px;
+  --imageweave-radius-card: 24px;
+  --imageweave-radius-control: 16px;
+  --imageweave-radius-pill: 999px;
+
+  --imageweave-shadow-window:
+    0 16px 48px rgb(3 7 18 / 0.55),
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    inset 0 1px 0 rgb(255 255 255 / 0.25),
+    inset 0 -1px 0 rgb(2 6 16 / 0.35);
+  --imageweave-shadow-control:
+    0 4px 16px rgb(3 7 18 / 0.45),
+    inset 0 1px 0 rgb(255 255 255 / 0.25),
+    inset 0 -1px 0 rgb(2 6 16 / 0.30);
+
+  --imageweave-motion-duration: 500ms;
+  --imageweave-motion-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --imageweave-transition-standard: var(--imageweave-motion-duration) var(--imageweave-motion-easing);
+  --imageweave-menubar-height: 32px;
+  --imageweave-dock-height: 72px;
+  --imageweave-window-title-height: 44px;
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --imageweave-text-body: rgb(255 255 255 / 1);
+    --imageweave-text-muted: rgb(255 255 255 / 0.80);
+    --imageweave-border-weak: rgb(255 255 255 / 0.20);
+    --imageweave-border-default: rgb(255 255 255 / 0.35);
+    --imageweave-border-button: rgb(255 255 255 / 0.35);
+  }
+}

@@ -75,6 +75,7 @@
       type="button"
       class="application-center__backdrop"
       data-application-center-backdrop
+      tabindex="-1"
       aria-label="关闭应用中心"
       onclick={() => close()}
     ></button>

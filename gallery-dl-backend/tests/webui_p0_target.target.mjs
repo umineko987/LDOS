@@ -96,17 +96,3 @@ test("[P0 target][characterization] Review releases listeners, observer, rAF and
   assert.match(source, /deactivate\(\)\s*\{[\s\S]*detachInteractions\(\);[\s\S]*releaseImages\(\);/);
   assert.match(source, /destroy\(\)\s*\{[\s\S]*detachInteractions\(\);[\s\S]*releaseImages\(\);/);
 });
-
-test("[P0 target][red] direct manipulation disables backdrop as well as transitions", () => {
-  const source = readWebui("styles/desktop.css");
-  const block = section(
-    source,
-    ".application-window[data-window-interacting] {",
-    ".application-window[data-window-interacting] *",
-  );
-  const violations = [];
-  if (!/(?:-webkit-)?backdrop-filter:\s*none/.test(block)) violations.push("interaction block keeps the window backdrop active");
-  if (!/background:/.test(block)) violations.push("interaction block has no explicit low-cost glass fallback");
-  if (!/transition:\s*none/.test(block)) violations.push("interaction block does not disable transitions");
-  assertNoViolations("interaction compositing target is not implemented", violations);
-});

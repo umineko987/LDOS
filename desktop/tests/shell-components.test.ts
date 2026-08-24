@@ -43,6 +43,7 @@ describe("five-layer Svelte OS shell", () => {
     );
     expect(body).toContain('data-product-contract="nocturne-glass-desktop"');
     expect(body).toContain('role="dialog" aria-modal="true"');
+    expect(body).toContain("data-application-center-backdrop");
     expect(occurrences(body, "data-application-center-app=")).toBe(10);
     expect(body).toContain('data-availability="preview"');
   });
