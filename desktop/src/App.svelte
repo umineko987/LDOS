@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import { ApiError, createApiClient } from "./core/api/client";
+  import { ApiError, createApiClient, type ApiClient } from "./core/api/client";
   import { createPersistenceAdapter } from "./core/persistence/adapter";
   import { createPersistenceService } from "./core/persistence/service";
   import { createPlatformAdapter } from "./core/platform/adapter";
@@ -20,6 +20,7 @@
   let phase = $state<BootstrapPhase>("starting");
   let message = $state("正在启动本地服务");
   let backendVersion = $state<string | null>(null);
+  let api = $state<ApiClient | null>(null);
 
   onMount(() => {
     let active = true;
@@ -32,12 +33,16 @@
       if (status.state === "starting") {
         phase = "starting";
         message = status.message;
+        connected = false;
+        api = null;
+        controller?.abort();
         return;
       }
       if (status.state !== "ready") {
         phase = "failed";
         message = status.message;
         connected = false;
+        api = null;
         controller?.abort();
         return;
       }
@@ -47,16 +52,20 @@
       controller = new AbortController();
       try {
         const runtime = await platform.getRuntimeMetadata();
+        const client = createApiClient(runtime);
         const health = sanitizeHealthSnapshot(
-          await createApiClient(runtime).get("/healthz", { signal: controller.signal }),
+          await client.get("/healthz", { signal: controller.signal }),
         );
         if (!active) return;
         if (!health.ok) {
           phase = "failed";
           message = "本地服务健康检查失败";
+          connected = false;
+          api = null;
           return;
         }
         backendVersion = runtime.backendVersion;
+        api = client;
         connected = true;
         phase = "ready";
         message = "本地服务已就绪";
@@ -64,6 +73,8 @@
         if (!active || (error instanceof DOMException && error.name === "AbortError")) return;
         phase = "failed";
         message = error instanceof ApiError ? error.message : "无法读取本地服务状态";
+        connected = false;
+        api = null;
       } finally {
         connecting = false;
       }
@@ -89,8 +100,8 @@
   <meta name="theme-color" content="#060a13" />
 </svelte:head>
 
-{#if phase === "ready"}
-  <Desktop {shell} {persistence} />
+{#if phase === "ready" && api}
+  <Desktop {shell} {persistence} {polling} {api} />
 {:else}
   <main class="startup-gate" data-startup-phase={phase} aria-labelledby="startup-title" aria-live="polite">
     <section>

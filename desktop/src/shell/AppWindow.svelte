@@ -1,5 +1,9 @@
 <script lang="ts">
+  import Tasks from "../apps/tasks/Tasks.svelte";
   import { getApplicationDefinition, type ApplicationId } from "../core/applications/definitions";
+  import type { ApiClient } from "../core/api/client";
+  import type { PersistenceService } from "../core/persistence/service";
+  import type { PollingService } from "../core/polling/service";
   import type { WindowRecord } from "../core/state/shell";
   import type { ResizeDirection } from "../core/windowing/geometry";
   import type { WindowInteractionMode } from "../core/windowing/interaction";
@@ -7,7 +11,11 @@
 
   interface Props {
     record: WindowRecord;
+    api: ApiClient;
+    polling: PollingService;
+    persistence: PersistenceService;
     focused: boolean;
+    onNavigate: (appId: ApplicationId) => void;
     onFocus: (appId: ApplicationId) => void;
     onMinimize: (appId: ApplicationId) => void;
     onToggleMaximized: (appId: ApplicationId) => void;
@@ -18,6 +26,10 @@
 
   let {
     record,
+    api,
+    polling,
+    persistence,
+    onNavigate,
     focused,
     onFocus,
     onMinimize,
@@ -87,7 +99,11 @@
   </header>
 
   <div class="app-window__body" data-window-body role="document" tabindex="-1">
-    <ApplicationPlaceholder {application} />
+    {#if record.appId === "tasks"}
+      <Tasks {api} {polling} {persistence} {onNavigate} />
+    {:else}
+      <ApplicationPlaceholder {application} />
+    {/if}
   </div>
 
   <button

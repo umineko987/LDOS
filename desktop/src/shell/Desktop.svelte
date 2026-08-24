@@ -2,8 +2,10 @@
   import { onMount, tick } from "svelte";
 
   import type { ApplicationId } from "../core/applications/definitions";
+  import type { ApiClient } from "../core/api/client";
   import { restoreFocus } from "../core/a11y/focus";
   import type { PersistenceService } from "../core/persistence/service";
+  import type { PollingService } from "../core/polling/service";
   import { createHashRouter, type HashRouter, type RouteChange } from "../core/routing/hash";
   import type { DockItemProjection } from "../core/state/projections";
   import type { ShellStore } from "../core/state/shell";
@@ -14,7 +16,12 @@
   import Wallpaper from "./Wallpaper.svelte";
   import WindowLayer from "./WindowLayer.svelte";
 
-  let { shell, persistence }: { shell: ShellStore; persistence: PersistenceService } = $props();
+  let { shell, persistence, polling, api }: {
+    shell: ShellStore;
+    persistence: PersistenceService;
+    polling: PollingService;
+    api: ApiClient;
+  } = $props();
   let desktop = $state<HTMLElement>();
   let router: HashRouter | null = null;
   let routeGeneration = 0;
@@ -162,6 +169,10 @@
   />
   <WindowLayer
     {shell}
+    {api}
+    {polling}
+    {persistence}
+    onNavigate={navigate}
     onFocus={focusWindow}
     onMinimize={(appId) => void minimizeWindow(appId)}
     onToggleMaximized={toggleMaximized}

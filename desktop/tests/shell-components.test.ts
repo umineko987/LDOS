@@ -1,8 +1,10 @@
 import { render } from "svelte/server";
 import { describe, expect, it } from "vitest";
 
+import type { ApiClient } from "../src/core/api/client";
 import { createPersistenceAdapter } from "../src/core/persistence/adapter";
 import { createPersistenceService } from "../src/core/persistence/service";
+import type { PollingService } from "../src/core/polling/service";
 import { createShellStore } from "../src/core/state/shell";
 import Desktop from "../src/shell/Desktop.svelte";
 
@@ -11,6 +13,9 @@ const componentSources = import.meta.glob<string>("../src/shell/*.svelte", {
   import: "default",
   query: "?raw",
 });
+
+const api = Object.freeze({}) as ApiClient;
+const polling = Object.freeze({}) as PollingService;
 
 function runtime(options: Parameters<typeof createShellStore>[0] = {}) {
   const persistence = createPersistenceService(createPersistenceAdapter({
@@ -22,7 +27,7 @@ function runtime(options: Parameters<typeof createShellStore>[0] = {}) {
 }
 
 function renderDesktop(shell: ReturnType<typeof createShellStore>, persistence: ReturnType<typeof createPersistenceService>): string {
-  return render(Desktop, { props: { shell, persistence } }).body;
+  return render(Desktop, { props: { shell, persistence, polling, api } }).body;
 }
 
 function occurrences(source: string, value: string): number {

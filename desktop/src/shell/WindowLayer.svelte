@@ -2,6 +2,9 @@
   import { onMount } from "svelte";
 
   import type { ApplicationId } from "../core/applications/definitions";
+  import type { ApiClient } from "../core/api/client";
+  import type { PersistenceService } from "../core/persistence/service";
+  import type { PollingService } from "../core/polling/service";
   import { isDockHidden, type ShellStore } from "../core/state/shell";
   import {
     clampWindowRect,
@@ -19,13 +22,27 @@
 
   interface Props {
     shell: ShellStore;
+    api: ApiClient;
+    polling: PollingService;
+    persistence: PersistenceService;
+    onNavigate: (appId: ApplicationId) => void;
     onFocus: (appId: ApplicationId) => void;
     onMinimize: (appId: ApplicationId) => void;
     onToggleMaximized: (appId: ApplicationId) => void;
     onClose: (appId: ApplicationId) => void;
   }
 
-  let { shell, onFocus, onMinimize, onToggleMaximized, onClose }: Props = $props();
+  let {
+    shell,
+    api,
+    polling,
+    persistence,
+    onNavigate,
+    onFocus,
+    onMinimize,
+    onToggleMaximized,
+    onClose,
+  }: Props = $props();
   let layer = $state<HTMLDivElement>();
   let interaction: WindowInteractionEngine | null = null;
   const snapshot = $derived($shell);
@@ -100,6 +117,10 @@
   {#each visibleWindows as record (record.appId)}
     <AppWindow
       {record}
+      {api}
+      {polling}
+      {persistence}
+      {onNavigate}
       focused={record.appId === snapshot.focusedAppId}
       {onFocus}
       {onMinimize}

@@ -370,4 +370,17 @@ describe("Tasks controller lifecycle", () => {
     expect(listener).toHaveBeenCalledTimes(calls);
     runtime.polling.destroy();
   });
+
+  it("returns requests, timers, and registrations to baseline across 20 mount/destroy cycles", async () => {
+    for (let cycle = 0; cycle < 20; cycle += 1) {
+      const runtime = harness();
+      runtime.controller.activate();
+      await flush();
+      expect(runtime.polling.getSummary()).toHaveLength(1);
+      runtime.controller.destroy();
+      expect(runtime.polling.getSummary()).toEqual([]);
+      expect(runtime.timers.timers.size).toBe(0);
+      runtime.polling.destroy();
+    }
+  });
 });

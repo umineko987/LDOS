@@ -80,4 +80,20 @@ describe("desktop architecture boundaries", () => {
       expect(source, path).not.toMatch(/\bsetInterval\s*\(/);
     }
   });
+
+  it("keeps one Tasks domain owner outside shell state and one remaining placeholder path", () => {
+    const tasks = sourceEnding("/apps/tasks/Tasks.svelte");
+    const state = sourceEnding("/apps/tasks/state.ts");
+    const window = sourceEnding("/shell/AppWindow.svelte");
+    expect(tasks.match(/createTasksStore\s*\(/g)).toHaveLength(1);
+    expect(state.match(/export function createTasksStore\s*\(/g)).toHaveLength(1);
+    expect(state).toContain("entities: Readonly<Record<string, TaskEntity>>");
+    expect(window.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
+    expect(window).toContain('record.appId === "tasks"');
+    expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/BatchSummary|TaskEntity|TasksState/);
+    for (const [path, source] of Object.entries(productionSources)) {
+      if (!path.includes("/core/")) continue;
+      expect(source, path).not.toMatch(/from ["'][^"']*apps\/tasks/);
+    }
+  });
 });
