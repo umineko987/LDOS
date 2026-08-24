@@ -81,19 +81,26 @@ describe("desktop architecture boundaries", () => {
     }
   });
 
-  it("keeps one Tasks domain owner outside shell state and one remaining placeholder path", () => {
+  it("keeps each migrated domain owner outside shell state and one placeholder path", () => {
+    const crawl = sourceEnding("/apps/crawl/Crawl.svelte");
+    const crawlState = sourceEnding("/apps/crawl/state.ts");
+    const crawlModel = sourceEnding("/apps/crawl/model.ts");
     const tasks = sourceEnding("/apps/tasks/Tasks.svelte");
-    const state = sourceEnding("/apps/tasks/state.ts");
+    const tasksState = sourceEnding("/apps/tasks/state.ts");
     const window = sourceEnding("/shell/AppWindow.svelte");
+    expect(crawl.match(/createCrawlStore\s*\(/g)).toHaveLength(1);
+    expect(crawlState.match(/export function createCrawlStore\s*\(/g)).toHaveLength(1);
+    expect(crawlModel).toContain("candidates: Readonly<Record<CrawlCandidateKey, CrawlCandidate>>");
     expect(tasks.match(/createTasksStore\s*\(/g)).toHaveLength(1);
-    expect(state.match(/export function createTasksStore\s*\(/g)).toHaveLength(1);
-    expect(state).toContain("entities: Readonly<Record<string, TaskEntity>>");
+    expect(tasksState.match(/export function createTasksStore\s*\(/g)).toHaveLength(1);
+    expect(tasksState).toContain("entities: Readonly<Record<string, TaskEntity>>");
     expect(window.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
+    expect(window).toContain('record.appId === "crawl"');
     expect(window).toContain('record.appId === "tasks"');
-    expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/BatchSummary|TaskEntity|TasksState/);
+    expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/CrawlState|TasksState|BatchSummary|TaskEntity/);
     for (const [path, source] of Object.entries(productionSources)) {
       if (!path.includes("/core/")) continue;
-      expect(source, path).not.toMatch(/from ["'][^"']*apps\/tasks/);
+      expect(source, path).not.toMatch(/from ["'][^"']*apps\/(?:crawl|tasks)/);
     }
   });
 });

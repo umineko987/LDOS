@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Crawl from "../apps/crawl/Crawl.svelte";
   import Tasks from "../apps/tasks/Tasks.svelte";
   import { getApplicationDefinition, type ApplicationId } from "../core/applications/definitions";
   import type { ApiClient } from "../core/api/client";
@@ -99,7 +100,9 @@
   </header>
 
   <div class="app-window__body" data-window-body role="document" tabindex="-1">
-    {#if record.appId === "tasks"}
+    {#if record.appId === "crawl"}
+      <Crawl {api} {persistence} {onNavigate} />
+    {:else if record.appId === "tasks"}
       <Tasks {api} {polling} {persistence} {onNavigate} />
     {:else}
       <ApplicationPlaceholder {application} />

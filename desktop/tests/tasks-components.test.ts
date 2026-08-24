@@ -66,12 +66,13 @@ describe("Svelte Tasks integration", () => {
     expect(body).not.toContain("P2 Shell");
   });
 
-  it("uses Tasks for the only tasks window path and leaves the other nine on one placeholder path", () => {
+  it("uses Tasks for its only window path while Crawl has its own real branch", () => {
     const tasks = render(AppWindow, { props: { ...windowProps, record: record("tasks") } }).body;
     const crawl = render(AppWindow, { props: { ...windowProps, record: record("crawl") } }).body;
     expect(tasks).toContain("data-tasks-app");
     expect(tasks).not.toContain('data-application-content="tasks"');
-    expect(crawl).toContain('data-application-content="crawl"');
+    expect(crawl).toContain("data-crawl-app");
+    expect(crawl).not.toContain('data-application-content="crawl"');
     expect(appWindowSource.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
     expect(appWindowSource).toContain('record.appId === "tasks"');
     expect(appWindowSource).toContain("<Tasks {api} {polling} {persistence} {onNavigate} />");
