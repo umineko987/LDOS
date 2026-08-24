@@ -17,23 +17,15 @@ interface LocationSource {
   readonly origin: string;
 }
 
-type IntervalHandle = ReturnType<typeof globalThis.setInterval>;
-type SetInterval = (callback: () => void, delay: number) => IntervalHandle;
-type ClearInterval = (handle: IntervalHandle) => void;
-
 interface PlatformDependencies {
   readonly bridge?: TauriBridge;
   readonly location?: LocationSource;
-  readonly pollIntervalMs?: number;
-  readonly setIntervalFn?: SetInterval;
-  readonly clearIntervalFn?: ClearInterval;
 }
 
 export interface PlatformAdapter {
   readonly mode: "browser" | "tauri";
   getRuntimeMetadata(): Promise<RuntimeMetadata>;
   getBackendStatus(): Promise<BackendStatus>;
-  watchBackendStatus(listener: (status: BackendStatus) => void): () => void;
 }
 
 const defaultBridge: TauriBridge = {
@@ -44,9 +36,6 @@ const defaultBridge: TauriBridge = {
 export function createPlatformAdapter({
   bridge = defaultBridge,
   location = globalThis.location,
-  pollIntervalMs = 500,
-  setIntervalFn = globalThis.setInterval,
-  clearIntervalFn = globalThis.clearInterval,
 }: PlatformDependencies = {}): PlatformAdapter {
   const mode = bridge.isTauri() ? "tauri" : "browser";
 
@@ -71,25 +60,5 @@ export function createPlatformAdapter({
     }
   };
 
-  const watchBackendStatus = (listener: (status: BackendStatus) => void): (() => void) => {
-    let active = true;
-    let running = false;
-    const tick = async (): Promise<void> => {
-      if (!active || running) return;
-      running = true;
-      const status = await getBackendStatus();
-      running = false;
-      if (active) listener(status);
-    };
-    void tick();
-    const timer = mode === "tauri"
-      ? setIntervalFn(() => { void tick(); }, Math.max(100, pollIntervalMs))
-      : null;
-    return () => {
-      active = false;
-      if (timer !== null) clearIntervalFn(timer);
-    };
-  };
-
-  return Object.freeze({ mode, getRuntimeMetadata, getBackendStatus, watchBackendStatus });
+  return Object.freeze({ mode, getRuntimeMetadata, getBackendStatus });
 }

@@ -5,7 +5,9 @@
   import { createPersistenceAdapter } from "./core/persistence/adapter";
   import { createPersistenceService } from "./core/persistence/service";
   import { createPlatformAdapter } from "./core/platform/adapter";
+  import { createPollingService } from "./core/polling/service";
   import { sanitizeHealthSnapshot, type BackendStatus } from "./core/runtime/sanitize";
+  import { createShellPollingLifecycleSource } from "./core/state/projections";
   import { createShellStore } from "./core/state/shell";
   import Desktop from "./shell/Desktop.svelte";
 
@@ -14,6 +16,7 @@
   const platform = createPlatformAdapter();
   const persistence = createPersistenceService(createPersistenceAdapter());
   const shell = createShellStore({ persistence });
+  const polling = createPollingService({ lifecycleSource: createShellPollingLifecycleSource(shell) });
   let phase = $state<BootstrapPhase>("starting");
   let message = $state("正在启动本地服务");
   let backendVersion = $state<string | null>(null);
@@ -66,11 +69,17 @@
       }
     };
 
-    const stopWatching = platform.watchBackendStatus((status) => { void connect(status); });
+    polling.start({
+      key: "platform.backend-status",
+      intervalMs: 500,
+      critical: true,
+      task: () => platform.getBackendStatus(),
+      onResult: (status) => { void connect(status); },
+    });
     return () => {
       active = false;
       controller?.abort();
-      stopWatching();
+      polling.destroy();
       shell.destroy();
     };
   });

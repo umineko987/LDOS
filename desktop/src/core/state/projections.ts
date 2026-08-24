@@ -5,7 +5,12 @@ import {
   type ApplicationDefinition,
   type ApplicationId,
 } from "../applications/definitions";
-import type { ShellState, WindowRecord } from "./shell";
+import {
+  POLLING_SCOPE_STATES,
+  type PollingLifecycleSource,
+  type PollingScopeState,
+} from "../polling/service";
+import type { ShellState, ShellStore, WindowRecord } from "./shell";
 
 export interface ApplicationGroupProjection {
   readonly id: string;
@@ -138,4 +143,37 @@ export function deriveWindowMenu(state: ShellState): readonly WindowMenuProjecti
       description: minimized ? "已最小化" : focused ? "当前窗口" : "后台窗口",
     });
   }));
+}
+
+function pollingScope(appId: ApplicationId | null): string | null {
+  return appId === null ? null : `app:${appId}`;
+}
+
+function pollingState(state: ShellState, scope: string): PollingScopeState {
+  if (!scope.startsWith("app:")) return POLLING_SCOPE_STATES.UNMANAGED;
+  const application = getApplicationDefinition(scope.slice(4));
+  if (!application) return POLLING_SCOPE_STATES.UNMANAGED;
+  const record = state.windows.find(({ appId }) => appId === application.id);
+  if (!record) return POLLING_SCOPE_STATES.CLOSED;
+  return record.state === "minimized" ? POLLING_SCOPE_STATES.MINIMIZED : POLLING_SCOPE_STATES.OPEN;
+}
+
+function pollingSnapshot(state: ShellState): string {
+  return `${state.focusedAppId ?? ""}|${state.windows.map(({ appId, state: windowState }) => `${appId}:${windowState}`).join(",")}`;
+}
+
+export function createShellPollingLifecycleSource(shell: ShellStore): PollingLifecycleSource {
+  return Object.freeze({
+    getFocusedScope: () => pollingScope(shell.getState().focusedAppId),
+    getScopeState: (scope: string) => pollingState(shell.getState(), scope),
+    subscribe(listener: () => void) {
+      let previous = pollingSnapshot(shell.getState());
+      return shell.subscribe((state) => {
+        const next = pollingSnapshot(state);
+        if (next === previous) return;
+        previous = next;
+        listener();
+      });
+    },
+  });
 }

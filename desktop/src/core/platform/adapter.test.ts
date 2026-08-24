@@ -76,57 +76,13 @@ describe("platform adapter", () => {
     });
   });
 
-  it("watches desktop status without overlapping calls and stops its timer", async () => {
-    let release: (() => void) | undefined;
-    const invoke = vi.fn(() => new Promise<unknown>((resolve) => { release = () => resolve({ state: "ready" }); }));
-    const intervalCallbacks: Array<() => void> = [];
-    const clearIntervalFn = vi.fn();
-    const adapter = createPlatformAdapter({
-      bridge: { isTauri: () => true, invoke },
-      pollIntervalMs: 1,
-      setIntervalFn: (callback) => {
-        intervalCallbacks.push(callback);
-        return 7 as unknown as ReturnType<typeof globalThis.setInterval>;
-      },
-      clearIntervalFn,
-    });
-    const listener = vi.fn();
-    const stop = adapter.watchBackendStatus(listener);
-
-    expect(invoke).toHaveBeenCalledOnce();
-    intervalCallbacks[0]();
-    expect(invoke).toHaveBeenCalledOnce();
-    release?.();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ state: "ready" }));
-
-    stop();
-    expect(clearIntervalFn).toHaveBeenCalledWith(7);
-    intervalCallbacks[0]();
-    expect(invoke).toHaveBeenCalledOnce();
-
-    const stoppedListener = vi.fn();
-    const stopBeforeRelease = adapter.watchBackendStatus(stoppedListener);
-    expect(invoke).toHaveBeenCalledTimes(2);
-    stopBeforeRelease();
-    release?.();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(stoppedListener).not.toHaveBeenCalled();
-  });
-
-  it("watches browser readiness once and requires a location origin", async () => {
-    const listener = vi.fn();
+  it("leaves scheduling to the shared polling service and requires a browser origin", async () => {
     const adapter = createPlatformAdapter({
       bridge: bridge(false, {}),
       location: { origin: "http://127.0.0.1:8787" },
     });
-    const stop = adapter.watchBackendStatus(listener);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(listener).toHaveBeenCalledOnce();
-    stop();
+    expect(Object.keys(adapter)).toEqual(["mode", "getRuntimeMetadata", "getBackendStatus"]);
+    await expect(adapter.getBackendStatus()).resolves.toMatchObject({ state: "ready" });
 
     const missing = createPlatformAdapter({ bridge: bridge(false, {}), location: undefined });
     await expect(missing.getRuntimeMetadata()).rejects.toThrow("runtime_metadata_unavailable");

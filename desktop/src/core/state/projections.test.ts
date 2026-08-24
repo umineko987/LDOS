@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { deriveApplicationGroups, deriveDockProjection, deriveWindowMenu } from "./projections";
+import {
+  createShellPollingLifecycleSource,
+  deriveApplicationGroups,
+  deriveDockProjection,
+  deriveWindowMenu,
+} from "./projections";
 import { createShellStore } from "./shell";
 
 describe("single-source shell projections", () => {
@@ -52,5 +57,33 @@ describe("single-source shell projections", () => {
       { appId: "tasks", title: "批次管理", command: "restore", checked: false, description: "已最小化" },
       { appId: "proxy", title: "代理管理", command: "minimize", checked: true, description: "当前窗口" },
     ]);
+  });
+
+  it("projects only focused/open/minimized/closed lifecycle facts for polling", async () => {
+    const shell = createShellStore();
+    const source = createShellPollingLifecycleSource(shell);
+    const listener = vi.fn();
+    const unsubscribe = source.subscribe(listener);
+    expect(source.getFocusedScope()).toBeNull();
+    expect(source.getScopeState("global")).toBe("unmanaged");
+    expect(source.getScopeState("app:unknown")).toBe("unmanaged");
+    expect(source.getScopeState("app:tasks")).toBe("closed");
+    shell.setApplicationCenter(true);
+    expect(listener).not.toHaveBeenCalled();
+
+    shell.openApplication("tasks");
+    expect(source.getFocusedScope()).toBe("app:tasks");
+    expect(source.getScopeState("app:tasks")).toBe("open");
+    expect(listener).toHaveBeenCalledOnce();
+    await shell.requestMinimize("tasks");
+    expect(source.getFocusedScope()).toBeNull();
+    expect(source.getScopeState("app:tasks")).toBe("minimized");
+    expect(listener).toHaveBeenCalledTimes(2);
+    await shell.requestClose("tasks");
+    expect(source.getScopeState("app:tasks")).toBe("closed");
+    expect(listener).toHaveBeenCalledTimes(3);
+    unsubscribe();
+    shell.openApplication("crawl");
+    expect(listener).toHaveBeenCalledTimes(3);
   });
 });

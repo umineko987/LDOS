@@ -68,4 +68,16 @@ describe("desktop architecture boundaries", () => {
     expect(`${app}\n${main}`).not.toMatch(/bootstrap-(?:desktop|menu|window|dock)|bootstrap\.css/);
     expect(main).toContain('import "./styles/shell.css"');
   });
+
+  it("keeps all recurring scheduling in the one core polling service", () => {
+    const app = sourceEnding("/App.svelte");
+    const polling = sourceEnding("/core/polling/service.ts");
+    expect(app.match(/createPollingService\s*\(/g)).toHaveLength(1);
+    expect(polling).toContain("BACKGROUND_POLL_MULTIPLIER = 4");
+    expect(polling).toContain("AbortController");
+    for (const [path, source] of Object.entries(productionSources)) {
+      if (path.endsWith("/core/polling/service.ts")) continue;
+      expect(source, path).not.toMatch(/\bsetInterval\s*\(/);
+    }
+  });
 });
