@@ -72,6 +72,34 @@ def test_safe_extract_rejects_parent_traversal(tmp_path: Path) -> None:
         release.safe_extract(archive, tmp_path / "output")
 
 
+def test_extract_deb_reads_data_archive_without_system_tools(tmp_path: Path) -> None:
+    tar_payload = io.BytesIO()
+    with tarfile.open(fileobj=tar_payload, mode="w:gz") as archive:
+        content = b"canonical"
+        member = tarfile.TarInfo("./usr/lib/imageweave/probe")
+        member.size = len(content)
+        archive.addfile(member, io.BytesIO(content))
+
+    def ar_member(name: str, payload: bytes) -> bytes:
+        header = (
+            f"{name + '/':<16}{0:<12}{0:<6}{0:<6}"
+            f"{'100644':<8}{len(payload):<10}`\n"
+        ).encode("ascii")
+        assert len(header) == 60
+        return header + payload + (b"\n" if len(payload) % 2 else b"")
+
+    bundle = tmp_path / "ImageWeave.deb"
+    bundle.write_bytes(
+        b"!<arch>\n"
+        + ar_member("debian-binary", b"2.0\n")
+        + ar_member("data.tar.gz", tar_payload.getvalue())
+    )
+    destination = tmp_path / "extracted"
+    release.extract_deb(bundle, destination)
+
+    assert (destination / "usr/lib/imageweave/probe").read_bytes() == b"canonical"
+
+
 def test_linux_bundle_env_disables_linuxdeploy_strip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -189,6 +217,27 @@ def test_file_manifest_records_relative_symlinks(tmp_path: Path) -> None:
 
     lines = (tmp_path / release.FILES_NAME).read_text(encoding="utf-8")
     assert "\tL\truntime/python3\n" in lines
+
+
+def test_bundle_tree_accepts_tauri_materialized_symlinks(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("symlink creation is not guaranteed on Windows")
+    minimal_tree(tmp_path)
+    target = tmp_path / "runtime" / "alias-target"
+    target.write_bytes(b"target bytes")
+    link = tmp_path / "runtime" / "alias"
+    os.symlink("alias-target", link)
+    count, digest = release.write_file_manifest(tmp_path)
+    manifest_path = tmp_path / release.MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"] = {"path": release.FILES_NAME, "count": count, "sha256": digest}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    link.unlink()
+    link.write_bytes(target.read_bytes())
+
+    with pytest.raises(release.ReleaseError, match="release file mismatch"):
+        release.verify_tree(tmp_path)
+    release.verify_tree(tmp_path, allow_materialized_symlinks=True)
 
 
 def use_test_frontend_manifest(

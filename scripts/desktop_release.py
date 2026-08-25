@@ -171,14 +171,14 @@ def download_runtime(lock: dict[str, Any], target: str, cache_dir: Path) -> Path
     return archive
 
 
-def safe_extract(archive: Path, destination: Path) -> None:
+def extract_tar_archive(archive: Path, destination: Path, label: str) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     root = destination.resolve()
-    with tarfile.open(archive, "r:gz") as bundle:
+    with tarfile.open(archive, "r:*") as bundle:
         for member in bundle.getmembers():
             member_path = PurePosixPath(member.name)
             if member_path.is_absolute() or ".." in member_path.parts:
-                raise ReleaseError(f"unsafe runtime archive member: {member.name}")
+                raise ReleaseError(f"unsafe {label} archive member: {member.name}")
             if member.issym():
                 link_target = (destination / member.name).parent / member.linkname
             elif member.islnk():
@@ -188,13 +188,61 @@ def safe_extract(archive: Path, destination: Path) -> None:
             if link_target is not None:
                 resolved_link = link_target.resolve(strict=False)
                 if root != resolved_link and root not in resolved_link.parents:
-                    raise ReleaseError(f"unsafe runtime archive link: {member.name}")
+                    raise ReleaseError(f"unsafe {label} archive link: {member.name}")
             resolved = (destination / member.name).resolve(strict=False)
             if root != resolved and root not in resolved.parents:
-                raise ReleaseError(f"runtime archive escapes destination: {member.name}")
+                raise ReleaseError(f"{label} archive escapes destination: {member.name}")
         bundle.extractall(destination, filter="data")
+
+
+def safe_extract(archive: Path, destination: Path) -> None:
+    extract_tar_archive(archive, destination, "runtime")
     if not (destination / "python").is_dir():
         raise ReleaseError("runtime archive does not contain the expected python directory")
+
+
+def extract_deb(bundle: Path, destination: Path) -> None:
+    with bundle.open("rb") as archive:
+        if archive.read(8) != b"!<arch>\n":
+            raise ReleaseError("invalid Debian ar archive")
+        debian_version_seen = False
+        while header := archive.read(60):
+            if len(header) != 60 or header[58:60] != b"`\n":
+                raise ReleaseError("invalid Debian ar member header")
+            name = header[:16].decode("ascii").strip().rstrip("/")
+            try:
+                size = int(header[48:58].decode("ascii").strip())
+            except ValueError as exc:
+                raise ReleaseError("invalid Debian ar member size") from exc
+            if name == "debian-binary":
+                debian_version_seen = archive.read(size) == b"2.0\n"
+                if size % 2:
+                    archive.seek(1, os.SEEK_CUR)
+                continue
+            if name == "data.tar" or name.startswith("data.tar."):
+                if not debian_version_seen:
+                    raise ReleaseError("unsupported Debian archive version")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                temporary_path: Path | None = None
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        dir=destination.parent, prefix="imageweave-data-", delete=False
+                    ) as temporary:
+                        temporary_path = Path(temporary.name)
+                        remaining = size
+                        while remaining:
+                            chunk = archive.read(min(1024 * 1024, remaining))
+                            if not chunk:
+                                raise ReleaseError("truncated Debian data archive")
+                            temporary.write(chunk)
+                            remaining -= len(chunk)
+                    extract_tar_archive(temporary_path, destination, "Debian data")
+                finally:
+                    if temporary_path is not None:
+                        temporary_path.unlink(missing_ok=True)
+                return
+            archive.seek(size + size % 2, os.SEEK_CUR)
+    raise ReleaseError("Debian package does not contain a data archive")
 
 
 def controlled_env() -> dict[str, str]:
@@ -378,7 +426,9 @@ def entry_digest(path: Path, root: Path) -> tuple[str, str]:
             trusted_root != resolved and trusted_root not in resolved.parents
         ):
             raise ReleaseError(f"unsafe release symlink: {path} -> {target}")
-        return "L", sha256_bytes(target.encode("utf-8"))
+        if not resolved.is_file():
+            raise ReleaseError(f"release symlink target is not a file: {path} -> {target}")
+        return "L", sha256_file(resolved)
     if not path.is_file():
         raise ReleaseError(f"unsupported release tree entry: {path}")
     return "F", sha256_file(path)
@@ -484,7 +534,12 @@ def scan_for_local_paths(root: Path, forbidden: Iterable[Path]) -> None:
             raise ReleaseError(f"possible credential in {path.relative_to(root)}")
 
 
-def verify_tree(root: Path, *, forbidden_paths: Iterable[Path] = ()) -> dict[str, Any]:
+def verify_tree(
+    root: Path,
+    *,
+    forbidden_paths: Iterable[Path] = (),
+    allow_materialized_symlinks: bool = False,
+) -> dict[str, Any]:
     manifest_path = root / MANIFEST_NAME
     files_path = root / FILES_NAME
     if not manifest_path.is_file() or not files_path.is_file():
@@ -505,7 +560,10 @@ def verify_tree(root: Path, *, forbidden_paths: Iterable[Path] = ()) -> dict[str
         seen.add(relative)
         path = root.joinpath(*parsed.parts)
         actual_kind, actual = entry_digest(path, root)
-        if kind != actual_kind or expected != actual:
+        kind_matches = kind == actual_kind or (
+            allow_materialized_symlinks and kind == "L" and actual_kind == "F"
+        )
+        if not kind_matches or expected != actual:
             raise ReleaseError(f"release file mismatch: {relative}")
     actual_entries = {
         path.relative_to(root).as_posix() for path in relative_entries(root)
@@ -765,7 +823,7 @@ def extract_bundle(bundle: Path, destination: Path) -> Path:
     destination.mkdir(parents=True, exist_ok=True)
     lower_name = bundle.name.lower()
     if lower_name.endswith(".deb"):
-        run(["dpkg-deb", "-x", bundle, destination])
+        extract_deb(bundle, destination)
     elif lower_name.endswith(".appimage"):
         if os.name == "nt":
             raise ReleaseError("AppImage extraction requires Linux")
@@ -792,7 +850,11 @@ def verify_bundle_tree(extracted: Path) -> dict[str, Any]:
             f"bundle must contain one backend release manifest, found {len(release_manifests)}"
         )
     backend = release_manifests[0].parent
-    manifest = verify_tree(backend, forbidden_paths=[ROOT, Path.home()])
+    manifest = verify_tree(
+        backend,
+        forbidden_paths=[ROOT, Path.home()],
+        allow_materialized_symlinks=True,
+    )
     verify_release_identity(manifest)
     frontend_manifests = sorted(extracted.rglob(FRONTEND_MANIFEST.name))
     if len(frontend_manifests) != 1:
