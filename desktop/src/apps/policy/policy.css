@@ -1,6 +1,6 @@
 .app-window__body:has(> .policy-app) { padding: 0; overflow: hidden; }
 
-.policy-app { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-width: 0; min-height: 100%; color: var(--imageweave-text-body); }
+.policy-app { display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100%; min-width: 0; min-height: 0; color: var(--imageweave-text-body); }
 .policy-header,
 .policy-header-actions,
 .policy-actions,

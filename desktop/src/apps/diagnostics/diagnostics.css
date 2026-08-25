@@ -1,5 +1,5 @@
 .app-window__body:has(> .diagnostics-app) { padding: 0; overflow: hidden; }
-.diagnostics-app { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-width: 0; min-height: 100%; color: var(--imageweave-text-body); }
+.diagnostics-app { display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100%; min-width: 0; min-height: 0; color: var(--imageweave-text-body); }
 .diagnostics-header,
 .diagnostics-header-actions,
 .diagnostics-actions,
