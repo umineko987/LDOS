@@ -128,15 +128,37 @@ mod tests {
     }
 
     #[test]
-    fn tauri_uses_one_dist_and_declares_distribution_out_of_scope() {
+    fn tauri_bundles_one_frontend_and_one_controlled_backend() {
         let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
             .expect("valid Tauri config JSON");
         assert_eq!(config["build"]["frontendDist"], "../dist");
         assert_eq!(config["build"]["devUrl"], "http://localhost:1420");
-        assert_eq!(config["bundle"]["active"], false);
+        assert_eq!(config["bundle"]["active"], true);
         assert!(config["bundle"].get("externalBin").is_none());
-        assert!(config["bundle"].get("resources").is_none());
+        assert_eq!(
+            config["bundle"]["resources"],
+            serde_json::json!({
+                "release/backend/": "backend/",
+                "../../gallery-dl-backend/gdl_backend/webui_dist/frontend-manifest.json":
+                    "frontend-manifest.json"
+            })
+        );
         assert_eq!(config["identifier"], "dev.imageweave.desktop");
+        let linux: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.linux.conf.json"))
+                .expect("valid Linux Tauri config JSON");
+        let windows: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.windows.conf.json"))
+                .expect("valid Windows Tauri config JSON");
+        assert_eq!(
+            linux["bundle"]["targets"],
+            serde_json::json!(["deb", "appimage"])
+        );
+        assert_eq!(windows["bundle"]["targets"], serde_json::json!(["nsis"]));
+        assert_eq!(
+            windows["bundle"]["windows"]["nsis"]["installMode"],
+            "currentUser"
+        );
         assert_eq!(config["app"]["windows"][0]["decorations"], true);
         assert_eq!(config["app"]["windows"][0]["dataDirectory"], "webview");
         assert_eq!(

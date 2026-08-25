@@ -10,11 +10,14 @@ import os
 import platform
 import re
 import shutil
+import socket
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
@@ -29,6 +32,13 @@ MANIFEST_NAME = "release-manifest.json"
 FILES_NAME = "release-files.sha256"
 BACKEND_SOURCE = ROOT / "gallery-dl-backend" / "gdl_backend"
 GALLERY_SOURCE = ROOT / "gallery-dl-codeberg"
+FRONTEND_MANIFEST = (
+    ROOT
+    / "gallery-dl-backend"
+    / "gdl_backend"
+    / "webui_dist"
+    / "frontend-manifest.json"
+)
 
 
 class ReleaseError(RuntimeError):
@@ -341,6 +351,14 @@ def source_commit() -> str:
     return run(["git", "rev-parse", "HEAD"], capture=True)
 
 
+def ensure_clean_tracked_checkout() -> None:
+    status = run(
+        ["git", "status", "--porcelain", "--untracked-files=no"], capture=True
+    )
+    if status:
+        raise ReleaseError("desktop release assembly requires a clean tracked checkout")
+
+
 def write_release_manifest(
     staging: Path,
     lock: dict[str, Any],
@@ -470,7 +488,298 @@ def verify_tree(root: Path, *, forbidden_paths: Iterable[Path] = ()) -> dict[str
     return manifest
 
 
+def verify_release_identity(manifest: dict[str, Any]) -> None:
+    lock = load_lock()
+    target = manifest.get("target")
+    if target not in lock["targets"]:
+        raise ReleaseError("release manifest target is not locked")
+    expected_target = lock["targets"][target]
+    runtime = manifest.get("runtime", {})
+    if (
+        manifest.get("source_commit") != source_commit()
+        or manifest.get("tauri_target") != expected_target["tauri_target"]
+        or runtime.get("archive") != expected_target["archive"]
+        or runtime.get("archive_sha256") != expected_target["sha256"]
+        or runtime.get("python") != expected_target["python"]
+    ):
+        raise ReleaseError("release manifest does not match the tracked source and runtime lock")
+    expected_requirements = {
+        relative: sha256_file(ROOT / relative) for relative in lock["requirements"]
+    }
+    if manifest.get("requirements_sha256") != expected_requirements:
+        raise ReleaseError("release requirements no longer match the assembled tree")
+    gitlink = run(
+        ["git", "ls-tree", "HEAD", "gallery-dl-codeberg"], capture=True
+    ).split()
+    if (
+        len(gitlink) < 3
+        or gitlink[0] != "160000"
+        or manifest.get("gallery_dl", {}).get("commit") != gitlink[2]
+    ):
+        raise ReleaseError("release gallery-dl source no longer matches the tracked gitlink")
+
+
+def _runtime_environment(root: Path, data_root: Path, python: Path) -> dict[str, str]:
+    env = controlled_env()
+    env.update(
+        {
+            "IMAGEWEAVE_DESKTOP_DISTRIBUTION": "1",
+            "IMAGEWEAVE_DESKTOP_RESOURCE_ROOT": os.fspath(root),
+            "IMAGEWEAVE_DESKTOP_DATA_ROOT": os.fspath(data_root),
+            "IMAGEWEAVE_DESKTOP_PYTHON": os.fspath(python),
+        }
+    )
+    return env
+
+
+def _free_loopback_port() -> int:
+    family = socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def _http_json(
+    opener: urllib.request.OpenerDirector, url: str, accepted: set[int]
+) -> tuple[int, dict[str, Any]]:
+    try:
+        response = opener.open(url, timeout=1)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        status = int(response.status)
+        payload = json.loads(response.read().decode("utf-8"))
+    if status not in accepted or not isinstance(payload, dict):
+        raise ReleaseError(f"unexpected HTTP response from {url}: {status}")
+    return status, payload
+
+
+def verify_runtime(root: Path) -> dict[str, Any]:
+    root = root.resolve()
+    manifest = verify_tree(root, forbidden_paths=[ROOT, Path.home()])
+    verify_release_identity(manifest)
+    python = root / manifest["runtime"]["python"]
+    app = root / "app"
+    with tempfile.TemporaryDirectory(prefix="imageweave-runtime-smoke-") as temporary:
+        temporary_root = Path(temporary)
+        data_root = temporary_root / "data"
+        config_root = temporary_root / "config"
+        data_root.mkdir()
+        config_root.mkdir()
+        env = _runtime_environment(root, data_root, python)
+        import_code = """
+import json, os, sys
+import cv2, fastapi, PIL, torch, torchvision, uvicorn
+import dedup_core, dedup_review_worker, gdl_backend
+expected = os.environ['IMAGEWEAVE_DESKTOP_PYTHON']
+if not os.path.samefile(sys.executable, expected):
+    raise SystemExit('unexpected runtime interpreter')
+print(json.dumps({
+    'python': sys.version.split()[0],
+    'torch': torch.__version__,
+    'torchvision': torchvision.__version__,
+    'cuda': bool(torch.cuda.is_available()),
+}, sort_keys=True))
+"""
+        import_result = json.loads(
+            run(
+                [python, "-B", "-c", import_code],
+                cwd=app,
+                env=env,
+                capture=True,
+            )
+        )
+        if import_result["cuda"]:
+            raise ReleaseError("controlled CPU runtime unexpectedly exposes CUDA")
+        gallery_version = run(
+            [
+                python,
+                "-B",
+                "-m",
+                "gdl_backend.worker_entry",
+                "--marker",
+                "release-smoke",
+                "--gallery-root",
+                app / "gallery-dl-codeberg",
+                "--",
+                "--version",
+            ],
+            cwd=app,
+            env=env,
+            capture=True,
+        )
+        run(
+            [python, "-B", app / "dedup_review_worker.py", "--help"],
+            cwd=app,
+            env=env,
+            capture=True,
+        )
+
+        port = _free_loopback_port()
+        config_path = config_root / "backend.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "runtime_dir": "/stale/runtime",
+                    "database_path": "/stale/backend.sqlite3",
+                    "server": {"host": "127.0.0.1", "port": port},
+                    "gallery": {"python_executable": "/stale/python"},
+                    "proxy": {"enabled": False, "auto_start": False},
+                    "dedup": {"enabled": False, "python_executable": "/stale/python"},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        env["GDL_BACKEND_PARENT_PIPE"] = "1"
+        log_path = temporary_root / "backend.log"
+        with log_path.open("w+b") as log:
+            process = subprocess.Popen(
+                [python, "-B", "-m", "gdl_backend", "--config", config_path],
+                cwd=app,
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
+            try:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                deadline = time.monotonic() + 30
+                health: dict[str, Any] | None = None
+                while time.monotonic() < deadline:
+                    if process.poll() is not None:
+                        break
+                    try:
+                        _, health = _http_json(
+                            opener, f"http://127.0.0.1:{port}/healthz", {200}
+                        )
+                        break
+                    except (
+                        OSError,
+                        UnicodeError,
+                        json.JSONDecodeError,
+                        ReleaseError,
+                    ):
+                        time.sleep(0.1)
+                if health is None or health.get("ok") is not True:
+                    raise ReleaseError("packaged FastAPI did not reach healthz")
+                ready_status, _ = _http_json(
+                    opener, f"http://127.0.0.1:{port}/readyz", {200, 503}
+                )
+                _, root_payload = _http_json(
+                    opener, f"http://127.0.0.1:{port}/", {200}
+                )
+                if root_payload.get("ui", "missing") is not None:
+                    raise ReleaseError("desktop backend exposed a second frontend")
+                try:
+                    opener.open(f"http://127.0.0.1:{port}/ui/", timeout=1)
+                except urllib.error.HTTPError as error:
+                    if error.code != 404:
+                        raise
+                else:
+                    raise ReleaseError("desktop backend mounted /ui unexpectedly")
+            except Exception as error:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=10)
+                log.flush()
+                detail = log_path.read_text(encoding="utf-8", errors="replace")
+                raise ReleaseError(f"packaged FastAPI smoke failed: {error}\n{detail}") from error
+            if process.stdin is None:
+                raise ReleaseError("parent pipe was not created")
+            process.stdin.close()
+            try:
+                return_code = process.wait(timeout=20)
+            except subprocess.TimeoutExpired as error:
+                process.kill()
+                process.wait(timeout=10)
+                raise ReleaseError("packaged FastAPI ignored parent-pipe shutdown") from error
+            if return_code != 0:
+                log.flush()
+                detail = log_path.read_text(encoding="utf-8", errors="replace")
+                raise ReleaseError(f"packaged FastAPI shutdown failed ({return_code})\n{detail}")
+    return {
+        "target": manifest["target"],
+        "python_sha256": sha256_file(python),
+        "python_version": import_result["python"],
+        "torch_version": import_result["torch"],
+        "torchvision_version": import_result["torchvision"],
+        "gallery_version": gallery_version.strip(),
+        "readyz_status": ready_status,
+        "files_sha256": manifest["files"]["sha256"],
+    }
+
+
+def extract_bundle(bundle: Path, destination: Path) -> Path:
+    bundle = bundle.resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    lower_name = bundle.name.lower()
+    if lower_name.endswith(".deb"):
+        run(["dpkg-deb", "-x", bundle, destination])
+    elif lower_name.endswith(".appimage"):
+        if os.name == "nt":
+            raise ReleaseError("AppImage extraction requires Linux")
+        bundle.chmod(bundle.stat().st_mode | stat.S_IXUSR)
+        run([bundle, "--appimage-extract"], cwd=destination, capture=True)
+    elif lower_name.endswith(".exe"):
+        seven_zip = shutil.which("7z") or shutil.which("7z.exe")
+        if seven_zip is None:
+            raise ReleaseError("7z is required to inspect an NSIS installer")
+        run([seven_zip, "x", "-y", f"-o{destination}", bundle], capture=True)
+        nested_archives = sorted(destination.rglob("*.7z"))
+        for index, archive in enumerate(nested_archives):
+            nested = destination / f"nested-{index}"
+            run([seven_zip, "x", "-y", f"-o{nested}", archive], capture=True)
+    else:
+        raise ReleaseError(f"unsupported desktop bundle: {bundle.name}")
+    return destination
+
+
+def verify_bundle_tree(extracted: Path) -> dict[str, Any]:
+    release_manifests = sorted(extracted.rglob(MANIFEST_NAME))
+    if len(release_manifests) != 1:
+        raise ReleaseError(
+            f"bundle must contain one backend release manifest, found {len(release_manifests)}"
+        )
+    backend = release_manifests[0].parent
+    manifest = verify_tree(backend, forbidden_paths=[ROOT, Path.home()])
+    verify_release_identity(manifest)
+    frontend_manifests = sorted(extracted.rglob(FRONTEND_MANIFEST.name))
+    if len(frontend_manifests) != 1:
+        raise ReleaseError(
+            f"bundle must contain one frontend manifest, found {len(frontend_manifests)}"
+        )
+    canonical_frontend = FRONTEND_MANIFEST.read_bytes()
+    if frontend_manifests[0].read_bytes() != canonical_frontend:
+        raise ReleaseError("bundled frontend manifest differs from the canonical Svelte build")
+    if any(path.name == "webui_dist" for path in extracted.rglob("webui_dist")):
+        raise ReleaseError("bundle contains a second frontend tree")
+    runtime_roots = [path for path in extracted.rglob("runtime") if path.parent == backend]
+    if runtime_roots != [backend / "runtime"]:
+        raise ReleaseError("bundle does not contain exactly one controlled Python runtime")
+    return {
+        "target": manifest["target"],
+        "backend_relative": backend.relative_to(extracted).as_posix(),
+        "frontend_manifest_relative": frontend_manifests[0]
+        .relative_to(extracted)
+        .as_posix(),
+        "frontend_manifest_sha256": sha256_bytes(canonical_frontend),
+        "files_sha256": manifest["files"]["sha256"],
+    }
+
+
+def verify_bundle(bundle: Path) -> dict[str, Any]:
+    if not bundle.is_file():
+        raise ReleaseError(f"desktop bundle is missing: {bundle}")
+    with tempfile.TemporaryDirectory(prefix="imageweave-bundle-") as temporary:
+        extracted = extract_bundle(bundle, Path(temporary))
+        result = verify_bundle_tree(extracted)
+    result["bundle"] = bundle.name
+    result["bundle_sha256"] = sha256_file(bundle)
+    return result
+
 def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
+    ensure_clean_tracked_checkout()
     lock = load_lock()
     if target not in lock["targets"]:
         raise ReleaseError(f"unknown target: {target}")
@@ -501,15 +810,58 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
         shutil.copy2(ROOT / "LICENSE", licenses / "ImageWeave-MIT.txt")
         shutil.copy2(GALLERY_SOURCE / "LICENSE", licenses / "gallery-dl-GPL-2.0.txt")
         write_release_manifest(staging, lock, target, gallery_commit, archive)
-        verify_tree(staging, forbidden_paths=[ROOT, staging, Path.home()])
+        staged_manifest = verify_tree(
+            staging, forbidden_paths=[ROOT, staging, Path.home()]
+        )
+        verify_release_identity(staged_manifest)
         if output.exists():
             shutil.rmtree(output)
         os.replace(staging, output)
-        return verify_tree(output, forbidden_paths=[ROOT, staging, Path.home()])
+        output_manifest = verify_tree(
+            output, forbidden_paths=[ROOT, staging, Path.home()]
+        )
+        verify_release_identity(output_manifest)
+        return output_manifest
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
 
+
+def build_release(cache_dir: Path) -> dict[str, Any]:
+    ensure_clean_tracked_checkout()
+    desktop = ROOT / "desktop"
+    npm = "npm.cmd" if os.name == "nt" else "npm"
+    run([npm, "ci"], cwd=desktop)
+    run([npm, "run", "build"], cwd=desktop)
+    run([npm, "run", "verify:artifacts"], cwd=desktop)
+    target = host_target()
+    assemble(target, DEFAULT_OUTPUT, cache_dir)
+    runtime_result = verify_runtime(DEFAULT_OUTPUT)
+    tauri = desktop / "src-tauri"
+    run(["cargo", "fmt", "--check"], cwd=tauri)
+    run(["cargo", "test"], cwd=tauri)
+    run([npm, "run", "tauri", "--", "build", "--ci"], cwd=desktop)
+    bundle_root = tauri / "target" / "release" / "bundle"
+    patterns = (
+        ("deb/*.deb", "appimage/*.AppImage")
+        if target == "linux-x86_64"
+        else ("nsis/*.exe",)
+    )
+    bundles: list[Path] = []
+    for pattern in patterns:
+        matches = sorted(bundle_root.glob(pattern))
+        if len(matches) != 1:
+            raise ReleaseError(
+                f"expected one {pattern} bundle, found {len(matches)}"
+            )
+        bundles.extend(matches)
+    bundle_results = [verify_bundle(bundle) for bundle in bundles]
+    ensure_clean_tracked_checkout()
+    return {
+        "target": target,
+        "runtime": runtime_result,
+        "bundles": bundle_results,
+    }
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -518,33 +870,51 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     assemble_parser.add_argument("--target", default=host_target())
     assemble_parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     assemble_parser.add_argument("--cache-dir", type=Path, default=default_cache_dir())
+    build_parser = subparsers.add_parser("build")
+    build_parser.add_argument("--cache-dir", type=Path, default=default_cache_dir())
     verify_parser = subparsers.add_parser("verify-tree")
     verify_parser.add_argument("--tree", type=Path, default=DEFAULT_OUTPUT)
+    runtime_parser = subparsers.add_parser("verify-runtime")
+    runtime_parser.add_argument("--tree", type=Path, default=DEFAULT_OUTPUT)
+    bundle_parser = subparsers.add_parser("verify-bundle")
+    bundle_parser.add_argument("--bundle", type=Path, required=True)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
+        if args.command not in {"assemble", "build"}:
+            ensure_clean_tracked_checkout()
         if args.command == "assemble":
             manifest = assemble(args.target, args.output, args.cache_dir)
-        else:
-            manifest = verify_tree(args.tree.resolve(), forbidden_paths=[ROOT, Path.home()])
-    except (OSError, ValueError, KeyError, ReleaseError, subprocess.SubprocessError) as exc:
-        print(f"desktop release error: {exc}", file=sys.stderr)
-        return 1
-    print(
-        json.dumps(
-            {
-                "status": "ok",
+            result = {
                 "target": manifest["target"],
                 "source_commit": manifest["source_commit"],
                 "runtime_archive_sha256": manifest["runtime"]["archive_sha256"],
                 "files_sha256": manifest["files"]["sha256"],
-            },
-            sort_keys=True,
-        )
-    )
+            }
+        elif args.command == "build":
+            result = build_release(args.cache_dir)
+        elif args.command == "verify-tree":
+            manifest = verify_tree(
+                args.tree.resolve(), forbidden_paths=[ROOT, Path.home()]
+            )
+            verify_release_identity(manifest)
+            result = {
+                "target": manifest["target"],
+                "source_commit": manifest["source_commit"],
+                "runtime_archive_sha256": manifest["runtime"]["archive_sha256"],
+                "files_sha256": manifest["files"]["sha256"],
+            }
+        elif args.command == "verify-runtime":
+            result = verify_runtime(args.tree)
+        else:
+            result = verify_bundle(args.bundle)
+    except (OSError, ValueError, KeyError, ReleaseError, subprocess.SubprocessError) as exc:
+        print(f"desktop release error: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps({"status": "ok", **result}, sort_keys=True))
     return 0
 
 

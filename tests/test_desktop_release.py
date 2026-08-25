@@ -118,3 +118,57 @@ def test_file_manifest_records_relative_symlinks(tmp_path: Path) -> None:
 
     lines = (tmp_path / release.FILES_NAME).read_text(encoding="utf-8")
     assert "\tL\truntime/python3\n" in lines
+
+
+def use_test_frontend_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> bytes:
+    canonical = tmp_path.parent / f"{tmp_path.name}-source" / "frontend-manifest.json"
+    canonical.parent.mkdir()
+    payload = b'{"schema_version":1}\n'
+    canonical.write_bytes(payload)
+    monkeypatch.setattr(release, "FRONTEND_MANIFEST", canonical)
+    return payload
+
+
+def test_bundle_tree_requires_one_runtime_and_canonical_frontend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frontend_payload = use_test_frontend_manifest(tmp_path, monkeypatch)
+    backend = tmp_path / "usr" / "lib" / "imageweave" / "backend"
+    backend.mkdir(parents=True)
+    minimal_tree(backend)
+    frontend = tmp_path / "usr" / "lib" / "imageweave" / "frontend-manifest.json"
+    frontend.write_bytes(frontend_payload)
+    monkeypatch.setattr(release, "verify_release_identity", lambda _manifest: None)
+
+    result = release.verify_bundle_tree(tmp_path)
+
+    assert result["backend_relative"] == "usr/lib/imageweave/backend"
+    assert result["frontend_manifest_relative"] == (
+        "usr/lib/imageweave/frontend-manifest.json"
+    )
+
+
+def test_bundle_tree_rejects_a_second_frontend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frontend_payload = use_test_frontend_manifest(tmp_path, monkeypatch)
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    minimal_tree(backend)
+    (tmp_path / "frontend-manifest.json").write_bytes(frontend_payload)
+    (tmp_path / "webui_dist").mkdir()
+    monkeypatch.setattr(release, "verify_release_identity", lambda _manifest: None)
+
+    with pytest.raises(release.ReleaseError, match="second frontend"):
+        release.verify_bundle_tree(tmp_path)
+
+
+def test_clean_checkout_guard_rejects_tracked_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(release, "run", lambda *_args, **_kwargs: " M tracked.py")
+
+    with pytest.raises(release.ReleaseError, match="clean tracked checkout"):
+        release.ensure_clean_tracked_checkout()
