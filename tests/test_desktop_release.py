@@ -145,6 +145,39 @@ class DesktopReleaseTests(unittest.TestCase):
             }
             self.assertEqual(actual, expected)
 
+    def test_record_cleanup_removes_pruned_launchers_deterministically(self) -> None:
+        with temporary_path() as tmp_path:
+            runtime = tmp_path / "runtime"
+            site_packages = (
+                runtime / "python" / "lib" / "python3.13" / "site-packages"
+            )
+            package = site_packages / "demo"
+            package.mkdir(parents=True)
+            (package / "module.py").write_text("value = 1\n", encoding="utf-8")
+            record = site_packages / "demo-1.0.dist-info" / "RECORD"
+            record.parent.mkdir()
+            record.write_bytes(
+                b"../../../bin/pruned,sha256=random,1\r\n"
+                b"demo/module.py,sha256=stable,10\r\n"
+                b"demo-1.0.dist-info/RECORD,,\r\n"
+            )
+
+            release.remove_stale_record_entries(runtime)
+            expected = (
+                b"demo/module.py,sha256=stable,10\n"
+                b"demo-1.0.dist-info/RECORD,,\n"
+            )
+            self.assertEqual(record.read_bytes(), expected)
+
+            release.remove_stale_record_entries(runtime)
+            self.assertEqual(record.read_bytes(), expected)
+
+            record.write_text("../../../../../outside,,\n", encoding="utf-8")
+            with self.assertRaisesRegex(
+                release.ReleaseError, "unsafe installed RECORD path"
+            ):
+                release.remove_stale_record_entries(runtime)
+
     def test_safe_extract_rejects_parent_traversal(self) -> None:
         with temporary_path() as tmp_path:
             archive = tmp_path / "runtime.tar.gz"

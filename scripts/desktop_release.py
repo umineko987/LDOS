@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -429,6 +430,28 @@ def remove_bytecode(root: Path) -> None:
         path.unlink()
     for path in sorted(root.rglob("__pycache__"), reverse=True):
         path.rmdir()
+
+
+def remove_stale_record_entries(runtime: Path) -> None:
+    trusted_root = runtime.resolve()
+    for record in sorted(runtime.rglob("*.dist-info/RECORD")):
+        rows: list[list[str]] = []
+        with record.open(encoding="utf-8", newline="") as source:
+            for row in csv.reader(source):
+                if len(row) != 3:
+                    raise ReleaseError(f"malformed installed RECORD: {record}")
+                relative = PurePosixPath(row[0])
+                if relative.is_absolute():
+                    raise ReleaseError(f"unsafe installed RECORD path: {row[0]}")
+                installed = record.parent.parent.joinpath(*relative.parts).resolve(
+                    strict=False
+                )
+                if installed != trusted_root and trusted_root not in installed.parents:
+                    raise ReleaseError(f"unsafe installed RECORD path: {row[0]}")
+                if installed.exists():
+                    rows.append(row)
+        with record.open("w", encoding="utf-8", newline="") as destination:
+            csv.writer(destination, lineterminator="\n").writerows(rows)
 
 
 def tracked_files(repository: Path, pathspec: str) -> list[str]:
@@ -1012,6 +1035,7 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
         make_linux_wheels_relocatable(staging / "runtime", lock, target)
         remove_generated_launchers(staging / "runtime", target)
         remove_bytecode(staging / "runtime")
+        remove_stale_record_entries(staging / "runtime")
         app = staging / "app"
         app.mkdir()
         copy_backend_sources(app)
