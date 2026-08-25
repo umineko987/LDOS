@@ -208,6 +208,11 @@ def controlled_env() -> dict[str, str]:
     env["PIP_NO_INPUT"] = "1"
     return env
 
+def tauri_bundle_env(target: str) -> dict[str, str]:
+    env = controlled_env()
+    if target.startswith("linux"):
+        env["NO_STRIP"] = "1"
+    return env
 
 def install_requirements(
     python: Path, lock: dict[str, Any], staging: Path
@@ -255,6 +260,13 @@ def make_linux_wheels_relocatable(
             if current:
                 raise ReleaseError(f"unsafe wheel library rpath: {library}: {current}")
             set_linux_relative_rpath(library, "$ORIGIN")
+
+    tkinter_extensions = list(
+        (site_packages.parent / "lib-dynload").glob("_tkinter*.so")
+    )
+    if len(tkinter_extensions) != 1:
+        raise ReleaseError("controlled Linux runtime must contain one _tkinter extension")
+    set_linux_relative_rpath(tkinter_extensions[0], "$ORIGIN/../..")
 
     extensions = [site_packages / "torchvision" / name for name in ("_C.so", "image.so")]
     for extension in extensions:
@@ -879,7 +891,11 @@ def build_release(cache_dir: Path) -> dict[str, Any]:
     tauri = desktop / "src-tauri"
     run(["cargo", "fmt", "--check"], cwd=tauri)
     run(["cargo", "test"], cwd=tauri)
-    run([npm, "run", "tauri", "--", "build", "--ci"], cwd=desktop)
+    run(
+        [npm, "run", "tauri", "--", "build", "--ci"],
+        cwd=desktop,
+        env=tauri_bundle_env(target),
+    )
     bundle_root = tauri / "target" / "release" / "bundle"
     patterns = (
         ("deb/*.deb", "appimage/*.AppImage")

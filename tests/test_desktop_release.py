@@ -72,6 +72,13 @@ def test_safe_extract_rejects_parent_traversal(tmp_path: Path) -> None:
         release.safe_extract(archive, tmp_path / "output")
 
 
+def test_linux_bundle_env_disables_linuxdeploy_strip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NO_STRIP", raising=False)
+    assert release.tauri_bundle_env("linux-x86_64")["NO_STRIP"] == "1"
+
+
 def test_linux_wheel_libraries_get_relative_runtime_rpaths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -89,6 +96,9 @@ def test_linux_wheel_libraries_get_relative_runtime_rpaths(
         library = directory / "library.so.1"
         library.write_bytes(b"elf")
         libraries.append(library)
+    tkinter = site_packages.parent / "lib-dynload" / "_tkinter.cpython-313.so"
+    tkinter.parent.mkdir()
+    tkinter.write_bytes(b"elf")
 
     commands: list[list[str]] = []
     rpaths: dict[str, str] = {}
@@ -113,6 +123,12 @@ def test_linux_wheel_libraries_get_relative_runtime_rpaths(
                 ["patchelf", "--print-rpath", os.fspath(library)],
             ]
         )
+    expected.extend(
+        [
+            ["patchelf", "--set-rpath", "$ORIGIN/../..", os.fspath(tkinter)],
+            ["patchelf", "--print-rpath", os.fspath(tkinter)],
+        ]
+    )
     for extension in extensions:
         expected.extend(
             [
