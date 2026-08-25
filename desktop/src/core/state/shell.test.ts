@@ -193,6 +193,66 @@ describe("desktop shell state owner", () => {
     await expect(shell.requestClose("vault")).resolves.toBe(true);
   });
 
+  it("lets a domain save one dirty draft before a lifecycle operation", async () => {
+    const shell = createShellStore();
+    shell.openApplication("review");
+    let dirty = true;
+    let resolveSave!: (saved: boolean) => void;
+    const save = vi.fn(() => new Promise<boolean>((resolve) => { resolveSave = resolve; }));
+    const discard = vi.fn(() => { dirty = false; });
+    shell.registerUnsavedChanges("review", () => dirty, discard, save);
+
+    const close = shell.requestClose("review");
+    const duplicate = shell.requestClose("review");
+    expect(duplicate).toBe(close);
+    expect(shell.getState().confirmation).toBeNull();
+    await Promise.resolve();
+    expect(save).toHaveBeenCalledOnce();
+    resolveSave(true);
+    await expect(close).resolves.toBe(true);
+    expect(discard).not.toHaveBeenCalled();
+    expect(shell.getState().windows).toHaveLength(0);
+
+    shell.openApplication("review");
+    const failedSave = vi.fn(async () => false);
+    shell.registerUnsavedChanges("review", () => true, discard, failedSave);
+    await expect(shell.requestMinimize("review")).resolves.toBe(false);
+    expect(shell.getState().windows[0]?.state).toBe("maximized");
+    expect(shell.getState().confirmation).toBeNull();
+  });
+
+  it("serializes dirty preparation and fails closed on rejection or shell destruction", async () => {
+    const shell = createShellStore();
+    shell.openApplication("vault");
+    shell.openApplication("review");
+    let resolvePrepare!: (saved: boolean) => void;
+    const prepare = vi.fn(() => new Promise<boolean>((resolve) => { resolvePrepare = resolve; }));
+    shell.registerUnsavedChanges("review", () => true, undefined, prepare);
+    shell.registerUnsavedChanges("vault", () => true);
+
+    const reviewClose = shell.requestClose("review");
+    await Promise.resolve();
+    await expect(shell.requestMinimize("review")).resolves.toBe(false);
+    await expect(shell.requestClose("vault")).resolves.toBe(false);
+    resolvePrepare(false);
+    await expect(reviewClose).resolves.toBe(false);
+
+    shell.registerUnsavedChanges("review", () => true, undefined, async () => { throw new Error("save failed"); });
+    await expect(shell.requestClose("review")).resolves.toBe(false);
+
+    const vaultClose = shell.requestClose("vault");
+    expect(shell.getState().confirmation?.appId).toBe("vault");
+    await expect(shell.requestClose("review")).resolves.toBe(false);
+    shell.resolveConfirmation(false);
+    await expect(vaultClose).resolves.toBe(false);
+
+    shell.registerUnsavedChanges("review", () => true, undefined, prepare);
+    const destroyedClose = shell.requestClose("review");
+    await Promise.resolve();
+    shell.destroy();
+    resolvePrepare(true);
+    await expect(destroyedClose).resolves.toBe(false);
+  });
   it("fails closed when the unsaved boundary throws and cancels pending work on destroy", async () => {
     const shell = createShellStore({ hasUnsavedChanges: () => { throw new Error("domain failure"); } });
     shell.openApplication("vault");

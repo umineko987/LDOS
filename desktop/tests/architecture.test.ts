@@ -102,6 +102,9 @@ describe("desktop architecture boundaries", () => {
     const personalization = sourceEnding("/apps/personalization/Personalization.svelte");
     const personalizationState = sourceEnding("/apps/personalization/state.ts");
     const personalizationModel = sourceEnding("/apps/personalization/model.ts");
+    const review = sourceEnding("/apps/review/Review.svelte");
+    const reviewState = sourceEnding("/apps/review/state.ts");
+    const reviewModel = sourceEnding("/apps/review/model.ts");
     const window = sourceEnding("/shell/AppWindow.svelte");
     expect(crawl.match(/createCrawlStore\s*\(/g)).toHaveLength(1);
     expect(crawlState.match(/export function createCrawlStore\s*\(/g)).toHaveLength(1);
@@ -124,11 +127,15 @@ describe("desktop architecture boundaries", () => {
     expect(personalization.match(/createPersonalizationStore\s*\(/g)).toHaveLength(1);
     expect(personalizationState.match(/export function createPersonalizationStore\s*\(/g)).toHaveLength(1);
     expect(personalizationModel).toContain("PERSONALIZATION_PREFERENCE_KEYS");
+    expect(review.match(/createReviewStore\s*\(/g)).toHaveLength(1);
+    expect(reviewState.match(/export function createReviewStore\s*\(/g)).toHaveLength(1);
+    expect(reviewModel).toContain("groups: Readonly<Record<string, ReviewGroup>>");
     expect(window.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
     expect(window).toContain('record.appId === "crawl"');
     expect(window).toContain('record.appId === "tasks"');
     expect(window).toContain('record.appId === "proxy"');
     expect(window).toContain('record.appId === "vault"');
+    expect(window).toContain('record.appId === "review"');
     expect(window).toContain('record.appId === "policy"');
     expect(window).toContain('record.appId === "diagnostics"');
     expect(window).toContain('record.appId === "personalization"');

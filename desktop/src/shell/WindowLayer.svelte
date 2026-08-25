@@ -120,7 +120,7 @@
       {api}
       {polling}
       {persistence}
-      shellUnsaved={(appId, reader, discard) => shell.registerUnsavedChanges(appId, reader, discard)}
+      shellUnsaved={(appId, reader, discard, prepare) => shell.registerUnsavedChanges(appId, reader, discard, prepare)}
       {onNavigate}
       focused={record.appId === snapshot.focusedAppId}
       {onFocus}

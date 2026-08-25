@@ -25,6 +25,7 @@ export interface ApiClient {
   post(path: string, body?: unknown, options?: Omit<ApiRequestOptions, "body">): Promise<unknown>;
   put(path: string, body?: unknown, options?: Omit<ApiRequestOptions, "body">): Promise<unknown>;
   delete(path: string, options?: Omit<ApiRequestOptions, "body">): Promise<unknown>;
+  resourceUrl(path: string): string;
   createIdempotencyKey(prefix?: string): string;
 }
 
@@ -257,6 +258,7 @@ export function createApiClient(
     post: (path, body, options = {}) => request(path, "POST", { ...options, ...(body === undefined ? {} : { body }) }),
     put: (path, body, options = {}) => request(path, "PUT", { ...options, ...(body === undefined ? {} : { body }) }),
     delete: (path, options = {}) => request(path, "DELETE", options),
+    resourceUrl: (path) => apiUrl(origin, path),
     createIdempotencyKey,
   };
   return Object.freeze(client);

@@ -48,6 +48,7 @@ export interface ShellPersistence {
 interface UnsavedRegistration {
   readonly reader: () => boolean;
   readonly discard?: () => void;
+  readonly prepare?: () => Promise<boolean>;
 }
 
 export interface ShellStore {
@@ -65,7 +66,7 @@ export interface ShellStore {
   setOpenMenu(menu: ShellMenuId | null): void;
   setDockOverflow(open: boolean): void;
   resolveConfirmation(confirmed: boolean): boolean;
-  registerUnsavedChanges(appId: ApplicationId, reader: () => boolean, discard?: () => void): () => void;
+  registerUnsavedChanges(appId: ApplicationId, reader: () => boolean, discard?: () => void, prepare?: () => Promise<boolean>): () => void;
   destroy(): void;
 }
 
@@ -73,6 +74,11 @@ interface PendingOperation {
   readonly key: string;
   readonly promise: Promise<boolean>;
   readonly resolve: (confirmed: boolean) => void;
+}
+
+interface PendingPreparation {
+  readonly key: string;
+  readonly promise: Promise<boolean>;
 }
 
 const CONFIRMATION_COPY = Object.freeze({
@@ -127,6 +133,7 @@ export function createShellStore({
   });
   const listeners = new Set<(next: ShellState) => void>();
   let pendingOperation: PendingOperation | null = null;
+  let pendingPreparation: PendingPreparation | null = null;
   let destroyed = false;
   const unsavedReaders = new Map<ApplicationId, UnsavedRegistration>();
 
@@ -219,8 +226,22 @@ export function createShellStore({
   ): Promise<boolean> => {
     if (!needsConfirmation(appId)) return Promise.resolve(operation());
     const key = `${appId}:${intent}`;
-    if (pendingOperation) {
-      return pendingOperation.key === key ? pendingOperation.promise : Promise.resolve(false);
+    const registration = unsavedReaders.get(appId);
+    if (registration?.prepare) {
+      if (pendingPreparation) return pendingPreparation.key === key ? pendingPreparation.promise : Promise.resolve(false);
+      if (pendingOperation) return Promise.resolve(false);
+      const promise = Promise.resolve()
+        .then(() => registration.prepare!())
+        .then((prepared) => prepared && !destroyed ? operation() : false)
+        .catch(() => false)
+        .finally(() => {
+          if (pendingPreparation?.key === key) pendingPreparation = null;
+        });
+      pendingPreparation = { key, promise };
+      return promise;
+    }
+    if (pendingOperation || pendingPreparation) {
+      return pendingOperation?.key === key ? pendingOperation.promise : Promise.resolve(false);
     }
 
     let resolveChoice!: (confirmed: boolean) => void;
@@ -312,10 +333,10 @@ export function createShellStore({
       pending.resolve(confirmed);
       return true;
     },
-    registerUnsavedChanges(appId, reader, discard) {
+    registerUnsavedChanges(appId, reader, discard, prepare) {
       if (destroyed) return () => {};
       getApplicationDefinition(appId);
-      const registration = { reader, discard };
+      const registration = { reader, discard, prepare };
       unsavedReaders.set(appId, registration);
       return () => { if (unsavedReaders.get(appId) === registration) unsavedReaders.delete(appId); };
     },
@@ -323,6 +344,7 @@ export function createShellStore({
       if (destroyed) return;
       pendingOperation?.resolve(false);
       pendingOperation = null;
+      pendingPreparation = null;
       listeners.clear();
       unsavedReaders.clear();
       destroyed = true;

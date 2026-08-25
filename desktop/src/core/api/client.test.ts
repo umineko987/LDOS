@@ -31,6 +31,9 @@ describe("API client", () => {
     expect(headers.get("Accept")).toBe("application/json");
     expect(headers.get("X-Request-ID")).toBe("request-1");
     expect(headers.has("Content-Type")).toBe(false);
+    expect(client.resourceUrl("/api/v1/crawls/batch/review/images/image-1")).toBe(
+      "http://127.0.0.1:8787/api/v1/crawls/batch/review/images/image-1",
+    );
   });
 
   it("serializes POST and PUT JSON, supports DELETE, and preserves explicit headers", async () => {
@@ -166,6 +169,7 @@ describe("API client", () => {
     expect(() => buildRequestOptions("GET", { requestId: "bad id" })).toThrow("invalid_request_id");
     expect(() => buildRequestOptions("POST", { idempotencyKey: "short" })).toThrow("invalid_idempotency_key");
     expect(() => createApiClient(runtime, { fetchImpl: null as never })).toThrow("fetch_unavailable");
+    expect(() => client.resourceUrl("//evil.example/image")).toThrow("invalid_api_path");
     expect(() => buildRequestOptions("POST", { body: BigInt(1), requestId: "body-1" })).toThrow(ApiError);
     expect(() => buildRequestOptions("POST", { body: undefined, requestId: "body-2" })).not.toThrow();
     expect(() => buildRequestOptions("POST", { body: () => undefined, requestId: "body-3" })).toThrow(ApiError);

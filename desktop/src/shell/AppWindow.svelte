@@ -4,6 +4,7 @@
   import Policy from "../apps/policy/Policy.svelte";
   import Vault from "../apps/vault/Vault.svelte";
   import Personalization from "../apps/personalization/Personalization.svelte";
+  import Review from "../apps/review/Review.svelte";
   import Proxy from "../apps/proxy/Proxy.svelte";
   import Tasks from "../apps/tasks/Tasks.svelte";
   import { getApplicationDefinition, type ApplicationId } from "../core/applications/definitions";
@@ -20,7 +21,7 @@
     api: ApiClient;
     polling: PollingService;
     persistence: PersistenceService;
-    shellUnsaved?: (appId: ApplicationId, reader: () => boolean, discard?: () => void) => () => void;
+    shellUnsaved?: (appId: ApplicationId, reader: () => boolean, discard?: () => void, prepare?: () => Promise<boolean>) => () => void;
     focused: boolean;
     onNavigate: (appId: ApplicationId) => void;
     onFocus: (appId: ApplicationId) => void;
@@ -115,6 +116,8 @@
       <Proxy {api} {polling} />
     {:else if record.appId === "vault"}
       <Vault {api} {polling} registerUnsavedChanges={shellUnsaved ? (reader, discard) => shellUnsaved("vault", reader, discard) : undefined} />
+    {:else if record.appId === "review"}
+      <Review {api} {polling} {persistence} {onNavigate} registerUnsavedChanges={shellUnsaved ? (reader, discard, prepare) => shellUnsaved("review", reader, discard, prepare) : undefined} />
     {:else if record.appId === "policy"}
       <Policy {api} registerUnsavedChanges={shellUnsaved ? (reader, discard) => shellUnsaved("policy", reader, discard) : undefined} />
     {:else if record.appId === "diagnostics"}
