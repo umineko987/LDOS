@@ -30,6 +30,9 @@ RELEASE_BASE_URL = (
 )
 MANIFEST_NAME = "release-manifest.json"
 FILES_NAME = "release-files.sha256"
+LINUX_TORCHVISION_RPATH = (
+    "$ORIGIN:$ORIGIN/../torchvision.libs:$ORIGIN/../torch/lib"
+)
 BACKEND_SOURCE = ROOT / "gallery-dl-backend" / "gdl_backend"
 GALLERY_SOURCE = ROOT / "gallery-dl-codeberg"
 FRONTEND_MANIFEST = (
@@ -223,6 +226,22 @@ def install_requirements(
     for relative in lock["requirements"]:
         command.extend(["-r", ROOT / relative])
     run(command, cwd=staging, env=controlled_env())
+
+def make_linux_wheels_relocatable(
+    runtime: Path, lock: dict[str, Any], target: str
+) -> None:
+    if not target.startswith("linux"):
+        return
+    python_version = ".".join(lock["distribution"]["python_version"].split(".")[:2])
+    site_packages = runtime / "python" / "lib" / f"python{python_version}" / "site-packages"
+    extensions = [site_packages / "torchvision" / name for name in ("_C.so", "image.so")]
+    for extension in extensions:
+        if not extension.is_file():
+            raise ReleaseError(f"required torchvision extension is missing: {extension}")
+        run(["patchelf", "--set-rpath", LINUX_TORCHVISION_RPATH, extension])
+        actual = run(["patchelf", "--print-rpath", extension], capture=True)
+        if actual != LINUX_TORCHVISION_RPATH:
+            raise ReleaseError(f"failed to make torchvision extension relocatable: {extension}")
 
 
 def remove_generated_launchers(runtime: Path, target: str) -> None:
@@ -798,6 +817,7 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
         if os.name != "nt":
             python.chmod(python.stat().st_mode | stat.S_IXUSR)
         install_requirements(python, lock, staging)
+        make_linux_wheels_relocatable(staging / "runtime", lock, target)
         remove_generated_launchers(staging / "runtime", target)
         remove_bytecode(staging / "runtime")
         app = staging / "app"

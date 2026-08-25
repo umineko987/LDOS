@@ -72,6 +72,46 @@ def test_safe_extract_rejects_parent_traversal(tmp_path: Path) -> None:
         release.safe_extract(archive, tmp_path / "output")
 
 
+def test_linux_torchvision_extensions_get_relative_runtime_rpath(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = release.load_lock()
+    site_packages = (
+        tmp_path
+        / "python"
+        / "lib"
+        / "python3.13"
+        / "site-packages"
+        / "torchvision"
+    )
+    site_packages.mkdir(parents=True)
+    extensions = [site_packages / "_C.so", site_packages / "image.so"]
+    for extension in extensions:
+        extension.write_bytes(b"elf")
+    commands: list[list[str]] = []
+
+    def fake_run(command: object, **kwargs: object) -> str:
+        rendered = [os.fspath(item) for item in command]  # type: ignore[arg-type]
+        commands.append(rendered)
+        return release.LINUX_TORCHVISION_RPATH if kwargs.get("capture") else ""
+
+    monkeypatch.setattr(release, "run", fake_run)
+    release.make_linux_wheels_relocatable(tmp_path, lock, "linux-x86_64")
+
+    assert commands == [
+        command
+        for extension in extensions
+        for command in (
+            [
+                "patchelf",
+                "--set-rpath",
+                release.LINUX_TORCHVISION_RPATH,
+                os.fspath(extension),
+            ],
+            ["patchelf", "--print-rpath", os.fspath(extension)],
+        )
+    ]
+
 def minimal_tree(root: Path) -> dict[str, object]:
     python = root / "runtime" / "python" / "bin" / "python3"
     python.parent.mkdir(parents=True)
