@@ -56,7 +56,6 @@ describe("Svelte Review integration", () => {
     expect(body).not.toContain('data-application-content="review"');
     expect(appWindowSource).toContain('record.appId === "review"');
     expect(appWindowSource).toContain("<Review {api} {polling} {persistence} {onNavigate}");
-    expect(appWindowSource.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
   });
 
   it("keeps stable keyed groups and images under one domain state owner", () => {

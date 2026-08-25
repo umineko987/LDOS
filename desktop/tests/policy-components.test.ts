@@ -34,7 +34,6 @@ describe("Svelte Policy integration", () => {
     expect(body).toContain("data-policy-app");
     expect(appWindowSource).toContain('record.appId === "policy"');
     expect(appWindowSource).toContain("<Policy {api} registerUnsavedChanges=");
-    expect(appWindowSource.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
     expect(policySource).toContain("registerUnsavedChanges");
     expect(policySource).toContain("beforeunload");
     expect(policySource).toContain('aria-modal="true"');

@@ -57,7 +57,6 @@ describe("Svelte Proxy integration", () => {
     expect(body).not.toContain('data-application-content="proxy"');
     expect(appWindowSource).toContain('record.appId === "proxy"');
     expect(appWindowSource).toContain("<Proxy {api} {polling} />");
-    expect(appWindowSource.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
   });
 
   it("keeps keyed domain lists, one owner, shared API/polling, confirmations, and cleanup", () => {

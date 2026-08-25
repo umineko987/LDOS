@@ -73,7 +73,6 @@ describe("Svelte Tasks integration", () => {
     expect(tasks).not.toContain('data-application-content="tasks"');
     expect(crawl).toContain("data-crawl-app");
     expect(crawl).not.toContain('data-application-content="crawl"');
-    expect(appWindowSource.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
     expect(appWindowSource).toContain('record.appId === "tasks"');
     expect(appWindowSource).toContain("<Tasks {api} {polling} {persistence} {onNavigate} />");
   });

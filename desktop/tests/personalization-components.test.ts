@@ -31,7 +31,6 @@ describe("Svelte Personalization integration", () => {
     expect(body).toContain("data-personalization-app");
     expect(appWindowSource).toContain('record.appId === "personalization"');
     expect(appWindowSource).toContain("<Personalization {persistence} registerUnsavedChanges=");
-    expect(appWindowSource.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
   });
   it("keeps the two-field preference path, dirty lifecycle and flat CSS boundary", () => {
     expect(personalizationSource).toContain("registerUnsavedChanges");

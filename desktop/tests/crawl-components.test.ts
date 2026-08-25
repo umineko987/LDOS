@@ -60,7 +60,6 @@ describe("Svelte Crawl integration", () => {
     expect(body).not.toContain('data-application-content="crawl"');
     expect(appWindowSource).toContain('record.appId === "crawl"');
     expect(appWindowSource).toContain("<Crawl {api} {persistence} {onNavigate} />");
-    expect(appWindowSource.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
   });
 
   it("renders only sanitized candidate facts and a stable business key", () => {

@@ -58,7 +58,6 @@ describe("Svelte Vault integration", () => {
     expect(body).not.toContain('data-application-content="vault"');
     expect(appWindowSource).toContain('record.appId === "vault"');
     expect(appWindowSource).toContain('<Vault {api} {polling} registerUnsavedChanges=');
-    expect(appWindowSource.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
   });
 
   it("keeps keyed sites, one owner, shared API/polling, confirmation focus, and complete cleanup", () => {

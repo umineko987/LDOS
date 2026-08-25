@@ -81,7 +81,7 @@ describe("desktop architecture boundaries", () => {
     }
   });
 
-  it("keeps each migrated domain owner outside shell state and one placeholder path", () => {
+  it("keeps each migrated domain owner outside shell state with no fallback application path", () => {
     const crawl = sourceEnding("/apps/crawl/Crawl.svelte");
     const crawlState = sourceEnding("/apps/crawl/state.ts");
     const crawlModel = sourceEnding("/apps/crawl/model.ts");
@@ -105,6 +105,12 @@ describe("desktop architecture boundaries", () => {
     const review = sourceEnding("/apps/review/Review.svelte");
     const reviewState = sourceEnding("/apps/review/state.ts");
     const reviewModel = sourceEnding("/apps/review/model.ts");
+    const gallery = sourceEnding("/apps/gallery/Gallery.svelte");
+    const galleryState = sourceEnding("/apps/gallery/state.ts");
+    const galleryModel = sourceEnding("/apps/gallery/model.ts");
+    const exportApp = sourceEnding("/apps/export/Export.svelte");
+    const exportState = sourceEnding("/apps/export/state.ts");
+    const exportModel = sourceEnding("/apps/export/model.ts");
     const window = sourceEnding("/shell/AppWindow.svelte");
     expect(crawl.match(/createCrawlStore\s*\(/g)).toHaveLength(1);
     expect(crawlState.match(/export function createCrawlStore\s*\(/g)).toHaveLength(1);
@@ -130,7 +136,13 @@ describe("desktop architecture boundaries", () => {
     expect(review.match(/createReviewStore\s*\(/g)).toHaveLength(1);
     expect(reviewState.match(/export function createReviewStore\s*\(/g)).toHaveLength(1);
     expect(reviewModel).toContain("groups: Readonly<Record<string, ReviewGroup>>");
-    expect(window.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
+    expect(gallery.match(/createGalleryStore\s*\(/g)).toHaveLength(1);
+    expect(galleryState.match(/export function createGalleryStore\s*\(/g)).toHaveLength(1);
+    expect(galleryModel).toContain('readonly phase: "unavailable"');
+    expect(exportApp.match(/createExportStore\s*\(/g)).toHaveLength(1);
+    expect(exportState.match(/export function createExportStore\s*\(/g)).toHaveLength(1);
+    expect(exportModel).toContain('readonly phase: "unavailable"');
+    expect(window).not.toContain("ApplicationPlaceholder");
     expect(window).toContain('record.appId === "crawl"');
     expect(window).toContain('record.appId === "tasks"');
     expect(window).toContain('record.appId === "proxy"');
@@ -139,10 +151,12 @@ describe("desktop architecture boundaries", () => {
     expect(window).toContain('record.appId === "policy"');
     expect(window).toContain('record.appId === "diagnostics"');
     expect(window).toContain('record.appId === "personalization"');
-    expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/CrawlState|TasksState|BatchSummary|TaskEntity|ProxyState|ProxyStatus/);
+    expect(window).toContain('record.appId === "gallery"');
+    expect(window).toContain('record.appId === "export"');
+    expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/CrawlState|TasksState|BatchSummary|TaskEntity|ProxyState|ProxyStatus|VaultState|PolicyState|DiagnosticsState|PersonalizationState|ReviewState|GalleryState|ExportState/);
     for (const [path, source] of Object.entries(productionSources)) {
       if (!path.includes("/core/")) continue;
-      expect(source, path).not.toMatch(/from ["'][^"']*apps\/(?:crawl|tasks|proxy|vault)/);
+      expect(source, path).not.toMatch(/from ["'][^"']*apps\/(?:crawl|tasks|proxy|vault|review|policy|diagnostics|personalization|gallery|export)/);
     }
   });
 });

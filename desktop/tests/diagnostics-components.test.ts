@@ -33,7 +33,6 @@ describe("Svelte Diagnostics integration", () => {
     expect(body).toContain("data-diagnostics-app");
     expect(appWindowSource).toContain('record.appId === "diagnostics"');
     expect(appWindowSource).toContain("<Diagnostics {api} {polling} onNavigate=");
-    expect(appWindowSource.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
   });
 
   it("keeps one store, keyed components, the shared poller, safe API boundary, and cleanup", () => {

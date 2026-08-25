@@ -122,11 +122,12 @@ describe("five-layer Svelte OS shell", () => {
     expect(appWindow).toContain('role="group" aria-label="窗口操作"');
   });
 
-  it("uses one minimal application-content boundary and never accesses storage or APIs from shell views", () => {
+  it("uses explicit application branches and never accesses storage or APIs from shell views", () => {
     const joined = Object.values(componentSources).join("\n");
-    expect(occurrences(joined, 'import ApplicationPlaceholder from "./ApplicationPlaceholder.svelte"')).toBe(1);
+    expect(joined).not.toContain("ApplicationPlaceholder");
     expect(joined).not.toMatch(/\b(?:localStorage|sessionStorage|fetch|XMLHttpRequest)\b/);
     expect(joined).not.toContain("/api/v1");
-    expect(joined).toContain("本阶段不发送业务请求，也不提供伪数据或写入能力。");
+    expect(joined).toContain('record.appId === "gallery"');
+    expect(joined).toContain('record.appId === "export"');
   });
 });

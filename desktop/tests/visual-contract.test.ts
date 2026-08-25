@@ -43,8 +43,8 @@ describe("night-flight glass visual contract", () => {
     const supported = shellCss.slice(shellCss.indexOf("@supports ((-webkit-backdrop-filter"), shellCss.indexOf("@supports not"));
     expect(supported).toContain(".app-window,");
     expect(supported.match(/\.app-window,/g)).toHaveLength(1);
-    expect(supported).not.toMatch(/\.app-window__|\.application-placeholder|\.menu-popover__item|\.dock__item/);
-    expect(shellCss).not.toMatch(/(?:\.app-window__|\.application-placeholder)[^{]*\{[^}]*backdrop-filter/s);
+    expect(supported).not.toMatch(/\.app-window__|\.menu-popover__item|\.dock__item/);
+    expect(shellCss).not.toMatch(/\.app-window__[^{]*\{[^}]*backdrop-filter/s);
     expect(budgetContract.budgets.composition_idle.main_backdrops_per_visible_window_max).toBe(1);
     expect(budgetContract.budgets.composition_idle.internal_backdrops_per_application_max).toBe(0);
   });

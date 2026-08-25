@@ -1,6 +1,8 @@
 <script lang="ts">
   import Crawl from "../apps/crawl/Crawl.svelte";
   import Diagnostics from "../apps/diagnostics/Diagnostics.svelte";
+  import Export from "../apps/export/Export.svelte";
+  import Gallery from "../apps/gallery/Gallery.svelte";
   import Policy from "../apps/policy/Policy.svelte";
   import Vault from "../apps/vault/Vault.svelte";
   import Personalization from "../apps/personalization/Personalization.svelte";
@@ -14,7 +16,6 @@
   import type { WindowRecord } from "../core/state/shell";
   import type { ResizeDirection } from "../core/windowing/geometry";
   import type { WindowInteractionMode } from "../core/windowing/interaction";
-  import ApplicationPlaceholder from "./ApplicationPlaceholder.svelte";
 
   interface Props {
     record: WindowRecord;
@@ -124,8 +125,10 @@
       <Diagnostics {api} {polling} onNavigate={(appId) => onNavigate(appId)} />
     {:else if record.appId === "personalization"}
       <Personalization {persistence} registerUnsavedChanges={shellUnsaved ? (reader: () => boolean, discard?: () => void) => shellUnsaved("personalization", reader, discard) : undefined} />
-    {:else}
-      <ApplicationPlaceholder {application} />
+    {:else if record.appId === "gallery"}
+      <Gallery />
+    {:else if record.appId === "export"}
+      <Export />
     {/if}
   </div>
 
