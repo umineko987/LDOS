@@ -9,7 +9,7 @@
     "beforeBuildCommand": "npm run build",
     "beforeBundleCommand": {
       "script": "python ../../scripts/desktop_release.py verify-tree --tree release/backend",
-      "cwd": "src-tauri"
+      "cwd": "."
     },
     "frontendDist": "../dist"
   },
