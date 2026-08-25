@@ -1,5 +1,7 @@
 use std::{
-    env, fs,
+    env,
+    ffi::OsString,
+    fs,
     io::{self, Read, Write},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     path::PathBuf,
@@ -16,6 +18,8 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
+#[cfg(not(debug_assertions))]
+use crate::distribution::BackendDistribution;
 use crate::process_tree::ProcessTree;
 
 pub const HEALTH_PATH: &str = "/healthz";
@@ -133,10 +137,24 @@ struct LaunchSpec {
     backend_dir: PathBuf,
     config_path: PathBuf,
     endpoint: Endpoint,
+    environment: Vec<(OsString, OsString)>,
 }
 
 impl LaunchSpec {
-    fn from_environment() -> Result<Self, ()> {
+    fn from_app(app: &AppHandle) -> Result<Self, ()> {
+        #[cfg(debug_assertions)]
+        {
+            let _ = app;
+            Self::development()
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            Self::packaged(app)
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn development() -> Result<Self, ()> {
         let backend_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .join("gallery-dl-backend")
@@ -154,17 +172,6 @@ impl LaunchSpec {
             .unwrap_or_else(|| backend_dir.join("config.json"))
             .canonicalize()
             .map_err(|_| ())?;
-        let metadata = fs::metadata(&config_path).map_err(|_| ())?;
-        if !metadata.is_file() || metadata.len() > MAX_CONFIG_BYTES {
-            return Err(());
-        }
-        let config_bytes = fs::read(&config_path).map_err(|_| ())?;
-        if config_bytes.len() as u64 > MAX_CONFIG_BYTES {
-            return Err(());
-        }
-        let config: Value = serde_json::from_slice(&config_bytes).map_err(|_| ())?;
-        let endpoint = Endpoint::from_config(&config)?.with_environment()?;
-
         let python = if let Some(python) = environment_value("PYTHON")? {
             PathBuf::from(python)
         } else {
@@ -177,12 +184,52 @@ impl LaunchSpec {
             }
             candidate
         };
+        Self::from_paths(python, backend_dir, config_path, Vec::new())
+    }
 
+    #[cfg(not(debug_assertions))]
+    fn packaged(app: &AppHandle) -> Result<Self, ()> {
+        let distribution = BackendDistribution::prepare(
+            &app.path().resource_dir().map_err(|_| ())?,
+            &app.path().app_config_dir().map_err(|_| ())?,
+            &app.path().app_data_dir().map_err(|_| ())?,
+        )
+        .map_err(|_| ())?;
+        let backend_dir = distribution.backend_root.join("app");
+        let environment = distribution.environment().into_iter().collect();
+        Self::from_paths(
+            distribution.python_executable,
+            backend_dir,
+            distribution.config_path,
+            environment,
+        )
+    }
+
+    fn from_paths(
+        python: PathBuf,
+        backend_dir: PathBuf,
+        config_path: PathBuf,
+        environment: Vec<(OsString, OsString)>,
+    ) -> Result<Self, ()> {
+        if !python.is_file() || !backend_dir.join("gdl_backend/__init__.py").is_file() {
+            return Err(());
+        }
+        let metadata = fs::metadata(&config_path).map_err(|_| ())?;
+        if !metadata.is_file() || metadata.len() > MAX_CONFIG_BYTES {
+            return Err(());
+        }
+        let config_bytes = fs::read(&config_path).map_err(|_| ())?;
+        if config_bytes.len() as u64 > MAX_CONFIG_BYTES {
+            return Err(());
+        }
+        let config: Value = serde_json::from_slice(&config_bytes).map_err(|_| ())?;
+        let endpoint = Endpoint::from_config(&config)?.with_environment()?;
         Ok(Self {
             python,
             backend_dir,
             config_path,
             endpoint,
+            environment,
         })
     }
 
@@ -193,8 +240,10 @@ impl LaunchSpec {
             .args(["-m", "gdl_backend", "--config"])
             .arg(&self.config_path)
             .env("GDL_BACKEND_PARENT_PIPE", "1")
+            .env("IMAGEWEAVE_DESKTOP_DISTRIBUTION", "1")
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
+        command.envs(self.environment.iter().map(|(key, value)| (key, value)));
         command
     }
 }
@@ -266,7 +315,7 @@ impl BackendManager {
         if self.inner.shutdown.load(Ordering::SeqCst) {
             return;
         }
-        let spec = match LaunchSpec::from_environment() {
+        let spec = match LaunchSpec::from_app(&app) {
             Ok(spec) => spec,
             Err(()) => {
                 self.fail("backend_config_invalid");
@@ -488,6 +537,10 @@ mod tests {
             backend_dir: PathBuf::from("backend"),
             config_path: PathBuf::from("backend/config.json"),
             endpoint: Endpoint::new("127.0.0.1", 8787).expect("endpoint"),
+            environment: vec![(
+                OsString::from("IMAGEWEAVE_DESKTOP_PYTHON"),
+                OsString::from("backend/runtime/python/bin/python3"),
+            )],
         };
         let command = spec.command();
         let arguments = command
@@ -501,6 +554,13 @@ mod tests {
         assert_eq!(command.get_current_dir(), Some(Path::new("backend")));
         assert!(command.get_envs().any(|(name, value)| {
             name == "GDL_BACKEND_PARENT_PIPE" && value == Some(std::ffi::OsStr::new("1"))
+        }));
+        assert!(command.get_envs().any(|(name, value)| {
+            name == "IMAGEWEAVE_DESKTOP_DISTRIBUTION" && value == Some(std::ffi::OsStr::new("1"))
+        }));
+        assert!(command.get_envs().any(|(name, value)| {
+            name == "IMAGEWEAVE_DESKTOP_PYTHON"
+                && value == Some(std::ffi::OsStr::new("backend/runtime/python/bin/python3"))
         }));
     }
 

@@ -1,4 +1,6 @@
 mod backend;
+#[cfg(any(not(debug_assertions), test))]
+mod distribution;
 mod process_tree;
 
 use backend::{BackendManager, BackendStatus, RuntimeMetadata};

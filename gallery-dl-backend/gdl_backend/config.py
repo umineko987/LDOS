@@ -171,6 +171,63 @@ def _paths(values: list[str] | None, base: Path, defaults: list[Path]) -> list[P
         return [p.resolve() for p in defaults]
     return [_path(value, base, base) for value in cleaned]
 
+def _desktop_distribution_data(data: dict[str, Any]) -> dict[str, Any]:
+    resource_value = os.environ.get("IMAGEWEAVE_DESKTOP_RESOURCE_ROOT")
+    data_value = os.environ.get("IMAGEWEAVE_DESKTOP_DATA_ROOT")
+    python_value = os.environ.get("IMAGEWEAVE_DESKTOP_PYTHON")
+    values = (resource_value, data_value, python_value)
+    if not any(values):
+        return data
+    if not all(values):
+        raise ValueError("桌面分发路径环境不完整")
+
+    resource_root = Path(os.path.abspath(os.fspath(Path(resource_value))))
+    data_root = Path(os.path.abspath(os.fspath(Path(data_value))))
+    python = Path(os.path.abspath(os.fspath(Path(python_value))))
+    if not resource_root.is_absolute() or not data_root.is_absolute() or not python.is_absolute():
+        raise ValueError("桌面分发路径必须是绝对路径")
+    expected_python = resource_root / "runtime" / "python" / (
+        "python.exe" if os.name == "nt" else "bin/python3"
+    )
+    if os.path.normcase(os.fspath(python)) != os.path.normcase(os.fspath(expected_python)):
+        raise ValueError("桌面后端、gallery worker 与去重 worker 必须使用同一受控 Python")
+
+    projected = dict(data)
+    projected.update(
+        {
+            "runtime_dir": str(data_root / "runtime"),
+            "database_path": str(data_root / "runtime" / "backend.sqlite3"),
+            "default_output_root": str(data_root / "downloads"),
+            "allowed_output_roots": [str(data_root / "downloads")],
+            "allowed_config_roots": [str(data_root / "credentials")],
+            "allowed_cookie_roots": [str(data_root / "credentials")],
+        }
+    )
+    gallery = dict(projected.get("gallery") or {})
+    gallery.update(
+        {
+            "repo_path": str(resource_root / "app" / "gallery-dl-codeberg"),
+            "cache_file": str(data_root / "credentials" / "managed" / "gallery-dl-cache.sqlite3"),
+            "python_executable": str(python),
+            "migrate_default_auth": False,
+        }
+    )
+    projected["gallery"] = gallery
+    proxy = dict(projected.get("proxy") or {})
+    proxy["allowed_node_roots"] = [str(data_root / "subscriptions")]
+    projected["proxy"] = proxy
+    dedup = dict(projected.get("dedup") or {})
+    dedup.update(
+        {
+            "python_executable": str(python),
+            "worker_script": str(resource_root / "app" / "dedup_review_worker.py"),
+            "core_script": str(resource_root / "app" / "dedup_core.py"),
+            "model_dir": str(data_root / "models"),
+        }
+    )
+    projected["dedup"] = dedup
+    return projected
+
 
 def _allowed_node_roots(values: Any, base: Path) -> list[Path]:
     """规范化 WebUI 节点文件许可根目录，同时拒绝空项和过宽根目录。"""
@@ -381,6 +438,7 @@ class AppSettings:
         data: dict[str, Any] = {}
         if config_path.is_file():
             data = json.loads(config_path.read_text(encoding="utf-8"))
+        data = _desktop_distribution_data(data)
         base = config_path.parent if config_path else PROJECT_DIR
 
         runtime = _managed_path(data.get("runtime_dir"), base, PROJECT_DIR / "runtime")

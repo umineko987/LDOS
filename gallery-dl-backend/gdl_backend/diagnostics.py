@@ -794,9 +794,7 @@ def _chrome_component(settings: AppSettings) -> dict[str, Any]:
 
 
 def doctor_snapshot(settings: AppSettings) -> dict[str, Any]:
-    expected_python = settings.project_dir / ".venv" / (
-        "Scripts/python.exe" if os.name == "nt" else "bin/python"
-    )
+    expected_python = Path(settings.gallery.python_executable)
     try:
         same_python = expected_python.is_file() and os.path.samefile(expected_python, sys.executable)
     except OSError:
@@ -850,9 +848,9 @@ def doctor_snapshot(settings: AppSettings) -> dict[str, Any]:
         "backend_python": _component(
             "ok" if backend_ok else "error",
             (
-                f"后端 venv Python {sys.version_info.major}.{sys.version_info.minor} 依赖可用"
+                f"受控 Python {sys.version_info.major}.{sys.version_info.minor} 依赖可用"
                 if backend_ok
-                else "后端 venv 或依赖不完整"
+                else "受控 Python 或依赖不完整"
             ),
             missing_dependency_count=len(missing_dependencies),
         ),

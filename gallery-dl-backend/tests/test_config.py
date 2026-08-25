@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr
 from io import StringIO
+from unittest.mock import patch
 from pathlib import Path
 
 from gdl_backend.config import AppSettings, normalize_authorization_proxy
@@ -602,6 +603,57 @@ class AuthorizationProxyConfigTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 settings.validate()
 
+
+class DesktopDistributionConfigTests(unittest.TestCase):
+    def test_packaged_paths_override_stale_install_paths_and_share_python(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            resource_root = root / "install" / "backend"
+            data_root = root / "data"
+            python = resource_root / "runtime" / "python" / (
+                "python.exe" if os.name == "nt" else "bin/python3"
+            )
+            config_path = root / "config" / "backend.json"
+            config_path.parent.mkdir()
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "runtime_dir": "/stale/runtime",
+                        "gallery": {"python_executable": "/usr/bin/python", "migrate_default_auth": True},
+                        "proxy": {"enabled": True, "allowed_node_roots": ["/stale/nodes"]},
+                        "dedup": {"enabled": False, "python_executable": "/stale/python"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            environment = {
+                "IMAGEWEAVE_DESKTOP_RESOURCE_ROOT": str(resource_root),
+                "IMAGEWEAVE_DESKTOP_DATA_ROOT": str(data_root),
+                "IMAGEWEAVE_DESKTOP_PYTHON": str(python),
+            }
+
+            with patch.dict(os.environ, environment):
+                settings = AppSettings.load(config_path)
+
+            self.assertEqual(settings.runtime_dir, data_root / "runtime")
+            self.assertEqual(settings.database_path, data_root / "runtime" / "backend.sqlite3")
+            self.assertEqual(settings.gallery.python_executable, str(python))
+            self.assertEqual(settings.dedup.python_executable, python)
+            self.assertEqual(settings.gallery.repo_path, resource_root / "app" / "gallery-dl-codeberg")
+            self.assertEqual(settings.dedup.worker_script, resource_root / "app" / "dedup_review_worker.py")
+            self.assertEqual(settings.allowed_cookie_roots, [data_root / "credentials"])
+            self.assertEqual(settings.proxy.allowed_node_roots, [data_root / "subscriptions"])
+            self.assertTrue(settings.proxy.enabled)
+            self.assertFalse(settings.gallery.migrate_default_auth)
+
+    def test_partial_packaged_environment_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.dict(
+                os.environ,
+                {"IMAGEWEAVE_DESKTOP_RESOURCE_ROOT": str(Path(temporary) / "backend")},
+            ):
+                with self.assertRaisesRegex(ValueError, "环境不完整"):
+                    AppSettings.load(Path(temporary) / "missing.json")
 
 class NormalizeAuthorizationProxyTests(unittest.TestCase):
     def test_valid_forms(self):
