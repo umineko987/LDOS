@@ -6,7 +6,9 @@
     "python_version": "3.13.15",
     "source": "https://github.com/astral-sh/python-build-standalone/releases/tag/20260807",
     "license": "MPL-2.0",
-    "license_source": "https://github.com/astral-sh/python-build-standalone/blob/20260807/LICENSE"
+    "license_source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20260807/LICENSE",
+    "license_sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+    "python_license_sha256": "78b12c3a81360b357002334f0e70ea0e92eebf7a9b358805c03c48484945f3bb"
   },
   "targets": {
     "linux-x86_64": {

@@ -22,6 +22,12 @@ import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
+from third_party_notices import (
+    NoticeError,
+    generate as generate_notices,
+    verify as verify_notices,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = ROOT / "desktop" / "release" / "runtime-lock.json"
 DEFAULT_OUTPUT = ROOT / "desktop" / "src-tauri" / "release" / "backend"
@@ -89,6 +95,13 @@ def load_lock() -> dict[str, Any]:
     data = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
     if data.get("schema_version") != 1:
         raise ReleaseError("unsupported runtime lock schema")
+    distribution = data.get("distribution", {})
+    if (
+        not str(distribution.get("license_source", "")).startswith("https://")
+        or len(distribution.get("license_sha256", "")) != 64
+        or len(distribution.get("python_license_sha256", "")) != 64
+    ):
+        raise ReleaseError("runtime license evidence is not locked")
     for target, item in data.get("targets", {}).items():
         if not target or len(item.get("sha256", "")) != 64:
             raise ReleaseError(f"invalid runtime lock target: {target!r}")
@@ -144,31 +157,35 @@ def ensure_submodule() -> str:
     return actual
 
 
-def download_runtime(lock: dict[str, Any], target: str, cache_dir: Path) -> Path:
-    item = lock["targets"][target]
-    archive = cache_dir / item["archive"]
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    if archive.is_file() and sha256_file(archive) == item["sha256"]:
-        return archive
-    archive.unlink(missing_ok=True)
-    url = f"{RELEASE_BASE_URL}/{lock['distribution']['version']}/{item['archive']}"
-    temporary = archive.with_suffix(archive.suffix + ".part")
+def download_locked_file(url: str, expected: str, destination: Path, label: str) -> Path:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_file() and sha256_file(destination) == expected:
+        return destination
+    destination.unlink(missing_ok=True)
+    temporary = destination.with_suffix(destination.suffix + ".part")
     temporary.unlink(missing_ok=True)
     request = urllib.request.Request(url, headers={"User-Agent": "ImageWeave-release/1"})
     try:
-        with urllib.request.urlopen(request, timeout=120) as response, temporary.open("wb") as output:
+        with urllib.request.urlopen(request, timeout=120) as response, temporary.open(
+            "wb"
+        ) as output:
             shutil.copyfileobj(response, output)
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
     actual = sha256_file(temporary)
-    if actual != item["sha256"]:
+    if actual != expected:
         temporary.unlink(missing_ok=True)
-        raise ReleaseError(
-            f"runtime archive hash mismatch: expected {item['sha256']}, got {actual}"
-        )
-    os.replace(temporary, archive)
-    return archive
+        raise ReleaseError(f"{label} hash mismatch: expected {expected}, got {actual}")
+    os.replace(temporary, destination)
+    return destination
+
+
+def download_runtime(lock: dict[str, Any], target: str, cache_dir: Path) -> Path:
+    item = lock["targets"][target]
+    archive = cache_dir / item["archive"]
+    url = f"{RELEASE_BASE_URL}/{lock['distribution']['version']}/{item['archive']}"
+    return download_locked_file(url, item["sha256"], archive, "runtime archive")
 
 
 def extract_tar_archive(archive: Path, destination: Path, label: str) -> None:
@@ -592,6 +609,10 @@ def verify_tree(
     forbidden_names = {"mihomo", "mihomo.exe", "chrome", "chrome.exe"}
     if any(path.name.lower() in forbidden_names for path in root.rglob("*")):
         raise ReleaseError("unlocked optional binary found in release tree")
+    try:
+        verify_notices(root, manifest.get("target"))
+    except NoticeError as error:
+        raise ReleaseError(str(error)) from error
     scan_for_local_paths(root, forbidden_paths)
     return manifest
 
@@ -922,6 +943,53 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
         licenses.mkdir()
         shutil.copy2(ROOT / "LICENSE", licenses / "ImageWeave-MIT.txt")
         shutil.copy2(GALLERY_SOURCE / "LICENSE", licenses / "gallery-dl-GPL-2.0.txt")
+        distribution = lock["distribution"]
+        runtime_license = download_locked_file(
+            distribution["license_source"],
+            distribution["license_sha256"],
+            cache_dir / f"python-build-standalone-{distribution['version']}-LICENSE",
+            "python-build-standalone license",
+        )
+        runtime_license_target = licenses / "python-build-standalone-MPL-2.0.txt"
+        shutil.copyfile(runtime_license, runtime_license_target)
+        python_license_candidates = [
+            path
+            for path in (staging / "runtime" / "python").rglob("LICENSE.txt")
+            if "site-packages" not in path.parts
+            and sha256_file(path) == distribution["python_license_sha256"]
+        ]
+        if len(python_license_candidates) != 1:
+            raise ReleaseError(
+                "controlled CPython license evidence is missing or ambiguous"
+            )
+        gallery_version_match = re.search(
+            r'^__version__\s*=\s*"([^"]+)"$',
+            (GALLERY_SOURCE / "gallery_dl" / "version.py").read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if gallery_version_match is None:
+            raise ReleaseError("gallery-dl version evidence is missing")
+        generate_notices(
+            staging,
+            target,
+            {
+                "name": distribution["name"],
+                "version": distribution["version"],
+                "python_version": distribution["python_version"],
+                "artifact_sha256": lock["targets"][target]["sha256"],
+                "license": distribution["license"],
+                "source": distribution["source"],
+                "license_file": runtime_license_target.relative_to(staging).as_posix(),
+                "python_license_file": python_license_candidates[0]
+                .relative_to(staging)
+                .as_posix(),
+                "gallery_version": gallery_version_match.group(1),
+                "gallery_source": (
+                    "https://codeberg.org/mikf/gallery-dl/src/commit/" + gallery_commit
+                ),
+            },
+            python,
+        )
         write_release_manifest(staging, lock, target, gallery_commit, archive)
         staged_manifest = verify_tree(
             staging, forbidden_paths=[ROOT, staging, Path.home()]
@@ -1028,7 +1096,14 @@ def main(argv: list[str] | None = None) -> int:
             result = verify_runtime(args.tree)
         else:
             result = verify_bundle(args.bundle)
-    except (OSError, ValueError, KeyError, ReleaseError, subprocess.SubprocessError) as exc:
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        NoticeError,
+        ReleaseError,
+        subprocess.SubprocessError,
+    ) as exc:
         print(f"desktop release error: {exc}", file=sys.stderr)
         return 1
     print(json.dumps({"status": "ok", **result}, sort_keys=True))

@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import sys
 import tarfile
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location(
     "desktop_release", ROOT / "scripts" / "desktop_release.py"
 )
@@ -28,7 +30,9 @@ def test_runtime_lock_has_pinned_supported_assets() -> None:
         "python_version": "3.13.15",
         "source": "https://github.com/astral-sh/python-build-standalone/releases/tag/20260807",
         "license": "MPL-2.0",
-        "license_source": "https://github.com/astral-sh/python-build-standalone/blob/20260807/LICENSE",
+        "license_source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20260807/LICENSE",
+        "license_sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+        "python_license_sha256": "78b12c3a81360b357002334f0e70ea0e92eebf7a9b358805c03c48484945f3bb",
     }
     assert set(lock["targets"]) == {"linux-x86_64", "windows-x86_64"}
     assert all(len(item["sha256"]) == 64 for item in lock["targets"].values())
@@ -179,6 +183,29 @@ def minimal_tree(root: Path) -> dict[str, object]:
     (app / "gdl_backend").mkdir(parents=True)
     (app / "gdl_backend" / "worker_entry.py").write_text("", encoding="utf-8")
     (app / "dedup_review_worker.py").write_text("", encoding="utf-8")
+    licenses = root / "licenses"
+    licenses.mkdir()
+    (licenses / "test-license.txt").write_text("license\n", encoding="utf-8")
+    (licenses / "THIRD-PARTY-NOTICES.md").write_text("# notices\n", encoding="utf-8")
+    (licenses / "third-party-components.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "target": "linux-x86_64",
+                "components": [
+                    {
+                        "ecosystem": "test",
+                        "name": "dependency",
+                        "version": "1",
+                        "license": "MIT",
+                        "source": "https://example.invalid/dependency",
+                        "license_files": ["licenses/test-license.txt"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     count, digest = release.write_file_manifest(root)
     manifest: dict[str, object] = {
         "schema_version": 1,
