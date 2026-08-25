@@ -245,9 +245,7 @@ Mihomo、去重 Python、Torch 实际设备及 SSCD/DINOv2 缓存。禁用组件
 ## WebUI 工作流
 
 1. 访问裸 `/ui/` 的空玻璃桌面，通过 Dock 或应用中心启动应用；也可使用 `#/应用ID` 深链接。
-   当前聚焦窗口最大化时 Dock 完全隐藏，窗口保留菜单栏并延伸到视口底部；恢复、最小化、关闭或切到
-   普通窗口后 Dock 自动返回。Bootstrap 的普通桌面默认显示 Dock；即使滚动升级暂时复用旧 ESM，
-   版本化 `desktop.css` 也会从 focused/maximized/hidden DOM 事实接管 Dock 与全高几何，不要求强制刷新。
+   当前聚焦窗口最大化时 Dock 完全隐藏，窗口保留菜单栏并延伸到视口底部；恢复、最小化、关闭或切到普通窗口后 Dock 自动返回。Svelte shell 从空窗口栈启动，hash router、shell state 和窗口组件共同提供唯一运行路径，不保留旧 ESM 或 CSS fallback。
 2. （可选）在“外观设置”选择六个同源内置夜景之一，并开启或关闭界面动效；
 3. 查看代理池状态，按需启动、重载或探活。
 4. 在“授权管理”中完成所需站点登录。
@@ -259,22 +257,13 @@ Mihomo、去重 Python、Torch 实际设备及 SSCD/DINOv2 缓存。禁用组件
 
 ### 桌面 WebUI 状态、轮询与安全边界
 
-所有业务请求只经同源 `js/core/api.js` 和应用 `context.api` 发出；应用模块不直接调用
-`fetch`/XHR。后端响应必须先经过对应 model 白名单投影，再通过受控 action 进入中央 Store。
-爬取提交所需的原始地址只在“图片采集”控制器内短暂保留，批次/任务/review 响应中的 URL、绝对路径、
-原始错误和内部载荷不会进入 Store 或 DOM。新页面的中央窗口栈始终从空数组开始；session 中的当前
-应用只用于运行期协调，不是启动权威，不恢复运行、焦点、最小化或窗口栈状态。LocalStorage 的
-`imageweave.window-placements.v2` 只按应用保存经过几何校验的最近 normal rect 和可选最大化偏好；
-旧 v1 工作区仅一次迁移为位置提示，不会自动重开窗口。`imageweave.ui:ui-preferences` 只保存
-`wallpaperColor`（六个合法场景 ID）和 `animations`（`on | off`）；未知字段、危险键、损坏 JSON
-和旧 `custom` 值都由白名单投影安全回退。不保存 CSS 声明、颜色函数、图片内容、文件名、路径、
-Base64/Data URL 或 Blob URL。
+所有业务请求只经 `desktop/src/core/api/client.ts`，周期读取只经共享 `PollingService`；应用组件不直接调用 `fetch`/XHR 或创建自己的 interval。后端响应先经过对应领域 model 白名单投影，再一次提交到该领域唯一 state owner；shell state 只拥有窗口 lifecycle，不保存领域快照。
 
-“外观设置”不发起网络请求、调用业务 API、增加后端端点或上传文件。本地图片导入、预览、解码、
-Canvas 重编码和显示运行时均已删除；正式代码不读取壁纸 IndexedDB。兼容期
-`js/core/wallpaper-storage.js` 在启动时最多删除旧 `imageweave-ui/wallpapers/custom` 记录，
-不执行 `get/getAll/openCursor/put`，也不创建 Blob/Object URL；IndexedDB 不支持、open/blocked
-或 delete 失败都非阻断，并保留受控默认 `graphite`。
+爬取提交所需的原始地址只在 Crawl controller 内短暂保留，批次/任务/review 响应中的 URL、绝对路径、原始错误和内部载荷不会进入持久 state 或不安全 DOM。窗口栈从空数组开始；session current-app 只用于运行期导航协调，不恢复运行、焦点、最小化或窗口栈。
+
+`imageweave.window-placements.v2` 只按应用保存经过几何校验的最近 normal rect 和可选 maximized 偏好；旧 v1 工作区最多一次迁移为位置提示。`imageweave.ui:ui-preferences` 只保存 `wallpaperColor`（六个合法场景 ID）和 `animations`（`on | off`）；未知字段、危险键、accessor、损坏 JSON 和旧 custom 值都安全回退。不保存 CSS 声明、颜色函数、图片内容、文件名、路径、Base64/Data URL 或 Blob URL。
+
+“外观设置”不发起网络请求、调用业务 API、增加后端端点或上传文件。六个场景只定义于 `desktop/src/core/personalization/scenes.ts`，预览即时投影到 shell，提交只经现有 persistence service 写 UI 偏好键。正式代码不读取壁纸 IndexedDB，不导入、解码或重编码本地图片，也不创建 Blob/Object URL；损坏或退役值回退到受控默认 `graphite`。
 
 “批次管理”仅对活动批次执行一个 1.5 秒、生命周期受控且不重叠的轮询，终态、404、最小化、
 关闭或切出应用即停止；写操作加锁并在完成后读取权威快照。“去重审核”只在分析处理中轮询；
@@ -291,28 +280,15 @@ Canvas 重编码和显示运行时均已删除；正式代码不读取壁纸 Ind
 布尔值、计数和枚举，不返回主机路径、秘密、配置正文、任务标识或原始异常。默认不带 `view` 的
 legacy API 契约保持兼容。
 
-异常界面只显示受控错误码与恢复动作，不渲染后端 `details`。控制台只允许固定文本的壳层故障提示，
-不记录用户输入、请求/响应、凭据、路径或异常对象。桌面 WebUI 不需要 Node/npm、打包器、跨域服务或
-独立前端进程，其模块、样式与资源均随后端 wheel 同源提供。
+桌面 WebUI 的唯一源码位于仓库根 `desktop/src/`，由 Svelte/TypeScript 与共享 ApiClient、PollingService、persistence、windowing 组成。它不需要独立前端服务，但发布前必须使用 `desktop/package-lock.json` 锁定的 Vite 构建；后端不得维护手写 HTML/ESM/CSS 源码副本。所有可见响应先经 desktop 领域 model 白名单投影，异常界面不渲染后端 `details`，控制台不记录用户输入、请求/响应、凭据、路径或异常对象。
 
 ### `/ui/` 静态交付与 wheel 边界
 
-当前生产静态清单固定为 99 项：1 个 HTML、17 个 CSS、80 个 JS 和 1 个 SVG；10 个应用的
-controller/CSS 均包含在内。`pyproject.toml` 的 package-data pattern 必须精确覆盖该集合，clean
-archive wheel 中的成员和 `RECORD` hash/size 必须与源码逐字节一致。`assets/noise.svg` 只有一份，
-为 497 bytes，SHA-256 为
-`9a525197b6bc88f7a64d8746a50f04aa64f29f08d06d57c3e69514b6db083529`，正式 HTTP 返回
-`image/svg+xml`。
+`npm --prefix desktop run build` 是 canonical frontend build：Vite 生成 `desktop/dist/`，随后 `scripts/frontend_artifacts.py sync` 生成 `frontend-manifest.json` 并原子同步同批字节到 `gdl_backend/webui_dist/`。该后端目录是可重现的 package-data 发布副本，不是第二套可编辑前端源码。Tauri `frontendDist` 直接使用 `desktop/dist/`；FastAPI `/ui` 只挂载 `webui_dist/`。
 
-正式 `/ui/` 必须让全部 99 项同源返回 200，并让退役 `wallpaper-image-import.js`、旧 cloud 资源
-和 `tests/fixtures/webui/` 路径返回 404。全部 HTML/CSS/JS/SVG 响应都必须是
-`Cache-Control: no-cache`，同时保留 ETag/Last-Modified；条件请求返回 304，业务 API 不继承该 header。
-`index.html` 只对本次缓存敏感的 `desktop.css` 使用显式版本 query，不给 99 项资源手工散加 hash。
-Gallery/Export 的 loading/empty/content/error、
-进度和 Gallery Quick Look 只由 `tests/stage5_preview_harness.py` 挂载 tests-only host；正式两项
-始终 unavailable、写操作禁用且合计 0 个所属业务 API 请求。fixture 不得进入生产 ESM 闭包、wheel、
-正式 DOM 或网络发现结果。
+manifest 为每个 HTML、hashed asset 和静态资源记录相对路径、size 与 SHA-256。`npm --prefix desktop run verify:artifacts` 必须证明 canonical dist 与后端发布副本逐字节一致、Tauri 配置解析到同一 dist；给定 wheel 时还要证明 `gdl_backend/webui_dist/` 成员与 manifest/`RECORD` 一致，并拒绝任何 `gdl_backend/webui/` legacy 成员。`pyproject.toml` package-data 只覆盖 `webui_dist/*.html`、manifest JSON 与 `webui_dist/assets/*`。
 
+正式 `/ui/` 根与 trailing-slash redirect 沿用 Starlette mount 语义；构建产物中的相对 hashed asset 返回正确 MIME。HTML 与 asset 响应均为 `Cache-Control: no-cache`，同时保留 ETag/Last-Modified；条件请求返回 304，业务 API 不继承该 header。缺失静态资源返回 404，hash fragment 仍由同一 `index.html` 和 desktop hash router 解释。Gallery/Export 只由 desktop component tree 提供明确 preview/unavailable 状态，不存在 tests-only fixture host、隐藏 URL 或对应业务请求。
 夜航视觉交付没有修改后端业务契约：正式基线仍为 OpenAPI 50 paths/61 operations、61 条业务
 APIRoute 和唯一 `/ui` 静态挂载；ServiceContainer、数据库、任务状态机、抓取、代理、授权与 Review
 schema/语义保持不变。更完整的前端模块和合成边界见 [架构与开发约定](ARCHITECTURE.md)。
@@ -338,8 +314,7 @@ X、Pixiv 和 EH 共用项目目录中的持久 Chrome Profile，但每次授权
 “授权管理”使用相同路由的 `?view=vault` 响应 profile。默认 `legacy` 响应保持兼容；`vault`
 投影只保留受控站点/会话 ID、布尔能力、计数与时间，移除 Pixiv 完整授权 URL、原始会话错误、
 失效原因、绝对路径及非必要代理字段；VAULT 操作失败也只返回白名单错误码和受控消息，不透传
-`AuthError.message/details`。前端再经 `js/core/vault-model.js` 二次白名单投影后才进入中央
-Store；会话 ID 只短暂保存在应用控制器中，不进入 Store、DOM 或 Storage。
+`AuthError.message/details`。前端再经 `desktop/src/apps/vault/model.ts` 二次白名单投影后才进入 Vault 领域 state；会话 ID 只短暂保存在应用 controller 中，不进入持久 state、DOM 或 Storage。
 
 授权代理是唯一由 VAULT 表单提交的敏感自由文本：输入使用默认隐藏控件，构造 JSON 后、发请求
 前即清空，成功、失败、确认取消、最小化、关闭、路由切换和销毁都会再次清空。代理写接口限制
@@ -554,33 +529,30 @@ cd gallery-dl-backend
 cd ..
 ```
 
-定向核对静态 HTTP、package-data、preview fixture 隔离和正式 unavailable 边界：
+定向核对 canonical frontend、静态 HTTP、origin/security header 与 package-data：
 
 ```bash
+npm --prefix desktop run build
+npm --prefix desktop run verify:artifacts
 cd gallery-dl-backend
 ./.venv/bin/python -m unittest \
-  tests.test_api \
-  tests.test_webui_modules \
-  tests.test_stage5_preview_harness -v
+  tests.test_desktop_origin_contract \
+  tests.test_api -v
 cd ..
 ```
 
-固定 Node.js v24.13.0 后运行唯一正式 WebUI 行为/覆盖率门槛；当前收口基线为 325/325，
-0 fail、0 skip：
+前端行为、结构、预算与 coverage 只由唯一 desktop workspace 守护：
 
 ```bash
-NODE_24=/absolute/path/to/node-v24.13.0/bin/node
-./gallery-dl-backend/.venv/bin/python scripts/run-webui-coverage.py \
-  --node "$NODE_24" \
-  --output /tmp/imageweave-coverage/webui
+npm --prefix desktop ci
+npm --prefix desktop run check
+npm --prefix desktop test
+npm --prefix desktop run test:coverage
 ```
 
 项目级 coverage、服务 smoke 与依赖锁命令统一维护在
-[架构与开发约定](ARCHITECTURE.md#13-测试与覆盖率门槛)。构建 wheel 时必须使用 clean archive，
-并核对 99 个 WebUI 成员、wheel `RECORD`、同源 HTTP 字节、单一 noise、兼容 seam 以及退役资源
-404；当前 wheel 清单为 176 个成员，其中 `gdl_backend` 171 项（72 Python + 99 WebUI），并对全部
-99 个静态资源同时核对 200/MIME/字节、`no-cache`/validator 与条件 304。不能把开发工作树中的 fixture、
-浏览器 Profile、coverage 或本机文件带入包。
+[架构与开发约定](ARCHITECTURE.md#13-测试与覆盖率门槛)。wheel 必须从 clean tracked checkout 构建，再用
+`python scripts/frontend_artifacts.py verify --wheel <wheel>` 核对 manifest 定义的全部前端成员、wheel `RECORD`、size 与 SHA-256；wheel 不得包含任何 `gdl_backend/webui/` legacy 源码。HTTP 合同测试分别核对 200/MIME/字节、`no-cache`/validator、条件 304 与缺失资源 404。不能把开发工作树中的未跟踪文件、浏览器 Profile、coverage 或本机缓存带入包。
 
 测试默认使用本地夹具、mock 或 gallery-dl `--version`。需要真实凭据和代理节点的 EH
 烟雾脚本不属于当前仓库的提交内容；如需运行此类检查，应在受控本地环境中单独维护。

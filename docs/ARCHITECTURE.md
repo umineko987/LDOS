@@ -54,7 +54,8 @@ Browser
 | `gallery-dl-backend/gdl_backend/discovery_transforms.py` | 无网络、无子进程的纯转换 |
 | `gallery-dl-backend/gdl_backend/auth*.py` | 授权状态、公开投影、浏览器与 Pixiv OAuth 适配 |
 | `gallery-dl-backend/gdl_backend/proxy*.py` | 代理 facade、状态协调、策略、投影和运行时适配 |
-| `gallery-dl-backend/gdl_backend/webui/js/` | WebUI 元数据、状态、持久化、窗口、应用和视图 |
+| `desktop/src/` | Svelte 壳层、10 个应用、共享 API/polling/persistence/windowing 与唯一前端源码 |
+| `scripts/frontend_artifacts.py` | `desktop/dist/`、后端发布副本和 wheel 的 manifest/hash 一致性门槛 |
 | `Proxy_pool/` | 可独立测试和安装的外部代理池边界 |
 | 仓库根目录 `dedup_*.py` | 可独立运行的去重组件 |
 
@@ -268,162 +269,54 @@ WAL reader 只能看到已提交快照。事务内需要观察本次写入时，
 
 `Proxy_pool/` 保持独立组件边界，不与后端 facade 合并。其依赖环境、测试和 coverage gate 必须能够独立运行。
 
-## 8. WebUI
+## 8. Desktop WebUI
 
-WebUI 使用后端直接提供的原生 ES modules，不需要单独前端构建流程。模块边界由 Node 行为测试和 Python 静态 import 图共同守护。
+当前唯一前端源码与构建入口位于 `desktop/`：Svelte 负责组件树，TypeScript 负责共享状态、运行时和领域控制器，Vite 生成 `desktop/dist/`。后端目录 `gdl_backend/webui_dist/` 是 canonical build script 生成的发布副本，不是第二份可编辑源码。旧 `gdl_backend/webui/` 原生 ESM、Store、Router、window manager、CSS、Node runner 和 fixture host 已删除，不得重新引入。
 
-### 8.1 五层桌面壳层、应用元数据与 registry
+### 8.1 五层桌面壳层与应用定义
 
-当前桌面壳层分为壁纸、顶部菜单栏、窗口层、应用中心和 Dock 五层。裸 `/ui/` 是空桌面，不自动
-打开应用；合法 `#/应用ID` 深链接只打开一个目标窗口。应用中心、Dock、菜单中的窗口列表都只是
-中央 definitions/Store 窗口栈的纯投影，不拥有第二份应用清单、运行状态、焦点或 z-order。
-`components/taskbar-summary.js` 与 `components/taskbar-windows.js` 的文件名是兼容 seam；前者实际
-服务菜单栏系统摘要，后者拥有 Dock 的纯投影和激活函数，不表示旧任务栏仍存在。Dock 的可见性同样
-不是独立状态：window manager 每次只从 Store 的窗口栈与 `focusedAppId` 派生工作区。当前聚焦且可见
-窗口为 `maximized` 时，顶部菜单栏保留，window-layer 扩展到视口底部，Dock 以 `hidden`、`inert` 与
-`aria-hidden` 完全退出视觉、指针、键盘和 AX 路径；恢复、最小化、关闭或聚焦普通窗口时恢复普通
-Dock 工作区。后台最大化窗口本身不会隐藏 Dock。Bootstrap HTML 必须以普通空桌面为安全默认：Dock
-不得预置 `hidden`、`inert` 或 `aria-hidden`，因此 JS 尚未运行、加载失败或旧 manager 被缓存时也不会
-把普通 Dock 永久隐藏。`desktop.css` 还必须从现有窗口 DOM 事实派生兼容路径：只有同一 layer 内存在
-`data-window-focused + data-maximized + 非 hidden` 窗口时，才把 layer 扩到视口底部、以
-`!important` 覆盖该窗口的旧 inline 几何并隐藏 Dock；后台最大化配前台普通窗口不得命中。
+桌面壳层分为壁纸、顶部菜单栏、窗口层、应用中心和 Dock 五层。裸 `/ui/` 是空桌面；合法 `#/应用ID` 深链接打开目标窗口。`desktop/src/core/applications/definitions.ts` 是 10 个应用 ID、route、标题、图标、分组、顺序、availability 和默认窗口的唯一来源。应用中心、Dock、菜单和 Router 只投影该定义与 shell state，不保存第二份应用清单、窗口栈、焦点或 z-order。
 
-`core/app-definitions.js` 是 10 个应用以下信息的唯一来源：
+8 个 ready 应用各自在 `desktop/src/apps/<domain>/` 内拥有组件、sanitizer/model、一个领域 state owner、service 和 controller。Gallery 与 Export 是两个明确的 `preview` 应用，只显示可访问的 unavailable 界面，不伪造业务 API、数据、进度或导出能力。未知应用必须在 definitions/router 类型边界被拒绝。
 
-- `id`、`label`、`icon`、`route`、分组、说明与应用中心顺序；
-- 自然语言 `windowTitle`、`availability`、`defaultWindowState`；
-- `DEFAULT_APP_ID` 和 `DEFAULT_ROUTE`。
+### 8.2 Shell state、领域 state 与持久化
 
-`availability` 只接受 `ready | preview`：8 个真实应用为 `ready`，图片库和数据集导出为
-`preview`。2 个 preview 各有独立 controller/model/view，正式 adapter 只返回 unavailable 且发送
-0 个对应业务 API；内容、加载和错误状态只由 `tests/fixtures/webui/` 的显式 tests-only host 注入。
-`app-registry-factory.js` 只负责按 ID 将 controller 与元数据一对一合并。新增应用时必须：
+`desktop/src/core/state/shell.ts` 是运行窗口、焦点、z-order 和 dirty-hide 协调的唯一 owner；shell 不保存领域响应快照。每个应用只把已经白名单清洗的响应一次提交给自己的 state owner，集合以稳定业务 ID/key 投影。未提交表单只有一个 owner，关闭、最小化和 route 切换共用同一确认边界。
 
-- 添加唯一 ID 和 route；
-- 使用完整元数据字段；
-- 提供 `mount`、`activate`、`deactivate`、`unmount` lifecycle hooks；
-- 根据需要添加 `beforeLeave` 或 `beforeWindowHide`；
-- 更新 metadata/registry 一致性测试和静态资源 API 测试。
+`desktop/src/core/persistence/service.ts` 是窗口位置与 UI 偏好的唯一读写服务，I/O 由 persistence adapter 提供。窗口持久化只保存边界校验后的 normal rect 与 maximized 偏好，不恢复 running/focused/minimized。个性化只保存六个内置 scene ID 和 motion 开关；未知字段、危险键、访问器和损坏数据安全回退。
 
-只需要元数据的模块不得导入 controller registry。
+### 8.3 Router、API、polling 与应用生命周期
 
-### 8.2 Store
+`desktop/src/core/routing/hash.ts` 只解析和生成应用 hash，不拥有窗口状态。所有 HTTP 请求使用唯一 `desktop/src/core/api/client.ts`；所有周期读取使用唯一 `desktop/src/core/polling/service.ts`。应用不得直接 `fetch`、创建组件计时器、第二 polling registry、WebSocket 或 SSE。后端响应必须先经领域 sanitizer，原始异常、秘密、凭据、路径和操作 URL 不进入持久 state 或不安全 DOM。
 
-`core/store.js` 保持兼容 re-export facade。实现分别位于：
+应用组件 mount 时取得共享 primitive，关闭、最小化或销毁时取消请求、polling、listener、observer、media、object URL 和 animation frame。Review 的 Canvas、归一化坐标、媒体窗口与释放逻辑只位于独立 `desktop/src/apps/review/engine.ts`，不进入 Svelte store。
 
-- `store-data.js`：clone 与深不可变数据；
-- `store-runtime.js`：dispatch、subscribe 和运行阶段保护；
-- `store-contract.js`：action type 与错误 contract；
-- `store-state.js`：初始状态、creator 和 selector；
-- `store-*-transition.js`：纯状态转移；
-- `store-factory.js`：装配。
+### 8.4 窗口与可访问性
 
-新增状态行为时：
+`desktop/src/core/windowing/geometry.ts` 和 `interaction.ts` 提供纯几何与一次性交互提交；`WindowLayer.svelte`、`AppWindow.svelte` 和 shell state 负责 DOM lifecycle。pointer move 只做临时视觉反馈，结束时提交一次；聚焦最大化窗口时 Dock 以 hidden/inert/ARIA 边界退出，恢复、最小化、关闭、切焦和 destroy 恢复普通工作区。低于 `1180 × 720` CSS 像素时显示环境 blocker。async hide guard 去重并拒绝 stale completion，资源清理必须幂等。
 
-1. 在 contract 中定义稳定 action type；
-2. 在 state 中增加 creator/selector；
-3. 在对应纯 transition 中实现；
-4. 通过 facade 保持调用方入口稳定；
-5. 测试输入不变性、输出深不可变和 prototype-pollution guard。
+### 8.5 夜航玻璃与合成
 
-reducer 不得访问 DOM、storage、网络或应用 controller。嵌套 dispatch、通知阶段 dispatch 和 subscriber 异常隔离语义必须保持。
+`desktop/src/styles/tokens.css` 是视觉 token 的唯一事实源，`global.css` 与 `shell.css` 提供共享壳层规则，各应用 CSS 只负责领域布局。六个内置场景定义只存在于 `desktop/src/core/personalization/scenes.ts`。正常内容使用低透明中性表面；状态色必须配文字、图标、ARIA 或其他非颜色说明。
 
-### 8.3 Storage 与启动语义
+每个可见应用窗口只有窗口根本身一个主 backdrop；应用内部普通列、行和卡片不创建 backdrop。最小化或关闭会从 DOM 移除应用组件。Menu、普通工作区 Dock 和 Dialog 是独立合法顶层玻璃；聚焦最大化时隐藏 Dock。全局 noise 资源只挂载一次，并在 forced-colors 中移除。持续 specular/blur 动画以及直接操控路径上的长过渡均被禁止；motion-off 与 reduced-motion 由共享 motion 路径处理。
 
-`core/storage.js` 保持薄 facade。纯快照、布局和偏好投影与显式 persistence adapter 分开。新页面
-不会以 session current app 或旧工作区为启动权威，Store 的运行窗口栈、焦点和最小化状态从空值
-开始。`imageweave.window-placements.v2` 只按应用保存经过边界校验的 normal rect 和可选 maximized
-偏好；旧 v1 记录只能严格迁移成位置提示，不恢复 running/focused/minimized，也不自动打开窗口。
+### 8.6 Canonical 构建与静态交付
 
-个性化偏好 `imageweave.ui:ui-preferences` 只允许 `wallpaperColor`（六个内置场景 ID）和
-`animations`（`on | off`）两个字段。未知字段、危险键、访问器、损坏 JSON 和退役 `custom`
-记录都经同一白名单投影安全回退；不再保存强调色、窗口底色、透明度、文件名、路径、Base64、
-Data URL 或 Blob URL。`core/wallpaper-storage.js` 只是兼容期 delete-only seam：启动时最多删除
-旧 IndexedDB `imageweave-ui/wallpapers/custom`，不得读取、枚举、写入或显示记录；失败必须非阻断。
-删除该 seam 前需要单独的兼容性取证和迁移决策。
+唯一 npm manifest/lock 是 `desktop/package.json` 和 `desktop/package-lock.json`。标准前端门槛为：
 
-修改持久化时必须保持：
+```bash
+npm --prefix desktop ci
+npm --prefix desktop run check
+npm --prefix desktop test
+npm --prefix desktop run test:coverage
+npm --prefix desktop run build
+npm --prefix desktop run verify:artifacts
+```
 
-- `STORAGE_KEYS` 稳定，或提供显式迁移；
-- snapshot 格式向后兼容；
-- 损坏数据安全回退；
-- 只通过领域现有 sanitizer 处理模型数据，不复制第二套清洗逻辑；
-- storage I/O 不进入 reducer。
+`npm run build` 先由 Vite 生成 `desktop/dist/`，再由 `scripts/frontend_artifacts.py sync` 规范化生成字节、写入 `frontend-manifest.json` 并原子替换后端 `gdl_backend/webui_dist/` 发布副本。Tauri `frontendDist` 必须解析到 `desktop/dist/`；FastAPI `/ui` 只挂载 `webui_dist/`。manifest 记录每个发布文件的相对路径、size 与 SHA-256，验证器要求 Tauri 输入、后端副本和可选 wheel 内 `gdl_backend/webui_dist/` 字节一致，并拒绝 wheel 中任何 `gdl_backend/webui/` legacy 成员。
 
-### 8.4 Window manager
-
-窗口纯决策位于 `window-policy.js`，几何规则复用 `window-geometry.js`；交互、异步 hide 和 DOM lifecycle 分别位于独立 collaborator。
-
-必须保持：
-
-- store 中的窗口数组是 z-order 唯一事实来源；
-- DOM `zIndex` 只是 render plan 的投影；
-- pointermove 只做临时 DOM 反馈，不持续写 store；
-- pointer interaction 结束时统一提交一次；
-- 每次 render 只从 Store 窗口栈与 `focusedAppId` 派生 `normal | maximized` 工作区，并在读取任何
-  maximized rect 前先同步 `data-window-workspace` layer marker；该 marker-before-measurement 顺序是
-  canonical JS 路径，不能因 CSS 兼容 fallback 存在而删除；
-- 聚焦最大化工作区的 layer `bottom: 0`，Dock 必须关闭 overflow 并使用原生 `hidden`、`inert` 和
-  `aria-hidden`；焦点若来自即将隐藏的 Dock，先释放该焦点并在目标窗口同步后转入 window body；
-- restore、minimize、close、聚焦普通窗口、初始化失败与 `destroy()` 都必须恢复普通 Dock 工作区；
-- CSS `:has()` 兼容规则只读取 window lifecycle 已投影的 focused/maximized/hidden 属性，不创建新状态；
-  它必须覆盖旧 manager 写入的 inline `left/top/width/height`，并在旧 JS 缓存期间保证 Dock/AX 与几何正确；
-- window-layer 工作区变化会取消不再有效的 interaction；低于 1180×720 时壳层显示桌面环境 blocker；
-- async `beforeHide` 去重并阻止 stale completion；
-- mount 失败会清理半创建 DOM；
-- `destroy()` 幂等。
-
-### 8.5 静态依赖约束
-
-所有相对静态 import/re-export 使用完整 `.js` 路径。必须持续满足：
-
-- 整个 `webui/js` 没有多文件强连通分量；
-- `core/store.js` 的静态依赖闭包不包含 `apps/`；
-- 该闭包不包含 `components/*-view.js`；
-- store facade 可以加载而不依赖应用 controller 或视图文件。
-
-不要通过字符串搜索伪造依赖测试；使用真实静态 specifier 解析和 Tarjan SCC 检查。
-
-### 8.6 Router、应用 context 与 I/O
-
-Router 只把裸 `/ui/`、合法 `#/应用ID` 和非法 route 投影为桌面导航意图；窗口数组、焦点、
-最小化和 z-order 仍由 Store/window manager 拥有，Router 不维护第二份运行状态。
-`core/desktop.js` 为每个已挂载应用创建冻结的 context，其中的 `api`、`store`、`actions`、
-`pollingScope`、`dialogs`、`motion`、`personalization` 和 `navigate` 是应用与壳层协作的唯一入口。
-
-真实业务请求统一经过 `core/api.js` 提供的同源 client 和 `context.api`；应用 controller 不直接
-调用 `fetch`/XHR，也不把原始响应绕过 model 白名单送入 Store。deactivate、最小化和 unmount
-必须停止应用 polling scope 并取消迟到响应。Gallery、Schedule、Export 的正式 context 不获得
-对应业务能力：三者只返回 unavailable，合计发送 0 个所属业务 API 请求。
-
-### 8.7 夜航玻璃、合成与静态交付
-
-`styles/tokens.css` 是深色夜航 token 的唯一事实源；`desktop.css` 为 graphite、slate、deep-ocean、
-forest、plum-gray、warm-paper 六个同源径向光井场景提供视觉事实。正常内容只使用低透明中性表面；
-香槟金只作装饰强调，状态色必须配图标、文字、ARIA 或其他非颜色说明。最低桌面工作区为
-`1180 × 720` CSS 像素，低于边界只显示环境 blocker。
-
-合成策略必须保持：每个可见应用窗口只有窗口根本身一个 `blur(60px) saturate(1.8)` 主 backdrop，
-应用内部普通列、行和卡片不创建 backdrop；最小化/隐藏窗口没有可见合成表面。Menu、普通工作区中的
-Dock、Dialog 和 Gallery tests-only Quick Look 是各自独立的合法顶层玻璃；聚焦最大化时隐藏的 Dock
-不得保留可见 backdrop 合成，也不得浮在窗口上。全局 `assets/noise.svg` 只挂载一次，且在
-forced-colors 中移除。禁止持续 specular/blur 动画；拖拽、resize 和 Canvas 镜片等直接操控路径不使用
-500ms 过渡。
-
-生产 WebUI 是后端 `/ui/` 同源提供的原生 ESM、静态 CSS 和 SVG，不存在 Node/npm 构建产物。
-`WebUIStaticFiles` 只用于该 mount，并让 HTML/CSS/JS/SVG 在保留 ETag 与 Last-Modified 的同时返回
-`Cache-Control: no-cache`，使浏览器可以存储但每次复用前必须 revalidate；业务 API 不继承该 header。
-`index.html` 对缓存敏感的 `desktop.css` 使用显式 `?v=` URL，修改相关壳层兼容规则时必须同步递增，
-无需也不得给全部 99 项资源手工追加散乱 hash。ESM 仍可能在一次滚动升级中暂时来自旧代，因此安全
-bootstrap 与 DOM 事实 CSS fallback 必须独立于新 manager 生效，不能把强制刷新写成产品修复。
-当前 package-data 闭包为 99 项（1 HTML、17 CSS、80 JS、1 SVG），包含单一 `noise.svg` 和
-兼容期 `wallpaper-storage.js`，不包含已退役的 `wallpaper-image-import.js`。preview 内容态只由
-`tests/fixtures/webui/` 与 `tests/stage5_preview_harness.py` 的 tests-only host 提供，生产 import
-闭包、wheel 和正式 HTTP 路径不得发现 fixture。夜航改造没有改变业务 API、OpenAPI schema、
-ServiceContainer、数据库或领域服务语义。
-
-这些边界由固定 Node.js v24.13.0 的正式 WebUI runner、Python 静态/HTTP 契约、clean-archive wheel
-清单和浏览器验收共同守护；不能用截图替代 import graph、fixture isolation 或 API 契约测试。
+`WebUIStaticFiles` 只用于 `/ui` mount。HTML 和构建资产保留 ETag/Last-Modified 并返回 `Cache-Control: no-cache`，条件请求可返回 304；业务 API 不继承该 header。hashed Vite asset 通过相对 URL 加载，未知 `/ui` 路径按现有 StaticFiles HTML fallback 语义返回入口或 404。静态切换不得改变 OpenAPI 61 operations、ServiceContainer、SQLite、调度、抓取、代理、授权或 Review worker 语义。
 
 ## 9. 安全投影、日志与诊断
 
@@ -462,7 +355,7 @@ token、cookie、密码、API key、代理凭据和代理订阅原文不得进�
 - API 响应字段白名单；
 - task 状态机和 attempt 顺序；
 - SQLite 事务与 reader 可见性；
-- 仍在使用的 WebUI action type、facade export、snapshot 和 storage key；已删除的 START action/state/selector/facade 不得重新引入；
+- desktop application definitions、hash route、窗口 lifecycle 与仍受支持的 persistence keys；已删除的 legacy facade/Store/Router/window manager 不得重新引入；
 - 应用 lifecycle 与默认 route/window state；
 - proxy required/prefer 语义；
 - discovery 候选顺序、别名、重试和公开错误分类。
@@ -518,10 +411,10 @@ Python 直接依赖只在 `gallery-dl-backend/pyproject.toml` 维护。`requirem
 - 不得无理由新增 production omit；
 - source 边界变化必须显式更新测试和审查说明；
 - skip 数量和原因必须可见；
-- WebUI 行为和 coverage 使用固定 Node.js v24.13.0；
-- 夜航最终目标契约是正式 runner 的 source test，不是单独的可选检查；当前收口基线为 325/325，0 fail、0 skip；
-- WebUI 静态清单同时从生产源、`WebUIStaticFiles` HTTP、clean archive wheel 和 wheel `RECORD` 四个边界核对；
-- Python 源码字符串断言不计入真实 JavaScript coverage。
+- 前端行为与 coverage 只使用 `desktop/package-lock.json` 锁定的 Vitest/V8 套件；
+- P0 budget 与 P3/P4 migration target 已迁入 `desktop/tests/`，不得为迁移降低既有阈值；
+- 前端静态字节必须从 `desktop/dist/`、后端发布副本、manifest 和 wheel `RECORD` 四个边界核对；
+- 源码字符串断言不能替代真实 TypeScript/Svelte 单元、组件或结构契约。
 
 在仓库根目录执行标准门槛：
 
@@ -536,22 +429,23 @@ Python 直接依赖只在 `gallery-dl-backend/pyproject.toml` 维护。`requirem
   proxy --output /tmp/imageweave-coverage/proxy
 ```
 
-准备固定版本 Node 后执行 WebUI 门槛：
+前端门槛使用唯一 desktop workspace：
 
 ```bash
-NODE_24=/absolute/path/to/node-v24.13.0/bin/node
-"$NODE_24" --version
-
-./gallery-dl-backend/.venv/bin/python scripts/run-webui-coverage.py \
-  --node "$NODE_24" \
-  --output /tmp/imageweave-coverage/webui
+npm --prefix desktop ci
+npm --prefix desktop run check
+npm --prefix desktop test
+npm --prefix desktop run test:coverage
+npm --prefix desktop run build
+npm --prefix desktop run verify:artifacts
 ```
 
 静态依赖和服务 smoke：
 
 ```bash
 cd gallery-dl-backend
-./.venv/bin/python -m unittest tests.test_webui_modules -v
+./.venv/bin/python -m unittest \
+  tests.test_desktop_origin_contract tests.test_api -v
 cd ..
 
 bash scripts/smoke-linux-service.sh
@@ -598,14 +492,14 @@ RepoWise 是发现候选问题的辅助工具，不是缺陷计数器或自动�
 - [ ] 新公开字段是否采用白名单投影？
 - [ ] 保留或新增兼容 seam 是否有明确调用证据和注释？
 
-### WebUI
+### Desktop WebUI
 
-- [ ] 应用元数据是否仍只有一个来源？
-- [ ] reducer 是否纯净且不接触 DOM/storage/network？
-- [ ] 是否复用已有模型 sanitizer 和窗口几何规则？
-- [ ] import graph 是否仍为 0 个多文件 SCC？
-- [ ] store closure 是否仍排除 `apps/` 和 `components/*-view.js`？
-- [ ] 普通 bootstrap 是否默认显示 Dock，`:has()` fallback 与版本化 `desktop.css` 是否仍覆盖旧 ESM？
+- [ ] 10 个应用元数据是否仍只来自 `definitions.ts`？
+- [ ] shell 与每个领域是否各自只有一个 state owner，sanitizer 与窗口几何规则是否复用？
+- [ ] HTTP 与 periodic reads 是否只经过共享 ApiClient/PollingService？
+- [ ] 关闭、最小化和 destroy 是否释放请求、listener、observer、media 与 animation frame？
+- [ ] `desktop/dist/`、后端发布副本、manifest、Tauri frontendDist 和 wheel 字节是否一致？
+- [ ] tracked tree 是否不存在旧 `gdl_backend/webui/`、legacy runner、第二 npm manifest 或第二前端入口？
 - [ ] `/ui` 是否保留 ETag/Last-Modified、返回 `Cache-Control: no-cache`，且业务 API 未被污染？
 
 ### 验证与交付

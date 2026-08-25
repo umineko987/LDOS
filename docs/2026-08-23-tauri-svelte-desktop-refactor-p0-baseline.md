@@ -9,11 +9,11 @@
 > **P5 状态（2026-08-25）**：本文是切换前的历史取证快照，不再描述当前生产入口，也不再提供可执行的 legacy WebUI 命令。当前 10 个应用的唯一权威定义与组件树位于 `desktop/src/core/applications/definitions.ts` 和 `desktop/src/apps/`；P0 目标预算已迁至 `desktop/tests/fixtures/p0-performance-budget.json` 并由 desktop Vitest 套件执行。FastAPI `/ui/` 与 Tauri 均消费 `desktop/dist/` 的同一 canonical 构建，历史 `gdl_backend/webui/` 源码、Node runner 和 current/target legacy 测试已在 P5 删除。
 本文只记录 P0 时点原生 ESM WebUI 的历史合同、目标 red-first 差距和非 headed 证据；下文路径与命令仅用于审计当时基线，不再是当前运行或测试入口。
 
-## 1. 当前实现合同
+## 1. P0 时点旧实现合同
 
 ### 1.1 10 个应用
 
-权威来源是 `gdl_backend/webui/js/core/app-definitions.js`，P0 快照在 `gallery-dl-backend/tests/webui_p0_current_contract.test.mjs`。
+P0 时点权威来源是后来由 P5 删除的 `gdl_backend/webui/js/core/app-definitions.js`，快照测试是同样已删除的 `gallery-dl-backend/tests/webui_p0_current_contract.test.mjs`；当前权威来源是 `desktop/src/core/applications/definitions.ts`。
 
 | id | 标题 / icon | route | 分组 / 顺序 | availability | 默认窗口 |
 | --- | --- | --- | --- | --- | --- |
@@ -72,7 +72,7 @@ imageweave.ui:ui-preferences           localStorage
 - Menu 使用 menu/menuitem、方向键/Home/End/Escape；Application Center 与 Dialog 限制 Tab 并返回焦点；Dock 提供 closed/focused/background/minimized 文本和 `aria-pressed`。
 - 交通灯、三个 resize handle、skip link、route live announcer、forced-colors、reduced-motion 和 no-backdrop fallback 均由当前静态/行为测试固化。
 
-## 2. 当前性能特征与目标差距
+## 2. P0 时点性能特征与目标差距
 
 下表中“当前”是 characterization，不是应迁移的目标。
 
@@ -86,11 +86,11 @@ imageweave.ui:ui-preferences           localStorage
 | Review | deactivate/destroy 释放 listener、ResizeObserver、rAF/timer、img src、canvas、预加载与订阅 | 静态 characterization 通过；Svelte 20 次循环仍待目标单元测试 |
 | 交互期玻璃 | 关闭 transition/shadow，但主 backdrop 仍保留 | **RED**：目标交互期关闭 backdrop 并使用低成本回退 |
 
-目标预算的机器可读版本在 `gallery-dl-backend/tests/fixtures/webui/p0-performance-budget.json`。隔离的 red-first 命令只运行 `webui_p0_target.target.mjs`，不进入常规 runner。
+P0 时点目标预算位于后来删除的 legacy fixture；P5 后的同一目标预算位于 `desktop/tests/fixtures/p0-performance-budget.json`，由 `desktop/tests/p0-budget.test.ts` 及对应 P3/P4 target suite 执行。
 
-## 3. 非 headed 验证证据
+## 3. P0 时点非 headed 验证证据
 
-所有命令均从仓库根目录执行。
+以下命令均在 P0 时点从仓库根目录执行；legacy 路径已删除，不是当前验证命令。
 
 | 命令 | 结果 |
 | --- | --- |
