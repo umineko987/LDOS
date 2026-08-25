@@ -24,6 +24,7 @@ Desktop.ini
 /desktop/src-tauri/target/
 /desktop/src-tauri/gen/
 /desktop/src-tauri/release/
+/.release-cache/
 /.models/
 **/dist/
 **/build/
@@ -75,3 +76,5 @@ Desktop.ini
 /docs/*
 !/docs/ARCHITECTURE.md
 !/docs/gallery-dl-backend.md
+!/docs/2026-08-23-tauri-svelte-desktop-refactor-design.md
+!/docs/third-party-notices.md
