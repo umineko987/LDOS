@@ -555,7 +555,7 @@ Linux/Windows 配置合同、clean-checkout reproducibility 和静态 bundle ext
 
 正式截图，以及 Linux WebKitGTK/Windows WebView2 安装后启动、退出、再次启动、六场景、多窗口、
 缩放、键盘/a11y 和 Tasks/Crawl/Review 性能矩阵均 **未执行（任务约束）**，不是 PASS/FAIL。
-当前 non-headed Arch Linux 主机已生成并静态验证 DEB；AppImage 在 Tauri 调用的 `linuxdeploy` 内置 `strip` 读取当前 Arch 系统库 `.relr.dyn` section 时失败，准确记录为 packaging-host 工具链阻断。
+当前 non-headed Arch Linux 主机已生成并静态验证 DEB；AppImage 的 canonical `NO_STRIP=1` 路径在 Tauri 调用的 `linuxdeploy` GTK plugin 中因当前主机缺少其固定读取的 `/usr/lib/gdk-pixbuf-2.0/2.10.0` 目录而失败，准确记录为 packaging-host layout 阻断。
 Windows 安装包只在 Windows CI/host 生成，不能把 Linux 上存在配置写成已构建。
 
 退出条件：干净 tracked checkout 可执行同一 canonical release path；安装包只有一份 Svelte frontend
