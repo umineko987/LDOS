@@ -263,7 +263,7 @@ for item in metadata.distributions():
     })
 print(json.dumps(result, sort_keys=True))
 """
-    output = _run([str(python), "-I", "-c", program], cwd=tree)
+    output = _run([str(python), "-I", "-B", "-c", program], cwd=tree)
     raw_components = json.loads(output)
     components: list[dict[str, Any]] = []
     for item in raw_components:

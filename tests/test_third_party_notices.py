@@ -5,9 +5,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from third_party_notices import NoticeError, _runtime_components, verify
+from third_party_notices import (
+    NoticeError,
+    _python_components,
+    _runtime_components,
+    verify,
+)
 
 
 class ThirdPartyNoticesTests(unittest.TestCase):
@@ -41,6 +47,20 @@ class ThirdPartyNoticesTests(unittest.TestCase):
             encoding="utf-8",
         )
         return tree
+
+    def test_python_inventory_cannot_write_relocating_bytecode(self) -> None:
+        tree = self.make_tree()
+        python = tree / "runtime" / "python"
+        python.parent.mkdir(parents=True)
+        python.touch()
+
+        with patch(
+            "third_party_notices._run", return_value="[]"
+        ) as inventory_run:
+            self.assertEqual(_python_components(tree, python), [])
+
+        command = inventory_run.call_args.args[0]
+        self.assertEqual(command[:4], [str(python), "-I", "-B", "-c"])
 
     def test_verifies_complete_target_inventory(self) -> None:
         tree = self.make_tree()
