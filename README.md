@@ -66,6 +66,8 @@ python scripts/desktop_release.py build --cache-dir .release-cache
 - Windows：`desktop/src-tauri/target/release/bundle/nsis/*.exe`；
 - 后端清单：`desktop/src-tauri/release/backend/release-manifest.json` 和 `desktop/src-tauri/release/backend/release-files.sha256`。
 
+本次 non-headed Arch Linux 验证已生成并静态解包验证 DEB；AppImage 在 Tauri 调用的 `linuxdeploy` 内置 `strip` 处理当前 Arch 系统库 `.relr.dyn` section 时失败，属于 packaging-host 工具链阻断。仓库的 canonical Linux CI 使用 Ubuntu 24.04；Windows NSIS 只在 Windows CI/host 构建。配置存在不等于安装包已生成。
+
 组装、树校验、runtime 校验和单个安装包校验也可以独立执行：
 
 ```bash

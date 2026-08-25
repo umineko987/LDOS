@@ -172,6 +172,8 @@ P0–P5 的 pure unit、simulated DOM/timer、backend contract、artifact、cove
 
 静态安装包解包、临时根目录首次配置/保留/清理和进程子树 tests 已覆盖 repository 可自动闭环部分，但不能替代上述真实 WebView 验证。
 
+本次 non-headed Arch Linux 主机已生成并静态解包验证 DEB。AppImage 在 Tauri 调用的 `linuxdeploy` 内置 `strip` 读取当前 Arch 系统库 `.relr.dyn` section 时失败，准确记录为 packaging-host 工具链阻断；Windows NSIS 未在 Linux 主机伪造，交由 canonical Windows CI job 构建和验证。
+
 ## 9. Historical documents
 
 - `docs/2026-08-14-nocturne-glass-webui-design.md`：视觉与交互的历史证据；
