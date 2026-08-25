@@ -72,45 +72,60 @@ def test_safe_extract_rejects_parent_traversal(tmp_path: Path) -> None:
         release.safe_extract(archive, tmp_path / "output")
 
 
-def test_linux_torchvision_extensions_get_relative_runtime_rpath(
+def test_linux_wheel_libraries_get_relative_runtime_rpaths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lock = release.load_lock()
-    site_packages = (
-        tmp_path
-        / "python"
-        / "lib"
-        / "python3.13"
-        / "site-packages"
-        / "torchvision"
-    )
-    site_packages.mkdir(parents=True)
-    extensions = [site_packages / "_C.so", site_packages / "image.so"]
+    site_packages = tmp_path / "python" / "lib" / "python3.13" / "site-packages"
+    torchvision = site_packages / "torchvision"
+    torchvision.mkdir(parents=True)
+    extensions = [torchvision / "_C.so", torchvision / "image.so"]
     for extension in extensions:
         extension.write_bytes(b"elf")
-    commands: list[list[str]] = []
+    libraries = []
+    for name in ("opencv_python_headless.libs", "pillow.libs"):
+        directory = site_packages / name
+        directory.mkdir()
+        library = directory / "library.so.1"
+        library.write_bytes(b"elf")
+        libraries.append(library)
 
-    def fake_run(command: object, **kwargs: object) -> str:
+    commands: list[list[str]] = []
+    rpaths: dict[str, str] = {}
+
+    def fake_run(command: object, **_kwargs: object) -> str:
         rendered = [os.fspath(item) for item in command]  # type: ignore[arg-type]
         commands.append(rendered)
-        return release.LINUX_TORCHVISION_RPATH if kwargs.get("capture") else ""
+        if rendered[1] == "--set-rpath":
+            rpaths[rendered[3]] = rendered[2]
+            return ""
+        return rpaths.get(rendered[2], "")
 
     monkeypatch.setattr(release, "run", fake_run)
     release.make_linux_wheels_relocatable(tmp_path, lock, "linux-x86_64")
 
-    assert commands == [
-        command
-        for extension in extensions
-        for command in (
+    expected: list[list[str]] = []
+    for library in libraries:
+        expected.extend(
             [
-                "patchelf",
-                "--set-rpath",
-                release.LINUX_TORCHVISION_RPATH,
-                os.fspath(extension),
-            ],
-            ["patchelf", "--print-rpath", os.fspath(extension)],
+                ["patchelf", "--print-rpath", os.fspath(library)],
+                ["patchelf", "--set-rpath", "$ORIGIN", os.fspath(library)],
+                ["patchelf", "--print-rpath", os.fspath(library)],
+            ]
         )
-    ]
+    for extension in extensions:
+        expected.extend(
+            [
+                [
+                    "patchelf",
+                    "--set-rpath",
+                    release.LINUX_TORCHVISION_RPATH,
+                    os.fspath(extension),
+                ],
+                ["patchelf", "--print-rpath", os.fspath(extension)],
+            ]
+        )
+    assert commands == expected
 
 def minimal_tree(root: Path) -> dict[str, object]:
     python = root / "runtime" / "python" / "bin" / "python3"

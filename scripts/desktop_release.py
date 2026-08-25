@@ -227,6 +227,12 @@ def install_requirements(
         command.extend(["-r", ROOT / relative])
     run(command, cwd=staging, env=controlled_env())
 
+def set_linux_relative_rpath(path: Path, rpath: str) -> None:
+    run(["patchelf", "--set-rpath", rpath, path])
+    if run(["patchelf", "--print-rpath", path], capture=True) != rpath:
+        raise ReleaseError(f"failed to make wheel library relocatable: {path}")
+
+
 def make_linux_wheels_relocatable(
     runtime: Path, lock: dict[str, Any], target: str
 ) -> None:
@@ -234,14 +240,27 @@ def make_linux_wheels_relocatable(
         return
     python_version = ".".join(lock["distribution"]["python_version"].split(".")[:2])
     site_packages = runtime / "python" / "lib" / f"python{python_version}" / "site-packages"
+    library_directories = sorted(site_packages.glob("*.libs"))
+    required = {"opencv_python_headless.libs", "pillow.libs"}
+    if not required.issubset(path.name for path in library_directories):
+        raise ReleaseError("required auditwheel library directories are missing")
+    for directory in library_directories:
+        libraries = sorted(
+            path for path in directory.iterdir() if path.is_file() and ".so" in path.name
+        )
+        for library in libraries:
+            current = run(["patchelf", "--print-rpath", library], capture=True)
+            if any(entry.startswith("$ORIGIN") for entry in current.split(":")):
+                continue
+            if current:
+                raise ReleaseError(f"unsafe wheel library rpath: {library}: {current}")
+            set_linux_relative_rpath(library, "$ORIGIN")
+
     extensions = [site_packages / "torchvision" / name for name in ("_C.so", "image.so")]
     for extension in extensions:
         if not extension.is_file():
             raise ReleaseError(f"required torchvision extension is missing: {extension}")
-        run(["patchelf", "--set-rpath", LINUX_TORCHVISION_RPATH, extension])
-        actual = run(["patchelf", "--print-rpath", extension], capture=True)
-        if actual != LINUX_TORCHVISION_RPATH:
-            raise ReleaseError(f"failed to make torchvision extension relocatable: {extension}")
+        set_linux_relative_rpath(extension, LINUX_TORCHVISION_RPATH)
 
 
 def remove_generated_launchers(runtime: Path, target: str) -> None:
