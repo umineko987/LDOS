@@ -319,7 +319,7 @@ def create_app(
     app.state.container = service
     app.mount(
         "/ui",
-        WebUIStaticFiles(directory=str(Path(__file__).resolve().parent / "webui"), html=True),
+        WebUIStaticFiles(directory=str(Path(__file__).resolve().parent / "webui_dist"), html=True),
         name="webui",
     )
     if settings.server.cors_origins:

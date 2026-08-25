@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import mimetypes
+import hashlib
+import json
 import os
 import re
 import tempfile
 import unittest
-from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
-from xml.etree import ElementTree
 
 from fastapi.staticfiles import StaticFiles
 
@@ -24,25 +23,8 @@ from gdl_backend.webui_static import WebUIStaticFiles
 from tests.helpers import local_test_client, make_settings
 
 
-WEBUI_ROOT = Path(__file__).resolve().parents[1] / "gdl_backend" / "webui"
-WEBUI_APP_ROUTES = {
-    "crawl": "/crawl",
-    "tasks": "/tasks",
-    "proxy": "/proxy",
-    "vault": "/vault",
-    "review": "/review",
-    "policy": "/policy",
-    "diagnostics": "/diagnostics",
-    "personalization": "/personalization",
-    "gallery": "/gallery",
-    "export": "/export",
-}
-WEBUI_MEDIA_TYPES = {
-    ".html": "text/html",
-    ".css": "text/css",
-    ".js": "text/javascript",
-    ".svg": "image/svg+xml",
-}
+WEBUI_ROOT = Path(__file__).resolve().parents[1] / "gdl_backend" / "webui_dist"
+WEBUI_MANIFEST_PATH = WEBUI_ROOT / "frontend-manifest.json"
 
 
 def _webui_source_inventory() -> tuple[str, ...]:
@@ -74,16 +56,6 @@ class _FakeMonotonicClock:
     def __call__(self) -> float:
         return self.now
 
-
-class _TagCollector(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.tags: list[tuple[str, dict[str, str | None]]] = []
-
-    def handle_starttag(
-        self, tag: str, attrs: list[tuple[str, str | None]]
-    ) -> None:
-        self.tags.append((tag, dict(attrs)))
 
 
 class NetworkTargetValidationTests(unittest.TestCase):
@@ -637,48 +609,109 @@ class ApiTests(unittest.TestCase):
             ready.json()["components"]["dedup_python"]["status"], "error"
         )
 
-    def test_webui_static_assets_and_root_link(self):
+    def test_webui_serves_only_the_canonical_desktop_build(self):
         root = self.client.get("/")
         self.assertEqual(root.status_code, 200)
         self.assertEqual(root.json()["ui"], "/ui/")
 
+        slash_redirect = self.client.get("/ui", follow_redirects=False)
+        self.assertEqual(slash_redirect.status_code, 307)
+        self.assertEqual(
+            slash_redirect.headers["location"],
+            f"{str(self.client.base_url).rstrip('/')}/ui/",
+        )
+
+        manifest = json.loads(WEBUI_MANIFEST_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertEqual(manifest["build_source"], "desktop")
+        self.assertEqual(manifest["entrypoint"], "index.html")
+        entries = manifest["files"]
+        manifest_paths = tuple(entry["path"] for entry in entries)
+        self.assertEqual(tuple(sorted(manifest_paths)), manifest_paths)
+        self.assertEqual(
+            _webui_source_inventory(),
+            tuple(sorted(("frontend-manifest.json", *manifest_paths))),
+        )
+
+        for entry in entries:
+            relative_path = entry["path"]
+            content = (WEBUI_ROOT / relative_path).read_bytes()
+            with self.subTest(manifest_file=relative_path):
+                self.assertEqual(entry["size"], len(content))
+                self.assertEqual(
+                    entry["sha256"],
+                    hashlib.sha256(content).hexdigest(),
+                )
+
         index = self.client.get("/ui/")
         self.assertEqual(index.status_code, 200)
-        self.assertIn("ImageWeave 菜单栏", index.text)
-        self.assertIn("ImageWeave Dock", index.text)
-        self.assertNotIn("ImageWeave 应用快捷方式", index.text)
-        self.assertNotIn("聚合爬取测试台", index.text)
-        self.assertIn("text/html", index.headers["content-type"])
+        self.assertEqual(index.content, (WEBUI_ROOT / "index.html").read_bytes())
+        self.assertEqual(
+            index.headers["content-type"].partition(";")[0].lower(),
+            "text/html",
+        )
+        self.assertIn('<div id="app"></div>', index.text)
+        javascript_path = next(path for path in manifest_paths if path.endswith(".js"))
+        stylesheet_path = next(path for path in manifest_paths if path.endswith(".css"))
+        self.assertIn(f'src="./{javascript_path}"', index.text)
+        self.assertIn(f'href="./{stylesheet_path}"', index.text)
 
         self.assertEqual(self.client.get("/ui-next/").status_code, 404)
-        self.assertEqual(self.client.get("/ui/app.js").status_code, 404)
-        self.assertEqual(self.client.get("/ui/styles.css").status_code, 404)
+        self.assertEqual(self.client.get("/ui/js/main.js").status_code, 404)
+        self.assertEqual(self.client.get("/ui/styles/desktop.css").status_code, 404)
+        self.assertEqual(self.client.get("/ui/does-not-exist.js").status_code, 404)
+        self.assertEqual(self.client.get("/ui/unknown-route").status_code, 404)
 
-    def test_webui_static_assets_require_revalidation_with_validators(self):
-        for asset_path in (
-            "/ui/",
-            "/ui/styles/desktop.css?v=20260815.1",
-            "/ui/js/main.js",
-            "/ui/assets/noise.svg",
-        ):
-            with self.subTest(asset_path=asset_path):
-                response = self.client.get(asset_path)
-                self.assertEqual(response.status_code, 200, response.text)
+        ui_mounts = [
+            route
+            for route in self.app.routes
+            if getattr(route, "path", None) == "/ui"
+            and isinstance(getattr(route, "app", None), StaticFiles)
+        ]
+        self.assertEqual(len(ui_mounts), 1)
+        self.assertIsInstance(ui_mounts[0].app, WebUIStaticFiles)
+        self.assertEqual(Path(ui_mounts[0].app.directory).resolve(), WEBUI_ROOT.resolve())
+
+    def test_webui_build_assets_keep_static_http_contract(self):
+        media_types = {
+            ".html": "text/html",
+            ".json": "application/json",
+            ".css": "text/css",
+            ".js": "text/javascript",
+            ".svg": "image/svg+xml",
+        }
+        for relative_path in _webui_source_inventory():
+            route = f"/ui/{relative_path}"
+            with self.subTest(static_resource=relative_path):
+                response = self.client.get(route)
+                self.assertEqual(response.status_code, 200, route)
+                self.assertEqual(
+                    response.headers["content-type"].partition(";")[0].lower(),
+                    media_types[Path(relative_path).suffix],
+                )
                 self.assertEqual(response.headers.get("cache-control"), "no-cache")
                 self.assertTrue(response.headers.get("etag"))
                 self.assertTrue(response.headers.get("last-modified"))
+                self.assertEqual(
+                    response.content,
+                    (WEBUI_ROOT / relative_path).read_bytes(),
+                )
+                self.assertEqual(response.request.url.path, route)
+                self.assertFalse(response.request.url.query)
+                self.assertEqual(
+                    (response.request.url.scheme, response.request.url.host, response.request.url.port),
+                    (self.client.base_url.scheme, self.client.base_url.host, self.client.base_url.port),
+                )
+                self.assertFalse(response.history)
 
                 revalidated = self.client.get(
-                    asset_path,
+                    route,
                     headers={"If-None-Match": response.headers["etag"]},
                 )
-                self.assertEqual(revalidated.status_code, 304, asset_path)
+                self.assertEqual(revalidated.status_code, 304)
                 self.assertEqual(revalidated.content, b"")
                 self.assertEqual(revalidated.headers.get("cache-control"), "no-cache")
-                self.assertEqual(
-                    revalidated.headers.get("etag"),
-                    response.headers["etag"],
-                )
+                self.assertEqual(revalidated.headers.get("etag"), response.headers["etag"])
 
         html = self.client.get("/ui/")
         modified_since = self.client.get(
@@ -689,707 +722,23 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(modified_since.headers.get("cache-control"), "no-cache")
         self.assertEqual(modified_since.headers.get("etag"), html.headers["etag"])
 
-        non_javascript_paths = (
-            "/ui/",
-            "/ui/styles/desktop.css",
-            "/ui/assets/noise.svg",
+        javascript_path = next(
+            path for path in _webui_source_inventory() if path.endswith(".js")
         )
-        baseline_media_types = {
-            path: self.client.get(path).headers["content-type"]
-            for path in non_javascript_paths
-        }
-        native_guess_type = mimetypes.guess_type
-
-        def windows_guess_type(path):
-            if os.fspath(path).lower().endswith(".js"):
-                return "application/javascript", None
-            return native_guess_type(path)
-
         with patch(
             "starlette.responses.guess_type",
-            side_effect=windows_guess_type,
+            return_value=("application/javascript", None),
         ):
-            javascript = self.client.get("/ui/js/main.js")
-            self.assertEqual(javascript.status_code, 200)
-            self.assertEqual(
-                javascript.headers.get("content-type"),
-                "text/javascript; charset=utf-8",
-            )
-            self.assertEqual(javascript.headers.get("cache-control"), "no-cache")
-            self.assertTrue(javascript.headers.get("etag"))
-            self.assertTrue(javascript.headers.get("last-modified"))
-
-            revalidated_javascript = self.client.get(
-                "/ui/js/main.js",
-                headers={"If-None-Match": javascript.headers["etag"]},
-            )
-            self.assertEqual(revalidated_javascript.status_code, 304)
-            self.assertEqual(revalidated_javascript.content, b"")
-            self.assertEqual(
-                revalidated_javascript.headers.get("cache-control"),
-                "no-cache",
-            )
-            self.assertEqual(
-                revalidated_javascript.headers.get("etag"),
-                javascript.headers["etag"],
-            )
-
-            for path, expected_media_type in baseline_media_types.items():
-                with self.subTest(windows_mimetypes_non_javascript=path):
-                    response = self.client.get(path)
-                    self.assertEqual(response.status_code, 200)
-                    self.assertEqual(
-                        response.headers.get("content-type"),
-                        expected_media_type,
-                    )
-                    self.assertEqual(response.headers.get("cache-control"), "no-cache")
-                    self.assertTrue(response.headers.get("etag"))
+            javascript = self.client.get(f"/ui/{javascript_path}")
+        self.assertEqual(
+            javascript.headers.get("content-type"),
+            "text/javascript; charset=utf-8",
+        )
 
         for api_path in ("/", "/healthz", "/api/v1/config"):
             api = self.client.get(api_path)
             self.assertEqual(api.status_code, 200, api_path)
             self.assertNotIn("cache-control", api.headers, api_path)
-
-    def test_webui_noise_svg_is_safe_same_origin_static_asset(self):
-        asset_path = "/ui/assets/noise.svg"
-        response = self.client.get(asset_path)
-
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(
-            response.headers.get("content-type", "").partition(";")[0].lower(),
-            "image/svg+xml",
-        )
-        request_url = response.request.url
-        base_url = self.client.base_url
-        self.assertEqual(request_url.path, asset_path)
-        self.assertFalse(request_url.query)
-        self.assertEqual(
-            (request_url.scheme, request_url.host, request_url.port),
-            (base_url.scheme, base_url.host, base_url.port),
-        )
-        self.assertFalse(response.history)
-
-        ui_mounts = [
-            route
-            for route in self.app.routes
-            if getattr(route, "path", None) == "/ui"
-            and isinstance(getattr(route, "app", None), StaticFiles)
-        ]
-        self.assertEqual(len(ui_mounts), 1)
-        self.assertIsInstance(ui_mounts[0].app, WebUIStaticFiles)
-        self.assertNotIn(asset_path, self.app.openapi()["paths"])
-
-        source = response.content.decode("utf-8")
-        source_lower = source.lower()
-        for forbidden_declaration in (
-            "<!doctype",
-            "<!entity",
-            "<?xml-stylesheet",
-        ):
-            self.assertNotIn(forbidden_declaration, source_lower)
-
-        root = ElementTree.fromstring(source)
-
-        def local_name(qualified_name: str) -> str:
-            return qualified_name.rsplit("}", 1)[-1]
-
-        self.assertEqual(local_name(root.tag), "svg")
-        self.assertEqual(root.attrib.get("aria-hidden"), "true")
-        self.assertEqual(root.attrib.get("focusable"), "false")
-
-        width = float(root.attrib["width"])
-        height = float(root.attrib["height"])
-        self.assertEqual(width, height)
-        self.assertGreaterEqual(width, 64)
-        self.assertLessEqual(width, 512)
-        view_box = tuple(
-            float(part)
-            for part in root.attrib["viewBox"].replace(",", " ").split()
-        )
-        self.assertEqual(view_box, (0.0, 0.0, width, height))
-
-        elements = list(root.iter())
-        element_names = {local_name(element.tag).lower() for element in elements}
-        self.assertLessEqual(
-            element_names,
-            {"svg", "defs", "filter", "feturbulence", "fecolormatrix", "rect"},
-        )
-        self.assertIn("feturbulence", element_names)
-
-        element_ids = {
-            element.attrib["id"] for element in elements if "id" in element.attrib
-        }
-        local_references: set[str] = set()
-        for element in elements:
-            self.assertFalse((element.text or "").strip())
-            self.assertFalse((element.tail or "").strip())
-            for qualified_name, value in element.attrib.items():
-                attribute_name = local_name(qualified_name).lower()
-                compact_value = "".join(value.split()).lower()
-                self.assertFalse(attribute_name.startswith("on"))
-                self.assertNotIn(attribute_name, {"href", "src", "style"})
-                self.assertNotIn("opacity", attribute_name)
-                for external_marker in (
-                    "data:",
-                    "javascript:",
-                    "http:",
-                    "https:",
-                    "//",
-                ):
-                    self.assertNotIn(external_marker, compact_value)
-                if "url(" in compact_value:
-                    reference = re.fullmatch(
-                        r"url\(#([a-z_][a-z0-9_.:-]*)\)",
-                        compact_value,
-                    )
-                    self.assertIsNotNone(reference, value)
-                    local_references.add(reference.group(1))
-        self.assertTrue(local_references)
-        self.assertLessEqual(local_references, element_ids)
-
-        turbulence = [
-            element
-            for element in elements
-            if local_name(element.tag).lower() == "feturbulence"
-        ]
-        self.assertEqual(len(turbulence), 1)
-        turbulence_attributes = turbulence[0].attrib
-        self.assertEqual(turbulence_attributes.get("type"), "fractalNoise")
-        self.assertEqual(turbulence_attributes.get("stitchTiles"), "stitch")
-        frequencies = [
-            float(value)
-            for value in turbulence_attributes["baseFrequency"].split()
-        ]
-        self.assertTrue(all(0.0 < value <= 1.0 for value in frequencies))
-        self.assertIn(int(turbulence_attributes["numOctaves"]), range(1, 5))
-        int(turbulence_attributes["seed"])
-
-        filters = [
-            element
-            for element in elements
-            if local_name(element.tag).lower() == "filter"
-        ]
-        self.assertEqual(len(filters), 1)
-        self.assertEqual(filters[0].attrib.get("x"), "0")
-        self.assertEqual(filters[0].attrib.get("y"), "0")
-        self.assertEqual(filters[0].attrib.get("width"), "100%")
-        self.assertEqual(filters[0].attrib.get("height"), "100%")
-
-        color_matrices = [
-            element
-            for element in elements
-            if local_name(element.tag).lower() == "fecolormatrix"
-        ]
-        self.assertEqual(len(color_matrices), 1)
-        self.assertEqual(color_matrices[0].attrib.get("type"), "saturate")
-        self.assertEqual(float(color_matrices[0].attrib["values"]), 0.0)
-
-        rectangles = [
-            element
-            for element in elements
-            if local_name(element.tag).lower() == "rect"
-        ]
-        self.assertEqual(len(rectangles), 1)
-        self.assertIn(rectangles[0].attrib.get("fill"), {"none", "transparent"})
-
-    def test_webui_desktop_shell_static_contract(self):
-        index = self.client.get("/ui/")
-        self.assertEqual(index.status_code, 200)
-        self.assertIn("ImageWeave 菜单栏", index.text)
-        self.assertIn("请使用更大的桌面窗口", index.text)
-
-        parser = _TagCollector()
-        parser.feed(index.text)
-        html_tags = [attrs for tag, attrs in parser.tags if tag == "html"]
-        self.assertEqual(len(html_tags), 1)
-        self.assertEqual(html_tags[0].get("data-motion"), "on")
-        self.assertEqual(html_tags[0].get("data-theme-tone"), "dark")
-        self.assertIn('<meta name="color-scheme" content="dark">', index.text)
-        wallpaper_tags = [
-            (tag, attrs)
-            for tag, attrs in parser.tags
-            if "data-desktop-wallpaper" in attrs
-        ]
-        self.assertEqual(len(wallpaper_tags), 1)
-        wallpaper_tag, wallpaper_attrs = wallpaper_tags[0]
-        self.assertEqual(wallpaper_tag, "div")
-        self.assertEqual(wallpaper_attrs.get("aria-hidden"), "true")
-        self.assertIn("inert", wallpaper_attrs)
-        self.assertNotIn("tabindex", wallpaper_attrs)
-        self.assertIn("desktop-wallpaper", wallpaper_attrs.get("class", "").split())
-        self.assertIn(
-            "desktop-wallpaper--graphite",
-            wallpaper_attrs.get("class", "").split(),
-        )
-        noise_tags = [
-            attrs
-            for tag, attrs in parser.tags
-            if tag == "div"
-            and "desktop-noise" in attrs.get("class", "").split()
-        ]
-        self.assertEqual(len(noise_tags), 1)
-        self.assertEqual(noise_tags[0].get("aria-hidden"), "true")
-        self.assertNotIn("tabindex", noise_tags[0])
-        self.assertNotIn("data-desktop-wallpaper-image", index.text)
-        self.assertNotIn("data-desktop-wallpaper-mask", index.text)
-        self.assertNotIn("desktop-wallpaper__image", index.text)
-        self.assertNotIn("desktop-wallpaper__mask", index.text)
-
-        self.assertIn('data-menu-bar', index.text)
-        self.assertIn('data-application-window', index.text)
-        self.assertIn('data-application-center-host', index.text)
-        self.assertIn('data-dock', index.text)
-        dock_tags = [
-            attrs for tag, attrs in parser.tags if tag == "nav" and "data-dock" in attrs
-        ]
-        self.assertEqual(len(dock_tags), 1)
-        for unsafe_bootstrap_attribute in ("hidden", "inert", "aria-hidden"):
-            self.assertNotIn(unsafe_bootstrap_attribute, dock_tags[0])
-        self.assertIn('data-task-window-list', index.text)
-        self.assertIn('data-desktop-size-blocker', index.text)
-        self.assertNotIn('data-desktop-icons', index.text)
-        self.assertNotIn('data-start-menu', index.text)
-        for summary in ("api", "proxy", "dedup"):
-            self.assertEqual(
-                index.text.count(f'data-taskbar-summary="{summary}"'), 1
-            )
-        self.assertEqual(index.text.count("data-taskbar-refresh"), 1)
-        self.assertEqual(index.text.count("data-taskbar-diagnostics"), 1)
-        self.assertIn('type="module" src="./js/main.js"', index.text)
-        self.assertIn('href="./styles/tokens.css"', index.text)
-        self.assertEqual(
-            index.text.count('href="./styles/desktop.css?v=20260815.1"'),
-            1,
-        )
-        self.assertNotIn('href="./styles/desktop.css"', index.text)
-        self.assertIn('href="./styles/apps/personalization.css"', index.text)
-        self.assertIn('href="./styles/responsive.css"', index.text)
-        self.assertNotIn("聚合爬取测试台", index.text)
-        self.assertNotIn('id="searchForm"', index.text)
-        self.assertNotIn('href="#/', index.text)
-        self.assertIn("text/html", index.headers["content-type"])
-
-        desktop_styles = self.client.get("/ui/styles/desktop.css")
-        self.assertEqual(desktop_styles.status_code, 200)
-        status_styles = self.client.get("/ui/styles/status.css")
-        self.assertEqual(status_styles.status_code, 200)
-        main_source = self.client.get("/ui/js/main.js")
-        self.assertEqual(main_source.status_code, 200)
-        desktop_style_text = desktop_styles.text.replace("\r\n", "\n")
-        self.assertIn(':root[data-motion="off"]', status_styles.text)
-        self.assertIn(
-            "@media (prefers-reduced-motion: reduce)",
-            status_styles.text,
-        )
-        for immediate_rule in (
-            "scroll-behavior: auto !important;",
-            "animation: none !important;",
-            "transition: none !important;",
-        ):
-            self.assertGreaterEqual(status_styles.text.count(immediate_rule), 2)
-        self.assertLess(
-            main_source.text.index("motionController = createMotionController({"),
-            main_source.text.index("desktopController = initializeDesktop("),
-        )
-        self.assertLess(
-            main_source.text.index("personalizationController = createPersonalizationRuntime({"),
-            main_source.text.index("desktopController = initializeDesktop("),
-        )
-        self.assertIn("motion: motionController", main_source.text)
-        self.assertIn("personalization: personalizationController", main_source.text)
-        separator = ".desktop-wallpaper {"
-        self.assertIn(separator, desktop_style_text)
-        wallpaper_rule = desktop_style_text.partition(separator)[2].partition("}")[0]
-        self.assertIn(
-            "background: var(--imageweave-background-deepest);",
-            wallpaper_rule,
-        )
-        self.assertIn("pointer-events: none;", wallpaper_rule)
-        self.assertNotIn("animation", wallpaper_rule)
-        self.assertNotIn("transition", wallpaper_rule)
-        self.assertNotIn("desktop-wallpaper__image", desktop_style_text)
-        self.assertNotIn("desktop-wallpaper__mask", desktop_style_text)
-        self.assertNotIn("window-layer--opacity", desktop_style_text)
-        for color_id, color_value in {
-            "graphite": "#080d15",
-            "slate": "#0b1322",
-            "deep-ocean": "#07111b",
-            "forest": "#081210",
-            "plum-gray": "#100c0b",
-            "warm-paper": "#120d0a",
-        }.items():
-            scene_separator = f".desktop-wallpaper--{color_id} {{"
-            self.assertIn(scene_separator, desktop_style_text)
-            scene_rule = desktop_style_text.partition(scene_separator)[2].partition("}")[0]
-            self.assertGreaterEqual(scene_rule.count("radial-gradient("), 2)
-            self.assertIn(color_value, scene_rule.lower())
-        noise_separator = ".desktop-noise {"
-        self.assertIn(noise_separator, desktop_style_text)
-        noise_rule = desktop_style_text.partition(noise_separator)[2].partition("}")[0]
-        self.assertEqual(noise_rule.count('url("../assets/noise.svg")'), 1)
-        self.assertIn("position: fixed;", noise_rule)
-        self.assertIn("inset: 0;", noise_rule)
-        self.assertIn("opacity: 0.025;", noise_rule)
-        self.assertIn("pointer-events: none;", noise_rule)
-
-        static_background_sources = "\n".join(
-            (index.text, desktop_style_text, main_source.text)
-        ).lower()
-        for forbidden in (
-            "cloud-background",
-            "data-cloud",
-            "initializecloudbackground",
-            "webgl",
-            "<canvas",
-            "requestanimationframe",
-            "cancelanimationframe",
-        ):
-            self.assertNotIn(forbidden, static_background_sources)
-
-        source_inventory = _webui_source_inventory()
-        self.assertEqual(len(source_inventory), 99)
-        self.assertEqual(sum(path.endswith(".html") for path in source_inventory), 1)
-        self.assertEqual(sum(path.endswith(".svg") for path in source_inventory), 1)
-        self.assertEqual(sum(path.endswith(".css") for path in source_inventory), 17)
-        self.assertEqual(sum(path.endswith(".js") for path in source_inventory), 80)
-        self.assertEqual(
-            {Path(path).suffix for path in source_inventory},
-            set(WEBUI_MEDIA_TYPES),
-        )
-
-        inventory_routes = {f"/ui/{path}" for path in source_inventory}
-        expected_app_controllers = {
-            f"/ui/js/apps/{app_id}.js" for app_id in WEBUI_APP_ROUTES
-        }
-        expected_app_styles = {
-            f"/ui/styles/apps/{app_id}.css" for app_id in WEBUI_APP_ROUTES
-        }
-        self.assertEqual(
-            {
-                path
-                for path in inventory_routes
-                if path.startswith("/ui/js/apps/")
-            },
-            expected_app_controllers,
-        )
-        self.assertEqual(
-            {
-                path
-                for path in inventory_routes
-                if path.startswith("/ui/styles/apps/")
-            },
-            expected_app_styles,
-        )
-        self.assertIn("/ui/js/core/wallpaper-storage.js", inventory_routes)
-
-        for relative_path in source_inventory:
-            route = f"/ui/{relative_path}"
-            with self.subTest(static_resource=relative_path):
-                response = self.client.get(route)
-                self.assertEqual(response.status_code, 200, route)
-                self.assertEqual(
-                    response.headers.get("content-type", "")
-                    .partition(";")[0]
-                    .lower(),
-                    WEBUI_MEDIA_TYPES[Path(relative_path).suffix],
-                    route,
-                )
-                self.assertEqual(response.headers.get("cache-control"), "no-cache", route)
-                self.assertTrue(response.headers.get("etag"), route)
-                self.assertTrue(response.headers.get("last-modified"), route)
-                self.assertEqual(
-                    response.content,
-                    (WEBUI_ROOT / relative_path).read_bytes(),
-                    route,
-                )
-                self.assertEqual(response.request.url.path, route)
-                self.assertFalse(response.request.url.query)
-                self.assertEqual(
-                    (
-                        response.request.url.scheme,
-                        response.request.url.host,
-                        response.request.url.port,
-                    ),
-                    (
-                        self.client.base_url.scheme,
-                        self.client.base_url.host,
-                        self.client.base_url.port,
-                    ),
-                )
-                self.assertFalse(response.history)
-
-        retired_or_isolated_assets = (
-            "/ui/js/components/cloud-background.js",
-            "/ui/assets/dithered-cloud-fallback.png",
-            "/ui/js/core/wallpaper-image-import.js",
-            "/ui/stage5-preview-host.js",
-            "/ui/tests/fixtures/webui/stage5-preview-host.html",
-            "/__stage5__/stage5-preview-host.html",
-            "/__stage5__/stage5-preview-fixtures.js",
-        )
-        self.assertTrue(inventory_routes.isdisjoint(retired_or_isolated_assets))
-        for asset_path in retired_or_isolated_assets:
-            self.assertEqual(
-                self.client.get(asset_path).status_code,
-                404,
-                asset_path,
-            )
-
-        registry = self.client.get("/ui/js/core/app-registry.js")
-        definitions = self.client.get("/ui/js/core/app-definitions.js")
-        self.assertEqual(registry.status_code, 200)
-        self.assertEqual(definitions.status_code, 200)
-        for app_id, route in WEBUI_APP_ROUTES.items():
-            self.assertEqual(definitions.text.count(f'id: "{app_id}"'), 1)
-            self.assertEqual(definitions.text.count(f'route: "{route}"'), 1)
-        self.assertEqual(definitions.text.count('availability: "ready"'), 8)
-        self.assertEqual(definitions.text.count('availability: "preview"'), 2)
-        self.assertIn('defaultWindowState: "maximized"', definitions.text)
-
-        javascript_paths = [
-            "/ui/js/main.js",
-            "/ui/js/core/app-definitions.js",
-            "/ui/js/core/app-registry-factory.js",
-            "/ui/js/core/app-registry.js",
-            "/ui/js/core/router.js",
-            "/ui/js/core/desktop.js",
-            "/ui/js/core/window-manager.js",
-            "/ui/js/components/empty-state.js",
-            "/ui/js/apps/crawl.js",
-            "/ui/js/apps/tasks.js",
-            "/ui/js/apps/proxy.js",
-            "/ui/js/apps/vault.js",
-            "/ui/js/apps/review.js",
-            "/ui/js/apps/policy.js",
-            "/ui/js/apps/diagnostics.js",
-            "/ui/js/apps/personalization.js",
-        ]
-        combined_javascript = "\n".join(
-            self.client.get(path).text for path in javascript_paths
-        )
-        for forbidden in (
-            "fetch(",
-            "XMLHttpRequest",
-            "localStorage",
-            "sessionStorage",
-        ):
-            self.assertNotIn(forbidden, combined_javascript)
-
-        core_paths = [
-            "/ui/js/core/api.js",
-            "/ui/js/core/actions.js",
-            "/ui/js/core/app-definitions.js",
-            "/ui/js/core/app-registry-factory.js",
-            "/ui/js/core/app-registry.js",
-            "/ui/js/core/desktop.js",
-            "/ui/js/core/dom.js",
-            "/ui/js/core/motion.js",
-            "/ui/js/core/personalization-model.js",
-            "/ui/js/core/personalization.js",
-            "/ui/js/core/wallpaper-storage.js",
-            "/ui/js/core/polling.js",
-            "/ui/js/core/proxy-model.js",
-            "/ui/js/core/vault-model.js",
-            "/ui/js/core/policy-model.js",
-            "/ui/js/core/crawl-model.js",
-            "/ui/js/core/tasks-model.js",
-            "/ui/js/core/review-model.js",
-            "/ui/js/core/diagnostics-model.js",
-            "/ui/js/core/router.js",
-            "/ui/js/core/storage.js",
-            "/ui/js/core/storage-contract.js",
-            "/ui/js/core/storage-layout.js",
-            "/ui/js/core/storage-persistence.js",
-            "/ui/js/core/storage-preferences.js",
-            "/ui/js/core/storage-service.js",
-            "/ui/js/core/storage-snapshot.js",
-            "/ui/js/core/store.js",
-            "/ui/js/core/store-business-transition.js",
-            "/ui/js/core/store-contract.js",
-            "/ui/js/core/store-data.js",
-            "/ui/js/core/store-factory.js",
-            "/ui/js/core/store-runtime.js",
-            "/ui/js/core/store-state.js",
-            "/ui/js/core/store-transition.js",
-            "/ui/js/core/store-window-transition.js",
-            "/ui/js/core/window-dom-lifecycle.js",
-            "/ui/js/core/window-hide-controller.js",
-            "/ui/js/core/window-interaction.js",
-            "/ui/js/core/window-manager.js",
-            "/ui/js/core/window-policy.js",
-        ]
-        component_paths = [
-            "/ui/js/components/dialog.js",
-            "/ui/js/components/empty-state.js",
-            "/ui/js/components/error-view.js",
-            "/ui/js/components/icons.js",
-            "/ui/js/components/proxy-dom.js",
-            "/ui/js/components/proxy-view.js",
-            "/ui/js/components/vault-dom.js",
-            "/ui/js/components/vault-view.js",
-            "/ui/js/components/policy-dom.js",
-            "/ui/js/components/policy-view.js",
-            "/ui/js/components/crawl-view.js",
-            "/ui/js/components/tasks-view.js",
-            "/ui/js/components/review-view.js",
-            "/ui/js/components/diagnostics-view.js",
-            "/ui/js/components/personalization-view.js",
-            "/ui/js/components/status.js",
-            "/ui/js/components/taskbar-summary.js",
-        ]
-        app_paths = [
-            "/ui/js/apps/crawl.js",
-            "/ui/js/apps/tasks.js",
-            "/ui/js/apps/proxy.js",
-            "/ui/js/apps/vault.js",
-            "/ui/js/apps/review.js",
-            "/ui/js/apps/policy.js",
-            "/ui/js/apps/diagnostics.js",
-            "/ui/js/apps/personalization.js",
-        ]
-        module_sources = {
-            path: self.client.get(path).text
-            for path in ["/ui/js/main.js", *core_paths, *component_paths, *app_paths]
-        }
-        api_source = module_sources["/ui/js/core/api.js"]
-        self.assertIn("globalThis.fetch", api_source)
-        self.assertIn("fetchImpl(url, requestOptions)", api_source)
-        for path, source in module_sources.items():
-            if path != "/ui/js/core/api.js":
-                self.assertNotIn("globalThis.fetch", source, path)
-                self.assertNotIn("fetch(", source, path)
-            self.assertNotIn("XMLHttpRequest", source, path)
-            if path != "/ui/js/core/storage-persistence.js":
-                self.assertNotIn("localStorage", source, path)
-                self.assertNotIn("sessionStorage", source, path)
-
-        proxy_app_path = "/ui/js/apps/proxy.js"
-        vault_app_path = "/ui/js/apps/vault.js"
-        policy_app_path = "/ui/js/apps/policy.js"
-        crawl_app_path = "/ui/js/apps/crawl.js"
-        tasks_app_path = "/ui/js/apps/tasks.js"
-        review_app_path = "/ui/js/apps/review.js"
-        diagnostics_app_path = "/ui/js/apps/diagnostics.js"
-        personalization_app_path = "/ui/js/apps/personalization.js"
-        proxy_endpoints = {
-            "/api/v1/proxy/status",
-            "/api/v1/proxy/start",
-            "/api/v1/proxy/reload",
-            "/api/v1/proxy/probe",
-            "/api/v1/proxy/stop",
-            "/api/v1/proxy/sources",
-            "/api/v1/proxy/sources/subscriptions",
-            "/api/v1/proxy/sources/node-file",
-            "/api/v1/proxy/sources/inline-nodes",
-            "/api/v1/proxy/sources/override",
-        }
-        vault_endpoints = {
-            "/api/v1/auth",
-            "/api/v1/auth/proxy",
-            "/api/v1/auth/browser-profile",
-            "/api/v1/auth/pixiv/oauth/start",
-            "/api/v1/auth/pixiv/oauth/session",
-        }
-        for path in app_paths:
-            source = module_sources[path]
-            for forbidden in (
-                "fetch(",
-                "response.json",
-                "response.ok",
-                "normalizeApiError",
-                "new ApiError",
-            ):
-                self.assertNotIn(forbidden, source, path)
-            if path == proxy_app_path:
-                for endpoint in proxy_endpoints:
-                    self.assertEqual(source.count(f'"{endpoint}"'), 1, endpoint)
-                self.assertEqual(source.count('"/api/v1/'), len(proxy_endpoints))
-                self.assertIn('STATUS_POLL_KEY = "proxy.status"', source)
-                self.assertIn("scope: context.pollingScope", source)
-            elif path == vault_app_path:
-                for endpoint in vault_endpoints:
-                    self.assertEqual(source.count(f'"{endpoint}"'), 1, endpoint)
-                self.assertEqual(source.count('"/api/v1/'), len(vault_endpoints))
-                self.assertIn('AUTHORIZATION_POLL_KEY = "vault.authorization"', source)
-                self.assertIn("scope: context.pollingScope", source)
-                self.assertIn("critical: false", source)
-            elif path == policy_app_path:
-                self.assertEqual(source.count('"/api/v1/sites/policies"'), 1)
-                self.assertEqual(source.count('"/api/v1/'), 1)
-                self.assertIn('POLICY_VIEW_QUERY = "view=policy"', source)
-                self.assertNotIn("polling.start", source)
-            elif path == crawl_app_path:
-                for endpoint in (
-                    "/api/v1/search",
-                    "/api/v1/search/autocomplete",
-                    "/api/v1/crawls",
-                ):
-                    self.assertEqual(source.count(f'"{endpoint}"'), 1, endpoint)
-                self.assertIn("idempotencyKey: true", source)
-            elif path == tasks_app_path:
-                self.assertEqual(source.count('"/api/v1/crawls"'), 1)
-                self.assertIn('BATCH_POLL_KEY = "batches.active"', source)
-            elif path == review_app_path:
-                self.assertEqual(source.count('"/api/v1/crawls"'), 1)
-                self.assertIn('REVIEW_POLL_KEY = "review.active"', source)
-                self.assertIn("beforeLeave()", source)
-            elif path == diagnostics_app_path:
-                self.assertEqual(source.count('"/healthz"'), 1)
-                self.assertEqual(source.count('"/readyz"'), 1)
-                self.assertEqual(source.count('"/api/v1/config?view=diagnostics"'), 1)
-                self.assertEqual(
-                    source.count('"/api/v1/scheduler/status?view=diagnostics"'), 1
-                )
-                self.assertIn('DIAGNOSTICS_POLL_KEY = "diagnostics.snapshot"', source)
-            elif path == personalization_app_path:
-                self.assertNotIn("/api/", source)
-                self.assertNotIn("polling.", source)
-                self.assertIn("beforeLeave()", source)
-                self.assertIn("beforeWindowHide", source)
-            else:
-                self.assertNotIn("/api/v1", source, path)
-
-        for path, source in module_sources.items():
-            if path != proxy_app_path:
-                self.assertNotIn("/api/v1/proxy", source, path)
-            if path != vault_app_path:
-                self.assertNotIn("/api/v1/auth", source, path)
-            if path != policy_app_path:
-                self.assertNotIn("/api/v1/sites", source, path)
-        personalization_view_source = module_sources[
-            "/ui/js/components/personalization-view.js"
-        ]
-        personalization_runtime_source = module_sources[
-            "/ui/js/core/personalization.js"
-        ]
-        self.assertNotIn("innerHTML", personalization_view_source)
-        self.assertIn(
-            "已开启界面动效，但系统“减少动态效果”设置会限制部分效果。",
-            personalization_view_source,
-        )
-        self.assertNotIn('"background-image"', personalization_runtime_source)
-        self.assertNotIn("createObjectURL", personalization_runtime_source)
-        self.assertNotIn("setProperty", personalization_runtime_source)
-        self.assertNotIn("data-theme-tone", personalization_runtime_source)
-        self.assertIn("WALLPAPER_COLOR_CLASSES", personalization_runtime_source)
-        self.assertEqual(
-            self.client.get("/ui/js/core/wallpaper-image-import.js").status_code,
-            404,
-        )
-        self.assertNotIn(
-            "context.actions.navigateToApp",
-            module_sources["/ui/js/components/empty-state.js"],
-        )
-        taskbar_summary_source = module_sources[
-            "/ui/js/components/taskbar-summary.js"
-        ]
-        self.assertIn('SHELL_POLL_KEY = "shell.summary"', taskbar_summary_source)
-        self.assertIn("key: SHELL_POLL_KEY", taskbar_summary_source)
-        self.assertIn("critical: false", taskbar_summary_source)
-
-        self.assertEqual(self.client.get("/ui/styles.css").status_code, 404)
-        self.assertEqual(self.client.get("/ui/app.js").status_code, 404)
-        self.assertEqual(self.client.get("/ui/does-not-exist.js").status_code, 404)
 
     def test_authorization_proxy_api_roundtrip(self):
         # 路由顺序回归：/auth/proxy 不能被 /auth/{site} 当成站点名吃掉（那会 404）
