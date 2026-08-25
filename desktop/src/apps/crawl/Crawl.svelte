@@ -234,22 +234,23 @@
       <aside class="crawl-column" aria-labelledby="crawl-sources-heading">
         <header><p>01 · 来源</p><h2 id="crawl-sources-heading">来源与连接</h2><span>启用来源，并按真实执行顺序排列。</span></header>
         <div class="crawl-column__scroll">
-          <fieldset class="crawl-panel">
+          <fieldset class="crawl-panel" aria-describedby="crawl-source-discovery-note">
             <legend>来源启用状态</legend>
+            <p id="crawl-source-discovery-note">Danbooru、EH 与 Pawchive / Pawoo 执行站内发现；X / Twitter 与 Pixiv 只从 Danbooru 画师目录读取关联账户。X / Twitter 与 Pixiv 授权仅用于后续访问与采集，不会扩大当前发现范围。</p>
             {#each CRAWL_SITE_DEFINITIONS as site (site.id)}
               <div class="crawl-source-setting">
                 <label>
                   <input
                     type="checkbox"
                     checked={sites.includes(site.id)}
-                    aria-label={`启用 ${site.label} 搜索来源`}
+                    aria-label={`启用 ${site.label}`}
                     onchange={(event) => toggleSite(site.id, (event.currentTarget as HTMLInputElement).checked)}
                   />
                   <strong>{site.label}</strong>
                 </label>
                 <label>
                   <span>{site.label} 代理覆盖</span>
-                  <select aria-label={`${site.label} 搜索代理覆盖`} bind:value={sourceProxyModes[site.id]}>
+                  <select aria-label={`${site.label} 代理覆盖`} bind:value={sourceProxyModes[site.id]}>
                     <option value="">使用全局设置</option>
                     <option value="required">仅使用代理</option>
                     <option value="prefer">优先代理，不可用时直连</option>

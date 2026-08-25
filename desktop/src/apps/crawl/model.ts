@@ -33,8 +33,8 @@ const EVIDENCE_LABELS: Readonly<Record<string, string>> = Object.freeze({
 
 export const CRAWL_SITE_DEFINITIONS = Object.freeze([
   Object.freeze({ id: "danbooru", label: "Danbooru" }),
-  Object.freeze({ id: "twitter", label: "X / Twitter" }),
-  Object.freeze({ id: "pixiv", label: "Pixiv" }),
+  Object.freeze({ id: "twitter", label: "X / Twitter · Danbooru 画师目录关联账户" }),
+  Object.freeze({ id: "pixiv", label: "Pixiv · Danbooru 画师目录关联账户" }),
   Object.freeze({ id: "exhentai", label: "EH" }),
   Object.freeze({ id: "pawchive", label: "Pawchive" }),
 ] as const);

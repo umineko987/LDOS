@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { sanitizeCrawlSearchResponse } from "../src/apps/crawl/model";
+import { CRAWL_SITE_DEFINITIONS, sanitizeCrawlSearchResponse } from "../src/apps/crawl/model";
 import { createCrawlStore } from "../src/apps/crawl/state";
 import candidateSource from "../src/apps/crawl/CandidateRow.svelte?raw";
 import crawlSource from "../src/apps/crawl/Crawl.svelte?raw";
@@ -73,5 +73,23 @@ describe("P4 Crawl target migrated from the legacy P0 source probe", () => {
     expect(crawlSource).toContain("{#each candidates as candidate, index (candidate.key)}");
     expect(candidateSource).toContain("data-candidate-key={candidate.key}");
     expect(`${crawlSource}\n${candidateSource}`).not.toContain("replaceChildren(");
+  });
+
+  it("keeps linked-account copy on the single source-definition rendering path", () => {
+    expect(CRAWL_SITE_DEFINITIONS.find(({ id }) => id === "twitter")?.label).toBe(
+      "X / Twitter · Danbooru 画师目录关联账户",
+    );
+    expect(CRAWL_SITE_DEFINITIONS.find(({ id }) => id === "pixiv")?.label).toBe(
+      "Pixiv · Danbooru 画师目录关联账户",
+    );
+    expect(crawlSource).toContain("{#each CRAWL_SITE_DEFINITIONS as site (site.id)}");
+    expect(crawlSource).toContain("X / Twitter 与 Pixiv 只从 Danbooru 画师目录读取关联账户");
+    expect(crawlSource).toContain("授权仅用于后续访问与采集，不会扩大当前发现范围");
+    for (const unsupportedClaim of [
+      "X / Twitter 站内搜索",
+      "Pixiv 站内搜索",
+      "X / Twitter 原生搜索",
+      "Pixiv 原生搜索",
+    ]) expect(crawlSource).not.toContain(unsupportedClaim);
   });
 });

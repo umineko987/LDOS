@@ -41,6 +41,26 @@ describe("Svelte Crawl integration", () => {
     expect(body).not.toContain("P2 Shell");
   });
 
+  it("explains linked-account discovery without promising native X or Pixiv search", () => {
+    const body = render(Crawl, { props: { api, persistence, onNavigate } }).body;
+    for (const marker of [
+      "X / Twitter · Danbooru 画师目录关联账户",
+      "Pixiv · Danbooru 画师目录关联账户",
+      "Danbooru、EH 与 Pawchive / Pawoo 执行站内发现",
+      "X / Twitter 与 Pixiv 只从 Danbooru 画师目录读取关联账户",
+      "X / Twitter 与 Pixiv 授权仅用于后续访问与采集，不会扩大当前发现范围",
+      'aria-describedby="crawl-source-discovery-note"',
+      'aria-label="启用 X / Twitter · Danbooru 画师目录关联账户"',
+      'aria-label="Pixiv · Danbooru 画师目录关联账户 代理覆盖"',
+    ]) expect(body).toContain(marker);
+    for (const unsupportedClaim of [
+      "X / Twitter 站内搜索",
+      "Pixiv 站内搜索",
+      "X / Twitter 原生搜索",
+      "Pixiv 原生搜索",
+    ]) expect(body).not.toContain(unsupportedClaim);
+  });
+
   it("uses Crawl for its only window branch and removes the Crawl placeholder", () => {
     const body = render(AppWindow, { props: {
       record: { appId: "crawl", state: "normal", rect: { x: 20, y: 20, w: 800, h: 560 } },
