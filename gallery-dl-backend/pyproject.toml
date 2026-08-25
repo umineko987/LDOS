@@ -54,6 +54,9 @@ dedup-cuda = [
 [project.scripts]
 gdl-backend = "gdl_backend.__main__:main"
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 include = ["gdl_backend*"]
 
