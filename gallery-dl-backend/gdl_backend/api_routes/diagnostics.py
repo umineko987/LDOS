@@ -18,7 +18,9 @@ from .dependencies import get_service
 DiagnosticsResponseView = Literal["legacy", "diagnostics"]
 
 
-def create_diagnostics_router(settings: AppSettings) -> APIRouter:
+def create_diagnostics_router(
+    settings: AppSettings, *, include_webui: bool = True
+) -> APIRouter:
     router = APIRouter()
 
     @router.get("/")
@@ -26,7 +28,7 @@ def create_diagnostics_router(settings: AppSettings) -> APIRouter:
         return {
             "service": "gallery-dl-backend",
             "version": __version__,
-            "ui": "/ui/",
+            "ui": "/ui/" if include_webui else None,
             "docs": "/docs",
         }
 

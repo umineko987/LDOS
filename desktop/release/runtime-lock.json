@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "distribution": {
+    "name": "python-build-standalone",
+    "version": "20260807",
+    "python_version": "3.13.15",
+    "source": "https://github.com/astral-sh/python-build-standalone/releases/tag/20260807",
+    "license": "MPL-2.0",
+    "license_source": "https://github.com/astral-sh/python-build-standalone/blob/20260807/LICENSE"
+  },
+  "targets": {
+    "linux-x86_64": {
+      "tauri_target": "x86_64-unknown-linux-gnu",
+      "archive": "cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "faae10a9faa9bec06da009ac69326cc1d9691dc138fec6a1b69159dff1781f35",
+      "python": "runtime/python/bin/python3"
+    },
+    "windows-x86_64": {
+      "tauri_target": "x86_64-pc-windows-msvc",
+      "archive": "cpython-3.13.15+20260807-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "sha256": "44bf9ae71f4b45e3ba3104ae331c6eff3f7002593c26fd12453eb9310c4f259a",
+      "python": "runtime/python/python.exe"
+    }
+  },
+  "requirements": [
+    "gallery-dl-backend/requirements.txt",
+    "requirements-dedup-cpu.txt"
+  ],
+  "application_scripts": [
+    "dedup_core.py",
+    "dedup_models.py",
+    "dedup_resources.py",
+    "dedup_review_worker.py"
+  ],
+  "optional_resources": {
+    "dedup_models": false,
+    "mihomo": false,
+    "browser_runtime": false
+  }
+}

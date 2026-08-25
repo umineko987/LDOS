@@ -23,6 +23,7 @@ Desktop.ini
 /desktop/coverage/
 /desktop/src-tauri/target/
 /desktop/src-tauri/gen/
+/desktop/src-tauri/release/
 /.models/
 **/dist/
 **/build/

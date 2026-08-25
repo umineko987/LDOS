@@ -287,6 +287,7 @@ def create_app(
     *,
     container: ServiceContainer | None = None,
     start_background: bool = True,
+    include_webui: bool = True,
 ) -> FastAPI:
     settings = settings or AppSettings.load()
     settings.validate()
@@ -317,11 +318,15 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.container = service
-    app.mount(
-        "/ui",
-        WebUIStaticFiles(directory=str(Path(__file__).resolve().parent / "webui_dist"), html=True),
-        name="webui",
-    )
+    if include_webui:
+        app.mount(
+            "/ui",
+            WebUIStaticFiles(
+                directory=str(Path(__file__).resolve().parent / "webui_dist"),
+                html=True,
+            ),
+            name="webui",
+        )
     if settings.server.cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -478,7 +483,9 @@ def create_app(
             },
         )
 
-    app.include_router(create_diagnostics_router(settings))
+    app.include_router(
+        create_diagnostics_router(settings, include_webui=include_webui)
+    )
     app.include_router(create_auth_router())
     service.ordered_crawls.set_enqueue(create_ordered_task_enqueuer(service))
     app.include_router(create_tasks_router())
