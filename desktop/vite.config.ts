@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   base: "./",
   clearScreen: false,
+  build: { assetsInlineLimit: 0 },
   plugins: [svelte()],
   server: {
     host: "localhost",

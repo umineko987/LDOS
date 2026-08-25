@@ -1,0 +1,27 @@
+{
+  "build_source": "desktop",
+  "entrypoint": "index.html",
+  "files": [
+    {
+      "path": "assets/index-C78Ibaes.css",
+      "sha256": "4e35ce55a99cd2badfe346a4cace5a2be6afc1b2ea1cb354c3135f8f6d76b1dd",
+      "size": 106954
+    },
+    {
+      "path": "assets/index-CIflxpW-.js",
+      "sha256": "46430762c2cd9cff75a5601958259f50f5ca7525d18065024508c23b64b5a40d",
+      "size": 422803
+    },
+    {
+      "path": "assets/noise-DI1T15ao.svg",
+      "sha256": "9a525197b6bc88f7a64d8746a50f04aa64f29f08d06d57c3e69514b6db083529",
+      "size": 497
+    },
+    {
+      "path": "index.html",
+      "sha256": "357cc1cf74b9b9e375b50552221be0b395008fec3b71f9712fb20658d06f63e5",
+      "size": 447
+    }
+  ],
+  "schema_version": 1
+}

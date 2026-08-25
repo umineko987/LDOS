@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && python ../scripts/frontend_artifacts.py sync",
+    "verify:artifacts": "python ../scripts/frontend_artifacts.py verify",
     "check": "svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
