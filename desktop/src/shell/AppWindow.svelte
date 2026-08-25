@@ -3,6 +3,7 @@
   import Diagnostics from "../apps/diagnostics/Diagnostics.svelte";
   import Policy from "../apps/policy/Policy.svelte";
   import Vault from "../apps/vault/Vault.svelte";
+  import Personalization from "../apps/personalization/Personalization.svelte";
   import Proxy from "../apps/proxy/Proxy.svelte";
   import Tasks from "../apps/tasks/Tasks.svelte";
   import { getApplicationDefinition, type ApplicationId } from "../core/applications/definitions";
@@ -118,6 +119,8 @@
       <Policy {api} registerUnsavedChanges={shellUnsaved ? (reader, discard) => shellUnsaved("policy", reader, discard) : undefined} />
     {:else if record.appId === "diagnostics"}
       <Diagnostics {api} {polling} onNavigate={(appId) => onNavigate(appId)} />
+    {:else if record.appId === "personalization"}
+      <Personalization {persistence} registerUnsavedChanges={shellUnsaved ? (reader: () => boolean, discard?: () => void) => shellUnsaved("personalization", reader, discard) : undefined} />
     {:else}
       <ApplicationPlaceholder {application} />
     {/if}

@@ -6,18 +6,9 @@ import {
 } from "../applications/definitions";
 import type { ShellPersistence, WindowPlacement } from "../state/shell";
 import { clampWindowRect, sameWindowRect, type WindowViewport } from "../windowing/geometry";
+import { BUILT_IN_SCENE_IDS, type SceneId } from "../personalization/scenes";
 import { PERSISTENCE_KEYS, type PersistenceAdapter } from "./adapter";
-
-export const BUILT_IN_SCENE_IDS = Object.freeze([
-  "graphite",
-  "slate",
-  "deep-ocean",
-  "forest",
-  "plum-gray",
-  "warm-paper",
-] as const);
-
-export type SceneId = typeof BUILT_IN_SCENE_IDS[number];
+export type { SceneId } from "../personalization/scenes";
 export type MotionPreference = "on" | "off";
 
 export interface UiPreferences {

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { WindowPlacement } from "../state/shell";
+import { BUILT_IN_SCENE_IDS } from "../personalization/scenes";
 import { PERSISTENCE_KEYS, type PersistenceAdapter, type PersistenceKey } from "./adapter";
 import {
-  BUILT_IN_SCENE_IDS,
   createPersistenceService,
   deserializeUiPreferences,
   deserializeWindowPlacements,

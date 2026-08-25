@@ -99,6 +99,9 @@ describe("desktop architecture boundaries", () => {
     const diagnostics = sourceEnding("/apps/diagnostics/Diagnostics.svelte");
     const diagnosticsState = sourceEnding("/apps/diagnostics/state.ts");
     const diagnosticsModel = sourceEnding("/apps/diagnostics/model.ts");
+    const personalization = sourceEnding("/apps/personalization/Personalization.svelte");
+    const personalizationState = sourceEnding("/apps/personalization/state.ts");
+    const personalizationModel = sourceEnding("/apps/personalization/model.ts");
     const window = sourceEnding("/shell/AppWindow.svelte");
     expect(crawl.match(/createCrawlStore\s*\(/g)).toHaveLength(1);
     expect(crawlState.match(/export function createCrawlStore\s*\(/g)).toHaveLength(1);
@@ -118,6 +121,9 @@ describe("desktop architecture boundaries", () => {
     expect(diagnostics.match(/createDiagnosticsStore\s*\(/g)).toHaveLength(1);
     expect(diagnosticsState.match(/export function createDiagnosticsStore\s*\(/g)).toHaveLength(1);
     expect(diagnosticsModel).toContain("readonly readiness: ReadinessDiagnostics | null");
+    expect(personalization.match(/createPersonalizationStore\s*\(/g)).toHaveLength(1);
+    expect(personalizationState.match(/export function createPersonalizationStore\s*\(/g)).toHaveLength(1);
+    expect(personalizationModel).toContain("PERSONALIZATION_PREFERENCE_KEYS");
     expect(window.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
     expect(window).toContain('record.appId === "crawl"');
     expect(window).toContain('record.appId === "tasks"');
@@ -125,6 +131,7 @@ describe("desktop architecture boundaries", () => {
     expect(window).toContain('record.appId === "vault"');
     expect(window).toContain('record.appId === "policy"');
     expect(window).toContain('record.appId === "diagnostics"');
+    expect(window).toContain('record.appId === "personalization"');
     expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/CrawlState|TasksState|BatchSummary|TaskEntity|ProxyState|ProxyStatus/);
     for (const [path, source] of Object.entries(productionSources)) {
       if (!path.includes("/core/")) continue;
