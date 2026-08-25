@@ -93,6 +93,12 @@ describe("desktop architecture boundaries", () => {
     const vault = sourceEnding("/apps/vault/Vault.svelte");
     const vaultState = sourceEnding("/apps/vault/state.ts");
     const vaultModel = sourceEnding("/apps/vault/model.ts");
+    const policy = sourceEnding("/apps/policy/Policy.svelte");
+    const policyState = sourceEnding("/apps/policy/state.ts");
+    const policyModel = sourceEnding("/apps/policy/model.ts");
+    const diagnostics = sourceEnding("/apps/diagnostics/Diagnostics.svelte");
+    const diagnosticsState = sourceEnding("/apps/diagnostics/state.ts");
+    const diagnosticsModel = sourceEnding("/apps/diagnostics/model.ts");
     const window = sourceEnding("/shell/AppWindow.svelte");
     expect(crawl.match(/createCrawlStore\s*\(/g)).toHaveLength(1);
     expect(crawlState.match(/export function createCrawlStore\s*\(/g)).toHaveLength(1);
@@ -106,11 +112,19 @@ describe("desktop architecture boundaries", () => {
     expect(vault.match(/createVaultStore\s*\(/g)).toHaveLength(1);
     expect(vaultState.match(/export function createVaultStore\s*\(/g)).toHaveLength(1);
     expect(vaultModel).toContain("sites: Readonly<Record<string, VaultSiteStatus>>");
+    expect(policy.match(/createPolicyStore\s*\(/g)).toHaveLength(1);
+    expect(policyState.match(/export function createPolicyStore\s*\(/g)).toHaveLength(1);
+    expect(policyModel).toContain("sites: Readonly<Record<PolicySiteId, PolicyItem>>");
+    expect(diagnostics.match(/createDiagnosticsStore\s*\(/g)).toHaveLength(1);
+    expect(diagnosticsState.match(/export function createDiagnosticsStore\s*\(/g)).toHaveLength(1);
+    expect(diagnosticsModel).toContain("readonly readiness: ReadinessDiagnostics | null");
     expect(window.match(/<ApplicationPlaceholder/g)).toHaveLength(1);
     expect(window).toContain('record.appId === "crawl"');
     expect(window).toContain('record.appId === "tasks"');
     expect(window).toContain('record.appId === "proxy"');
     expect(window).toContain('record.appId === "vault"');
+    expect(window).toContain('record.appId === "policy"');
+    expect(window).toContain('record.appId === "diagnostics"');
     expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/CrawlState|TasksState|BatchSummary|TaskEntity|ProxyState|ProxyStatus/);
     for (const [path, source] of Object.entries(productionSources)) {
       if (!path.includes("/core/")) continue;

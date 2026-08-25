@@ -39,7 +39,12 @@
   --imageweave-border-default: rgb(255 255 255 / 0.15);
   --imageweave-border-button: rgb(255 255 255 / 0.20);
   --imageweave-border-focus: rgb(255 255 255 / 0.35);
-
+  --imageweave-border-width: 1px;
+  --imageweave-border-strong-width: 2px;
+  --imageweave-text-primary: rgb(255 255 255 / 1);
+  --imageweave-text-secondary: rgb(255 255 255 / 0.62);
+  --imageweave-text-code: rgb(255 255 255 / 0.88);
+  --imageweave-state-disabled: rgb(255 255 255 / 0.42);
   --imageweave-glass-blur-environment: 40px;
   --imageweave-glass-blur-window: 60px;
   --imageweave-glass-saturation: 180%;

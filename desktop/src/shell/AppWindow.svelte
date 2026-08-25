@@ -1,5 +1,7 @@
 <script lang="ts">
   import Crawl from "../apps/crawl/Crawl.svelte";
+  import Diagnostics from "../apps/diagnostics/Diagnostics.svelte";
+  import Policy from "../apps/policy/Policy.svelte";
   import Vault from "../apps/vault/Vault.svelte";
   import Proxy from "../apps/proxy/Proxy.svelte";
   import Tasks from "../apps/tasks/Tasks.svelte";
@@ -112,6 +114,10 @@
       <Proxy {api} {polling} />
     {:else if record.appId === "vault"}
       <Vault {api} {polling} registerUnsavedChanges={shellUnsaved ? (reader, discard) => shellUnsaved("vault", reader, discard) : undefined} />
+    {:else if record.appId === "policy"}
+      <Policy {api} registerUnsavedChanges={shellUnsaved ? (reader, discard) => shellUnsaved("policy", reader, discard) : undefined} />
+    {:else if record.appId === "diagnostics"}
+      <Diagnostics {api} {polling} onNavigate={(appId) => onNavigate(appId)} />
     {:else}
       <ApplicationPlaceholder {application} />
     {/if}
