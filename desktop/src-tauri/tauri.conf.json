@@ -8,8 +8,8 @@
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "beforeBundleCommand": {
-      "script": "python ../scripts/desktop_release.py verify-tree --tree src-tauri/release/backend",
-      "cwd": "."
+      "script": "python ../../scripts/desktop_release.py verify-tree --tree release/backend",
+      "cwd": "src-tauri"
     },
     "frontendDist": "../dist"
   },
