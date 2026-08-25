@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import csv
+import io
 import hashlib
 import json
 import shutil
@@ -190,12 +193,37 @@ def _verify_copies() -> dict[str, object]:
     }
 
 
+def _wheel_record(wheel: zipfile.ZipFile, names: set[str]) -> dict[str, tuple[str, str]]:
+    record_names = [name for name in names if name.endswith(".dist-info/RECORD")]
+    if len(record_names) != 1:
+        raise ArtifactError("invalid_wheel_record_inventory")
+    try:
+        text = wheel.read(record_names[0]).decode("utf-8")
+        rows = tuple(csv.reader(io.StringIO(text, newline="")))
+    except (KeyError, UnicodeError, csv.Error) as error:
+        raise ArtifactError("invalid_wheel_record") from error
+    record: dict[str, tuple[str, str]] = {}
+    for row in rows:
+        if len(row) != 3 or not row[0] or row[0] in record:
+            raise ArtifactError("invalid_wheel_record")
+        record[row[0]] = (row[1], row[2])
+    return record
+
+
+def _record_digest(content: bytes) -> str:
+    encoded = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b"=").decode("ascii")
+    return f"sha256={encoded}"
+
+
 def _verify_wheel(wheel_path: Path, expected_files: tuple[str, ...]) -> None:
     if not wheel_path.is_file():
         raise ArtifactError(f"missing_wheel:{wheel_path}")
     try:
         with zipfile.ZipFile(wheel_path) as wheel:
-            names = set(wheel.namelist())
+            members = wheel.namelist()
+            names = set(members)
+            if len(names) != len(members):
+                raise ArtifactError("duplicate_wheel_member")
             if any(name.startswith(LEGACY_WHEEL_PREFIX) for name in names):
                 raise ArtifactError("legacy_webui_in_wheel")
             wheel_files = tuple(
@@ -203,9 +231,18 @@ def _verify_wheel(wheel_path: Path, expected_files: tuple[str, ...]) -> None:
             )
             if wheel_files != expected_files:
                 raise ArtifactError("wheel_frontend_inventory_mismatch")
+            record = _wheel_record(wheel, names)
             for relative in expected_files:
-                if wheel.read(f"{WHEEL_PREFIX}{relative}") != (BACKEND_ROOT / relative).read_bytes():
+                wheel_name = f"{WHEEL_PREFIX}{relative}"
+                content = wheel.read(wheel_name)
+                if content != (BACKEND_ROOT / relative).read_bytes():
                     raise ArtifactError(f"wheel_frontend_byte_mismatch:{relative}")
+                row = record.get(wheel_name)
+                if row is None:
+                    raise ArtifactError(f"wheel_record_missing:{relative}")
+                digest, size = row
+                if digest != _record_digest(content) or size != str(len(content)):
+                    raise ArtifactError(f"wheel_record_mismatch:{relative}")
     except zipfile.BadZipFile as error:
         raise ArtifactError("invalid_wheel") from error
 
