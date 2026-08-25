@@ -35,7 +35,10 @@ def test_runtime_lock_has_pinned_supported_assets() -> None:
         "python_license_sha256": "78b12c3a81360b357002334f0e70ea0e92eebf7a9b358805c03c48484945f3bb",
     }
     assert set(lock["targets"]) == {"linux-x86_64", "windows-x86_64"}
-    assert all(len(item["sha256"]) == 64 for item in lock["targets"].values())
+    assert all(
+        len(item["sha256"]) == 64 and len(item["metadata_sha256"]) == 64
+        for item in lock["targets"].values()
+    )
     assert lock["optional_resources"] == {
         "dedup_models": False,
         "mihomo": False,

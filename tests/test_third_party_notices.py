@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from third_party_notices import NoticeError, verify
+from third_party_notices import NoticeError, _runtime_components, verify
 
 
 class ThirdPartyNoticesTests(unittest.TestCase):
@@ -69,6 +69,68 @@ class ThirdPartyNoticesTests(unittest.TestCase):
 
         with self.assertRaisesRegex(NoticeError, "invalid third-party license path"):
             verify(tree, "linux-x86_64")
+
+    def test_runtime_components_follow_locked_artifact_metadata(self) -> None:
+        tree = self.make_tree()
+        metadata = tree / "runtime" / "metadata" / "python-build-standalone"
+        licenses = metadata / "licenses"
+        licenses.mkdir(parents=True)
+        for name in ("LICENSE.cpython.txt", "LICENSE.openssl-3.txt", "LICENSE.sqlite.txt"):
+            (licenses / name).write_text(f"{name}\n", encoding="utf-8")
+        (metadata / "PYTHON.json").write_text(
+            json.dumps(
+                {
+                    "python_version": "3.13.15",
+                    "target_triple": "x86_64-unknown-linux-gnu",
+                    "licenses": ["Python-2.0", "CNRI-Python"],
+                    "license_path": "licenses/LICENSE.cpython.txt",
+                    "build_info": {
+                        "extensions": {
+                            "_ssl": [
+                                {
+                                    "licenses": ["Apache-2.0"],
+                                    "license_paths": [
+                                        "licenses/LICENSE.openssl-3.txt",
+                                        "licenses/not-in-this-target.txt",
+                                    ],
+                                }
+                            ],
+                            "_sqlite3": [
+                                {
+                                    "licenses": [],
+                                    "license_public_domain": True,
+                                    "license_paths": ["licenses/LICENSE.sqlite.txt"],
+                                }
+                            ],
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        components = _runtime_components(
+            tree,
+            "linux-x86_64",
+            {
+                "python_version": "3.13.15",
+                "version": "20260807",
+                "metadata_archive": "python-full.tar.zst",
+                "metadata_artifact_sha256": "1" * 64,
+            },
+        )
+
+        self.assertEqual(
+            [(item["name"], item["license"]) for item in components],
+            [
+                ("CPython", "Python-2.0 AND CNRI-Python"),
+                ("CPython extension _sqlite3", "Public Domain"),
+                ("CPython extension _ssl", "Apache-2.0"),
+            ],
+        )
+        self.assertNotIn(
+            "not-in-this-target.txt",
+            str(components[-1]["license_files"]),
+        )
 
     def test_rejects_target_mismatch(self) -> None:
         tree = self.make_tree()

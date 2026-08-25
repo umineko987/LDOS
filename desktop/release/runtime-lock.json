@@ -15,12 +15,16 @@
       "tauri_target": "x86_64-unknown-linux-gnu",
       "archive": "cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
       "sha256": "faae10a9faa9bec06da009ac69326cc1d9691dc138fec6a1b69159dff1781f35",
+      "metadata_archive": "cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst",
+      "metadata_sha256": "032fc147761d21f4ca67296cab4145670443325508042720e52a12d87ca15cb2",
       "python": "runtime/python/bin/python3"
     },
     "windows-x86_64": {
       "tauri_target": "x86_64-pc-windows-msvc",
       "archive": "cpython-3.13.15+20260807-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
       "sha256": "44bf9ae71f4b45e3ba3104ae331c6eff3f7002593c26fd12453eb9310c4f259a",
+      "metadata_archive": "cpython-3.13.15+20260807-x86_64-pc-windows-msvc-pgo-full.tar.zst",
+      "metadata_sha256": "8a9768d5481a83b264d9878f9092eb97fd3e272453153396fce00838d6ce241a",
       "python": "runtime/python/python.exe"
     }
   },

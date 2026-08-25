@@ -295,6 +295,84 @@ print(json.dumps(result, sort_keys=True))
     return components
 
 
+def _runtime_components(
+    tree: Path, target: str, distribution: dict[str, Any]
+) -> list[dict[str, Any]]:
+    metadata_root = tree / "runtime" / "metadata" / "python-build-standalone"
+    metadata_path = metadata_root / "PYTHON.json"
+    if not metadata_path.is_file():
+        raise NoticeError("python-build-standalone metadata is missing")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if (
+        metadata.get("python_version") != distribution["python_version"]
+        or metadata.get("target_triple") != TARGET_TRIPLES[target]
+    ):
+        raise NoticeError("python-build-standalone metadata target/version mismatch")
+
+    def license_files(paths: list[str]) -> list[str]:
+        files: list[Path] = []
+        root = metadata_root.resolve()
+        for relative in paths:
+            path = (metadata_root / relative).resolve()
+            if root not in path.parents or not path.is_file():
+                continue
+            files.append(path)
+        return _relative_files(sorted(set(files)), tree)
+
+    artifact_source = (
+        "https://github.com/astral-sh/python-build-standalone/releases/download/"
+        f"{distribution['version']}/{distribution['metadata_archive']}"
+    )
+    cpython_files = license_files([metadata["license_path"]])
+    if not cpython_files:
+        raise NoticeError("CPython metadata license file is missing")
+    components = [
+        {
+            "ecosystem": "runtime",
+            "name": "CPython",
+            "version": metadata["python_version"],
+            "license": " AND ".join(metadata["licenses"]),
+            "source": f"https://github.com/python/cpython/tree/v{metadata['python_version']}",
+            "artifact_sha256": distribution["metadata_artifact_sha256"],
+            "license_files": cpython_files,
+        }
+    ]
+
+    extensions: dict[str, dict[str, Any]] = {}
+    for name, variants in metadata.get("build_info", {}).get("extensions", {}).items():
+        for variant in variants:
+            licenses = set(variant.get("licenses") or [])
+            public_domain = bool(variant.get("license_public_domain"))
+            if not licenses and not public_domain:
+                continue
+            entry = extensions.setdefault(
+                name, {"licenses": set(), "public_domain": False, "paths": set()}
+            )
+            entry["licenses"].update(licenses)
+            entry["public_domain"] |= public_domain
+            entry["paths"].update(variant.get("license_paths") or [])
+
+    for name, evidence in sorted(extensions.items()):
+        declared = sorted(evidence["licenses"])
+        if evidence["public_domain"]:
+            declared.append("Public Domain")
+        files = license_files(sorted(evidence["paths"]))
+        if not files:
+            raise NoticeError(f"runtime extension license evidence is missing: {name}")
+        components.append(
+            {
+                "ecosystem": "runtime-extension",
+                "name": f"CPython extension {name}",
+                "version": metadata["python_version"],
+                "license": " AND ".join(declared),
+                "source": artifact_source,
+                "artifact_sha256": distribution["metadata_artifact_sha256"],
+                "license_files": files,
+            }
+        )
+    return components
+
+
 def _write_markdown(
     target: str, components: list[dict[str, Any]], destination: Path
 ) -> None:
@@ -329,21 +407,13 @@ def generate(
     shutil.rmtree(licenses / "rust", ignore_errors=True)
     components = [
         {
-            "ecosystem": "runtime",
-            "name": distribution["name"],
+            "ecosystem": "build-provenance",
+            "name": f"{distribution['name']} build configuration",
             "version": distribution["version"],
             "license": distribution["license"],
             "source": distribution["source"],
             "artifact_sha256": distribution["artifact_sha256"],
             "license_files": [distribution["license_file"]],
-        },
-        {
-            "ecosystem": "runtime",
-            "name": "CPython",
-            "version": distribution["python_version"],
-            "license": "PSF-2.0",
-            "source": f"https://github.com/python/cpython/tree/v{distribution['python_version']}",
-            "license_files": [distribution["python_license_file"]],
         },
         {
             "ecosystem": "python-source",
@@ -354,6 +424,7 @@ def generate(
             "license_files": ["licenses/gallery-dl-GPL-2.0.txt"],
         },
     ]
+    components.extend(_runtime_components(tree, target, distribution))
     components.append(_rust_component(tree))
     components.extend(_npm_components(tree))
     components.extend(_cargo_components(tree, target))

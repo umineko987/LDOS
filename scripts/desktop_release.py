@@ -103,7 +103,12 @@ def load_lock() -> dict[str, Any]:
     ):
         raise ReleaseError("runtime license evidence is not locked")
     for target, item in data.get("targets", {}).items():
-        if not target or len(item.get("sha256", "")) != 64:
+        if (
+            not target
+            or len(item.get("sha256", "")) != 64
+            or len(item.get("metadata_sha256", "")) != 64
+            or not item.get("metadata_archive")
+        ):
             raise ReleaseError(f"invalid runtime lock target: {target!r}")
     return data
 
@@ -188,6 +193,20 @@ def download_runtime(lock: dict[str, Any], target: str, cache_dir: Path) -> Path
     return download_locked_file(url, item["sha256"], archive, "runtime archive")
 
 
+def download_runtime_metadata(
+    lock: dict[str, Any], target: str, cache_dir: Path
+) -> Path:
+    item = lock["targets"][target]
+    archive = cache_dir / item["metadata_archive"]
+    url = (
+        f"{RELEASE_BASE_URL}/{lock['distribution']['version']}/"
+        f"{item['metadata_archive']}"
+    )
+    return download_locked_file(
+        url, item["metadata_sha256"], archive, "runtime metadata archive"
+    )
+
+
 def extract_tar_archive(archive: Path, destination: Path, label: str) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     root = destination.resolve()
@@ -216,6 +235,57 @@ def safe_extract(archive: Path, destination: Path) -> None:
     extract_tar_archive(archive, destination, "runtime")
     if not (destination / "python").is_dir():
         raise ReleaseError("runtime archive does not contain the expected python directory")
+
+
+def extract_runtime_metadata(
+    archive: Path, staging: Path, lock: dict[str, Any], target: str
+) -> Path:
+    def tar(command: str, member: str | None = None) -> bytes:
+        arguments = ["tar", command, str(archive)]
+        if member is not None:
+            arguments.append(member)
+        result = subprocess.run(arguments, capture_output=True, check=False)
+        if result.returncode:
+            message = result.stderr.decode("utf-8", errors="replace")
+            raise ReleaseError(f"runtime metadata extraction failed: {message.strip()}")
+        return result.stdout
+
+    members = tar("-tf").decode("utf-8").splitlines()
+    metadata_member = "python/PYTHON.json"
+    license_members = sorted(
+        member for member in members if member.startswith("python/licenses/")
+    )
+    if metadata_member not in members or not license_members:
+        raise ReleaseError("runtime metadata archive is incomplete")
+    metadata_payload = tar("-xOf", metadata_member)
+    metadata = json.loads(metadata_payload.decode("utf-8"))
+    item = lock["targets"][target]
+    distribution = lock["distribution"]
+    if (
+        metadata.get("python_version") != distribution["python_version"]
+        or metadata.get("target_triple") != item["tauri_target"]
+        or not metadata.get("licenses")
+        or not metadata.get("license_path")
+    ):
+        raise ReleaseError("runtime metadata does not match the locked runtime")
+
+    destination = staging / "runtime" / "metadata" / "python-build-standalone"
+    destination.mkdir(parents=True)
+    (destination / "PYTHON.json").write_bytes(metadata_payload)
+    for member in license_members:
+        relative = PurePosixPath(member).relative_to("python")
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ReleaseError(f"unsafe runtime metadata member: {member}")
+        target_path = destination.joinpath(*relative.parts)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = tar("-xOf", member)
+        if not payload:
+            raise ReleaseError(f"empty runtime metadata license: {member}")
+        target_path.write_bytes(payload)
+    license_path = destination / metadata["license_path"]
+    if not license_path.is_file():
+        raise ReleaseError("CPython license is absent from runtime metadata")
+    return destination
 
 
 def extract_deb(bundle: Path, destination: Path) -> None:
@@ -482,6 +552,7 @@ def write_release_manifest(
     target: str,
     gallery_commit: str,
     archive: Path,
+    metadata_archive: Path,
 ) -> None:
     python_relative = lock["targets"][target]["python"]
     python = staging / python_relative
@@ -499,6 +570,8 @@ def write_release_manifest(
             **lock["distribution"],
             "archive": archive.name,
             "archive_sha256": sha256_file(archive),
+            "metadata_archive": metadata_archive.name,
+            "metadata_archive_sha256": sha256_file(metadata_archive),
             "python": python_relative,
         },
         "python_packages": packages,
@@ -629,6 +702,9 @@ def verify_release_identity(manifest: dict[str, Any]) -> None:
         or manifest.get("tauri_target") != expected_target["tauri_target"]
         or runtime.get("archive") != expected_target["archive"]
         or runtime.get("archive_sha256") != expected_target["sha256"]
+        or runtime.get("metadata_archive") != expected_target["metadata_archive"]
+        or runtime.get("metadata_archive_sha256")
+        != expected_target["metadata_sha256"]
         or runtime.get("python") != expected_target["python"]
     ):
         raise ReleaseError("release manifest does not match the tracked source and runtime lock")
@@ -920,11 +996,13 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
         raise ReleaseError(f"{target} runtime assembly must run on a matching host")
     gallery_commit = ensure_submodule()
     archive = download_runtime(lock, target, cache_dir)
+    metadata_archive = download_runtime_metadata(lock, target, cache_dir)
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{output.name}.{target}.", dir=output.parent))
     try:
         safe_extract(archive, staging / "runtime")
+        extract_runtime_metadata(metadata_archive, staging, lock, target)
         python = staging / lock["targets"][target]["python"]
         if not python.is_file():
             raise ReleaseError(f"runtime Python is missing: {python}")
@@ -977,12 +1055,13 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
                 "version": distribution["version"],
                 "python_version": distribution["python_version"],
                 "artifact_sha256": lock["targets"][target]["sha256"],
+                "metadata_archive": lock["targets"][target]["metadata_archive"],
+                "metadata_artifact_sha256": lock["targets"][target][
+                    "metadata_sha256"
+                ],
                 "license": distribution["license"],
                 "source": distribution["source"],
                 "license_file": runtime_license_target.relative_to(staging).as_posix(),
-                "python_license_file": python_license_candidates[0]
-                .relative_to(staging)
-                .as_posix(),
                 "gallery_version": gallery_version_match.group(1),
                 "gallery_source": (
                     "https://codeberg.org/mikf/gallery-dl/src/commit/" + gallery_commit
@@ -990,7 +1069,9 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
             },
             python,
         )
-        write_release_manifest(staging, lock, target, gallery_commit, archive)
+        write_release_manifest(
+            staging, lock, target, gallery_commit, archive, metadata_archive
+        )
         staged_manifest = verify_tree(
             staging, forbidden_paths=[ROOT, staging, Path.home()]
         )
