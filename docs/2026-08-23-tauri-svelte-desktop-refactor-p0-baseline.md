@@ -6,7 +6,8 @@
 - 环境：Linux x86_64；CPython `3.14.7`；系统 Node.js `v26.7.0`
 - 设计来源：`docs/2026-08-23-tauri-svelte-desktop-refactor-design.md`
 
-本文只记录当前原生 ESM WebUI 的真实合同、目标 red-first 差距和非 headed 证据。本文没有把 Tauri/Svelte 计划写成已实现状态，也没有修改生产前端或 Python/FastAPI 后端。
+> **P5 状态（2026-08-25）**：本文是切换前的历史取证快照，不再描述当前生产入口，也不再提供可执行的 legacy WebUI 命令。当前 10 个应用的唯一权威定义与组件树位于 `desktop/src/core/applications/definitions.ts` 和 `desktop/src/apps/`；P0 目标预算已迁至 `desktop/tests/fixtures/p0-performance-budget.json` 并由 desktop Vitest 套件执行。FastAPI `/ui/` 与 Tauri 均消费 `desktop/dist/` 的同一 canonical 构建，历史 `gdl_backend/webui/` 源码、Node runner 和 current/target legacy 测试已在 P5 删除。
+本文只记录 P0 时点原生 ESM WebUI 的历史合同、目标 red-first 差距和非 headed 证据；下文路径与命令仅用于审计当时基线，不再是当前运行或测试入口。
 
 ## 1. 当前实现合同
 

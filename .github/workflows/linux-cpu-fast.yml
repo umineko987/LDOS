@@ -28,9 +28,6 @@ jobs:
           cache-dependency-path: |
             gallery-dl-backend/requirements.txt
             gallery-dl-backend/requirements-test.txt
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24.13.0"
       - name: 安装后端锁定依赖
         run: >-
           ./scripts/setup-linux.sh --device cpu
@@ -104,10 +101,10 @@ jobs:
           git diff --check
           test -z "$(git status --short --untracked-files=no)"
 
-  webui-coverage:
-    name: WebUI Node 24.13.0 行为覆盖率
+  frontend:
+    name: Desktop Svelte/Vite 单一前端门槛
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -116,18 +113,36 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24.13.0"
-      - name: Node 内建 line / branch / function coverage 门槛
-        run: >-
-          python scripts/run-webui-coverage.py --node node
-          --output artifacts/coverage/webui
-      - name: 保存 WebUI coverage 报告
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: 安装唯一锁定前端依赖
+        working-directory: desktop
+        run: npm ci
+      - name: Svelte 与 TypeScript 静态检查
+        working-directory: desktop
+        run: npm run check
+      - name: Desktop 单元与静态合同
+        working-directory: desktop
+        run: npm test
+      - name: Desktop core coverage 门槛
+        working-directory: desktop
+        run: npm run test:coverage
+      - name: 生成并同步 canonical 前端
+        working-directory: desktop
+        run: npm run build
+      - name: Tauri 与后端前端字节一致性
+        working-directory: desktop
+        run: npm run verify:artifacts
+      - name: 保存 Desktop coverage 报告
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: webui-coverage-node-24.13.0
-          path: artifacts/coverage/webui
+          name: desktop-core-coverage-node-24.13.0
+          path: desktop/coverage
           if-no-files-found: error
-      - name: 工作区与差异格式
+      - name: Legacy 闭包、工作区与差异格式
         run: |
+          test -z "$(git ls-files 'gallery-dl-backend/gdl_backend/webui/**')"
+          test -z "$(git ls-files 'gallery-dl-backend/tests/*.mjs' 'scripts/run-webui-coverage.py' 'scripts/summarize-node-coverage.cjs')"
           git diff --check
           test -z "$(git status --short --untracked-files=no)"

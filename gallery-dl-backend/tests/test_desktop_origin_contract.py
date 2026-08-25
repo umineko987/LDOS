@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -230,8 +231,19 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
             "cross-origin",
         )
 
+        frontend_root = (
+            Path(__file__).resolve().parents[1] / "gdl_backend" / "webui_dist"
+        )
+        manifest = json.loads(
+            (frontend_root / "frontend-manifest.json").read_text(encoding="utf-8")
+        )
+        static_asset = next(
+            entry["path"]
+            for entry in manifest["files"]
+            if entry["path"].endswith(".svg")
+        )
         static_image = self.client.get(
-            "/ui/assets/noise.svg",
+            f"/ui/{static_asset}",
             headers=self.cross_origin_headers(),
         )
         self.assertEqual(static_image.status_code, 200, static_image.text)

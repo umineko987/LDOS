@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import budgetContract from "../../gallery-dl-backend/tests/fixtures/webui/p0-performance-budget.json";
+import budgetContract from "./fixtures/p0-performance-budget.json";
 import type { PersistenceService } from "../src/core/persistence/service";
 import type { PollingHandle, PollingRegistration, PollingService } from "../src/core/polling/service";
 import { createTasksController } from "../src/apps/tasks/controller";

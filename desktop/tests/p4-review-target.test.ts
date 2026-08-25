@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 import controllerSource from "../src/apps/review/controller.ts?raw";
@@ -74,10 +73,7 @@ describe("P4 Review target ownership", () => {
     expect(stateSource).not.toMatch(/canvas|pixel|magnification|objectUrl|mediaUrl|imageUrl/i);
   });
 
-  it("keeps the legacy release characterization and the one shared API/polling path", () => {
-    const legacyTarget = readFileSync(new URL("../../gallery-dl-backend/tests/webui_p0_target.target.mjs", import.meta.url), "utf8");
-    expect(legacyTarget).toContain("Review releases listeners, observer, rAF and images");
-    expect(legacyTarget).toContain("detachInteractions\\(\\);[\\s\\S]*releaseImages\\(\\);");
+  it("keeps release orchestration and the one shared API/polling path", () => {
     expect(controllerSource).toContain('REVIEW_POLL_KEY = "review.active"');
     expect(controllerSource).toContain("splitReviewDecisionPayload(buildReviewDecisionPayload(snapshot))");
     expect(controllerSource).toContain("queueMicrotask(() =>");

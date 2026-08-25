@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import budgetContract from "../../gallery-dl-backend/tests/fixtures/webui/p0-performance-budget.json";
+import budgetContract from "./fixtures/p0-performance-budget.json";
 import interactionSource from "../src/core/windowing/interaction.ts?raw";
 import appWindowSource from "../src/shell/AppWindow.svelte?raw";
 import windowLayerSource from "../src/shell/WindowLayer.svelte?raw";

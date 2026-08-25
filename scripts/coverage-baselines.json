@@ -113,49 +113,5 @@
         }
       }
     }
-  },
-  "webui": {
-    "command": "python scripts/run-webui-coverage.py --node <Node-24.13.0> --output artifacts/coverage/webui",
-    "node": "v24.13.0",
-    "measured_environment": "Linux x86_64, Node.js v24.13.0 built-in test coverage",
-    "source": "all .js files in gdl_backend/webui/js/{core,apps,components}; Python source-string assertions do not contribute",
-    "groups": {
-      "core": {
-        "baseline": {
-          "line": {"covered": 9018, "total": 11338, "percent": 79.53783736108662},
-          "branch": {"covered": 2161, "total": 3084, "percent": 70.07133592736706},
-          "function": {"covered": 694, "total": 825, "percent": 84.12121212121212}
-        },
-        "minimum": {
-          "line": {"covered": 9018, "total": 11338},
-          "branch": {"covered": 2161, "total": 3084},
-          "function": {"covered": 694, "total": 825}
-        }
-      },
-      "apps": {
-        "baseline": {
-          "line": {"covered": 702, "total": 3802, "percent": 18.46396633350868},
-          "branch": {"covered": 78, "total": 131, "percent": 59.541984732824424},
-          "function": {"covered": 33, "total": 85, "percent": 38.8235294117647}
-        },
-        "minimum": {
-          "line": {"covered": 702, "total": 3802},
-          "branch": {"covered": 78, "total": 131},
-          "function": {"covered": 33, "total": 85}
-        }
-      },
-      "components": {
-        "baseline": {
-          "line": {"covered": 1832, "total": 6841, "percent": 26.779710568630318},
-          "branch": {"covered": 231, "total": 304, "percent": 75.98684210526316},
-          "function": {"covered": 77, "total": 158, "percent": 48.734177215189874}
-        },
-        "minimum": {
-          "line": {"covered": 1832, "total": 6841},
-          "branch": {"covered": 231, "total": 304},
-          "function": {"covered": 77, "total": 158}
-        }
-      }
-    }
   }
 }

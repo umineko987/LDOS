@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import budgetContract from "../../gallery-dl-backend/tests/fixtures/webui/p0-performance-budget.json";
+import budgetContract from "./fixtures/p0-performance-budget.json";
 
 describe("P0 target contract migrated to the desktop test entry", () => {
   it("keeps section 6.6 budgets machine-readable and separate from current measurements", () => {
