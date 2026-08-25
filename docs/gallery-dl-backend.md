@@ -9,14 +9,16 @@
   补丁实现，上游接口变化时补丁自动跳过并在任务日志输出 `[gdl-backend-patch]` 告警；
 - `gdl_backend/` 负责搜索、规划、调度、授权、代理池和状态持久化；
 - `/ui/` 通过唯一的 `WebUIStaticFiles(..., html=True)` 挂载；该小型 `StaticFiles` 子类只为 WebUI
-  保留 ETag/Last-Modified 并添加 `Cache-Control: no-cache`，同源提供随后端 wheel 打包的原生 ESM、
-  静态 CSS 和 SVG；无需 Node/npm 构建或独立前端进程。旧单页资源、临时 `/ui-next/` 挂载和退役
-  壁纸导入模块已从正式交付中删除。
+  保留 ETag/Last-Modified 并添加 `Cache-Control: no-cache`，同源提供 canonical Svelte/Vite
+  构建复制 `gdl_backend/webui_dist/`。前端源码只位于 `desktop/src/`；`webui_dist/` 是 wheel
+  package-data 和 HTTP 发布副本，不是第二套可编辑前端。旧原生 ESM、临时 `/ui-next/` 与 CSS
+  fallback 已从正式交付中删除。
 
 ## 运行要求
 
-Linux、Windows 以及纯 CPU/CUDA 的完整安装命令统一维护在
-[根 README](../README.md)。后端要求 Python 3.11–3.14，默认只监听本机回环地址。
+源码开发的 Linux、Windows 与 CPU/CUDA 依赖说明见现有 setup/config；桌面发布命令统一维护在
+[根 README](../README.md)。后端源码支持 Python 3.11–3.14；正式桌面分发锁定 Python 3.13.15，
+默认只监听本机回环地址。
 
 X、Pixiv、EH 的托管授权需要桌面 Chrome/Chromium；纯后端、下载调度和去重不要求图形界面。
 `auth.authorization_proxy` 是授权浏览器的独立代理，与抓取代理池互不影响。
@@ -293,6 +295,25 @@ manifest 为每个 HTML、hashed asset 和静态资源记录相对路径、size 
 APIRoute 和唯一 `/ui` 静态挂载；ServiceContainer、数据库、任务状态机、抓取、代理、授权与 Review
 schema/语义保持不变。更完整的前端模块和合成边界见 [架构与开发约定](ARCHITECTURE.md)。
 
+### 桌面分发与写路径
+
+`scripts/desktop_release.py` 是唯一生产 assembly：它从 `desktop/release/runtime-lock.json` 下载并
+校验目标平台的 `python-build-standalone` archive，以 hash-locked、binary-only requirements 安装依赖，
+然后只复制 `gdl_backend/`、gallery-dl submodule source、dedup worker/core/model loader 和经代码证实
+需要的 package-data。FastAPI、`python -m gdl_backend.worker_entry` 与 `dedup_review_worker.py` 均由
+同一 bundled Python 执行，不依赖用户系统 Python，也没有第二 runtime。`backend/runtime/metadata` 保存对应 archive 的 build provenance 与适用许可证文本，供 notices 和静态审计使用；它不参与执行，也不含用户状态。
+
+安装包中的 `backend/` 是只读 Tauri resource。首次启动经 `app.path().app_config_dir()` 创建
+`backend.json`，经 `app.path().app_data_dir()` 创建 `runtime/`、SQLite、日志、proxy 状态、downloads、
+credentials、subscriptions 和 models 目录。生成配置中的 gallery/dedup executable 完全相同；
+repo/worker/core 指向 bundled app，所有可写状态指向 app data。已有配置不会被覆盖，模板不含
+secret、credential 或开发绝对路径。
+
+当前 release lock 不携带模型、mihomo 或浏览器 runtime。缺失可选资源继续通过 `/readyz=503`
+诊断，不影响 `/healthz` 启动门槛，也不会创建伪模型或伪二进制。每棵 release tree 都包含
+`release-manifest.json`、`release-files.sha256` 和由实际 lock/metadata 生成的 notices；静态 bundle
+verification 会拒绝第二 frontend/runtime、未列资源、秘密和开发绝对路径。
+
 ## 托管授权
 
 | 站点 | 授权方式 | 托管结果 |
@@ -550,9 +571,25 @@ npm --prefix desktop test
 npm --prefix desktop run test:coverage
 ```
 
-项目级 coverage、服务 smoke 与依赖锁命令统一维护在
-[架构与开发约定](ARCHITECTURE.md#13-测试与覆盖率门槛)。wheel 必须从 clean tracked checkout 构建，再用
+项目级边界见 [架构文档的 validation section](ARCHITECTURE.md#8-validation-boundary)。wheel 必须从
+clean tracked checkout 构建，再用
 `python scripts/frontend_artifacts.py verify --wheel <wheel>` 核对 manifest 定义的全部前端成员、wheel `RECORD`、size 与 SHA-256；wheel 不得包含任何 `gdl_backend/webui/` legacy 源码。HTTP 合同测试分别核对 200/MIME/字节、`no-cache`/validator、条件 304 与缺失资源 404。不能把开发工作树中的未跟踪文件、浏览器 Profile、coverage 或本机缓存带入包。
+
+P6 release contract 可单独验证，canonical package build 会自动包含这些步骤：
+
+```bash
+npm --prefix desktop ci
+python scripts/desktop_release.py assemble --target linux-x86_64 --cache-dir .release-cache
+python scripts/desktop_release.py verify-tree
+python scripts/desktop_release.py verify-runtime
+python -m pytest tests/test_desktop_release.py tests/test_third_party_notices.py -q
+python -m compileall -q scripts gallery-dl-backend/gdl_backend
+```
+
+Windows assembly 使用 `--target windows-x86_64`；正式 Linux/Windows bundle 使用根 README 的
+`desktop_release.py build`。正式 WebKitGTK/WebView2 启动、视觉、键盘/a11y、截图和 Tasks/Crawl/Review
+真实性能矩阵在本次 P6 中 **未执行（任务约束）**，不是 PASS/FAIL；静态安装包解包和纯 HTTP/worker
+smoke 不能替代这些 headed 项。
 
 测试默认使用本地夹具、mock 或 gallery-dl `--version`。需要真实凭据和代理节点的 EH
 烟雾脚本不属于当前仓库的提交内容；如需运行此类检查，应在受控本地环境中单独维护。

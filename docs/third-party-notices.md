@@ -1,49 +1,411 @@
-# Third-party notices and release evidence
+# ImageWeave desktop third-party notices
 
-ImageWeave desktop bundles are assembled only from locked inputs. The canonical assembler writes a target-specific inventory to:
+Target: `linux-x86_64`
 
-- `backend/licenses/third-party-components.json` — machine-readable component name, exact version, declared license, source, artifact hash/integrity when available, and bundled license-file paths;
-- `backend/licenses/THIRD-PARTY-NOTICES.md` — the same inventory for people;
-- `backend/licenses/{cargo,npm,rust}/` and the Python runtime's installed `*.dist-info/licenses/` directories — license and notice files shipped with that target.
+This target-specific inventory is generated from the locked release inputs. License and notice files listed below are included in the same backend distribution tree.
 
-Both inventories and every referenced license file are covered by `backend/release-files.sha256` and `backend/release-manifest.json`. `python scripts/desktop_release.py verify-tree` and `verify-bundle` reject a missing inventory, a missing license file, an untrusted source URL, a target mismatch, or altered bytes.
-
-## Locked distribution inputs
-
-| Distributed input | Locked version / identity | License | Source and lock evidence |
-| --- | --- | --- | --- |
-| CPython | 3.13.15 | PSF-2.0 | [CPython v3.13.15 source](https://github.com/python/cpython/tree/v3.13.15); the archive's `LICENSE.txt` hash is pinned in `desktop/release/runtime-lock.json`. |
-| python-build-standalone | 20260807 | MPL-2.0 | [Release 20260807](https://github.com/astral-sh/python-build-standalone/releases/tag/20260807); per-target archive hashes and the MPL license hash are pinned in `desktop/release/runtime-lock.json`. |
-| gallery-dl | `1.32.7-dev`, gitlink `2790ceb303ee4986ef7f683cc16d3799bb4356ce` | GPL-2.0-only | [Exact Codeberg source](https://codeberg.org/mikf/gallery-dl/src/commit/2790ceb303ee4986ef7f683cc16d3799bb4356ce); the clean submodule gitlink and `gallery-dl-codeberg/LICENSE` are verified during assembly. |
-| Rust standard library | 1.98.0 | Apache-2.0 OR MIT | [Rust 1.98.0 source](https://github.com/rust-lang/rust/tree/1.98.0); `rust-toolchain.toml` pins the toolchain and the installed standard-library copyright inventories are copied into each bundle. |
-| Svelte runtime | 5.56.10 | MIT | [Locked npm tarball](https://registry.npmjs.org/svelte/-/svelte-5.56.10.tgz); version, SRI integrity and license are in `desktop/package-lock.json`. |
-| Tauri JavaScript API | 2.11.1 | Apache-2.0 OR MIT | [Locked npm tarball](https://registry.npmjs.org/@tauri-apps/api/-/api-2.11.1.tgz); version, SRI integrity and license are in `desktop/package-lock.json`. |
-
-The complete Python distribution set is installed with hashes from `gallery-dl-backend/requirements.txt` and `requirements-dedup-cpu.txt`. The complete target-specific Rust crate set is resolved from `desktop/src-tauri/Cargo.lock` with Cargo metadata. Those generated inventories are authoritative because Linux and Windows resolve different native crates and Python wheels; this document intentionally does not present a stale cross-platform union as bundle contents.
-
-The Tauri executable dynamically uses operating-system WebView and desktop libraries. Those system components are prerequisites, not files bundled by ImageWeave, and therefore are not represented as distributed components.
-
-## Resources deliberately not distributed
-
-The current lock records `dedup_models`, `mihomo`, and `browser_runtime` as unavailable optional resources. No model weights, mihomo executable, browser/Chromium runtime, proxy secret, user configuration, database, cache, log, or output file is included. The backend keeps its existing readiness semantics: `/healthz` is the startup gate, while missing optional resources may leave `/readyz` at HTTP 503 without blocking the desktop UI.
-
-## Verification
-
-From a clean tracked checkout with the target prerequisites installed:
-
-```bash
-python scripts/desktop_release.py build --cache-dir .release-cache
-```
-
-For an already assembled tree or bundle:
-
-```bash
-python scripts/third_party_notices.py \
-  --tree desktop/src-tauri/release/backend \
-  --target linux-x86_64
-python scripts/desktop_release.py verify-tree \
-  --tree desktop/src-tauri/release/backend
-python scripts/desktop_release.py verify-bundle --bundle PATH_TO_BUNDLE
-```
-
-The first command is target-specific; use `windows-x86_64` on the Windows assembly job.
+| Ecosystem | Component | Version | License | Source | License files |
+| --- | --- | --- | --- | --- | --- |
+| build-provenance | `python-build-standalone build configuration` | `20260807` | MPL-2.0 | https://github.com/astral-sh/python-build-standalone/releases/tag/20260807 | `licenses/python-build-standalone-MPL-2.0.txt` |
+| cargo | `adler2` | `2.0.1` | 0BSD OR MIT OR Apache-2.0 | https://crates.io/crates/adler2/2.0.1 | `licenses/cargo/adler2-2.0.1/LICENSE-0BSD`<br>`licenses/cargo/adler2-2.0.1/LICENSE-APACHE`<br>`licenses/cargo/adler2-2.0.1/LICENSE-MIT` |
+| cargo | `aho-corasick` | `1.1.5` | Unlicense OR MIT | https://crates.io/crates/aho-corasick/1.1.5 | `licenses/cargo/aho-corasick-1.1.5/COPYING`<br>`licenses/cargo/aho-corasick-1.1.5/LICENSE-MIT` |
+| cargo | `alloc-no-stdlib` | `2.0.4` | BSD-3-Clause | https://crates.io/crates/alloc-no-stdlib/2.0.4 | `licenses/cargo/alloc-no-stdlib-2.0.4/LICENSE` |
+| cargo | `alloc-stdlib` | `0.2.4` | BSD-3-Clause | https://crates.io/crates/alloc-stdlib/0.2.4 | `licenses/cargo/alloc-stdlib-0.2.4/DECLARED-LICENSE.txt` |
+| cargo | `anyhow` | `1.0.104` | MIT OR Apache-2.0 | https://crates.io/crates/anyhow/1.0.104 | `licenses/cargo/anyhow-1.0.104/LICENSE-APACHE`<br>`licenses/cargo/anyhow-1.0.104/LICENSE-MIT` |
+| cargo | `async-broadcast` | `0.7.2` | MIT OR Apache-2.0 | https://crates.io/crates/async-broadcast/0.7.2 | `licenses/cargo/async-broadcast-0.7.2/LICENSE-APACHE`<br>`licenses/cargo/async-broadcast-0.7.2/LICENSE-MIT` |
+| cargo | `async-channel` | `2.5.0` | Apache-2.0 OR MIT | https://crates.io/crates/async-channel/2.5.0 | `licenses/cargo/async-channel-2.5.0/LICENSE-APACHE`<br>`licenses/cargo/async-channel-2.5.0/LICENSE-MIT` |
+| cargo | `async-executor` | `1.14.0` | Apache-2.0 OR MIT | https://crates.io/crates/async-executor/1.14.0 | `licenses/cargo/async-executor-1.14.0/LICENSE-APACHE`<br>`licenses/cargo/async-executor-1.14.0/LICENSE-MIT` |
+| cargo | `async-io` | `2.6.0` | Apache-2.0 OR MIT | https://crates.io/crates/async-io/2.6.0 | `licenses/cargo/async-io-2.6.0/LICENSE-APACHE`<br>`licenses/cargo/async-io-2.6.0/LICENSE-MIT` |
+| cargo | `async-lock` | `3.4.2` | Apache-2.0 OR MIT | https://crates.io/crates/async-lock/3.4.2 | `licenses/cargo/async-lock-3.4.2/LICENSE-APACHE`<br>`licenses/cargo/async-lock-3.4.2/LICENSE-MIT` |
+| cargo | `async-process` | `2.5.0` | Apache-2.0 OR MIT | https://crates.io/crates/async-process/2.5.0 | `licenses/cargo/async-process-2.5.0/LICENSE-APACHE`<br>`licenses/cargo/async-process-2.5.0/LICENSE-MIT` |
+| cargo | `async-recursion` | `1.1.1` | MIT OR Apache-2.0 | https://crates.io/crates/async-recursion/1.1.1 | `licenses/cargo/async-recursion-1.1.1/LICENSE-APACHE`<br>`licenses/cargo/async-recursion-1.1.1/LICENSE-MIT` |
+| cargo | `async-signal` | `0.2.14` | Apache-2.0 OR MIT | https://crates.io/crates/async-signal/0.2.14 | `licenses/cargo/async-signal-0.2.14/LICENSE-APACHE`<br>`licenses/cargo/async-signal-0.2.14/LICENSE-MIT` |
+| cargo | `async-task` | `4.7.1` | Apache-2.0 OR MIT | https://crates.io/crates/async-task/4.7.1 | `licenses/cargo/async-task-4.7.1/LICENSE-APACHE`<br>`licenses/cargo/async-task-4.7.1/LICENSE-MIT` |
+| cargo | `async-trait` | `0.1.92` | MIT OR Apache-2.0 | https://crates.io/crates/async-trait/0.1.92 | `licenses/cargo/async-trait-0.1.92/LICENSE-APACHE`<br>`licenses/cargo/async-trait-0.1.92/LICENSE-MIT` |
+| cargo | `atk` | `0.18.2` | MIT | https://crates.io/crates/atk/0.18.2 | `licenses/cargo/atk-0.18.2/LICENSE` |
+| cargo | `atk-sys` | `0.18.2` | MIT | https://crates.io/crates/atk-sys/0.18.2 | `licenses/cargo/atk-sys-0.18.2/LICENSE` |
+| cargo | `atomic-waker` | `1.1.2` | Apache-2.0 OR MIT | https://crates.io/crates/atomic-waker/1.1.2 | `licenses/cargo/atomic-waker-1.1.2/LICENSE-APACHE`<br>`licenses/cargo/atomic-waker-1.1.2/LICENSE-MIT`<br>`licenses/cargo/atomic-waker-1.1.2/LICENSE-THIRD-PARTY` |
+| cargo | `autocfg` | `1.5.1` | Apache-2.0 OR MIT | https://crates.io/crates/autocfg/1.5.1 | `licenses/cargo/autocfg-1.5.1/LICENSE-APACHE`<br>`licenses/cargo/autocfg-1.5.1/LICENSE-MIT` |
+| cargo | `base64` | `0.22.1` | MIT OR Apache-2.0 | https://crates.io/crates/base64/0.22.1 | `licenses/cargo/base64-0.22.1/LICENSE-APACHE`<br>`licenses/cargo/base64-0.22.1/LICENSE-MIT` |
+| cargo | `bit-set` | `0.8.0` | Apache-2.0 OR MIT | https://crates.io/crates/bit-set/0.8.0 | `licenses/cargo/bit-set-0.8.0/LICENSE-APACHE`<br>`licenses/cargo/bit-set-0.8.0/LICENSE-MIT` |
+| cargo | `bit-vec` | `0.8.0` | Apache-2.0 OR MIT | https://crates.io/crates/bit-vec/0.8.0 | `licenses/cargo/bit-vec-0.8.0/LICENSE-APACHE`<br>`licenses/cargo/bit-vec-0.8.0/LICENSE-MIT` |
+| cargo | `bitflags` | `1.3.2` | MIT/Apache-2.0 | https://crates.io/crates/bitflags/1.3.2 | `licenses/cargo/bitflags-1.3.2/LICENSE-APACHE`<br>`licenses/cargo/bitflags-1.3.2/LICENSE-MIT` |
+| cargo | `bitflags` | `2.13.1` | MIT OR Apache-2.0 | https://crates.io/crates/bitflags/2.13.1 | `licenses/cargo/bitflags-2.13.1/LICENSE-APACHE`<br>`licenses/cargo/bitflags-2.13.1/LICENSE-MIT` |
+| cargo | `block-buffer` | `0.10.4` | MIT OR Apache-2.0 | https://crates.io/crates/block-buffer/0.10.4 | `licenses/cargo/block-buffer-0.10.4/LICENSE-APACHE`<br>`licenses/cargo/block-buffer-0.10.4/LICENSE-MIT` |
+| cargo | `blocking` | `1.7.0` | Apache-2.0 OR MIT | https://crates.io/crates/blocking/1.7.0 | `licenses/cargo/blocking-1.7.0/LICENSE-APACHE`<br>`licenses/cargo/blocking-1.7.0/LICENSE-MIT` |
+| cargo | `brotli` | `8.0.4` | BSD-3-Clause AND MIT | https://crates.io/crates/brotli/8.0.4 | `licenses/cargo/brotli-8.0.4/LICENSE.BSD-3-Clause`<br>`licenses/cargo/brotli-8.0.4/LICENSE.MIT` |
+| cargo | `brotli-decompressor` | `5.0.3` | BSD-3-Clause/MIT | https://crates.io/crates/brotli-decompressor/5.0.3 | `licenses/cargo/brotli-decompressor-5.0.3/LICENSE` |
+| cargo | `bs58` | `0.5.1` | MIT/Apache-2.0 | https://crates.io/crates/bs58/0.5.1 | `licenses/cargo/bs58-0.5.1/LICENSE-APACHE`<br>`licenses/cargo/bs58-0.5.1/LICENSE-MIT` |
+| cargo | `byteorder` | `1.5.0` | Unlicense OR MIT | https://crates.io/crates/byteorder/1.5.0 | `licenses/cargo/byteorder-1.5.0/COPYING`<br>`licenses/cargo/byteorder-1.5.0/LICENSE-MIT` |
+| cargo | `bytes` | `1.12.1` | MIT | https://crates.io/crates/bytes/1.12.1 | `licenses/cargo/bytes-1.12.1/LICENSE` |
+| cargo | `cairo-rs` | `0.18.5` | MIT | https://crates.io/crates/cairo-rs/0.18.5 | `licenses/cargo/cairo-rs-0.18.5/LICENSE` |
+| cargo | `cairo-sys-rs` | `0.18.2` | MIT | https://crates.io/crates/cairo-sys-rs/0.18.2 | `licenses/cargo/cairo-sys-rs-0.18.2/LICENSE` |
+| cargo | `camino` | `1.2.5` | MIT OR Apache-2.0 | https://crates.io/crates/camino/1.2.5 | `licenses/cargo/camino-1.2.5/LICENSE-APACHE`<br>`licenses/cargo/camino-1.2.5/LICENSE-MIT` |
+| cargo | `cargo-platform` | `0.1.9` | MIT OR Apache-2.0 | https://crates.io/crates/cargo-platform/0.1.9 | `licenses/cargo/cargo-platform-0.1.9/LICENSE-APACHE`<br>`licenses/cargo/cargo-platform-0.1.9/LICENSE-MIT` |
+| cargo | `cargo_metadata` | `0.19.2` | MIT | https://crates.io/crates/cargo_metadata/0.19.2 | `licenses/cargo/cargo_metadata-0.19.2/LICENSE-MIT` |
+| cargo | `cargo_toml` | `0.22.3` | Apache-2.0 OR MIT | https://crates.io/crates/cargo_toml/0.22.3 | `licenses/cargo/cargo_toml-0.22.3/LICENSE` |
+| cargo | `cc` | `1.4.4` | MIT OR Apache-2.0 | https://crates.io/crates/cc/1.4.4 | `licenses/cargo/cc-1.4.4/LICENSE-APACHE`<br>`licenses/cargo/cc-1.4.4/LICENSE-MIT` |
+| cargo | `cfb` | `0.7.3` | MIT | https://crates.io/crates/cfb/0.7.3 | `licenses/cargo/cfb-0.7.3/LICENSE` |
+| cargo | `cfg-expr` | `0.15.8` | MIT OR Apache-2.0 | https://crates.io/crates/cfg-expr/0.15.8 | `licenses/cargo/cfg-expr-0.15.8/LICENSE-APACHE`<br>`licenses/cargo/cfg-expr-0.15.8/LICENSE-MIT` |
+| cargo | `cfg-if` | `1.0.4` | MIT OR Apache-2.0 | https://crates.io/crates/cfg-if/1.0.4 | `licenses/cargo/cfg-if-1.0.4/LICENSE-APACHE`<br>`licenses/cargo/cfg-if-1.0.4/LICENSE-MIT` |
+| cargo | `chrono` | `0.4.45` | MIT OR Apache-2.0 | https://crates.io/crates/chrono/0.4.45 | `licenses/cargo/chrono-0.4.45/LICENSE.txt` |
+| cargo | `concurrent-queue` | `2.5.0` | Apache-2.0 OR MIT | https://crates.io/crates/concurrent-queue/2.5.0 | `licenses/cargo/concurrent-queue-2.5.0/LICENSE-APACHE`<br>`licenses/cargo/concurrent-queue-2.5.0/LICENSE-MIT` |
+| cargo | `cookie` | `0.18.2` | MIT OR Apache-2.0 | https://crates.io/crates/cookie/0.18.2 | `licenses/cargo/cookie-0.18.2/LICENSE-APACHE`<br>`licenses/cargo/cookie-0.18.2/LICENSE-MIT` |
+| cargo | `cpufeatures` | `0.2.17` | MIT OR Apache-2.0 | https://crates.io/crates/cpufeatures/0.2.17 | `licenses/cargo/cpufeatures-0.2.17/LICENSE-APACHE`<br>`licenses/cargo/cpufeatures-0.2.17/LICENSE-MIT` |
+| cargo | `crc32fast` | `1.5.1` | MIT OR Apache-2.0 | https://crates.io/crates/crc32fast/1.5.1 | `licenses/cargo/crc32fast-1.5.1/LICENSE-APACHE`<br>`licenses/cargo/crc32fast-1.5.1/LICENSE-MIT` |
+| cargo | `crossbeam-channel` | `0.5.16` | MIT OR Apache-2.0 | https://crates.io/crates/crossbeam-channel/0.5.16 | `licenses/cargo/crossbeam-channel-0.5.16/LICENSE-APACHE`<br>`licenses/cargo/crossbeam-channel-0.5.16/LICENSE-MIT`<br>`licenses/cargo/crossbeam-channel-0.5.16/LICENSE-THIRD-PARTY` |
+| cargo | `crossbeam-utils` | `0.8.22` | MIT OR Apache-2.0 | https://crates.io/crates/crossbeam-utils/0.8.22 | `licenses/cargo/crossbeam-utils-0.8.22/LICENSE-APACHE`<br>`licenses/cargo/crossbeam-utils-0.8.22/LICENSE-MIT` |
+| cargo | `crypto-common` | `0.1.7` | MIT OR Apache-2.0 | https://crates.io/crates/crypto-common/0.1.7 | `licenses/cargo/crypto-common-0.1.7/LICENSE-APACHE`<br>`licenses/cargo/crypto-common-0.1.7/LICENSE-MIT` |
+| cargo | `cssparser` | `0.36.0` | MPL-2.0 | https://crates.io/crates/cssparser/0.36.0 | `licenses/cargo/cssparser-0.36.0/LICENSE` |
+| cargo | `cssparser-macros` | `0.6.1` | MPL-2.0 | https://crates.io/crates/cssparser-macros/0.6.1 | `licenses/cargo/cssparser-macros-0.6.1/LICENSE` |
+| cargo | `ctor` | `0.8.0` | Apache-2.0 OR MIT | https://crates.io/crates/ctor/0.8.0 | `licenses/cargo/ctor-0.8.0/LICENSE-APACHE`<br>`licenses/cargo/ctor-0.8.0/LICENSE-MIT` |
+| cargo | `ctor-proc-macro` | `0.0.7` | Apache-2.0 OR MIT | https://crates.io/crates/ctor-proc-macro/0.0.7 | `licenses/cargo/ctor-proc-macro-0.0.7/LICENSE-APACHE`<br>`licenses/cargo/ctor-proc-macro-0.0.7/LICENSE-MIT` |
+| cargo | `darling` | `0.23.0` | MIT | https://crates.io/crates/darling/0.23.0 | `licenses/cargo/darling-0.23.0/LICENSE` |
+| cargo | `darling_core` | `0.23.0` | MIT | https://crates.io/crates/darling_core/0.23.0 | `licenses/cargo/darling_core-0.23.0/LICENSE` |
+| cargo | `darling_macro` | `0.23.0` | MIT | https://crates.io/crates/darling_macro/0.23.0 | `licenses/cargo/darling_macro-0.23.0/LICENSE` |
+| cargo | `dbus` | `0.9.12` | Apache-2.0/MIT | https://crates.io/crates/dbus/0.9.12 | `licenses/cargo/dbus-0.9.12/LICENSE-APACHE`<br>`licenses/cargo/dbus-0.9.12/LICENSE-MIT` |
+| cargo | `defmt` | `1.1.1` | MIT OR Apache-2.0 | https://crates.io/crates/defmt/1.1.1 | `licenses/cargo/defmt-1.1.1/LICENSE-APACHE`<br>`licenses/cargo/defmt-1.1.1/LICENSE-MIT` |
+| cargo | `defmt-macros` | `1.1.1` | MIT OR Apache-2.0 | https://crates.io/crates/defmt-macros/1.1.1 | `licenses/cargo/defmt-macros-1.1.1/LICENSE-APACHE`<br>`licenses/cargo/defmt-macros-1.1.1/LICENSE-MIT` |
+| cargo | `defmt-parser` | `1.0.0` | MIT OR Apache-2.0 | https://crates.io/crates/defmt-parser/1.0.0 | `licenses/cargo/defmt-parser-1.0.0/DECLARED-LICENSE.txt` |
+| cargo | `deranged` | `0.5.8` | MIT OR Apache-2.0 | https://crates.io/crates/deranged/0.5.8 | `licenses/cargo/deranged-0.5.8/LICENSE-Apache`<br>`licenses/cargo/deranged-0.5.8/LICENSE-MIT` |
+| cargo | `derive_more` | `2.1.1` | MIT | https://crates.io/crates/derive_more/2.1.1 | `licenses/cargo/derive_more-2.1.1/LICENSE` |
+| cargo | `derive_more-impl` | `2.1.1` | MIT | https://crates.io/crates/derive_more-impl/2.1.1 | `licenses/cargo/derive_more-impl-2.1.1/LICENSE` |
+| cargo | `digest` | `0.10.7` | MIT OR Apache-2.0 | https://crates.io/crates/digest/0.10.7 | `licenses/cargo/digest-0.10.7/LICENSE-APACHE`<br>`licenses/cargo/digest-0.10.7/LICENSE-MIT` |
+| cargo | `dirs` | `6.0.0` | MIT OR Apache-2.0 | https://crates.io/crates/dirs/6.0.0 | `licenses/cargo/dirs-6.0.0/LICENSE-APACHE`<br>`licenses/cargo/dirs-6.0.0/LICENSE-MIT` |
+| cargo | `dirs-sys` | `0.5.0` | MIT OR Apache-2.0 | https://crates.io/crates/dirs-sys/0.5.0 | `licenses/cargo/dirs-sys-0.5.0/LICENSE-APACHE`<br>`licenses/cargo/dirs-sys-0.5.0/LICENSE-MIT` |
+| cargo | `displaydoc` | `0.2.7` | MIT OR Apache-2.0 | https://crates.io/crates/displaydoc/0.2.7 | `licenses/cargo/displaydoc-0.2.7/LICENSE-APACHE`<br>`licenses/cargo/displaydoc-0.2.7/LICENSE-MIT` |
+| cargo | `dlopen2` | `0.8.2` | MIT | https://crates.io/crates/dlopen2/0.8.2 | `licenses/cargo/dlopen2-0.8.2/DECLARED-LICENSE.txt` |
+| cargo | `dlopen2_derive` | `0.4.3` | MIT | https://crates.io/crates/dlopen2_derive/0.4.3 | `licenses/cargo/dlopen2_derive-0.4.3/DECLARED-LICENSE.txt` |
+| cargo | `dom_query` | `0.27.0` | MIT | https://crates.io/crates/dom_query/0.27.0 | `licenses/cargo/dom_query-0.27.0/LICENSE` |
+| cargo | `dpi` | `0.1.2` | Apache-2.0 AND MIT | https://crates.io/crates/dpi/0.1.2 | `licenses/cargo/dpi-0.1.2/LICENSE`<br>`licenses/cargo/dpi-0.1.2/LICENSE-LIBM-MIT` |
+| cargo | `dtoa` | `1.0.11` | MIT OR Apache-2.0 | https://crates.io/crates/dtoa/1.0.11 | `licenses/cargo/dtoa-1.0.11/LICENSE-APACHE`<br>`licenses/cargo/dtoa-1.0.11/LICENSE-MIT` |
+| cargo | `dtoa-short` | `0.3.5` | MPL-2.0 | https://crates.io/crates/dtoa-short/0.3.5 | `licenses/cargo/dtoa-short-0.3.5/LICENSE` |
+| cargo | `dtor` | `0.3.0` | Apache-2.0 OR MIT | https://crates.io/crates/dtor/0.3.0 | `licenses/cargo/dtor-0.3.0/LICENSE-APACHE`<br>`licenses/cargo/dtor-0.3.0/LICENSE-MIT` |
+| cargo | `dtor-proc-macro` | `0.0.6` | Apache-2.0 OR MIT | https://crates.io/crates/dtor-proc-macro/0.0.6 | `licenses/cargo/dtor-proc-macro-0.0.6/LICENSE-APACHE`<br>`licenses/cargo/dtor-proc-macro-0.0.6/LICENSE-MIT` |
+| cargo | `dunce` | `1.0.5` | CC0-1.0 OR MIT-0 OR Apache-2.0 | https://crates.io/crates/dunce/1.0.5 | `licenses/cargo/dunce-1.0.5/LICENSE` |
+| cargo | `dyn-clone` | `1.0.20` | MIT OR Apache-2.0 | https://crates.io/crates/dyn-clone/1.0.20 | `licenses/cargo/dyn-clone-1.0.20/LICENSE-APACHE`<br>`licenses/cargo/dyn-clone-1.0.20/LICENSE-MIT` |
+| cargo | `embed-resource` | `3.0.11` | MIT | https://crates.io/crates/embed-resource/3.0.11 | `licenses/cargo/embed-resource-3.0.11/LICENSE` |
+| cargo | `endi` | `1.1.1` | MIT | https://crates.io/crates/endi/1.1.1 | `licenses/cargo/endi-1.1.1/LICENSE-MIT` |
+| cargo | `enumflags2` | `0.7.12` | MIT OR Apache-2.0 | https://crates.io/crates/enumflags2/0.7.12 | `licenses/cargo/enumflags2-0.7.12/LICENSE-APACHE`<br>`licenses/cargo/enumflags2-0.7.12/LICENSE-MIT` |
+| cargo | `enumflags2_derive` | `0.7.12` | MIT OR Apache-2.0 | https://crates.io/crates/enumflags2_derive/0.7.12 | `licenses/cargo/enumflags2_derive-0.7.12/LICENSE-APACHE`<br>`licenses/cargo/enumflags2_derive-0.7.12/LICENSE-MIT` |
+| cargo | `equivalent` | `1.0.2` | Apache-2.0 OR MIT | https://crates.io/crates/equivalent/1.0.2 | `licenses/cargo/equivalent-1.0.2/LICENSE-APACHE`<br>`licenses/cargo/equivalent-1.0.2/LICENSE-MIT` |
+| cargo | `erased-serde` | `0.4.10` | MIT OR Apache-2.0 | https://crates.io/crates/erased-serde/0.4.10 | `licenses/cargo/erased-serde-0.4.10/LICENSE-APACHE`<br>`licenses/cargo/erased-serde-0.4.10/LICENSE-MIT` |
+| cargo | `errno` | `0.3.14` | MIT OR Apache-2.0 | https://crates.io/crates/errno/0.3.14 | `licenses/cargo/errno-0.3.14/LICENSE-APACHE`<br>`licenses/cargo/errno-0.3.14/LICENSE-MIT` |
+| cargo | `event-listener` | `5.4.2` | Apache-2.0 OR MIT | https://crates.io/crates/event-listener/5.4.2 | `licenses/cargo/event-listener-5.4.2/LICENSE-APACHE`<br>`licenses/cargo/event-listener-5.4.2/LICENSE-MIT` |
+| cargo | `event-listener-strategy` | `0.5.4` | Apache-2.0 OR MIT | https://crates.io/crates/event-listener-strategy/0.5.4 | `licenses/cargo/event-listener-strategy-0.5.4/LICENSE-APACHE`<br>`licenses/cargo/event-listener-strategy-0.5.4/LICENSE-MIT` |
+| cargo | `fastrand` | `2.5.0` | Apache-2.0 OR MIT | https://crates.io/crates/fastrand/2.5.0 | `licenses/cargo/fastrand-2.5.0/LICENSE-APACHE`<br>`licenses/cargo/fastrand-2.5.0/LICENSE-MIT` |
+| cargo | `fdeflate` | `0.3.7` | MIT OR Apache-2.0 | https://crates.io/crates/fdeflate/0.3.7 | `licenses/cargo/fdeflate-0.3.7/LICENSE-APACHE`<br>`licenses/cargo/fdeflate-0.3.7/LICENSE-MIT` |
+| cargo | `field-offset` | `0.3.6` | MIT OR Apache-2.0 | https://crates.io/crates/field-offset/0.3.6 | `licenses/cargo/field-offset-0.3.6/LICENSE-APACHE`<br>`licenses/cargo/field-offset-0.3.6/LICENSE-MIT` |
+| cargo | `find-msvc-tools` | `0.1.11` | MIT OR Apache-2.0 | https://crates.io/crates/find-msvc-tools/0.1.11 | `licenses/cargo/find-msvc-tools-0.1.11/LICENSE-APACHE`<br>`licenses/cargo/find-msvc-tools-0.1.11/LICENSE-MIT` |
+| cargo | `flate2` | `1.1.9` | MIT OR Apache-2.0 | https://crates.io/crates/flate2/1.1.9 | `licenses/cargo/flate2-1.1.9/LICENSE-APACHE`<br>`licenses/cargo/flate2-1.1.9/LICENSE-MIT` |
+| cargo | `fnv` | `1.0.7` | Apache-2.0 / MIT | https://crates.io/crates/fnv/1.0.7 | `licenses/cargo/fnv-1.0.7/LICENSE-APACHE`<br>`licenses/cargo/fnv-1.0.7/LICENSE-MIT` |
+| cargo | `foldhash` | `0.2.0` | Zlib | https://crates.io/crates/foldhash/0.2.0 | `licenses/cargo/foldhash-0.2.0/LICENSE` |
+| cargo | `form_urlencoded` | `1.2.2` | MIT OR Apache-2.0 | https://crates.io/crates/form_urlencoded/1.2.2 | `licenses/cargo/form_urlencoded-1.2.2/LICENSE-APACHE`<br>`licenses/cargo/form_urlencoded-1.2.2/LICENSE-MIT` |
+| cargo | `futures-channel` | `0.3.34` | MIT OR Apache-2.0 | https://crates.io/crates/futures-channel/0.3.34 | `licenses/cargo/futures-channel-0.3.34/LICENSE-APACHE`<br>`licenses/cargo/futures-channel-0.3.34/LICENSE-MIT` |
+| cargo | `futures-core` | `0.3.34` | MIT OR Apache-2.0 | https://crates.io/crates/futures-core/0.3.34 | `licenses/cargo/futures-core-0.3.34/LICENSE-APACHE`<br>`licenses/cargo/futures-core-0.3.34/LICENSE-MIT` |
+| cargo | `futures-executor` | `0.3.34` | MIT OR Apache-2.0 | https://crates.io/crates/futures-executor/0.3.34 | `licenses/cargo/futures-executor-0.3.34/LICENSE-APACHE`<br>`licenses/cargo/futures-executor-0.3.34/LICENSE-MIT` |
+| cargo | `futures-io` | `0.3.34` | MIT OR Apache-2.0 | https://crates.io/crates/futures-io/0.3.34 | `licenses/cargo/futures-io-0.3.34/LICENSE-APACHE`<br>`licenses/cargo/futures-io-0.3.34/LICENSE-MIT` |
+| cargo | `futures-lite` | `2.6.1` | Apache-2.0 OR MIT | https://crates.io/crates/futures-lite/2.6.1 | `licenses/cargo/futures-lite-2.6.1/LICENSE-APACHE`<br>`licenses/cargo/futures-lite-2.6.1/LICENSE-MIT`<br>`licenses/cargo/futures-lite-2.6.1/LICENSE-THIRD-PARTY` |
+| cargo | `futures-macro` | `0.3.34` | MIT OR Apache-2.0 | https://crates.io/crates/futures-macro/0.3.34 | `licenses/cargo/futures-macro-0.3.34/LICENSE-APACHE`<br>`licenses/cargo/futures-macro-0.3.34/LICENSE-MIT` |
+| cargo | `futures-sink` | `0.3.34` | MIT OR Apache-2.0 | https://crates.io/crates/futures-sink/0.3.34 | `licenses/cargo/futures-sink-0.3.34/LICENSE-APACHE`<br>`licenses/cargo/futures-sink-0.3.34/LICENSE-MIT` |
+| cargo | `futures-task` | `0.3.34` | MIT OR Apache-2.0 | https://crates.io/crates/futures-task/0.3.34 | `licenses/cargo/futures-task-0.3.34/LICENSE-APACHE`<br>`licenses/cargo/futures-task-0.3.34/LICENSE-MIT` |
+| cargo | `futures-util` | `0.3.34` | MIT OR Apache-2.0 | https://crates.io/crates/futures-util/0.3.34 | `licenses/cargo/futures-util-0.3.34/LICENSE-APACHE`<br>`licenses/cargo/futures-util-0.3.34/LICENSE-MIT` |
+| cargo | `gdk` | `0.18.2` | MIT | https://crates.io/crates/gdk/0.18.2 | `licenses/cargo/gdk-0.18.2/LICENSE` |
+| cargo | `gdk-pixbuf` | `0.18.5` | MIT | https://crates.io/crates/gdk-pixbuf/0.18.5 | `licenses/cargo/gdk-pixbuf-0.18.5/LICENSE` |
+| cargo | `gdk-pixbuf-sys` | `0.18.0` | MIT | https://crates.io/crates/gdk-pixbuf-sys/0.18.0 | `licenses/cargo/gdk-pixbuf-sys-0.18.0/LICENSE` |
+| cargo | `gdk-sys` | `0.18.2` | MIT | https://crates.io/crates/gdk-sys/0.18.2 | `licenses/cargo/gdk-sys-0.18.2/LICENSE` |
+| cargo | `gdkwayland-sys` | `0.18.2` | MIT | https://crates.io/crates/gdkwayland-sys/0.18.2 | `licenses/cargo/gdkwayland-sys-0.18.2/LICENSE` |
+| cargo | `gdkx11` | `0.18.2` | MIT | https://crates.io/crates/gdkx11/0.18.2 | `licenses/cargo/gdkx11-0.18.2/LICENSE` |
+| cargo | `gdkx11-sys` | `0.18.2` | MIT | https://crates.io/crates/gdkx11-sys/0.18.2 | `licenses/cargo/gdkx11-sys-0.18.2/LICENSE` |
+| cargo | `generic-array` | `0.14.7` | MIT | https://crates.io/crates/generic-array/0.14.7 | `licenses/cargo/generic-array-0.14.7/LICENSE` |
+| cargo | `getrandom` | `0.3.4` | MIT OR Apache-2.0 | https://crates.io/crates/getrandom/0.3.4 | `licenses/cargo/getrandom-0.3.4/LICENSE-APACHE`<br>`licenses/cargo/getrandom-0.3.4/LICENSE-MIT` |
+| cargo | `getrandom` | `0.4.3` | MIT OR Apache-2.0 | https://crates.io/crates/getrandom/0.4.3 | `licenses/cargo/getrandom-0.4.3/LICENSE-APACHE`<br>`licenses/cargo/getrandom-0.4.3/LICENSE-MIT` |
+| cargo | `gio` | `0.18.4` | MIT | https://crates.io/crates/gio/0.18.4 | `licenses/cargo/gio-0.18.4/LICENSE` |
+| cargo | `gio-sys` | `0.18.1` | MIT | https://crates.io/crates/gio-sys/0.18.1 | `licenses/cargo/gio-sys-0.18.1/LICENSE` |
+| cargo | `glib` | `0.18.5` | MIT | https://crates.io/crates/glib/0.18.5 | `licenses/cargo/glib-0.18.5/LICENSE` |
+| cargo | `glib-macros` | `0.18.5` | MIT | https://crates.io/crates/glib-macros/0.18.5 | `licenses/cargo/glib-macros-0.18.5/LICENSE` |
+| cargo | `glib-sys` | `0.18.1` | MIT | https://crates.io/crates/glib-sys/0.18.1 | `licenses/cargo/glib-sys-0.18.1/LICENSE` |
+| cargo | `glob` | `0.3.4` | MIT OR Apache-2.0 | https://crates.io/crates/glob/0.3.4 | `licenses/cargo/glob-0.3.4/LICENSE-APACHE`<br>`licenses/cargo/glob-0.3.4/LICENSE-MIT` |
+| cargo | `gobject-sys` | `0.18.0` | MIT | https://crates.io/crates/gobject-sys/0.18.0 | `licenses/cargo/gobject-sys-0.18.0/LICENSE` |
+| cargo | `gtk` | `0.18.2` | MIT | https://crates.io/crates/gtk/0.18.2 | `licenses/cargo/gtk-0.18.2/LICENSE` |
+| cargo | `gtk-sys` | `0.18.2` | MIT | https://crates.io/crates/gtk-sys/0.18.2 | `licenses/cargo/gtk-sys-0.18.2/LICENSE` |
+| cargo | `gtk3-macros` | `0.18.2` | MIT | https://crates.io/crates/gtk3-macros/0.18.2 | `licenses/cargo/gtk3-macros-0.18.2/LICENSE` |
+| cargo | `hashbrown` | `0.12.3` | MIT OR Apache-2.0 | https://crates.io/crates/hashbrown/0.12.3 | `licenses/cargo/hashbrown-0.12.3/LICENSE-APACHE`<br>`licenses/cargo/hashbrown-0.12.3/LICENSE-MIT` |
+| cargo | `hashbrown` | `0.17.1` | MIT OR Apache-2.0 | https://crates.io/crates/hashbrown/0.17.1 | `licenses/cargo/hashbrown-0.17.1/LICENSE-APACHE`<br>`licenses/cargo/hashbrown-0.17.1/LICENSE-MIT` |
+| cargo | `heck` | `0.4.1` | MIT OR Apache-2.0 | https://crates.io/crates/heck/0.4.1 | `licenses/cargo/heck-0.4.1/LICENSE-APACHE`<br>`licenses/cargo/heck-0.4.1/LICENSE-MIT` |
+| cargo | `heck` | `0.5.0` | MIT OR Apache-2.0 | https://crates.io/crates/heck/0.5.0 | `licenses/cargo/heck-0.5.0/LICENSE-APACHE`<br>`licenses/cargo/heck-0.5.0/LICENSE-MIT` |
+| cargo | `hex` | `0.4.3` | MIT OR Apache-2.0 | https://crates.io/crates/hex/0.4.3 | `licenses/cargo/hex-0.4.3/LICENSE-APACHE`<br>`licenses/cargo/hex-0.4.3/LICENSE-MIT` |
+| cargo | `html5ever` | `0.38.0` | MIT OR Apache-2.0 | https://crates.io/crates/html5ever/0.38.0 | `licenses/cargo/html5ever-0.38.0/LICENSE-APACHE`<br>`licenses/cargo/html5ever-0.38.0/LICENSE-MIT` |
+| cargo | `http` | `1.5.0` | MIT OR Apache-2.0 | https://crates.io/crates/http/1.5.0 | `licenses/cargo/http-1.5.0/LICENSE-APACHE`<br>`licenses/cargo/http-1.5.0/LICENSE-MIT` |
+| cargo | `iana-time-zone` | `0.1.65` | MIT OR Apache-2.0 | https://crates.io/crates/iana-time-zone/0.1.65 | `licenses/cargo/iana-time-zone-0.1.65/LICENSE-APACHE`<br>`licenses/cargo/iana-time-zone-0.1.65/LICENSE-MIT` |
+| cargo | `ico` | `0.5.0` | MIT | https://crates.io/crates/ico/0.5.0 | `licenses/cargo/ico-0.5.0/LICENSE` |
+| cargo | `icu_collections` | `2.3.0` | Unicode-3.0 | https://crates.io/crates/icu_collections/2.3.0 | `licenses/cargo/icu_collections-2.3.0/LICENSE` |
+| cargo | `icu_locale_core` | `2.3.0` | Unicode-3.0 | https://crates.io/crates/icu_locale_core/2.3.0 | `licenses/cargo/icu_locale_core-2.3.0/LICENSE` |
+| cargo | `icu_normalizer` | `2.3.0` | Unicode-3.0 | https://crates.io/crates/icu_normalizer/2.3.0 | `licenses/cargo/icu_normalizer-2.3.0/LICENSE` |
+| cargo | `icu_normalizer_data` | `2.3.0` | Unicode-3.0 | https://crates.io/crates/icu_normalizer_data/2.3.0 | `licenses/cargo/icu_normalizer_data-2.3.0/LICENSE` |
+| cargo | `icu_properties` | `2.3.0` | Unicode-3.0 | https://crates.io/crates/icu_properties/2.3.0 | `licenses/cargo/icu_properties-2.3.0/LICENSE` |
+| cargo | `icu_properties_data` | `2.3.0` | Unicode-3.0 | https://crates.io/crates/icu_properties_data/2.3.0 | `licenses/cargo/icu_properties_data-2.3.0/LICENSE` |
+| cargo | `icu_provider` | `2.3.1` | Unicode-3.0 | https://crates.io/crates/icu_provider/2.3.1 | `licenses/cargo/icu_provider-2.3.1/LICENSE` |
+| cargo | `ident_case` | `1.0.1` | MIT/Apache-2.0 | https://crates.io/crates/ident_case/1.0.1 | `licenses/cargo/ident_case-1.0.1/LICENSE` |
+| cargo | `idna` | `1.1.0` | MIT OR Apache-2.0 | https://crates.io/crates/idna/1.1.0 | `licenses/cargo/idna-1.1.0/LICENSE-APACHE`<br>`licenses/cargo/idna-1.1.0/LICENSE-MIT` |
+| cargo | `idna_adapter` | `1.2.2` | Apache-2.0 OR MIT | https://crates.io/crates/idna_adapter/1.2.2 | `licenses/cargo/idna_adapter-1.2.2/LICENSE-APACHE`<br>`licenses/cargo/idna_adapter-1.2.2/LICENSE-MIT` |
+| cargo | `indexmap` | `1.9.3` | Apache-2.0 OR MIT | https://crates.io/crates/indexmap/1.9.3 | `licenses/cargo/indexmap-1.9.3/LICENSE-APACHE`<br>`licenses/cargo/indexmap-1.9.3/LICENSE-MIT` |
+| cargo | `indexmap` | `2.14.0` | Apache-2.0 OR MIT | https://crates.io/crates/indexmap/2.14.0 | `licenses/cargo/indexmap-2.14.0/LICENSE-APACHE`<br>`licenses/cargo/indexmap-2.14.0/LICENSE-MIT` |
+| cargo | `infer` | `0.19.0` | MIT | https://crates.io/crates/infer/0.19.0 | `licenses/cargo/infer-0.19.0/LICENSE` |
+| cargo | `is-docker` | `0.2.0` | MIT | https://crates.io/crates/is-docker/0.2.0 | `licenses/cargo/is-docker-0.2.0/LICENSE` |
+| cargo | `is-wsl` | `0.4.0` | MIT | https://crates.io/crates/is-wsl/0.4.0 | `licenses/cargo/is-wsl-0.4.0/LICENSE` |
+| cargo | `itoa` | `1.0.18` | MIT OR Apache-2.0 | https://crates.io/crates/itoa/1.0.18 | `licenses/cargo/itoa-1.0.18/LICENSE-APACHE`<br>`licenses/cargo/itoa-1.0.18/LICENSE-MIT` |
+| cargo | `javascriptcore-rs` | `1.1.2` | MIT | https://crates.io/crates/javascriptcore-rs/1.1.2 | `licenses/cargo/javascriptcore-rs-1.1.2/LICENSE` |
+| cargo | `javascriptcore-rs-sys` | `1.1.1` | MIT | https://crates.io/crates/javascriptcore-rs-sys/1.1.1 | `licenses/cargo/javascriptcore-rs-sys-1.1.1/LICENSE` |
+| cargo | `jiff` | `0.2.35` | Unlicense OR MIT | https://crates.io/crates/jiff/0.2.35 | `licenses/cargo/jiff-0.2.35/COPYING`<br>`licenses/cargo/jiff-0.2.35/LICENSE-MIT` |
+| cargo | `jiff-core` | `0.1.0` | Unlicense OR MIT | https://crates.io/crates/jiff-core/0.1.0 | `licenses/cargo/jiff-core-0.1.0/COPYING`<br>`licenses/cargo/jiff-core-0.1.0/LICENSE-MIT` |
+| cargo | `json-patch` | `3.0.1` | MIT/Apache-2.0 | https://crates.io/crates/json-patch/3.0.1 | `licenses/cargo/json-patch-3.0.1/LICENSE-APACHE`<br>`licenses/cargo/json-patch-3.0.1/LICENSE-MIT` |
+| cargo | `jsonptr` | `0.6.3` | MIT OR Apache-2.0 | https://crates.io/crates/jsonptr/0.6.3 | `licenses/cargo/jsonptr-0.6.3/LICENSE-APACHE`<br>`licenses/cargo/jsonptr-0.6.3/LICENSE-MIT` |
+| cargo | `keyboard-types` | `0.7.0` | MIT OR Apache-2.0 | https://crates.io/crates/keyboard-types/0.7.0 | `licenses/cargo/keyboard-types-0.7.0/LICENSE-APACHE`<br>`licenses/cargo/keyboard-types-0.7.0/LICENSE-MIT` |
+| cargo | `libappindicator` | `0.9.0` | Apache-2.0 OR MIT | https://crates.io/crates/libappindicator/0.9.0 | `licenses/cargo/libappindicator-0.9.0/LICENSE-APACHE`<br>`licenses/cargo/libappindicator-0.9.0/LICENSE-MIT` |
+| cargo | `libappindicator-sys` | `0.9.0` | Apache-2.0 OR MIT | https://crates.io/crates/libappindicator-sys/0.9.0 | `licenses/cargo/libappindicator-sys-0.9.0/DECLARED-LICENSE.txt` |
+| cargo | `libc` | `0.2.189` | MIT OR Apache-2.0 | https://crates.io/crates/libc/0.2.189 | `licenses/cargo/libc-0.2.189/LICENSE-APACHE`<br>`licenses/cargo/libc-0.2.189/LICENSE-MIT` |
+| cargo | `libdbus-sys` | `0.2.7` | Apache-2.0/MIT | https://crates.io/crates/libdbus-sys/0.2.7 | `licenses/cargo/libdbus-sys-0.2.7/LICENSE-APACHE`<br>`licenses/cargo/libdbus-sys-0.2.7/LICENSE-MIT` |
+| cargo | `libloading` | `0.7.4` | ISC | https://crates.io/crates/libloading/0.7.4 | `licenses/cargo/libloading-0.7.4/LICENSE` |
+| cargo | `linux-raw-sys` | `0.12.1` | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | https://crates.io/crates/linux-raw-sys/0.12.1 | `licenses/cargo/linux-raw-sys-0.12.1/LICENSE-APACHE`<br>`licenses/cargo/linux-raw-sys-0.12.1/LICENSE-Apache-2.0_WITH_LLVM-exception`<br>`licenses/cargo/linux-raw-sys-0.12.1/LICENSE-MIT` |
+| cargo | `litemap` | `0.8.3` | Unicode-3.0 | https://crates.io/crates/litemap/0.8.3 | `licenses/cargo/litemap-0.8.3/LICENSE` |
+| cargo | `lock_api` | `0.4.14` | MIT OR Apache-2.0 | https://crates.io/crates/lock_api/0.4.14 | `licenses/cargo/lock_api-0.4.14/LICENSE-APACHE`<br>`licenses/cargo/lock_api-0.4.14/LICENSE-MIT` |
+| cargo | `log` | `0.4.34` | MIT OR Apache-2.0 | https://crates.io/crates/log/0.4.34 | `licenses/cargo/log-0.4.34/LICENSE-APACHE`<br>`licenses/cargo/log-0.4.34/LICENSE-MIT` |
+| cargo | `markup5ever` | `0.38.0` | MIT OR Apache-2.0 | https://crates.io/crates/markup5ever/0.38.0 | `licenses/cargo/markup5ever-0.38.0/LICENSE-APACHE`<br>`licenses/cargo/markup5ever-0.38.0/LICENSE-MIT` |
+| cargo | `memchr` | `2.8.3` | Unlicense OR MIT | https://crates.io/crates/memchr/2.8.3 | `licenses/cargo/memchr-2.8.3/COPYING`<br>`licenses/cargo/memchr-2.8.3/LICENSE-MIT` |
+| cargo | `memoffset` | `0.9.1` | MIT | https://crates.io/crates/memoffset/0.9.1 | `licenses/cargo/memoffset-0.9.1/LICENSE` |
+| cargo | `mime` | `0.3.17` | MIT OR Apache-2.0 | https://crates.io/crates/mime/0.3.17 | `licenses/cargo/mime-0.3.17/LICENSE-APACHE`<br>`licenses/cargo/mime-0.3.17/LICENSE-MIT` |
+| cargo | `miniz_oxide` | `0.8.9` | MIT OR Zlib OR Apache-2.0 | https://crates.io/crates/miniz_oxide/0.8.9 | `licenses/cargo/miniz_oxide-0.8.9/LICENSE`<br>`licenses/cargo/miniz_oxide-0.8.9/LICENSE-APACHE.md`<br>`licenses/cargo/miniz_oxide-0.8.9/LICENSE-MIT.md`<br>`licenses/cargo/miniz_oxide-0.8.9/LICENSE-ZLIB.md` |
+| cargo | `mio` | `1.2.2` | MIT | https://crates.io/crates/mio/1.2.2 | `licenses/cargo/mio-1.2.2/LICENSE` |
+| cargo | `muda` | `0.19.3` | Apache-2.0 OR MIT | https://crates.io/crates/muda/0.19.3 | `licenses/cargo/muda-0.19.3/LICENSE-APACHE`<br>`licenses/cargo/muda-0.19.3/LICENSE-MIT`<br>`licenses/cargo/muda-0.19.3/LICENSE.spdx` |
+| cargo | `new_debug_unreachable` | `1.0.6` | MIT | https://crates.io/crates/new_debug_unreachable/1.0.6 | `licenses/cargo/new_debug_unreachable-1.0.6/LICENSE-MIT` |
+| cargo | `num-conv` | `0.2.2` | MIT OR Apache-2.0 | https://crates.io/crates/num-conv/0.2.2 | `licenses/cargo/num-conv-0.2.2/LICENSE-Apache`<br>`licenses/cargo/num-conv-0.2.2/LICENSE-MIT` |
+| cargo | `num-traits` | `0.2.19` | MIT OR Apache-2.0 | https://crates.io/crates/num-traits/0.2.19 | `licenses/cargo/num-traits-0.2.19/LICENSE-APACHE`<br>`licenses/cargo/num-traits-0.2.19/LICENSE-MIT` |
+| cargo | `once_cell` | `1.21.4` | MIT OR Apache-2.0 | https://crates.io/crates/once_cell/1.21.4 | `licenses/cargo/once_cell-1.21.4/LICENSE-APACHE`<br>`licenses/cargo/once_cell-1.21.4/LICENSE-MIT` |
+| cargo | `open` | `5.4.1` | MIT | https://crates.io/crates/open/5.4.1 | `licenses/cargo/open-5.4.1/LICENSE.md` |
+| cargo | `option-ext` | `0.2.0` | MPL-2.0 | https://crates.io/crates/option-ext/0.2.0 | `licenses/cargo/option-ext-0.2.0/LICENSE.txt` |
+| cargo | `ordered-stream` | `0.2.0` | MIT OR Apache-2.0 | https://crates.io/crates/ordered-stream/0.2.0 | `licenses/cargo/ordered-stream-0.2.0/LICENSE-APACHE`<br>`licenses/cargo/ordered-stream-0.2.0/LICENSE-MIT` |
+| cargo | `pango` | `0.18.3` | MIT | https://crates.io/crates/pango/0.18.3 | `licenses/cargo/pango-0.18.3/LICENSE` |
+| cargo | `pango-sys` | `0.18.0` | MIT | https://crates.io/crates/pango-sys/0.18.0 | `licenses/cargo/pango-sys-0.18.0/LICENSE` |
+| cargo | `parking` | `2.2.1` | Apache-2.0 OR MIT | https://crates.io/crates/parking/2.2.1 | `licenses/cargo/parking-2.2.1/LICENSE-APACHE`<br>`licenses/cargo/parking-2.2.1/LICENSE-MIT`<br>`licenses/cargo/parking-2.2.1/LICENSE-THIRD-PARTY` |
+| cargo | `parking_lot` | `0.12.5` | MIT OR Apache-2.0 | https://crates.io/crates/parking_lot/0.12.5 | `licenses/cargo/parking_lot-0.12.5/LICENSE-APACHE`<br>`licenses/cargo/parking_lot-0.12.5/LICENSE-MIT` |
+| cargo | `parking_lot_core` | `0.9.12` | MIT OR Apache-2.0 | https://crates.io/crates/parking_lot_core/0.9.12 | `licenses/cargo/parking_lot_core-0.9.12/LICENSE-APACHE`<br>`licenses/cargo/parking_lot_core-0.9.12/LICENSE-MIT` |
+| cargo | `percent-encoding` | `2.3.2` | MIT OR Apache-2.0 | https://crates.io/crates/percent-encoding/2.3.2 | `licenses/cargo/percent-encoding-2.3.2/LICENSE-APACHE`<br>`licenses/cargo/percent-encoding-2.3.2/LICENSE-MIT` |
+| cargo | `phf` | `0.13.1` | MIT | https://crates.io/crates/phf/0.13.1 | `licenses/cargo/phf-0.13.1/LICENSE` |
+| cargo | `phf_codegen` | `0.13.1` | MIT | https://crates.io/crates/phf_codegen/0.13.1 | `licenses/cargo/phf_codegen-0.13.1/LICENSE` |
+| cargo | `phf_generator` | `0.13.1` | MIT | https://crates.io/crates/phf_generator/0.13.1 | `licenses/cargo/phf_generator-0.13.1/LICENSE` |
+| cargo | `phf_macros` | `0.13.1` | MIT | https://crates.io/crates/phf_macros/0.13.1 | `licenses/cargo/phf_macros-0.13.1/LICENSE` |
+| cargo | `phf_shared` | `0.13.1` | MIT | https://crates.io/crates/phf_shared/0.13.1 | `licenses/cargo/phf_shared-0.13.1/LICENSE` |
+| cargo | `pin-project-lite` | `0.2.17` | Apache-2.0 OR MIT | https://crates.io/crates/pin-project-lite/0.2.17 | `licenses/cargo/pin-project-lite-0.2.17/LICENSE-APACHE`<br>`licenses/cargo/pin-project-lite-0.2.17/LICENSE-MIT` |
+| cargo | `piper` | `0.2.5` | MIT OR Apache-2.0 | https://crates.io/crates/piper/0.2.5 | `licenses/cargo/piper-0.2.5/LICENSE-APACHE`<br>`licenses/cargo/piper-0.2.5/LICENSE-MIT` |
+| cargo | `pkg-config` | `0.3.34` | MIT OR Apache-2.0 | https://crates.io/crates/pkg-config/0.3.34 | `licenses/cargo/pkg-config-0.3.34/LICENSE-APACHE`<br>`licenses/cargo/pkg-config-0.3.34/LICENSE-MIT` |
+| cargo | `plist` | `1.10.0` | MIT | https://crates.io/crates/plist/1.10.0 | `licenses/cargo/plist-1.10.0/LICENCE` |
+| cargo | `png` | `0.17.16` | MIT OR Apache-2.0 | https://crates.io/crates/png/0.17.16 | `licenses/cargo/png-0.17.16/LICENSE-APACHE`<br>`licenses/cargo/png-0.17.16/LICENSE-MIT` |
+| cargo | `png` | `0.18.1` | MIT OR Apache-2.0 | https://crates.io/crates/png/0.18.1 | `licenses/cargo/png-0.18.1/LICENSE-APACHE`<br>`licenses/cargo/png-0.18.1/LICENSE-MIT` |
+| cargo | `polling` | `3.11.0` | Apache-2.0 OR MIT | https://crates.io/crates/polling/3.11.0 | `licenses/cargo/polling-3.11.0/LICENSE-APACHE`<br>`licenses/cargo/polling-3.11.0/LICENSE-MIT` |
+| cargo | `potential_utf` | `0.1.6` | Unicode-3.0 | https://crates.io/crates/potential_utf/0.1.6 | `licenses/cargo/potential_utf-0.1.6/LICENSE` |
+| cargo | `powerfmt` | `0.2.0` | MIT OR Apache-2.0 | https://crates.io/crates/powerfmt/0.2.0 | `licenses/cargo/powerfmt-0.2.0/LICENSE-Apache`<br>`licenses/cargo/powerfmt-0.2.0/LICENSE-MIT` |
+| cargo | `precomputed-hash` | `0.1.1` | MIT | https://crates.io/crates/precomputed-hash/0.1.1 | `licenses/cargo/precomputed-hash-0.1.1/LICENSE` |
+| cargo | `proc-macro-crate` | `1.3.1` | MIT OR Apache-2.0 | https://crates.io/crates/proc-macro-crate/1.3.1 | `licenses/cargo/proc-macro-crate-1.3.1/LICENSE-APACHE`<br>`licenses/cargo/proc-macro-crate-1.3.1/LICENSE-MIT` |
+| cargo | `proc-macro-crate` | `2.0.2` | MIT OR Apache-2.0 | https://crates.io/crates/proc-macro-crate/2.0.2 | `licenses/cargo/proc-macro-crate-2.0.2/LICENSE-APACHE`<br>`licenses/cargo/proc-macro-crate-2.0.2/LICENSE-MIT` |
+| cargo | `proc-macro-crate` | `3.5.0` | MIT OR Apache-2.0 | https://crates.io/crates/proc-macro-crate/3.5.0 | `licenses/cargo/proc-macro-crate-3.5.0/LICENSE-APACHE`<br>`licenses/cargo/proc-macro-crate-3.5.0/LICENSE-MIT` |
+| cargo | `proc-macro-error` | `1.0.4` | MIT OR Apache-2.0 | https://crates.io/crates/proc-macro-error/1.0.4 | `licenses/cargo/proc-macro-error-1.0.4/LICENSE-APACHE`<br>`licenses/cargo/proc-macro-error-1.0.4/LICENSE-MIT` |
+| cargo | `proc-macro-error-attr` | `1.0.4` | MIT OR Apache-2.0 | https://crates.io/crates/proc-macro-error-attr/1.0.4 | `licenses/cargo/proc-macro-error-attr-1.0.4/LICENSE-APACHE`<br>`licenses/cargo/proc-macro-error-attr-1.0.4/LICENSE-MIT` |
+| cargo | `proc-macro2` | `1.0.107` | MIT OR Apache-2.0 | https://crates.io/crates/proc-macro2/1.0.107 | `licenses/cargo/proc-macro2-1.0.107/LICENSE-APACHE`<br>`licenses/cargo/proc-macro2-1.0.107/LICENSE-MIT` |
+| cargo | `quick-xml` | `0.41.0` | MIT | https://crates.io/crates/quick-xml/0.41.0 | `licenses/cargo/quick-xml-0.41.0/LICENSE-MIT.md` |
+| cargo | `quote` | `1.0.47` | MIT OR Apache-2.0 | https://crates.io/crates/quote/1.0.47 | `licenses/cargo/quote-1.0.47/LICENSE-APACHE`<br>`licenses/cargo/quote-1.0.47/LICENSE-MIT` |
+| cargo | `raw-window-handle` | `0.6.2` | MIT OR Apache-2.0 OR Zlib | https://crates.io/crates/raw-window-handle/0.6.2 | `licenses/cargo/raw-window-handle-0.6.2/LICENSE-APACHE.md`<br>`licenses/cargo/raw-window-handle-0.6.2/LICENSE-MIT.md`<br>`licenses/cargo/raw-window-handle-0.6.2/LICENSE-ZLIB.md` |
+| cargo | `ref-cast` | `1.0.27` | MIT OR Apache-2.0 | https://crates.io/crates/ref-cast/1.0.27 | `licenses/cargo/ref-cast-1.0.27/LICENSE-APACHE`<br>`licenses/cargo/ref-cast-1.0.27/LICENSE-MIT` |
+| cargo | `ref-cast-impl` | `1.0.27` | MIT OR Apache-2.0 | https://crates.io/crates/ref-cast-impl/1.0.27 | `licenses/cargo/ref-cast-impl-1.0.27/LICENSE-APACHE`<br>`licenses/cargo/ref-cast-impl-1.0.27/LICENSE-MIT` |
+| cargo | `regex` | `1.13.1` | MIT OR Apache-2.0 | https://crates.io/crates/regex/1.13.1 | `licenses/cargo/regex-1.13.1/LICENSE-APACHE`<br>`licenses/cargo/regex-1.13.1/LICENSE-MIT` |
+| cargo | `regex-automata` | `0.4.18` | MIT OR Apache-2.0 | https://crates.io/crates/regex-automata/0.4.18 | `licenses/cargo/regex-automata-0.4.18/LICENSE-APACHE`<br>`licenses/cargo/regex-automata-0.4.18/LICENSE-MIT` |
+| cargo | `regex-syntax` | `0.8.11` | MIT OR Apache-2.0 | https://crates.io/crates/regex-syntax/0.8.11 | `licenses/cargo/regex-syntax-0.8.11/LICENSE-APACHE`<br>`licenses/cargo/regex-syntax-0.8.11/LICENSE-MIT` |
+| cargo | `rustc-hash` | `2.1.3` | Apache-2.0 OR MIT | https://crates.io/crates/rustc-hash/2.1.3 | `licenses/cargo/rustc-hash-2.1.3/LICENSE-APACHE`<br>`licenses/cargo/rustc-hash-2.1.3/LICENSE-MIT` |
+| cargo | `rustc_version` | `0.4.1` | MIT OR Apache-2.0 | https://crates.io/crates/rustc_version/0.4.1 | `licenses/cargo/rustc_version-0.4.1/LICENSE-APACHE`<br>`licenses/cargo/rustc_version-0.4.1/LICENSE-MIT` |
+| cargo | `rustix` | `1.1.4` | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | https://crates.io/crates/rustix/1.1.4 | `licenses/cargo/rustix-1.1.4/LICENSE-APACHE`<br>`licenses/cargo/rustix-1.1.4/LICENSE-Apache-2.0_WITH_LLVM-exception`<br>`licenses/cargo/rustix-1.1.4/LICENSE-MIT` |
+| cargo | `same-file` | `1.0.6` | Unlicense/MIT | https://crates.io/crates/same-file/1.0.6 | `licenses/cargo/same-file-1.0.6/COPYING`<br>`licenses/cargo/same-file-1.0.6/LICENSE-MIT` |
+| cargo | `schemars` | `0.8.22` | MIT | https://crates.io/crates/schemars/0.8.22 | `licenses/cargo/schemars-0.8.22/LICENSE` |
+| cargo | `schemars` | `0.9.0` | MIT | https://crates.io/crates/schemars/0.9.0 | `licenses/cargo/schemars-0.9.0/LICENSE` |
+| cargo | `schemars` | `1.2.2` | MIT | https://crates.io/crates/schemars/1.2.2 | `licenses/cargo/schemars-1.2.2/LICENSE` |
+| cargo | `schemars_derive` | `0.8.22` | MIT | https://crates.io/crates/schemars_derive/0.8.22 | `licenses/cargo/schemars_derive-0.8.22/LICENSE` |
+| cargo | `scopeguard` | `1.2.0` | MIT OR Apache-2.0 | https://crates.io/crates/scopeguard/1.2.0 | `licenses/cargo/scopeguard-1.2.0/LICENSE-APACHE`<br>`licenses/cargo/scopeguard-1.2.0/LICENSE-MIT` |
+| cargo | `selectors` | `0.36.1` | MPL-2.0 | https://crates.io/crates/selectors/0.36.1 | `licenses/cargo/selectors-0.36.1/DECLARED-LICENSE.txt` |
+| cargo | `semver` | `1.0.28` | MIT OR Apache-2.0 | https://crates.io/crates/semver/1.0.28 | `licenses/cargo/semver-1.0.28/LICENSE-APACHE`<br>`licenses/cargo/semver-1.0.28/LICENSE-MIT` |
+| cargo | `serde` | `1.0.229` | MIT OR Apache-2.0 | https://crates.io/crates/serde/1.0.229 | `licenses/cargo/serde-1.0.229/LICENSE-APACHE`<br>`licenses/cargo/serde-1.0.229/LICENSE-MIT` |
+| cargo | `serde-untagged` | `0.1.9` | MIT OR Apache-2.0 | https://crates.io/crates/serde-untagged/0.1.9 | `licenses/cargo/serde-untagged-0.1.9/LICENSE-APACHE`<br>`licenses/cargo/serde-untagged-0.1.9/LICENSE-MIT` |
+| cargo | `serde_core` | `1.0.229` | MIT OR Apache-2.0 | https://crates.io/crates/serde_core/1.0.229 | `licenses/cargo/serde_core-1.0.229/LICENSE-APACHE`<br>`licenses/cargo/serde_core-1.0.229/LICENSE-MIT` |
+| cargo | `serde_derive` | `1.0.229` | MIT OR Apache-2.0 | https://crates.io/crates/serde_derive/1.0.229 | `licenses/cargo/serde_derive-1.0.229/LICENSE-APACHE`<br>`licenses/cargo/serde_derive-1.0.229/LICENSE-MIT` |
+| cargo | `serde_derive_internals` | `0.29.1` | MIT OR Apache-2.0 | https://crates.io/crates/serde_derive_internals/0.29.1 | `licenses/cargo/serde_derive_internals-0.29.1/LICENSE-APACHE`<br>`licenses/cargo/serde_derive_internals-0.29.1/LICENSE-MIT` |
+| cargo | `serde_json` | `1.0.151` | MIT OR Apache-2.0 | https://crates.io/crates/serde_json/1.0.151 | `licenses/cargo/serde_json-1.0.151/LICENSE-APACHE`<br>`licenses/cargo/serde_json-1.0.151/LICENSE-MIT` |
+| cargo | `serde_repr` | `0.1.21` | MIT OR Apache-2.0 | https://crates.io/crates/serde_repr/0.1.21 | `licenses/cargo/serde_repr-0.1.21/LICENSE-APACHE`<br>`licenses/cargo/serde_repr-0.1.21/LICENSE-MIT` |
+| cargo | `serde_spanned` | `0.6.9` | MIT OR Apache-2.0 | https://crates.io/crates/serde_spanned/0.6.9 | `licenses/cargo/serde_spanned-0.6.9/LICENSE-APACHE`<br>`licenses/cargo/serde_spanned-0.6.9/LICENSE-MIT` |
+| cargo | `serde_spanned` | `1.1.1` | MIT OR Apache-2.0 | https://crates.io/crates/serde_spanned/1.1.1 | `licenses/cargo/serde_spanned-1.1.1/LICENSE-APACHE`<br>`licenses/cargo/serde_spanned-1.1.1/LICENSE-MIT` |
+| cargo | `serde_with` | `3.22.0` | MIT OR Apache-2.0 | https://crates.io/crates/serde_with/3.22.0 | `licenses/cargo/serde_with-3.22.0/LICENSE-APACHE`<br>`licenses/cargo/serde_with-3.22.0/LICENSE-MIT` |
+| cargo | `serde_with_macros` | `3.22.0` | MIT OR Apache-2.0 | https://crates.io/crates/serde_with_macros/3.22.0 | `licenses/cargo/serde_with_macros-3.22.0/LICENSE-APACHE`<br>`licenses/cargo/serde_with_macros-3.22.0/LICENSE-MIT` |
+| cargo | `serialize-to-javascript` | `0.1.2` | MIT OR Apache-2.0 | https://crates.io/crates/serialize-to-javascript/0.1.2 | `licenses/cargo/serialize-to-javascript-0.1.2/LICENSE-APACHE`<br>`licenses/cargo/serialize-to-javascript-0.1.2/LICENSE-MIT` |
+| cargo | `serialize-to-javascript-impl` | `0.1.2` | MIT OR Apache-2.0 | https://crates.io/crates/serialize-to-javascript-impl/0.1.2 | `licenses/cargo/serialize-to-javascript-impl-0.1.2/LICENSE-APACHE`<br>`licenses/cargo/serialize-to-javascript-impl-0.1.2/LICENSE-MIT` |
+| cargo | `servo_arc` | `0.4.3` | MIT OR Apache-2.0 | https://crates.io/crates/servo_arc/0.4.3 | `licenses/cargo/servo_arc-0.4.3/LICENSE-APACHE`<br>`licenses/cargo/servo_arc-0.4.3/LICENSE-MIT` |
+| cargo | `sha2` | `0.10.9` | MIT OR Apache-2.0 | https://crates.io/crates/sha2/0.10.9 | `licenses/cargo/sha2-0.10.9/LICENSE-APACHE`<br>`licenses/cargo/sha2-0.10.9/LICENSE-MIT` |
+| cargo | `shlex` | `2.0.1` | MIT OR Apache-2.0 | https://crates.io/crates/shlex/2.0.1 | `licenses/cargo/shlex-2.0.1/LICENSE-APACHE`<br>`licenses/cargo/shlex-2.0.1/LICENSE-MIT` |
+| cargo | `signal-hook-registry` | `1.4.8` | MIT OR Apache-2.0 | https://crates.io/crates/signal-hook-registry/1.4.8 | `licenses/cargo/signal-hook-registry-1.4.8/LICENSE-APACHE`<br>`licenses/cargo/signal-hook-registry-1.4.8/LICENSE-MIT` |
+| cargo | `simd-adler32` | `0.3.10` | MIT | https://crates.io/crates/simd-adler32/0.3.10 | `licenses/cargo/simd-adler32-0.3.10/LICENSE.md` |
+| cargo | `siphasher` | `1.0.3` | MIT/Apache-2.0 | https://crates.io/crates/siphasher/1.0.3 | `licenses/cargo/siphasher-1.0.3/COPYING` |
+| cargo | `slab` | `0.4.12` | MIT | https://crates.io/crates/slab/0.4.12 | `licenses/cargo/slab-0.4.12/LICENSE` |
+| cargo | `smallvec` | `1.15.2` | MIT OR Apache-2.0 | https://crates.io/crates/smallvec/1.15.2 | `licenses/cargo/smallvec-1.15.2/LICENSE-APACHE`<br>`licenses/cargo/smallvec-1.15.2/LICENSE-MIT` |
+| cargo | `socket2` | `0.6.5` | MIT OR Apache-2.0 | https://crates.io/crates/socket2/0.6.5 | `licenses/cargo/socket2-0.6.5/LICENSE-APACHE`<br>`licenses/cargo/socket2-0.6.5/LICENSE-MIT` |
+| cargo | `soup3` | `0.5.0` | MIT | https://crates.io/crates/soup3/0.5.0 | `licenses/cargo/soup3-0.5.0/LICENSE` |
+| cargo | `soup3-sys` | `0.5.0` | MIT | https://crates.io/crates/soup3-sys/0.5.0 | `licenses/cargo/soup3-sys-0.5.0/LICENSE` |
+| cargo | `stable_deref_trait` | `1.2.1` | MIT OR Apache-2.0 | https://crates.io/crates/stable_deref_trait/1.2.1 | `licenses/cargo/stable_deref_trait-1.2.1/LICENSE-APACHE`<br>`licenses/cargo/stable_deref_trait-1.2.1/LICENSE-MIT` |
+| cargo | `string_cache` | `0.9.0` | MIT OR Apache-2.0 | https://crates.io/crates/string_cache/0.9.0 | `licenses/cargo/string_cache-0.9.0/LICENSE-APACHE`<br>`licenses/cargo/string_cache-0.9.0/LICENSE-MIT` |
+| cargo | `string_cache_codegen` | `0.6.1` | MIT OR Apache-2.0 | https://crates.io/crates/string_cache_codegen/0.6.1 | `licenses/cargo/string_cache_codegen-0.6.1/LICENSE-APACHE`<br>`licenses/cargo/string_cache_codegen-0.6.1/LICENSE-MIT` |
+| cargo | `strsim` | `0.11.1` | MIT | https://crates.io/crates/strsim/0.11.1 | `licenses/cargo/strsim-0.11.1/LICENSE` |
+| cargo | `syn` | `1.0.109` | MIT OR Apache-2.0 | https://crates.io/crates/syn/1.0.109 | `licenses/cargo/syn-1.0.109/LICENSE-APACHE`<br>`licenses/cargo/syn-1.0.109/LICENSE-MIT` |
+| cargo | `syn` | `2.0.119` | MIT OR Apache-2.0 | https://crates.io/crates/syn/2.0.119 | `licenses/cargo/syn-2.0.119/LICENSE-APACHE`<br>`licenses/cargo/syn-2.0.119/LICENSE-MIT` |
+| cargo | `syn` | `3.0.3` | MIT OR Apache-2.0 | https://crates.io/crates/syn/3.0.3 | `licenses/cargo/syn-3.0.3/LICENSE-APACHE`<br>`licenses/cargo/syn-3.0.3/LICENSE-MIT` |
+| cargo | `synstructure` | `0.13.2` | MIT | https://crates.io/crates/synstructure/0.13.2 | `licenses/cargo/synstructure-0.13.2/LICENSE` |
+| cargo | `system-deps` | `6.2.2` | MIT OR Apache-2.0 | https://crates.io/crates/system-deps/6.2.2 | `licenses/cargo/system-deps-6.2.2/LICENSE-APACHE`<br>`licenses/cargo/system-deps-6.2.2/LICENSE-MIT` |
+| cargo | `tao` | `0.35.3` | Apache-2.0 | https://crates.io/crates/tao/0.35.3 | `licenses/cargo/tao-0.35.3/LICENSE`<br>`licenses/cargo/tao-0.35.3/LICENSE.spdx` |
+| cargo | `target-lexicon` | `0.12.16` | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/target-lexicon/0.12.16 | `licenses/cargo/target-lexicon-0.12.16/LICENSE` |
+| cargo | `tauri` | `2.11.5` | Apache-2.0 OR MIT | https://crates.io/crates/tauri/2.11.5 | `licenses/cargo/tauri-2.11.5/LICENSE_APACHE-2.0`<br>`licenses/cargo/tauri-2.11.5/LICENSE_MIT` |
+| cargo | `tauri-build` | `2.6.3` | Apache-2.0 OR MIT | https://crates.io/crates/tauri-build/2.6.3 | `licenses/cargo/tauri-build-2.6.3/LICENSE_APACHE-2.0`<br>`licenses/cargo/tauri-build-2.6.3/LICENSE_MIT` |
+| cargo | `tauri-codegen` | `2.6.3` | Apache-2.0 OR MIT | https://crates.io/crates/tauri-codegen/2.6.3 | `licenses/cargo/tauri-codegen-2.6.3/LICENSE_APACHE-2.0`<br>`licenses/cargo/tauri-codegen-2.6.3/LICENSE_MIT` |
+| cargo | `tauri-macros` | `2.6.3` | Apache-2.0 OR MIT | https://crates.io/crates/tauri-macros/2.6.3 | `licenses/cargo/tauri-macros-2.6.3/LICENSE_APACHE-2.0`<br>`licenses/cargo/tauri-macros-2.6.3/LICENSE_MIT` |
+| cargo | `tauri-plugin` | `2.6.3` | Apache-2.0 OR MIT | https://crates.io/crates/tauri-plugin/2.6.3 | `licenses/cargo/tauri-plugin-2.6.3/DECLARED-LICENSE.txt` |
+| cargo | `tauri-plugin-opener` | `2.5.4` | Apache-2.0 OR MIT | https://crates.io/crates/tauri-plugin-opener/2.5.4 | `licenses/cargo/tauri-plugin-opener-2.5.4/LICENSE.spdx`<br>`licenses/cargo/tauri-plugin-opener-2.5.4/LICENSE_APACHE-2.0`<br>`licenses/cargo/tauri-plugin-opener-2.5.4/LICENSE_MIT` |
+| cargo | `tauri-plugin-single-instance` | `2.4.3` | Apache-2.0 OR MIT | https://crates.io/crates/tauri-plugin-single-instance/2.4.3 | `licenses/cargo/tauri-plugin-single-instance-2.4.3/LICENSE.spdx`<br>`licenses/cargo/tauri-plugin-single-instance-2.4.3/LICENSE_APACHE-2.0`<br>`licenses/cargo/tauri-plugin-single-instance-2.4.3/LICENSE_MIT` |
+| cargo | `tauri-runtime` | `2.11.3` | Apache-2.0 OR MIT | https://crates.io/crates/tauri-runtime/2.11.3 | `licenses/cargo/tauri-runtime-2.11.3/LICENSE_APACHE-2.0`<br>`licenses/cargo/tauri-runtime-2.11.3/LICENSE_MIT` |
+| cargo | `tauri-runtime-wry` | `2.11.4` | Apache-2.0 OR MIT | https://crates.io/crates/tauri-runtime-wry/2.11.4 | `licenses/cargo/tauri-runtime-wry-2.11.4/LICENSE_APACHE-2.0`<br>`licenses/cargo/tauri-runtime-wry-2.11.4/LICENSE_MIT` |
+| cargo | `tauri-utils` | `2.9.3` | Apache-2.0 OR MIT | https://crates.io/crates/tauri-utils/2.9.3 | `licenses/cargo/tauri-utils-2.9.3/LICENSE_APACHE-2.0`<br>`licenses/cargo/tauri-utils-2.9.3/LICENSE_MIT` |
+| cargo | `tauri-winres` | `0.3.6` | MIT | https://crates.io/crates/tauri-winres/0.3.6 | `licenses/cargo/tauri-winres-0.3.6/LICENSE` |
+| cargo | `tendril` | `0.5.1` | MIT OR Apache-2.0 | https://crates.io/crates/tendril/0.5.1 | `licenses/cargo/tendril-0.5.1/LICENSE-APACHE`<br>`licenses/cargo/tendril-0.5.1/LICENSE-MIT` |
+| cargo | `thiserror` | `1.0.69` | MIT OR Apache-2.0 | https://crates.io/crates/thiserror/1.0.69 | `licenses/cargo/thiserror-1.0.69/LICENSE-APACHE`<br>`licenses/cargo/thiserror-1.0.69/LICENSE-MIT` |
+| cargo | `thiserror` | `2.0.20` | MIT OR Apache-2.0 | https://crates.io/crates/thiserror/2.0.20 | `licenses/cargo/thiserror-2.0.20/LICENSE-APACHE`<br>`licenses/cargo/thiserror-2.0.20/LICENSE-MIT` |
+| cargo | `thiserror-impl` | `1.0.69` | MIT OR Apache-2.0 | https://crates.io/crates/thiserror-impl/1.0.69 | `licenses/cargo/thiserror-impl-1.0.69/LICENSE-APACHE`<br>`licenses/cargo/thiserror-impl-1.0.69/LICENSE-MIT` |
+| cargo | `thiserror-impl` | `2.0.20` | MIT OR Apache-2.0 | https://crates.io/crates/thiserror-impl/2.0.20 | `licenses/cargo/thiserror-impl-2.0.20/LICENSE-APACHE`<br>`licenses/cargo/thiserror-impl-2.0.20/LICENSE-MIT` |
+| cargo | `time` | `0.3.55` | MIT OR Apache-2.0 | https://crates.io/crates/time/0.3.55 | `licenses/cargo/time-0.3.55/LICENSE-Apache`<br>`licenses/cargo/time-0.3.55/LICENSE-MIT` |
+| cargo | `time-core` | `0.1.9` | MIT OR Apache-2.0 | https://crates.io/crates/time-core/0.1.9 | `licenses/cargo/time-core-0.1.9/LICENSE-Apache`<br>`licenses/cargo/time-core-0.1.9/LICENSE-MIT` |
+| cargo | `time-macros` | `0.2.32` | MIT OR Apache-2.0 | https://crates.io/crates/time-macros/0.2.32 | `licenses/cargo/time-macros-0.2.32/LICENSE-Apache`<br>`licenses/cargo/time-macros-0.2.32/LICENSE-MIT` |
+| cargo | `tinystr` | `0.8.4` | Unicode-3.0 | https://crates.io/crates/tinystr/0.8.4 | `licenses/cargo/tinystr-0.8.4/LICENSE` |
+| cargo | `tinyvec` | `1.12.0` | Zlib OR Apache-2.0 OR MIT | https://crates.io/crates/tinyvec/1.12.0 | `licenses/cargo/tinyvec-1.12.0/LICENSE-APACHE.md`<br>`licenses/cargo/tinyvec-1.12.0/LICENSE-MIT.md`<br>`licenses/cargo/tinyvec-1.12.0/LICENSE-ZLIB.md` |
+| cargo | `tinyvec_macros` | `0.1.1` | MIT OR Apache-2.0 OR Zlib | https://crates.io/crates/tinyvec_macros/0.1.1 | `licenses/cargo/tinyvec_macros-0.1.1/LICENSE-APACHE.md`<br>`licenses/cargo/tinyvec_macros-0.1.1/LICENSE-MIT.md`<br>`licenses/cargo/tinyvec_macros-0.1.1/LICENSE-ZLIB.md` |
+| cargo | `tokio` | `1.53.1` | MIT | https://crates.io/crates/tokio/1.53.1 | `licenses/cargo/tokio-1.53.1/LICENSE` |
+| cargo | `toml` | `0.8.2` | MIT OR Apache-2.0 | https://crates.io/crates/toml/0.8.2 | `licenses/cargo/toml-0.8.2/LICENSE-APACHE`<br>`licenses/cargo/toml-0.8.2/LICENSE-MIT` |
+| cargo | `toml` | `0.9.12+spec-1.1.0` | MIT OR Apache-2.0 | https://crates.io/crates/toml/0.9.12%2Bspec-1.1.0 | `licenses/cargo/toml-0.9.12+spec-1.1.0/LICENSE-APACHE`<br>`licenses/cargo/toml-0.9.12+spec-1.1.0/LICENSE-MIT` |
+| cargo | `toml` | `1.1.4+spec-1.1.0` | MIT OR Apache-2.0 | https://crates.io/crates/toml/1.1.4%2Bspec-1.1.0 | `licenses/cargo/toml-1.1.4+spec-1.1.0/LICENSE-APACHE`<br>`licenses/cargo/toml-1.1.4+spec-1.1.0/LICENSE-MIT` |
+| cargo | `toml_datetime` | `0.6.3` | MIT OR Apache-2.0 | https://crates.io/crates/toml_datetime/0.6.3 | `licenses/cargo/toml_datetime-0.6.3/LICENSE-APACHE`<br>`licenses/cargo/toml_datetime-0.6.3/LICENSE-MIT` |
+| cargo | `toml_datetime` | `0.7.5+spec-1.1.0` | MIT OR Apache-2.0 | https://crates.io/crates/toml_datetime/0.7.5%2Bspec-1.1.0 | `licenses/cargo/toml_datetime-0.7.5+spec-1.1.0/LICENSE-APACHE`<br>`licenses/cargo/toml_datetime-0.7.5+spec-1.1.0/LICENSE-MIT` |
+| cargo | `toml_datetime` | `1.1.1+spec-1.1.0` | MIT OR Apache-2.0 | https://crates.io/crates/toml_datetime/1.1.1%2Bspec-1.1.0 | `licenses/cargo/toml_datetime-1.1.1+spec-1.1.0/LICENSE-APACHE`<br>`licenses/cargo/toml_datetime-1.1.1+spec-1.1.0/LICENSE-MIT` |
+| cargo | `toml_edit` | `0.19.15` | MIT OR Apache-2.0 | https://crates.io/crates/toml_edit/0.19.15 | `licenses/cargo/toml_edit-0.19.15/LICENSE-APACHE`<br>`licenses/cargo/toml_edit-0.19.15/LICENSE-MIT` |
+| cargo | `toml_edit` | `0.20.2` | MIT OR Apache-2.0 | https://crates.io/crates/toml_edit/0.20.2 | `licenses/cargo/toml_edit-0.20.2/LICENSE-APACHE`<br>`licenses/cargo/toml_edit-0.20.2/LICENSE-MIT` |
+| cargo | `toml_edit` | `0.25.13+spec-1.1.0` | MIT OR Apache-2.0 | https://crates.io/crates/toml_edit/0.25.13%2Bspec-1.1.0 | `licenses/cargo/toml_edit-0.25.13+spec-1.1.0/LICENSE-APACHE`<br>`licenses/cargo/toml_edit-0.25.13+spec-1.1.0/LICENSE-MIT` |
+| cargo | `toml_parser` | `1.1.3+spec-1.1.0` | MIT OR Apache-2.0 | https://crates.io/crates/toml_parser/1.1.3%2Bspec-1.1.0 | `licenses/cargo/toml_parser-1.1.3+spec-1.1.0/LICENSE-APACHE`<br>`licenses/cargo/toml_parser-1.1.3+spec-1.1.0/LICENSE-MIT` |
+| cargo | `toml_writer` | `1.1.2+spec-1.1.0` | MIT OR Apache-2.0 | https://crates.io/crates/toml_writer/1.1.2%2Bspec-1.1.0 | `licenses/cargo/toml_writer-1.1.2+spec-1.1.0/LICENSE-APACHE`<br>`licenses/cargo/toml_writer-1.1.2+spec-1.1.0/LICENSE-MIT` |
+| cargo | `tracing` | `0.1.44` | MIT | https://crates.io/crates/tracing/0.1.44 | `licenses/cargo/tracing-0.1.44/LICENSE` |
+| cargo | `tracing-attributes` | `0.1.31` | MIT | https://crates.io/crates/tracing-attributes/0.1.31 | `licenses/cargo/tracing-attributes-0.1.31/LICENSE` |
+| cargo | `tracing-core` | `0.1.36` | MIT | https://crates.io/crates/tracing-core/0.1.36 | `licenses/cargo/tracing-core-0.1.36/LICENSE` |
+| cargo | `tray-icon` | `0.24.2` | MIT OR Apache-2.0 | https://crates.io/crates/tray-icon/0.24.2 | `licenses/cargo/tray-icon-0.24.2/LICENSE-APACHE`<br>`licenses/cargo/tray-icon-0.24.2/LICENSE-MIT`<br>`licenses/cargo/tray-icon-0.24.2/LICENSE.spdx` |
+| cargo | `typeid` | `1.0.3` | MIT OR Apache-2.0 | https://crates.io/crates/typeid/1.0.3 | `licenses/cargo/typeid-1.0.3/LICENSE-APACHE`<br>`licenses/cargo/typeid-1.0.3/LICENSE-MIT` |
+| cargo | `typenum` | `1.20.1` | MIT OR Apache-2.0 | https://crates.io/crates/typenum/1.20.1 | `licenses/cargo/typenum-1.20.1/LICENSE`<br>`licenses/cargo/typenum-1.20.1/LICENSE-APACHE`<br>`licenses/cargo/typenum-1.20.1/LICENSE-MIT` |
+| cargo | `unic-char-property` | `0.9.0` | MIT/Apache-2.0 | https://crates.io/crates/unic-char-property/0.9.0 | `licenses/cargo/unic-char-property-0.9.0/DECLARED-LICENSE.txt` |
+| cargo | `unic-char-range` | `0.9.0` | MIT/Apache-2.0 | https://crates.io/crates/unic-char-range/0.9.0 | `licenses/cargo/unic-char-range-0.9.0/DECLARED-LICENSE.txt` |
+| cargo | `unic-common` | `0.9.0` | MIT/Apache-2.0 | https://crates.io/crates/unic-common/0.9.0 | `licenses/cargo/unic-common-0.9.0/DECLARED-LICENSE.txt` |
+| cargo | `unic-ucd-ident` | `0.9.0` | MIT/Apache-2.0 | https://crates.io/crates/unic-ucd-ident/0.9.0 | `licenses/cargo/unic-ucd-ident-0.9.0/DECLARED-LICENSE.txt` |
+| cargo | `unic-ucd-version` | `0.9.0` | MIT/Apache-2.0 | https://crates.io/crates/unic-ucd-version/0.9.0 | `licenses/cargo/unic-ucd-version-0.9.0/DECLARED-LICENSE.txt` |
+| cargo | `unicode-ident` | `1.0.24` | (MIT OR Apache-2.0) AND Unicode-3.0 | https://crates.io/crates/unicode-ident/1.0.24 | `licenses/cargo/unicode-ident-1.0.24/LICENSE-APACHE`<br>`licenses/cargo/unicode-ident-1.0.24/LICENSE-MIT`<br>`licenses/cargo/unicode-ident-1.0.24/LICENSE-UNICODE` |
+| cargo | `unicode-segmentation` | `1.13.3` | MIT OR Apache-2.0 | https://crates.io/crates/unicode-segmentation/1.13.3 | `licenses/cargo/unicode-segmentation-1.13.3/LICENSE-APACHE`<br>`licenses/cargo/unicode-segmentation-1.13.3/LICENSE-MIT` |
+| cargo | `url` | `2.5.8` | MIT OR Apache-2.0 | https://crates.io/crates/url/2.5.8 | `licenses/cargo/url-2.5.8/LICENSE-APACHE`<br>`licenses/cargo/url-2.5.8/LICENSE-MIT` |
+| cargo | `urlpattern` | `0.3.0` | MIT | https://crates.io/crates/urlpattern/0.3.0 | `licenses/cargo/urlpattern-0.3.0/LICENSE` |
+| cargo | `utf8_iter` | `1.0.4` | Apache-2.0 OR MIT | https://crates.io/crates/utf8_iter/1.0.4 | `licenses/cargo/utf8_iter-1.0.4/LICENSE-APACHE`<br>`licenses/cargo/utf8_iter-1.0.4/LICENSE-MIT` |
+| cargo | `uuid` | `1.25.0` | Apache-2.0 OR MIT | https://crates.io/crates/uuid/1.25.0 | `licenses/cargo/uuid-1.25.0/LICENSE-APACHE`<br>`licenses/cargo/uuid-1.25.0/LICENSE-MIT` |
+| cargo | `version-compare` | `0.2.1` | MIT | https://crates.io/crates/version-compare/0.2.1 | `licenses/cargo/version-compare-0.2.1/LICENSE` |
+| cargo | `version_check` | `0.9.5` | MIT/Apache-2.0 | https://crates.io/crates/version_check/0.9.5 | `licenses/cargo/version_check-0.9.5/LICENSE-APACHE`<br>`licenses/cargo/version_check-0.9.5/LICENSE-MIT` |
+| cargo | `walkdir` | `2.5.0` | Unlicense/MIT | https://crates.io/crates/walkdir/2.5.0 | `licenses/cargo/walkdir-2.5.0/COPYING`<br>`licenses/cargo/walkdir-2.5.0/LICENSE-MIT` |
+| cargo | `web_atoms` | `0.2.6` | MIT OR Apache-2.0 | https://crates.io/crates/web_atoms/0.2.6 | `licenses/cargo/web_atoms-0.2.6/LICENSE-APACHE`<br>`licenses/cargo/web_atoms-0.2.6/LICENSE-MIT` |
+| cargo | `webkit2gtk` | `2.0.2` | MIT | https://crates.io/crates/webkit2gtk/2.0.2 | `licenses/cargo/webkit2gtk-2.0.2/LICENSE` |
+| cargo | `webkit2gtk-sys` | `2.0.2` | MIT | https://crates.io/crates/webkit2gtk-sys/2.0.2 | `licenses/cargo/webkit2gtk-sys-2.0.2/LICENSE` |
+| cargo | `winnow` | `0.5.40` | MIT | https://crates.io/crates/winnow/0.5.40 | `licenses/cargo/winnow-0.5.40/LICENSE-MIT` |
+| cargo | `winnow` | `0.7.15` | MIT | https://crates.io/crates/winnow/0.7.15 | `licenses/cargo/winnow-0.7.15/LICENSE-MIT` |
+| cargo | `winnow` | `1.0.4` | MIT | https://crates.io/crates/winnow/1.0.4 | `licenses/cargo/winnow-1.0.4/LICENSE-MIT` |
+| cargo | `writeable` | `0.6.4` | Unicode-3.0 | https://crates.io/crates/writeable/0.6.4 | `licenses/cargo/writeable-0.6.4/LICENSE` |
+| cargo | `wry` | `0.55.1` | Apache-2.0 OR MIT | https://crates.io/crates/wry/0.55.1 | `licenses/cargo/wry-0.55.1/LICENSE-APACHE`<br>`licenses/cargo/wry-0.55.1/LICENSE-MIT`<br>`licenses/cargo/wry-0.55.1/LICENSE.spdx` |
+| cargo | `x11` | `2.21.0` | MIT | https://crates.io/crates/x11/2.21.0 | `licenses/cargo/x11-2.21.0/LICENSE-MIT` |
+| cargo | `x11-dl` | `2.21.0` | MIT | https://crates.io/crates/x11-dl/2.21.0 | `licenses/cargo/x11-dl-2.21.0/LICENSE-MIT` |
+| cargo | `yoke` | `0.8.3` | Unicode-3.0 | https://crates.io/crates/yoke/0.8.3 | `licenses/cargo/yoke-0.8.3/LICENSE` |
+| cargo | `yoke-derive` | `0.8.2` | Unicode-3.0 | https://crates.io/crates/yoke-derive/0.8.2 | `licenses/cargo/yoke-derive-0.8.2/LICENSE` |
+| cargo | `zbus` | `5.19.0` | MIT | https://crates.io/crates/zbus/5.19.0 | `licenses/cargo/zbus-5.19.0/LICENSE` |
+| cargo | `zbus_macros` | `5.19.0` | MIT | https://crates.io/crates/zbus_macros/5.19.0 | `licenses/cargo/zbus_macros-5.19.0/LICENSE` |
+| cargo | `zbus_names` | `4.3.4` | MIT | https://crates.io/crates/zbus_names/4.3.4 | `licenses/cargo/zbus_names-4.3.4/LICENSE` |
+| cargo | `zcheapstr` | `1.1.0` | MIT | https://crates.io/crates/zcheapstr/1.1.0 | `licenses/cargo/zcheapstr-1.1.0/LICENSE` |
+| cargo | `zerofrom` | `0.1.8` | Unicode-3.0 | https://crates.io/crates/zerofrom/0.1.8 | `licenses/cargo/zerofrom-0.1.8/LICENSE` |
+| cargo | `zerofrom-derive` | `0.1.7` | Unicode-3.0 | https://crates.io/crates/zerofrom-derive/0.1.7 | `licenses/cargo/zerofrom-derive-0.1.7/LICENSE` |
+| cargo | `zerotrie` | `0.2.5` | Unicode-3.0 | https://crates.io/crates/zerotrie/0.2.5 | `licenses/cargo/zerotrie-0.2.5/LICENSE` |
+| cargo | `zerovec` | `0.11.8` | Unicode-3.0 | https://crates.io/crates/zerovec/0.11.8 | `licenses/cargo/zerovec-0.11.8/LICENSE` |
+| cargo | `zerovec-derive` | `0.11.6` | Unicode-3.0 | https://crates.io/crates/zerovec-derive/0.11.6 | `licenses/cargo/zerovec-derive-0.11.6/LICENSE` |
+| cargo | `zmij` | `1.0.23` | MIT | https://crates.io/crates/zmij/1.0.23 | `licenses/cargo/zmij-1.0.23/LICENSE-MIT` |
+| cargo | `zvariant` | `5.15.0` | MIT | https://crates.io/crates/zvariant/5.15.0 | `licenses/cargo/zvariant-5.15.0/LICENSE` |
+| cargo | `zvariant_derive` | `5.15.0` | MIT | https://crates.io/crates/zvariant_derive/5.15.0 | `licenses/cargo/zvariant_derive-5.15.0/LICENSE` |
+| cargo | `zvariant_utils` | `4.2.0` | MIT | https://crates.io/crates/zvariant_utils/4.2.0 | `licenses/cargo/zvariant_utils-4.2.0/LICENSE` |
+| npm | `@tauri-apps/api` | `2.11.1` | Apache-2.0 OR MIT | https://registry.npmjs.org/@tauri-apps/api/-/api-2.11.1.tgz | `licenses/npm/_tauri-apps_api-2.11.1/LICENSE_APACHE-2.0`<br>`licenses/npm/_tauri-apps_api-2.11.1/LICENSE_MIT` |
+| npm | `svelte` | `5.56.10` | MIT | https://registry.npmjs.org/svelte/-/svelte-5.56.10.tgz | `licenses/npm/svelte-5.56.10/LICENSE.md` |
+| python | `annotated-doc` | `0.0.5` | MIT | https://github.com/fastapi/annotated-doc | `runtime/python/lib/python3.13/site-packages/annotated_doc-0.0.5.dist-info/licenses/LICENSE` |
+| python | `annotated-types` | `0.8.0` | MIT | https://github.com/annotated-types/annotated-types | `runtime/python/lib/python3.13/site-packages/annotated_types-0.8.0.dist-info/licenses/LICENSE` |
+| python | `anyio` | `4.14.2` | MIT | https://github.com/agronholm/anyio | `runtime/python/lib/python3.13/site-packages/anyio-4.14.2.dist-info/licenses/LICENSE` |
+| python | `certifi` | `2026.7.22` | MPL-2.0 | https://github.com/certifi/python-certifi | `runtime/python/lib/python3.13/site-packages/certifi-2026.7.22.dist-info/licenses/LICENSE` |
+| python | `cffi` | `2.1.0` | MIT-0 | https://github.com/python-cffi/cffi | `runtime/python/lib/python3.13/site-packages/cffi-2.1.0.dist-info/licenses/LICENSE` |
+| python | `charset-normalizer` | `3.4.9` | MIT | https://github.com/jawah/charset_normalizer | `runtime/python/lib/python3.13/site-packages/charset_normalizer-3.4.9.dist-info/licenses/LICENSE` |
+| python | `click` | `8.4.2` | BSD-3-Clause | https://github.com/pallets/click/ | `runtime/python/lib/python3.13/site-packages/click-8.4.2.dist-info/licenses/LICENSE.txt` |
+| python | `curl_cffi` | `0.16.0` | MIT | https://github.com/lexiforest/curl_cffi | `runtime/python/lib/python3.13/site-packages/curl_cffi-0.16.0.dist-info/licenses/LICENSE` |
+| python | `fastapi` | `0.141.1` | MIT | https://github.com/fastapi/fastapi | `runtime/python/lib/python3.13/site-packages/fastapi-0.141.1.dist-info/licenses/LICENSE` |
+| python | `filelock` | `3.32.2` | MIT | https://github.com/tox-dev/py-filelock | `runtime/python/lib/python3.13/site-packages/filelock-3.32.2.dist-info/licenses/LICENSE` |
+| python | `fsspec` | `2026.7.0` | BSD-3-Clause | https://github.com/fsspec/filesystem_spec | `runtime/python/lib/python3.13/site-packages/fsspec-2026.7.0.dist-info/licenses/LICENSE` |
+| python | `h11` | `0.16.0` | MIT | https://github.com/python-hyper/h11 | `runtime/python/lib/python3.13/site-packages/h11-0.16.0.dist-info/licenses/LICENSE.txt` |
+| python | `httpcore` | `1.0.9` | BSD-3-Clause | https://github.com/encode/httpcore | `runtime/python/lib/python3.13/site-packages/httpcore-1.0.9.dist-info/licenses/LICENSE.md` |
+| python | `httpcore2` | `2.9.1` | BSD-3-Clause | https://github.com/pydantic/httpx2/blob/main/src/httpcore2 | `runtime/python/lib/python3.13/site-packages/httpcore2-2.9.1.dist-info/licenses/LICENSE.md` |
+| python | `httpx` | `0.28.1` | BSD-3-Clause | https://github.com/encode/httpx | `runtime/python/lib/python3.13/site-packages/httpx-0.28.1.dist-info/licenses/LICENSE.md` |
+| python | `httpx2` | `2.9.1` | BSD-3-Clause | https://github.com/pydantic/httpx2 | `runtime/python/lib/python3.13/site-packages/httpx2-2.9.1.dist-info/licenses/LICENSE.md` |
+| python | `idna` | `3.18` | BSD-3-Clause | https://github.com/kjd/idna | `runtime/python/lib/python3.13/site-packages/idna-3.18.dist-info/licenses/LICENSE.md` |
+| python | `Jinja2` | `3.1.6` | BSD License | https://github.com/pallets/jinja/ | `runtime/python/lib/python3.13/site-packages/jinja2-3.1.6.dist-info/licenses/LICENSE.txt` |
+| python | `MarkupSafe` | `3.0.3` | BSD-3-Clause | https://github.com/pallets/markupsafe/ | `runtime/python/lib/python3.13/site-packages/markupsafe-3.0.3.dist-info/licenses/LICENSE.txt` |
+| python | `mpmath` | `1.3.0` | BSD | https://github.com/fredrik-johansson/mpmath | `runtime/python/lib/python3.13/site-packages/mpmath-1.3.0.dist-info/LICENSE` |
+| python | `networkx` | `3.6.1` | BSD-3-Clause | https://github.com/networkx/networkx | `runtime/python/lib/python3.13/site-packages/networkx-3.6.1.dist-info/licenses/LICENSE.txt` |
+| python | `numpy` | `2.4.2` | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | https://github.com/numpy/numpy | `runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/_core/include/numpy/libdivide/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/_core/src/common/pythoncapi-compat/COPYING`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/_core/src/highway/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/_core/src/multiarray/dragon4_LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/_core/src/umath/svml/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/fft/pocketfft/LICENSE.md`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/linalg/lapack_lite/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/ma/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/random/LICENSE.md`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/random/src/distributions/LICENSE.md`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/random/src/mt19937/LICENSE.md`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/random/src/pcg64/LICENSE.md`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/random/src/philox/LICENSE.md`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/random/src/sfc64/LICENSE.md`<br>`runtime/python/lib/python3.13/site-packages/numpy-2.4.2.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.md`<br>`runtime/python/lib/python3.13/site-packages/numpy/_core/include/numpy/random/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/numpy/ma/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/numpy/random/LICENSE.md` |
+| python | `opencv-python-headless` | `4.13.0.92` | Apache 2.0 | https://github.com/opencv/opencv-python | `runtime/python/lib/python3.13/site-packages/cv2/LICENSE-3RD-PARTY.txt`<br>`runtime/python/lib/python3.13/site-packages/cv2/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/opencv_python_headless-4.13.0.92.dist-info/LICENSE-3RD-PARTY.txt`<br>`runtime/python/lib/python3.13/site-packages/opencv_python_headless-4.13.0.92.dist-info/LICENSE.txt` |
+| python | `pillow` | `12.1.1` | MIT-CMU | https://github.com/python-pillow/Pillow | `runtime/python/lib/python3.13/site-packages/pillow-12.1.1.dist-info/licenses/LICENSE` |
+| python | `pip` | `26.2.1` | MIT | https://github.com/pypa/pip | `runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/AUTHORS.txt`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/cachecontrol/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/certifi/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/distlib/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/distro/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/idna/LICENSE.md`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/msgpack/COPYING`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/packaging/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/packaging/LICENSE.APACHE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/packaging/LICENSE.BSD`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/pkg_resources/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/platformdirs/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/pygments/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/pyproject_hooks/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/requests/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/resolvelib/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/rich/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/tomli/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/tomli_w/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/truststore/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip-26.2.1.dist-info/licenses/src/pip/_vendor/urllib3/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/cachecontrol/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/certifi/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/distlib/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/distro/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/idna/LICENSE.md`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/msgpack/COPYING`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/packaging/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/packaging/LICENSE.APACHE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/packaging/LICENSE.BSD`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/packaging/licenses/__init__.py`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/packaging/licenses/_spdx.py`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/pkg_resources/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/platformdirs/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/pygments/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/pyproject_hooks/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/requests/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/resolvelib/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/rich/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/tomli/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/tomli_w/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/truststore/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/pip/_vendor/urllib3/LICENSE.txt` |
+| python | `pycparser` | `3.0` | BSD-3-Clause | https://github.com/eliben/pycparser | `runtime/python/lib/python3.13/site-packages/pycparser-3.0.dist-info/licenses/LICENSE` |
+| python | `pydantic` | `2.13.4` | MIT | https://github.com/pydantic/pydantic | `runtime/python/lib/python3.13/site-packages/pydantic-2.13.4.dist-info/licenses/LICENSE` |
+| python | `pydantic_core` | `2.46.4` | MIT | https://github.com/pydantic/pydantic/tree/main/pydantic-core | `runtime/python/lib/python3.13/site-packages/pydantic_core-2.46.4.dist-info/licenses/LICENSE` |
+| python | `PySocks` | `1.7.1` | BSD | https://github.com/Anorov/PySocks | `runtime/python/lib/python3.13/site-packages/PySocks-1.7.1.dist-info/LICENSE` |
+| python | `PyYAML` | `6.0.3` | MIT | https://github.com/yaml/pyyaml | `runtime/python/lib/python3.13/site-packages/pyyaml-6.0.3.dist-info/licenses/LICENSE` |
+| python | `requests` | `2.34.2` | Apache-2.0 | https://github.com/psf/requests | `runtime/python/lib/python3.13/site-packages/requests-2.34.2.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/requests-2.34.2.dist-info/licenses/NOTICE` |
+| python | `setuptools` | `81.0.0` | MIT | https://github.com/pypa/setuptools | `runtime/python/lib/python3.13/site-packages/setuptools-81.0.0.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/autocommand-2.2.2.dist-info/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/backports.tarfile-1.2.0.dist-info/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/jaraco.text-4.0.0.dist-info/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/jaraco_context-6.1.0.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/jaraco_functools-4.4.0.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/more_itertools-10.8.0.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE.APACHE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE.BSD`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/packaging/licenses/__init__.py`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/packaging/licenses/_spdx.py`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/platformdirs-4.4.0.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/tomli-2.4.0.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/wheel-0.46.3.dist-info/licenses/LICENSE.txt`<br>`runtime/python/lib/python3.13/site-packages/setuptools/_vendor/zipp-3.23.0.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/config/NOTICE`<br>`runtime/python/lib/python3.13/site-packages/setuptools/config/_validate_pyproject/NOTICE` |
+| python | `starlette` | `1.3.1` | BSD-3-Clause | https://github.com/Kludex/starlette | `runtime/python/lib/python3.13/site-packages/starlette-1.3.1.dist-info/licenses/LICENSE.md` |
+| python | `sympy` | `1.14.0` | BSD | https://github.com/sympy/sympy | `runtime/python/lib/python3.13/site-packages/sympy-1.14.0.dist-info/licenses/AUTHORS`<br>`runtime/python/lib/python3.13/site-packages/sympy-1.14.0.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/sympy/parsing/latex/LICENSE.txt` |
+| python | `torch` | `2.11.0+cpu` | BSD-3-Clause | https://github.com/pytorch/pytorch | `runtime/python/lib/python3.13/site-packages/torch-2.11.0+cpu.dist-info/licenses/LICENSE`<br>`runtime/python/lib/python3.13/site-packages/torch-2.11.0+cpu.dist-info/licenses/NOTICE` |
+| python | `torchvision` | `0.26.0+cpu` | BSD | https://github.com/pytorch/vision | `runtime/python/lib/python3.13/site-packages/torchvision-0.26.0+cpu.dist-info/LICENSE` |
+| python | `tqdm` | `4.67.3` | MPL-2.0 AND MIT | https://github.com/tqdm/tqdm | `runtime/python/lib/python3.13/site-packages/tqdm-4.67.3.dist-info/licenses/LICENCE` |
+| python | `truststore` | `0.10.4` | MIT | https://github.com/sethmlarson/truststore | `runtime/python/lib/python3.13/site-packages/truststore-0.10.4.dist-info/licenses/LICENSE` |
+| python | `typing-inspection` | `0.4.2` | MIT | https://github.com/pydantic/typing-inspection | `runtime/python/lib/python3.13/site-packages/typing_inspection-0.4.2.dist-info/licenses/LICENSE` |
+| python | `typing_extensions` | `4.16.0` | PSF-2.0 | https://github.com/python/typing_extensions | `runtime/python/lib/python3.13/site-packages/typing_extensions-4.16.0.dist-info/licenses/LICENSE` |
+| python | `urllib3` | `2.7.0` | MIT | https://github.com/urllib3/urllib3 | `runtime/python/lib/python3.13/site-packages/urllib3-2.7.0.dist-info/licenses/LICENSE.txt` |
+| python | `uvicorn` | `0.52.1` | BSD-3-Clause | https://github.com/Kludex/uvicorn | `runtime/python/lib/python3.13/site-packages/uvicorn-0.52.1.dist-info/licenses/LICENSE.md` |
+| python | `websocket-client` | `1.9.0` | Apache-2.0 | https://github.com/websocket-client/websocket-client/ | `runtime/python/lib/python3.13/site-packages/websocket_client-1.9.0.dist-info/licenses/LICENSE` |
+| python-source | `gallery-dl` | `1.32.7-dev` | GPL-2.0-only | https://codeberg.org/mikf/gallery-dl/src/commit/2790ceb303ee4986ef7f683cc16d3799bb4356ce | `licenses/gallery-dl-GPL-2.0.txt` |
+| runtime | `CPython` | `3.13.15` | Python-2.0 AND CNRI-Python | https://github.com/python/cpython/tree/v3.13.15 | `runtime/metadata/python-build-standalone/licenses/LICENSE.cpython.txt` |
+| runtime | `Rust standard library` | `1.98.0` | Apache-2.0 OR MIT | https://github.com/rust-lang/rust/tree/1.98.0 | `licenses/rust/rust-1.98.0/COPYRIGHT.html`<br>`licenses/rust/rust-1.98.0/COPYRIGHT-library.html` |
+| runtime-extension | `CPython extension _bz2` | `3.13.15` | bzip2-1.0.6 | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.bzip2.txt` |
+| runtime-extension | `CPython extension _ctypes` | `3.13.15` | MIT | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.libffi.txt` |
+| runtime-extension | `CPython extension _curses` | `3.13.15` | X11 | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.ncurses.txt` |
+| runtime-extension | `CPython extension _curses_panel` | `3.13.15` | X11 | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.ncurses.txt` |
+| runtime-extension | `CPython extension _dbm` | `3.13.15` | Sleepycat | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.bdb.txt` |
+| runtime-extension | `CPython extension _decimal` | `3.13.15` | BSD-2-Clause | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.mpdecimal.txt` |
+| runtime-extension | `CPython extension _elementtree` | `3.13.15` | MIT | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.expat.txt` |
+| runtime-extension | `CPython extension _hashlib` | `3.13.15` | Apache-2.0 AND OpenSSL | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.openssl-1.1.txt`<br>`runtime/metadata/python-build-standalone/licenses/LICENSE.openssl-3.txt` |
+| runtime-extension | `CPython extension _lzma` | `3.13.15` | 0BSD | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.liblzma.txt` |
+| runtime-extension | `CPython extension _sqlite3` | `3.13.15` | Public Domain | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.sqlite.txt` |
+| runtime-extension | `CPython extension _ssl` | `3.13.15` | Apache-2.0 AND OpenSSL | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.openssl-1.1.txt`<br>`runtime/metadata/python-build-standalone/licenses/LICENSE.openssl-3.txt` |
+| runtime-extension | `CPython extension _tkinter` | `3.13.15` | MIT AND TCL AND X11 | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.libX11.txt`<br>`runtime/metadata/python-build-standalone/licenses/LICENSE.libXau.txt`<br>`runtime/metadata/python-build-standalone/licenses/LICENSE.libxcb.txt`<br>`runtime/metadata/python-build-standalone/licenses/LICENSE.tcl.txt` |
+| runtime-extension | `CPython extension _uuid` | `3.13.15` | BSD-3-Clause | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.libuuid.txt` |
+| runtime-extension | `CPython extension pyexpat` | `3.13.15` | MIT | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.expat.txt` |
+| runtime-extension | `CPython extension readline` | `3.13.15` | BSD-3-Clause AND X11 | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.libedit.txt`<br>`runtime/metadata/python-build-standalone/licenses/LICENSE.ncurses.txt` |
+| runtime-extension | `CPython extension zlib` | `3.13.15` | Zlib | https://github.com/astral-sh/python-build-standalone/releases/download/20260807/cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst | `runtime/metadata/python-build-standalone/licenses/LICENSE.zlib.txt` |
