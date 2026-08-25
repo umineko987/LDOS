@@ -133,6 +133,15 @@ jobs:
       - name: Tauri 与后端前端字节一致性
         working-directory: desktop
         run: npm run verify:artifacts
+      - name: 构建后端 wheel
+        run: >-
+          python -m pip wheel --disable-pip-version-check --no-deps
+          --wheel-dir artifacts/wheel ./gallery-dl-backend
+      - name: wheel 前端字节与 RECORD 一致性
+        run: |
+          wheel="$(find artifacts/wheel -maxdepth 1 -type f -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          python scripts/frontend_artifacts.py verify --wheel "$wheel"
       - name: 保存 Desktop coverage 报告
         if: always()
         uses: actions/upload-artifact@v7
