@@ -7,10 +7,6 @@
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
-    "beforeBundleCommand": {
-      "script": "python ../../scripts/desktop_release.py verify-tree --tree release/backend",
-      "cwd": "."
-    },
     "frontendDist": "../dist"
   },
   "app": {
@@ -37,14 +33,10 @@
     }
   },
   "bundle": {
-    "active": true,
+    "active": false,
     "targets": "all",
     "icon": ["icons/icon.png", "icons/icon.ico"],
     "license": "MIT",
-    "shortDescription": "Local gallery workflow desktop application",
-    "resources": {
-      "release/backend/": "backend/",
-      "../../gallery-dl-backend/gdl_backend/webui_dist/frontend-manifest.json": "frontend-manifest.json"
-    }
+    "shortDescription": "Local gallery workflow desktop application"
   }
 }

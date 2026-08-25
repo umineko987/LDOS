@@ -120,6 +120,26 @@ class DesktopReleaseTests(unittest.TestCase):
             },
         )
 
+    def test_tauri_release_resources_are_opt_in(self) -> None:
+        base = json.loads(
+            (ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+        )
+        release_config_path = ROOT / "desktop" / release.TAURI_RELEASE_CONFIG
+        release_config = json.loads(release_config_path.read_text(encoding="utf-8"))
+
+        self.assertFalse(base["bundle"]["active"])
+        self.assertNotIn("resources", base["bundle"])
+        self.assertNotIn("beforeBundleCommand", base["build"])
+        self.assertTrue(release_config["bundle"]["active"])
+        self.assertEqual(
+            release_config["bundle"]["resources"],
+            {
+                "release/backend/": "backend/",
+                "../../gallery-dl-backend/gdl_backend/webui_dist/frontend-manifest.json":
+                    "frontend-manifest.json",
+            },
+        )
+
     def test_backend_projection_omits_the_duplicate_frontend(self) -> None:
         with temporary_path() as tmp_path:
             app = tmp_path / "app"

@@ -32,6 +32,7 @@ from third_party_notices import (
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = ROOT / "desktop" / "release" / "runtime-lock.json"
 DEFAULT_OUTPUT = ROOT / "desktop" / "src-tauri" / "release" / "backend"
+TAURI_RELEASE_CONFIG = Path("src-tauri") / "tauri.release.conf.json"
 RELEASE_BASE_URL = (
     "https://github.com/astral-sh/python-build-standalone/releases/download"
 )
@@ -1127,7 +1128,16 @@ def build_release(cache_dir: Path) -> dict[str, Any]:
     run(["cargo", "fmt", "--check"], cwd=tauri)
     run(["cargo", "test"], cwd=tauri)
     run(
-        [npm, "run", "tauri", "--", "build", "--ci"],
+        [
+            npm,
+            "run",
+            "tauri",
+            "--",
+            "build",
+            "--ci",
+            "--config",
+            os.fspath(TAURI_RELEASE_CONFIG),
+        ],
         cwd=desktop,
         env=tauri_bundle_env(target),
     )

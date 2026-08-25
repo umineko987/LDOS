@@ -133,15 +133,25 @@ mod tests {
             .expect("valid Tauri config JSON");
         assert_eq!(config["build"]["frontendDist"], "../dist");
         assert_eq!(config["build"]["devUrl"], "http://localhost:1420");
-        assert_eq!(config["bundle"]["active"], true);
+        assert_eq!(config["bundle"]["active"], false);
         assert!(config["bundle"].get("externalBin").is_none());
+        assert!(config["bundle"].get("resources").is_none());
+        assert!(config["build"].get("beforeBundleCommand").is_none());
+        let release: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.release.conf.json"))
+                .expect("valid release Tauri config JSON");
+        assert_eq!(release["bundle"]["active"], true);
         assert_eq!(
-            config["bundle"]["resources"],
+            release["bundle"]["resources"],
             serde_json::json!({
                 "release/backend/": "backend/",
                 "../../gallery-dl-backend/gdl_backend/webui_dist/frontend-manifest.json":
                     "frontend-manifest.json"
             })
+        );
+        assert_eq!(
+            release["build"]["beforeBundleCommand"]["script"],
+            "python ../../scripts/desktop_release.py verify-tree --tree release/backend"
         );
         assert_eq!(config["identifier"], "dev.imageweave.desktop");
         let linux: serde_json::Value =
