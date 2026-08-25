@@ -243,6 +243,8 @@ impl LaunchSpec {
             .env("IMAGEWEAVE_DESKTOP_DISTRIBUTION", "1")
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
+        #[cfg(debug_assertions)]
+        command.env("IMAGEWEAVE_DESKTOP_ORIGIN", "http://localhost:1420");
         command.envs(self.environment.iter().map(|(key, value)| (key, value)));
         command
     }
@@ -561,6 +563,10 @@ mod tests {
         assert!(command.get_envs().any(|(name, value)| {
             name == "IMAGEWEAVE_DESKTOP_PYTHON"
                 && value == Some(std::ffi::OsStr::new("backend/runtime/python/bin/python3"))
+        }));
+        assert!(command.get_envs().any(|(name, value)| {
+            name == "IMAGEWEAVE_DESKTOP_ORIGIN"
+                && value == Some(std::ffi::OsStr::new("http://localhost:1420"))
         }));
     }
 

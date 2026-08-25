@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from gdl_backend.app import create_app
 from gdl_backend.config import AppSettings
@@ -37,6 +39,28 @@ class DesktopOriginConfigTests(unittest.TestCase):
                 "http://[::1]:1420",
             ],
         )
+
+    def test_supervised_desktop_origin_augments_legacy_config_safely(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config_path = Path(temporary) / "config.json"
+            config_path.write_text(
+                json.dumps({"server": {"cors_origins": []}}),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {"IMAGEWEAVE_DESKTOP_ORIGIN": VITE_ORIGIN},
+            ):
+                settings = AppSettings.load(config_path)
+
+            self.assertEqual(settings.server.cors_origins, [VITE_ORIGIN])
+
+            with patch.dict(
+                os.environ,
+                {"IMAGEWEAVE_DESKTOP_ORIGIN": "https://evil.example.com"},
+            ):
+                with self.assertRaisesRegex(ValueError, r"server\.cors_origins"):
+                    AppSettings.load(config_path)
 
     def test_wildcards_remote_origins_and_non_origin_values_are_rejected(self) -> None:
         invalid_values = (

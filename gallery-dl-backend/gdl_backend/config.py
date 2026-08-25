@@ -27,6 +27,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 WORKSPACE_DIR = PROJECT_DIR.parent
 
 AUTH_PROXY_SCHEMES = ("http", "https", "socks4", "socks5", "socks5h")
+DESKTOP_ORIGIN_ENV = "IMAGEWEAVE_DESKTOP_ORIGIN"
 
 
 def normalize_authorization_proxy(value: Any) -> str:
@@ -122,6 +123,16 @@ def _desktop_origins(values: Any) -> list[str]:
         if origin not in normalized:
             normalized.append(origin)
     return normalized
+
+
+def _desktop_origins_with_supervisor(values: Any) -> list[str]:
+    origins = _desktop_origins(values)
+    supervised = os.environ.get(DESKTOP_ORIGIN_ENV)
+    if supervised:
+        origin = normalize_desktop_origin(supervised)
+        if origin not in origins:
+            origins.append(origin)
+    return origins
 
 
 def _path(value: str | os.PathLike[str] | None, base: Path, default: Path) -> Path:
@@ -456,7 +467,9 @@ class AppSettings:
         server = ServerSettings(
             host=str(os.environ.get("GDL_BACKEND_HOST", server_data.get("host", "127.0.0.1"))),
             port=int(os.environ.get("GDL_BACKEND_PORT", server_data.get("port", 8787))),
-            cors_origins=_desktop_origins(server_data.get("cors_origins", [])),
+            cors_origins=_desktop_origins_with_supervisor(
+                server_data.get("cors_origins", [])
+            ),
             allow_private_targets=bool(server_data.get("allow_private_targets", False)),
             strict_target_dns=server_data.get("strict_target_dns", True),
         )
