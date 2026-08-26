@@ -36,6 +36,7 @@ from .api_routes import (
 # live outside the composition root.
 from .api_routes.errors import ApiError
 from .gallery_service import GalleryCatalogService
+from .gallery_file_operations import GalleryFileOperations
 from .gallery_thumbnails import ThumbnailService
 from .api_routes.validation import (
     validate_network_target as _validate_network_target,
@@ -88,6 +89,7 @@ class ServiceContainer:
         )
         self.auth = AuthManager(settings)
         self.gallery_catalog = GalleryCatalogService(self.db.gallery)
+        self.gallery_file_operations = GalleryFileOperations(self.db.gallery)
         self.gallery_thumbnails = ThumbnailService(
             settings.runtime_dir / "gallery-cache"
         )

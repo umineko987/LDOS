@@ -471,5 +471,114 @@ class GalleryAnnotationPutRoutesTest(GalleryApiTestBase):
         )
 
 
+
+class GalleryFileOperationRoutesTest(GalleryApiTestBase):
+    """G3-2：rename / trash / undo / restore / purge 的 HTTP 层。"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.source = self.import_source(
+            {"pic.jpg": _png_bytes(), "pic.txt": "tag_a", "other.jpg": _png_bytes()}
+        )
+        self.wait_scan_finished(self.source["source_id"])
+        self.assets = self._list_assets()
+
+
+    def _list_assets(self) -> dict:
+        root_dir = self.container.db.gallery.get_root_directory(
+            self.source["source_id"]
+        )
+        response = self.client.get(
+            "/api/v1/gallery/directories/"
+            f"{root_dir['directory_id']}/entries?view=desktop&limit=100",
+        )
+        return {a["name"]: a for a in response.json()["assets"]}
+
+    def test_rename_route(self) -> None:
+        asset_id = self.assets["pic.jpg"]["asset_id"]
+        response = self.client.post(
+            f"/api/v1/gallery/assets/{asset_id}/rename",
+            json={"new_stem": "renamed"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["status"], "committed")
+        self.assertTrue(
+            (self.root / "src-a" / "renamed.jpg").exists(),
+        )
+
+    def test_rename_conflict_409(self) -> None:
+        asset_id = self.assets["pic.jpg"]["asset_id"]
+        response = self.client.post(
+            f"/api/v1/gallery/assets/{asset_id}/rename",
+            json={"new_stem": "other"},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()["error"]["code"], "rename_target_conflict"
+        )
+
+    def test_trash_undo_flow(self) -> None:
+        asset_id = self.assets["pic.jpg"]["asset_id"]
+        response = self.client.post(
+            "/api/v1/gallery/file-operations/trash",
+            json={"asset_ids": [asset_id]},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        operation = response.json()
+        self.assertEqual(operation["status"], "committed")
+        self.assertFalse((self.root / "src-a" / "pic.jpg").exists())
+        # 撤销。
+        undo = self.client.post(
+            f"/api/v1/gallery/file-operations/{operation['operation_id']}/undo"
+        )
+        self.assertEqual(undo.status_code, 200, undo.text)
+        self.assertTrue((self.root / "src-a" / "pic.jpg").exists())
+
+    def test_trash_list_and_purge(self) -> None:
+        asset_id = self.assets["pic.jpg"]["asset_id"]
+        response = self.client.post(
+            "/api/v1/gallery/file-operations/trash",
+            json={"asset_ids": [asset_id]},
+        )
+        operation = response.json()
+        listing = self.client.get("/api/v1/gallery/trash?view=desktop")
+        self.assertEqual(listing.status_code, 200, listing.text)
+        self.assertEqual(len(listing.json()["operations"]), 1)
+        purge = self.client.delete(
+            f"/api/v1/gallery/trash/{operation['operation_id']}"
+        )
+        self.assertEqual(purge.status_code, 200, purge.text)
+        self.assertIsNone(
+            self.container.db.gallery.get_asset(asset_id)
+        )
+
+    def test_restore_conflict_409(self) -> None:
+        asset_id = self.assets["pic.jpg"]["asset_id"]
+        response = self.client.post(
+            "/api/v1/gallery/file-operations/trash",
+            json={"asset_ids": [asset_id]},
+        )
+        operation = response.json()
+        # 原路径被占用。
+        (self.root / "src-a" / "pic.jpg").write_bytes(_png_bytes())
+        restore = self.client.post(
+            f"/api/v1/gallery/trash/{operation['operation_id']}/restore"
+        )
+        self.assertEqual(restore.status_code, 409)
+        self.assertEqual(
+            restore.json()["error"]["code"], "restore_target_conflict"
+        )
+
+    def test_missing_operation_404(self) -> None:
+        response = self.client.post(
+            "/api/v1/gallery/trash/nonexistent/restore"
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json()["error"]["code"], "operation_not_found"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

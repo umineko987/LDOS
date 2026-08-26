@@ -30,6 +30,11 @@ from ..gallery_service import (
     GallerySourceNotFound,
     GallerySourceOffline,
 )
+from ..gallery_file_operations import (
+    GalleryFileOperationError,
+    GalleryFileOperations,
+)
+
 from ..gallery_thumbnails import SUPPORTED_THUMBNAIL_SIZES, ThumbnailUnavailable
 from .dependencies import get_service
 from .errors import ApiError
@@ -63,12 +68,58 @@ class GalleryAnnotationPutRequest(BaseModel):
     expected_txt_version: int = Field(ge=1)
 
 
+
+class GalleryRenameRequest(BaseModel):
+    new_stem: str = Field(min_length=1, max_length=255)
+
+
+class GalleryTrashRequest(BaseModel):
+    asset_ids: list[str] = Field(min_length=1, max_length=2000)
+
 def _source_not_found(source_id: str) -> ApiError:
     return ApiError(404, "source_not_found", "图库来源不存在")
 
 
 def _asset_not_found(asset_id: str) -> ApiError:
     return ApiError(404, "asset_not_found", "图库图片不存在")
+
+_FILE_OPERATION_ERROR_STATUS: dict[str, int] = {
+    "asset_not_found": 404,
+    "operation_not_found": 404,
+    "source_not_found": 404,
+    "source_offline": 409,
+    "source_missing": 409,
+    "source_conflict": 409,
+    "operation_in_progress": 409,
+    "operation_not_reversible": 409,
+    "rename_target_conflict": 409,
+    "restore_target_conflict": 409,
+    "invalid_rename_target": 422,
+    "invalid_asset_ids": 422,
+    "rename_noop": 422,
+    "invalid_cursor": 422,
+    "operation_recovery_required": 500,
+    "operation_failed": 500,
+    "invalid_operation_kind": 500,
+}
+
+
+def _file_operation_api_error(
+    error: GalleryFileOperationError,
+    *,
+    asset_id: str | None = None,
+    asset_ids: list[str] | None = None,
+    operation_id: str | None = None,
+) -> ApiError:
+    status = _FILE_OPERATION_ERROR_STATUS.get(error.code, 500)
+    details: dict[str, Any] = dict(error.details)
+    if asset_id is not None:
+        details.setdefault("asset_id", asset_id)
+    if asset_ids is not None:
+        details.setdefault("asset_ids", asset_ids)
+    if operation_id is not None:
+        details.setdefault("operation_id", operation_id)
+    return ApiError(status, error.code, "图库文件操作失败", details=details)
 
 
 def create_gallery_router() -> APIRouter:
@@ -397,6 +448,94 @@ def create_gallery_router() -> APIRouter:
                 422, error.code, "TXT 保存失败"
             ) from None
         return result
+    @router.post("/gallery/assets/{asset_id}/rename")
+    async def rename_asset(
+        asset_id: str,
+        request: GalleryRenameRequest,
+        container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        validate_idempotency_key(idempotency_key)
+        engine: GalleryFileOperations = container.gallery_file_operations
+        try:
+            return engine.rename_asset(asset_id, request.new_stem)
+        except GalleryFileOperationError as error:
+            raise _file_operation_api_error(error, asset_id=asset_id) from None
+
+    @router.post("/gallery/file-operations/trash")
+    async def trash_assets(
+        request: GalleryTrashRequest,
+        container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        validate_idempotency_key(idempotency_key)
+        engine: GalleryFileOperations = container.gallery_file_operations
+        try:
+            return engine.trash_assets(request.asset_ids)
+        except GalleryFileOperationError as error:
+            raise _file_operation_api_error(error, asset_ids=request.asset_ids) from None
+
+    @router.get("/gallery/trash")
+    async def list_trash(
+        view: Literal["desktop"] = Query(...),
+        cursor: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=200),
+        container: Any = Depends(get_service),
+    ) -> Any:
+        engine: GalleryFileOperations = container.gallery_file_operations
+        return engine.list_trash(cursor=cursor, limit=limit)
+
+    @router.post("/gallery/trash/{operation_id}/restore")
+    async def restore_trash(
+        operation_id: str,
+        container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        validate_idempotency_key(idempotency_key)
+        engine: GalleryFileOperations = container.gallery_file_operations
+        try:
+            return engine.restore_trash(operation_id)
+        except GalleryFileOperationError as error:
+            raise _file_operation_api_error(error, operation_id=operation_id) from None
+
+    @router.post("/gallery/file-operations/{operation_id}/undo")
+    async def undo_trash(
+        operation_id: str,
+        container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        validate_idempotency_key(idempotency_key)
+        engine: GalleryFileOperations = container.gallery_file_operations
+        try:
+            return engine.undo_trash(operation_id)
+        except GalleryFileOperationError as error:
+            raise _file_operation_api_error(error, operation_id=operation_id) from None
+
+    @router.delete("/gallery/trash/{operation_id}")
+    async def purge_trash(
+        operation_id: str,
+        container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        validate_idempotency_key(idempotency_key)
+        engine: GalleryFileOperations = container.gallery_file_operations
+        try:
+            return engine.purge_trash(operation_id)
+        except GalleryFileOperationError as error:
+            raise _file_operation_api_error(error, operation_id=operation_id) from None
+
+
+    @router.delete("/gallery/trash")
+    async def purge_all_trash(
+        container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        validate_idempotency_key(idempotency_key)
+        engine: GalleryFileOperations = container.gallery_file_operations
+        try:
+            return engine.purge_all_trash()
+        except GalleryFileOperationError as error:
+            raise _file_operation_api_error(error) from None
 
 
     return router
