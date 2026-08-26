@@ -5,10 +5,35 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION = 8
+GALLERY_EXPORT_SCHEMA_VERSION = 9
 
 TransactionFactory = Callable[[], AbstractContextManager[sqlite3.Connection]]
+
+
+def _ensure_gallery_search_index(connection: sqlite3.Connection) -> None:
+    # 图库搜索索引使用 SQLite FTS5（计划 §5.4）。运行时缺失 FTS5 属于硬失败：
+    # 必须在实现阶段更换受控后端索引，不允许静默退化为浏览器全量搜索。
+    try:
+        connection.executescript(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS gallery_search_index USING fts5(
+                asset_id UNINDEXED,
+                source_id UNINDEXED,
+                file_name,
+                relative_path,
+                txt_content
+            );
+            """
+        )
+    except sqlite3.Error as exc:
+        if "fts5" not in str(exc).lower():
+            raise
+        raise RuntimeError(
+            "当前 Python runtime 的 SQLite 缺少 FTS5，无法创建 gallery_search_index；"
+            "请按 docs/图库(含导出).md §5.4 更换受控搜索索引实现"
+        ) from exc
 
 
 def initialize_schema(
@@ -295,8 +320,179 @@ def initialize_schema(
             ON crawl_review_images(batch_id, group_id, ordinal);
         CREATE INDEX IF NOT EXISTS idx_crawl_review_images_selection
             ON crawl_review_images(batch_id, selected, disposition);
+
+        -- ---- 图库与数据集导出（v9） ----
+        CREATE TABLE IF NOT EXISTS gallery_sources (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            batch_id TEXT UNIQUE REFERENCES crawl_batches(id) ON DELETE CASCADE,
+            display_name TEXT NOT NULL,
+            root_path TEXT NOT NULL,
+            canonical_root_key TEXT NOT NULL UNIQUE,
+            availability TEXT NOT NULL DEFAULT 'available',
+            crawl_complete INTEGER NOT NULL DEFAULT 0,
+            dedup_required INTEGER NOT NULL DEFAULT 0,
+            dedup_state TEXT NOT NULL DEFAULT 'not_required',
+            content_version INTEGER NOT NULL DEFAULT 1,
+            annotation_version INTEGER NOT NULL DEFAULT 1,
+            indexed_version INTEGER NOT NULL DEFAULT 0,
+            last_scanned_at REAL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_gallery_sources_kind
+            ON gallery_sources(kind, availability);
+
+        CREATE TABLE IF NOT EXISTS gallery_directories (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES gallery_sources(id) ON DELETE CASCADE,
+            parent_id TEXT REFERENCES gallery_directories(id) ON DELETE CASCADE,
+            relative_path TEXT NOT NULL,
+            name TEXT NOT NULL,
+            sort_key TEXT NOT NULL,
+            direct_directory_count INTEGER NOT NULL DEFAULT 0,
+            direct_asset_count INTEGER NOT NULL DEFAULT 0,
+            recursive_asset_count INTEGER NOT NULL DEFAULT 0,
+            cover_asset_ids_json TEXT NOT NULL DEFAULT '[]',
+            indexed_version INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            UNIQUE(source_id, relative_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_gallery_directories_parent
+            ON gallery_directories(source_id, parent_id, sort_key, name);
+
+        CREATE TABLE IF NOT EXISTS gallery_assets (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES gallery_sources(id) ON DELETE CASCADE,
+            directory_id TEXT NOT NULL REFERENCES gallery_directories(id) ON DELETE CASCADE,
+            relative_path TEXT NOT NULL,
+            name TEXT NOT NULL,
+            extension TEXT NOT NULL,
+            sort_key TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            modified_ns INTEGER NOT NULL,
+            file_version INTEGER NOT NULL DEFAULT 1,
+            content_sha256 TEXT NOT NULL DEFAULT '',
+            content_version INTEGER NOT NULL DEFAULT 1,
+            format TEXT NOT NULL DEFAULT '',
+            width INTEGER NOT NULL DEFAULT 0,
+            height INTEGER NOT NULL DEFAULT 0,
+            read_state TEXT NOT NULL DEFAULT 'pending',
+            error_code TEXT NOT NULL DEFAULT '',
+            txt_relative_path TEXT NOT NULL DEFAULT '',
+            txt_size_bytes INTEGER NOT NULL DEFAULT 0,
+            txt_modified_ns INTEGER NOT NULL DEFAULT 0,
+            txt_sha256 TEXT NOT NULL DEFAULT '',
+            txt_version INTEGER NOT NULL DEFAULT 1,
+            txt_state TEXT NOT NULL DEFAULT 'missing',
+            dedup_visibility TEXT NOT NULL DEFAULT 'candidate',
+            lifecycle_state TEXT NOT NULL DEFAULT 'active',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            UNIQUE(source_id, relative_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_gallery_assets_directory
+            ON gallery_assets(directory_id, sort_key, name);
+        CREATE INDEX IF NOT EXISTS idx_gallery_assets_lifecycle
+            ON gallery_assets(source_id, lifecycle_state, dedup_visibility);
+
+        CREATE TABLE IF NOT EXISTS gallery_file_operations (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            source_ids_json TEXT NOT NULL DEFAULT '[]',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            finished_at REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_gallery_file_operations_status
+            ON gallery_file_operations(status, created_at);
+
+        CREATE TABLE IF NOT EXISTS gallery_file_operation_items (
+            operation_id TEXT NOT NULL REFERENCES gallery_file_operations(id) ON DELETE CASCADE,
+            ordinal INTEGER NOT NULL,
+            source_id TEXT NOT NULL,
+            asset_id TEXT NOT NULL,
+            origin_relative_path TEXT NOT NULL,
+            target_relative_path TEXT NOT NULL DEFAULT '',
+            has_txt INTEGER NOT NULL DEFAULT 0,
+            expected_asset_version INTEGER NOT NULL DEFAULT 1,
+            expected_txt_version INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'planned',
+            error_code TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY(operation_id, ordinal)
+        );
+        CREATE INDEX IF NOT EXISTS idx_gallery_file_operation_items_asset
+            ON gallery_file_operation_items(asset_id, status);
+
+        CREATE TABLE IF NOT EXISTS dataset_export_jobs (
+            id TEXT PRIMARY KEY,
+            idempotency_key TEXT UNIQUE,
+            status TEXT NOT NULL,
+            target_path TEXT NOT NULL,
+            sample_count INTEGER NOT NULL DEFAULT 0,
+            image_bytes INTEGER NOT NULL DEFAULT 0,
+            txt_bytes INTEGER NOT NULL DEFAULT 0,
+            snapshot_digest TEXT NOT NULL DEFAULT '',
+            error_class TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            started_at REAL,
+            finished_at REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_dataset_export_jobs_status
+            ON dataset_export_jobs(status, created_at);
+
+        CREATE TABLE IF NOT EXISTS dataset_export_sources (
+            job_id TEXT NOT NULL REFERENCES dataset_export_jobs(id) ON DELETE CASCADE,
+            source_id TEXT NOT NULL,
+            directory_id TEXT NOT NULL,
+            include_descendants INTEGER NOT NULL DEFAULT 0,
+            output_alias TEXT NOT NULL,
+            content_version INTEGER NOT NULL DEFAULT 1,
+            annotation_version INTEGER NOT NULL DEFAULT 1,
+            indexed_version INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,
+            PRIMARY KEY(job_id, source_id, directory_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS dataset_export_items (
+            job_id TEXT NOT NULL REFERENCES dataset_export_jobs(id) ON DELETE CASCADE,
+            asset_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            output_relative_path TEXT NOT NULL,
+            source_relative_path TEXT NOT NULL,
+            txt_output_relative_path TEXT NOT NULL DEFAULT '',
+            txt_source_relative_path TEXT NOT NULL DEFAULT '',
+            has_txt INTEGER NOT NULL DEFAULT 1,
+            expected_content_version INTEGER NOT NULL DEFAULT 1,
+            expected_txt_version INTEGER NOT NULL DEFAULT 1,
+            image_size_bytes INTEGER NOT NULL DEFAULT 0,
+            txt_size_bytes INTEGER NOT NULL DEFAULT 0,
+            image_sha256 TEXT NOT NULL DEFAULT '',
+            txt_sha256 TEXT NOT NULL DEFAULT '',
+            copy_state TEXT NOT NULL DEFAULT 'pending',
+            committed_at REAL,
+            PRIMARY KEY(job_id, asset_id),
+            UNIQUE(job_id, output_relative_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dataset_export_items_job_state
+            ON dataset_export_items(job_id, copy_state, output_relative_path);
+
+        CREATE TABLE IF NOT EXISTS dataset_export_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT NOT NULL REFERENCES dataset_export_jobs(id) ON DELETE CASCADE,
+            ts REAL NOT NULL,
+            event_type TEXT NOT NULL,
+            detail_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_dataset_export_events_job
+            ON dataset_export_events(job_id, id);
         """
     )
+    _ensure_gallery_search_index(connection)
+
     address_columns = {
         str(row["name"])
         for row in connection.execute("PRAGMA table_info(crawl_addresses)").fetchall()
@@ -345,6 +541,15 @@ def initialize_schema(
         # 一次性清除。提交 v8 后新建的四字段覆盖在后续启动中会保留。
         with transaction() as conn:
             conn.execute("DELETE FROM site_policies")
+            conn.execute(
+                "UPDATE meta SET value=? WHERE key='schema_version'",
+                (str(SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION),),
+            )
+
+    if schema_version < GALLERY_EXPORT_SCHEMA_VERSION:
+        # v9 迁移：图库与数据集导出只有新增对象，纯 DDL 已由上方幂等脚本建齐；
+        # 版本标记单独提交，失败时下次启动自动重试，不产生半迁移状态。
+        with transaction() as conn:
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(CURRENT_SCHEMA_VERSION),),

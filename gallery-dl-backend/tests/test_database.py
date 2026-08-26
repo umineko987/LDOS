@@ -1590,7 +1590,7 @@ class DatabaseTests(unittest.TestCase):
                     "PRAGMA table_info(crawl_reviews)"
                 ).fetchall()
             }
-            self.assertEqual(version, "8")
+            self.assertEqual(version, "9")
             self.assertIn("download_options_json", address_columns)
             self.assertIn("pre_dedup_skipped_count", address_columns)
             self.assertIn("automatic_group_count", review_columns)
@@ -1644,7 +1644,7 @@ class DatabaseTests(unittest.TestCase):
             upgraded._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_version'"
             ).fetchone()[0],
-            "8",
+            "9",
         )
         current = site_policy_values(max_concurrency=7, proxy_mode="direct")
         upgraded.put_site_policy("pixiv", current)
@@ -1660,7 +1660,7 @@ class DatabaseTests(unittest.TestCase):
                 restarted._conn.execute(
                     "SELECT value FROM meta WHERE key='schema_version'"
                 ).fetchone()[0],
-                "8",
+                "9",
             )
         finally:
             restarted.close()
