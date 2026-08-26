@@ -107,3 +107,24 @@
 - 与后端真实投影逐键核对：来源 15 键、目录 11 键、资产 23 键与白名单完全一致（`list_sources`/`list_directory_entries`/`search_assets` 实测）。
 - 测试：`model.test.ts` 新增 5 个 describe 用例（全量投影往返+冻结、缺省默认、来源漂移拒绝、目录含空根路径与封面列表上限、资产默认值/危险路径/`__proto__` 注入、比较器边界）；`dedup_state` 词汇暂为 not_required|pending_analysis，G4 落地时扩展。
 - 阻塞：无。
+
+### [G2-2a] feat(gallery): 来源投影携带 root_directory_id（加法扩展）
+
+- 状态：✅ 后端 652 tests（3 红为 G3/G5 预期红）
+- `gallery_service.py` 的 `_public_source` 新增 `root_directory_id`（未扫描来源为 null）；桌面进入来源首页不再需要额外往返。
+- `tests/test_gallery_api_routes.py`：列表与详情投影均断言该键；导入未扫描时为 null。
+
+### [G2-2b] feat(desktop): G2-2 图库浏览界面——目录树、虚拟化网格/列表与来源导航
+
+- 状态：✅ `npm run check` 0 错误 0 警告；桌面 340 tests 中 337 通过（3 红为 G6 导出合同预期红）；后端 652 tests（3 红为 G3/G5 预期红）
+- `Gallery.svelte` 由三栏静态预览重写为正式浏览工作区：
+  - 左栏：来源卡片（类型/可用性/去重状态/资产数），激活来源显示路径层级快捷返回。
+  - 右侧工具条：面包屑（来源名→路径段）、搜索表单（文件名/相对路径/TXT 原文）、范围（目录/来源）与包含子目录联动、TXT 六态筛选、网格/列表切换。
+  - 内容区：封面拼图文件夹卡片（最多 4 封面、不足降级单行）、缩略图网格（`galleryVisibleRange` 窗口化 + 滚动触发 loadMore）、ARIA 列表（sticky 表头 + 窗口化行）。
+  - 空态/加载/错误三态齐备；缩略图与原图 URL 一律 `api.resourceUrl`，组件零内联路径。
+- `service.ts`（新增）：sources/entries 读取显式 `view=desktop`；`thumbnailUrl` 固定 512 档（后端仅支持 256/512）；响应经模型清洗。
+- `state.ts`：浏览 store（目录页应用/追加、来源重载保持活跃项、订阅者异常隔离、destroy 后静默）。
+- `controller.ts`：activate 自动加载（idle/loading 都触发）、AbortController 竞态防护、面包屑导航、查询词本地校验拒绝（非法输入不触发网络）。
+- `gallery.css`：夜间玻璃主题全量使用真实 token（glass-surface/border/state 系列）；forced-colors/prefers-contrast/reduced-motion/data-motion 无障碍块与 export.css 对齐；`:has()` 适配窗口正文全高布局。
+- 应用定义 gallery `preview → ready`；`p4-gallery-export-target`、`preview-apps-components`、`api-response-budget-contract`、`applications/definitions.test` 合同同步演进：gallery=live（传输收敛于 service，view=desktop 纳入监管）、export=preview（保持到 G6）。
+- 阻塞：无。
