@@ -1,6 +1,13 @@
-import { validateGalleryQuery, type GallerySearchScope, type GalleryTxtState } from "./model";
+import {
+  galleryApplyClickSelection,
+  galleryClearSelection,
+  gallerySelectAll,
+  validateGalleryQuery,
+  type GallerySearchScope,
+  type GalleryTxtState,
+} from "./model";
+import type { GalleryStore, GalleryTxtViewMode, GalleryViewMode } from "./state";
 import type { GalleryDirectoryRequest, GalleryService } from "./service";
-import type { GalleryStore, GalleryViewMode } from "./state";
 
 function isAbortError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
@@ -27,6 +34,15 @@ export interface GalleryController {
   submitQuery(query: string): Promise<boolean>;
   setViewMode(mode: GalleryViewMode): boolean;
   loadMore(): Promise<boolean>;
+  clickAsset(assetId: string, options: { additive: boolean; range: boolean }): boolean;
+  selectAllAssets(): boolean;
+  clearAssetSelection(): boolean;
+  openViewer(assetId: string): boolean;
+  viewerNext(): Promise<boolean>;
+  viewerPrevious(): Promise<boolean>;
+  closeViewer(): boolean;
+  setTxtViewMode(mode: GalleryTxtViewMode): boolean;
+  refreshDirectory(): Promise<boolean>;
   destroy(): void;
 }
 
@@ -39,6 +55,7 @@ export function createGalleryController({ store, service }: {
   let sourcesController: AbortController | null = null;
   let pageController: AbortController | null = null;
   let pageVersion = 0;
+  let annotationController: AbortController | null = null;
 
   const run = (operation: () => boolean): boolean => active && !destroyed && operation();
 
@@ -200,6 +217,59 @@ export function createGalleryController({ store, service }: {
       if (state.directoryCursor === null && state.assetCursor === null) return false;
       return loadPage(true);
     },
+    clickAsset(assetId, options) {
+      if (!active || destroyed) return false;
+      const state = store.getState();
+      const index = state.assets.findIndex((asset) => asset.asset_id === assetId);
+      if (index < 0) return false;
+      const patch = galleryApplyClickSelection({
+        total: state.assets.length,
+        anchorIndex: state.selectionAnchorIndex,
+        selectedIds: state.selectedAssetIds,
+        clickedIndex: index,
+        clickedId: assetId,
+        additive: options.additive,
+        range: options.range,
+        ids: state.assets.map((asset) => asset.asset_id),
+      });
+      return store.applySelection(patch);
+    },
+    selectAllAssets() {
+      if (!active || destroyed) return false;
+      const state = store.getState();
+      return store.applySelection(gallerySelectAll(state.assets.map((asset) => asset.asset_id)));
+    },
+    clearAssetSelection() {
+      return run(() => store.applySelection(galleryClearSelection()));
+    },
+    openViewer(assetId) {
+      if (!active || destroyed) return false;
+      const state = store.getState();
+      const index = state.assets.findIndex((asset) => asset.asset_id === assetId);
+      if (index < 0) return false;
+      if (!store.openViewer(state.assets, index)) return false;
+      void loadViewerAnnotation();
+      return true;
+    },
+    async viewerNext() {
+      return moveViewerBy(1);
+    },
+    async viewerPrevious() {
+      return moveViewerBy(-1);
+    },
+    closeViewer() {
+      annotationController?.abort();
+      annotationController = null;
+      return run(() => store.closeViewer());
+    },
+    setTxtViewMode(mode) {
+      return run(() => store.setTxtViewMode(mode));
+    },
+    refreshDirectory() {
+      // 有界增量检查：重新拉取当前目录（后端按需增量扫描），不重置筛选与选择之外的本地状态。
+      if (!active || destroyed) return Promise.resolve(false);
+      return loadPage(false);
+    },
     destroy() {
       if (destroyed) return;
       controller.deactivate();
@@ -241,6 +311,38 @@ export function createGalleryController({ store, service }: {
       store.setPageError(errorCode(error));
       return false;
     }
+  }
+
+  async function loadViewerAnnotation(): Promise<boolean> {
+    if (!active || destroyed) return false;
+    const state = store.getState();
+    const asset = state.viewerAssets[state.viewerIndex];
+    if (!asset) return false;
+    annotationController?.abort();
+    const controller = new AbortController();
+    annotationController = controller;
+    try {
+      const annotation = await service.getAnnotation(asset.asset_id, controller.signal);
+      if (destroyed || annotationController !== controller) return false;
+      const current = store.getState();
+      if (current.viewerAssets[current.viewerIndex]?.asset_id !== asset.asset_id) return false;
+      store.setViewerAnnotation(annotation);
+      return true;
+    } catch (error) {
+      if (isAbortError(error) || destroyed || annotationController !== controller) return false;
+      store.setViewerError(errorCode(error));
+      return false;
+    }
+  }
+
+  async function moveViewerBy(delta: number): Promise<boolean> {
+    if (!active || destroyed) return false;
+    const state = store.getState();
+    const next = state.viewerIndex + delta;
+    if (next < 0 || next >= state.viewerAssets.length) return false;
+    if (!store.moveViewer(next)) return false;
+    void loadViewerAnnotation();
+    return true;
   }
 
   return Object.freeze(controller);

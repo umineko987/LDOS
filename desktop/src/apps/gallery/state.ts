@@ -1,6 +1,7 @@
 import {
   sortGalleryAssetEntries,
   sortGalleryDirectoryEntries,
+  type GalleryAnnotation,
   type GalleryAssetEntry,
   type GalleryDirectoryEntry,
   type GalleryPathSegment,
@@ -11,7 +12,8 @@ import {
 
 export type GalleryLoadPhase = "idle" | "loading" | "ready" | "error";
 export type GalleryViewMode = "grid" | "list";
-
+export type GalleryViewerPhase = "idle" | "loading" | "ready" | "error";
+export type GalleryTxtViewMode = "raw" | "tags";
 export interface GalleryBrowseState {
   /** 来源列表加载阶段。 */
   readonly sourcesPhase: GalleryLoadPhase;
@@ -36,6 +38,19 @@ export interface GalleryBrowseState {
   readonly searchScope: GallerySearchScope;
   readonly query: string;
   readonly viewMode: GalleryViewMode;
+  // ---- 选择（G2-3） ----
+  readonly selectedAssetIds: readonly string[];
+  readonly selectionAnchorIndex: number | null;
+  // ---- 沉浸式查看器（G2-3，只读） ----
+  /** 查看器打开时的资产列表快照（当前筛选与排序下的完整资产序）。 */
+  readonly viewerAssets: readonly GalleryAssetEntry[];
+  readonly viewerIndex: number;
+  readonly viewerPhase: GalleryViewerPhase;
+  readonly viewerErrorCode: string | null;
+  readonly viewerAnnotation: GalleryAnnotation | null;
+  readonly txtViewMode: GalleryTxtViewMode;
+  /** 返回网格时要恢复的滚动位置。 */
+  readonly pendingGridScrollTop: number;
 }
 
 export const GALLERY_BROWSE_DEFAULTS: GalleryBrowseState = Object.freeze({
@@ -58,6 +73,15 @@ export const GALLERY_BROWSE_DEFAULTS: GalleryBrowseState = Object.freeze({
   searchScope: "directory",
   query: "",
   viewMode: "grid",
+  selectedAssetIds: Object.freeze([]),
+  selectionAnchorIndex: null,
+  viewerAssets: Object.freeze([]),
+  viewerIndex: -1,
+  viewerPhase: "idle" as const,
+  viewerErrorCode: null,
+  viewerAnnotation: null,
+  txtViewMode: "raw" as const,
+  pendingGridScrollTop: 0,
 }) as GalleryBrowseState;
 
 type BrowsePatch = Partial<Omit<GalleryBrowseState, "treeChildren">>;
@@ -86,6 +110,15 @@ export interface GalleryStore {
   setPageError(errorCode: string): boolean;
   setPageLoading(): boolean;
   resetPage(): boolean;
+  applySelection(patch: { anchorIndex: number | null; selectedIds: readonly string[] }): boolean;
+  clearSelection(): boolean;
+  openViewer(assets: readonly GalleryAssetEntry[], index: number): boolean;
+  setViewerAnnotation(annotation: GalleryAnnotation): boolean;
+  setViewerLoading(): boolean;
+  setViewerError(errorCode: string): boolean;
+  moveViewer(index: number): boolean;
+  closeViewer(): boolean;
+  setTxtViewMode(mode: GalleryTxtViewMode): boolean;
   destroy(): void;
 }
 
@@ -109,7 +142,16 @@ function statesEqual(left: GalleryBrowseState, right: GalleryBrowseState): boole
     left.txtStateFilter === right.txtStateFilter &&
     left.searchScope === right.searchScope &&
     left.query === right.query &&
-    left.viewMode === right.viewMode
+    left.viewMode === right.viewMode &&
+    left.selectedAssetIds === right.selectedAssetIds &&
+    left.selectionAnchorIndex === right.selectionAnchorIndex &&
+    left.viewerAssets === right.viewerAssets &&
+    left.viewerIndex === right.viewerIndex &&
+    left.viewerPhase === right.viewerPhase &&
+    left.viewerErrorCode === right.viewerErrorCode &&
+    left.viewerAnnotation === right.viewerAnnotation &&
+    left.txtViewMode === right.txtViewMode &&
+    left.pendingGridScrollTop === right.pendingGridScrollTop
   );
 }
 
@@ -239,6 +281,69 @@ export function createGalleryStore(): GalleryStore {
         assetCursor: null,
         pageErrorCode: null,
       });
+    },
+    applySelection(patch) {
+      return publish({
+        ...state,
+        selectionAnchorIndex: patch.anchorIndex,
+        selectedAssetIds: Object.freeze([...patch.selectedIds]),
+      });
+    },
+    clearSelection() {
+      return publish({
+        ...state,
+        selectionAnchorIndex: null,
+        selectedAssetIds: Object.freeze([]),
+      });
+    },
+    openViewer(assets, index) {
+      if (index < 0 || index >= assets.length) return false;
+      return publish({
+        ...state,
+        viewerAssets: Object.freeze([...assets]),
+        viewerIndex: index,
+        viewerPhase: "loading",
+        viewerErrorCode: null,
+        viewerAnnotation: null,
+      });
+    },
+    setViewerAnnotation(annotation) {
+      return publish({
+        ...state,
+        viewerPhase: "ready",
+        viewerErrorCode: null,
+        viewerAnnotation: annotation,
+      });
+    },
+    setViewerLoading() {
+      return publish({ ...state, viewerPhase: "loading", viewerErrorCode: null });
+    },
+    setViewerError(errorCode) {
+      return publish({ ...state, viewerPhase: "error", viewerErrorCode: errorCode });
+    },
+    moveViewer(index) {
+      if (index < 0 || index >= state.viewerAssets.length) return false;
+      // 切换图片：TXT 重置为加载中；几何由视图层重新适应画布（记忆 #57）。
+      return publish({
+        ...state,
+        viewerIndex: index,
+        viewerPhase: "loading",
+        viewerErrorCode: null,
+        viewerAnnotation: null,
+      });
+    },
+    closeViewer() {
+      return publish({
+        ...state,
+        viewerAssets: Object.freeze([]),
+        viewerIndex: -1,
+        viewerPhase: "idle",
+        viewerErrorCode: null,
+        viewerAnnotation: null,
+      });
+    },
+    setTxtViewMode(mode) {
+      return publish({ ...state, txtViewMode: mode });
     },
     destroy() {
       destroyed = true;

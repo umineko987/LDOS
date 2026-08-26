@@ -16,6 +16,7 @@
   } from "./model";
   import { createGalleryService } from "./service";
   import { createGalleryStore, type GalleryBrowseState } from "./state";
+  import Viewer from "./Viewer.svelte";
   import "./gallery.css";
 
   let { api }: { api: ApiClient } = $props();
@@ -88,6 +89,39 @@
       contentHeight = entry.contentRect.height;
       gridColumns = Math.max(1, Math.floor(entry.contentRect.width / GRID_CELL));
     }
+  }
+
+  // ---- 选择与查看器（G2-3） ----
+  const selectedIds = $derived(new Set(snapshot.selectedAssetIds));
+
+  function onAssetClick(event: MouseEvent, asset: GalleryAssetEntry): void {
+    controller.clickAsset(asset.asset_id, {
+      additive: event.ctrlKey || event.metaKey,
+      range: event.shiftKey,
+    });
+  }
+
+  function onAssetActivate(asset: GalleryAssetEntry): void {
+    controller.openViewer(asset.asset_id);
+  }
+
+  let lastFocusedAssetId = "";
+
+  function onCardKeydown(event: KeyboardEvent, asset: GalleryAssetEntry): void {
+    if (event.target instanceof HTMLElement && event.target.isContentEditable) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onAssetActivate(asset);
+    }
+  }
+
+  function closeViewer(): void {
+    controller.closeViewer();
+    // 返回网格：焦点回到活动图片（记忆 #30 契约——返回后恢复活动图片焦点）。
+    queueMicrotask(() => {
+      const element = document.querySelector<HTMLElement>(`[data-gallery-asset="${CSS.escape(lastFocusedAssetId)}"]`);
+      element?.focus();
+    });
   }
 
   function submitSearch(event: SubmitEvent): void {
@@ -283,7 +317,18 @@
                 <div class="gallery-grid" style={`grid-template-columns: repeat(${gridColumns}, minmax(0, 1fr)); height: ${windowing.totalHeight}px;`}>
                   <div class="gallery-grid-window" style={`transform: translateY(${windowing.startOffsetY}px);`}>
                     {#each visibleAssets as asset (asset.asset_id)}
-                      <button type="button" class="gallery-card" data-gallery-asset title={asset.relative_path}>
+                      <button
+                        type="button"
+                        class="gallery-card"
+                        class:selected={selectedIds.has(asset.asset_id)}
+                        data-gallery-asset={asset.asset_id}
+                        title={asset.relative_path}
+                        aria-pressed={selectedIds.has(asset.asset_id)}
+                        onclick={(event) => onAssetClick(event, asset)}
+                        ondblclick={() => onAssetActivate(asset)}
+                        onkeydown={(event) => onCardKeydown(event, asset)}
+                        onfocus={() => (lastFocusedAssetId = asset.asset_id)}
+                      >
                         <span class="gallery-card__media">
                           <img src={service.thumbnailUrl(asset.asset_id)} alt={asset.name} loading="lazy" decoding="async" />
                         </span>
@@ -315,7 +360,18 @@
                   <div class="gallery-list-body" style={`height: ${windowing.totalHeight}px;`}>
                     <div class="gallery-list-window" style={`transform: translateY(${windowing.startOffsetY}px);`}>
                       {#each visibleAssets as asset (asset.asset_id)}
-                        <div class="gallery-list-row" role="row" data-gallery-asset>
+                        <div
+                          class="gallery-list-row"
+                          class:selected={selectedIds.has(asset.asset_id)}
+                          role="row"
+                          data-gallery-asset={asset.asset_id}
+                          tabindex="0"
+                          aria-selected={selectedIds.has(asset.asset_id)}
+                          onclick={(event) => onAssetClick(event, asset)}
+                          ondblclick={() => onAssetActivate(asset)}
+                          onkeydown={(event) => onCardKeydown(event, asset)}
+                          onfocus={() => (lastFocusedAssetId = asset.asset_id)}
+                        >
                           <span class="gallery-list-row__thumb" role="cell"><img src={service.thumbnailUrl(asset.asset_id)} alt="" loading="lazy" decoding="async" /></span>
                           <span class="gallery-list-row__name" role="cell">{asset.name}</span>
                           <span class="gallery-list-row__path" role="cell">{asset.relative_path}</span>
@@ -335,6 +391,16 @@
     </main>
   </div>
 </section>
+
+{#if snapshot.viewerIndex >= 0 && snapshot.viewerAssets.length > 0}
+  <Viewer
+    {store}
+    {service}
+    viewerNext={controller.viewerNext}
+    viewerPrevious={controller.viewerPrevious}
+    onClose={closeViewer}
+  />
+{/if}
 
 <script module lang="ts">
   // ResizeObserver 指令：观察内容滚动视口高度以驱动虚拟化窗口。

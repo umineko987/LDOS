@@ -2,8 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   GALLERY_PREVIEW_DEFAULTS,
+  GALLERY_VIEWER_MAX_SCALE,
+  galleryApplyClickSelection,
+  galleryClearSelection,
+  galleryFitViewport,
   galleryNaturalCompare,
+  galleryOneToOneViewport,
   galleryPreviewPresentation,
+  gallerySelectAll,
+  galleryZoomAtPointer,
+  parseGalleryTxtTags,
+  sanitizeGalleryAnnotation,
   sanitizeGalleryAssetEntry,
   sanitizeGalleryDirectoryEntry,
   sanitizeGalleryPreviewState,
@@ -195,5 +204,186 @@ describe("gallery target model (G2 安全投影消费)", () => {
     expect(galleryNaturalCompare("IMG1.png", "img1.png")).toBeLessThan(0);
     expect(galleryNaturalCompare("same.jpg", "same.jpg")).toBe(0);
     expect(() => galleryNaturalCompare("a", 2 as unknown as string)).toThrow(TypeError);
+  });
+});
+
+describe("gallery viewer geometry (G2-3 查看器几何)", () => {
+  const canvas = { width: 800, height: 600 };
+  const image = { width: 4000, height: 2000 };
+
+  it("fits the image inside the canvas and centers it", () => {
+    const fit = galleryFitViewport({ canvas, image });
+    expect(fit.scale).toBeCloseTo(0.2);
+    expect(fit.offsetX).toBeCloseTo(0);
+    expect(fit.offsetY).toBeCloseTo(100);
+  });
+
+  it("rejects degenerate inputs", () => {
+    expect(() => galleryFitViewport({ canvas: { width: 0, height: 600 }, image })).toThrow(TypeError);
+    expect(() => galleryFitViewport({ canvas, image: { width: -1, height: 1 } })).toThrow(TypeError);
+  });
+
+  it("keeps the pointer-anchored content point fixed while zooming", () => {
+    const fit = galleryFitViewport({ canvas, image });
+    // 指针在画布 (400, 200)；放大 2 倍后，同一内容点仍应位于指针下。
+    const zoomed = galleryZoomAtPointer({
+      canvas,
+      image,
+      viewport: fit,
+      pointerX: 400,
+      pointerY: 200,
+      factor: 2,
+    });
+    expect(zoomed.scale).toBeCloseTo(fit.scale * 2);
+    // 反推内容坐标验证不动点。
+    const contentBefore = (400 - fit.offsetX) / fit.scale;
+    const contentAfter = (400 - zoomed.offsetX) / zoomed.scale;
+    expect(contentAfter).toBeCloseTo(contentBefore);
+  });
+
+  it("clamps panning so edges stay within the canvas", () => {
+    const fit = galleryFitViewport({ canvas, image });
+    const panned = galleryZoomAtPointer({
+      canvas,
+      image,
+      viewport: fit,
+      pointerX: 400,
+      pointerY: 300,
+      factor: 4,
+    });
+    // 放大到内容超出画布后，向任意方向拖出的偏移都被钳制。
+    expect(panned.offsetX).toBeLessThanOrEqual(0);
+    expect(panned.offsetX).toBeGreaterThanOrEqual(canvas.width - image.width * panned.scale);
+    expect(panned.offsetY).toBeLessThanOrEqual(0);
+    expect(panned.offsetY).toBeGreaterThanOrEqual(canvas.height - image.height * panned.scale);
+  });
+
+  it("clamps scale to the bounded range", () => {
+    const fit = galleryFitViewport({ canvas, image: { width: 10, height: 10 } });
+    const zoomed = galleryZoomAtPointer({
+      canvas,
+      image: { width: 10, height: 10 },
+      viewport: fit,
+      pointerX: 100,
+      pointerY: 100,
+      factor: 100,
+    });
+    expect(zoomed.scale).toBeLessThanOrEqual(GALLERY_VIEWER_MAX_SCALE);
+  });
+
+  it("centers 1:1 view and keeps it usable", () => {
+    const one = galleryOneToOneViewport({ canvas: { width: 300, height: 200 }, image: { width: 600, height: 100 } });
+    expect(one.scale).toBe(1);
+    // 内容超出画布：钳制到左/右边缘内。
+    expect(one.offsetX).toBeLessThanOrEqual(0);
+    expect(one.offsetX).toBeGreaterThanOrEqual(300 - 600);
+    // 垂直居中。
+    expect(one.offsetY).toBeCloseTo(50);
+  });
+});
+
+describe("gallery TXT tags (G2-3 标签视图)", () => {
+  it("parses comma-separated tags without rewriting the raw text", () => {
+    expect(parseGalleryTxtTags("red, blue ,red, green")).toEqual(["red", "blue", "green"]);
+    expect(parseGalleryTxtTags("  ")).toEqual([]);
+    expect(parseGalleryTxtTags(null)).toEqual([]);
+    expect(parseGalleryTxtTags("single")).toEqual(["single"]);
+  });
+
+  it("sanitizes annotation payloads strictly", () => {
+    const clean = sanitizeGalleryAnnotation({
+      asset_id: "a1",
+      txt_state: "normal",
+      content: "hello",
+      txt_version: 3,
+    });
+    expect(clean.content).toBe("hello");
+    expect(Object.isFrozen(clean)).toBe(true);
+
+    expect(() => sanitizeGalleryAnnotation({ asset_id: "a1", txt_state: "approved" })).toThrow(TypeError);
+    expect(() =>
+      sanitizeGalleryAnnotation({ asset_id: "a1", txt_state: "normal", __proto__: null }),
+    ).not.toThrow();
+  });
+});
+
+describe("gallery grid selection (G2-3 多选)", () => {
+  const ids = ["a", "b", "c", "d", "e"];
+
+  it("replaces selection on plain click and moves the anchor", () => {
+    const patch = galleryApplyClickSelection({
+      total: 5,
+      anchorIndex: null,
+      selectedIds: ["a"],
+      clickedIndex: 2,
+      clickedId: "c",
+      additive: false,
+      range: false,
+      ids,
+    });
+    expect(patch.selectedIds).toEqual(["c"]);
+    expect(patch.anchorIndex).toBe(2);
+  });
+
+  it("toggles membership on Ctrl/Cmd+click", () => {
+    const patch = galleryApplyClickSelection({
+      total: 5,
+      anchorIndex: 0,
+      selectedIds: ["a", "b"],
+      clickedIndex: 1,
+      clickedId: "b",
+      additive: true,
+      range: false,
+      ids,
+    });
+    expect(patch.selectedIds).toEqual(["a"]);
+    expect(patch.anchorIndex).toBe(1);
+  });
+
+  it("selects a range on Shift+click from the anchor", () => {
+    const patch = galleryApplyClickSelection({
+      total: 5,
+      anchorIndex: 1,
+      selectedIds: ["b"],
+      clickedIndex: 3,
+      clickedId: "d",
+      additive: false,
+      range: true,
+      ids,
+    });
+    expect(patch.selectedIds).toEqual(["b", "c", "d"]);
+  });
+
+  it("rejects invalid indices and flag combinations", () => {
+    expect(() =>
+      galleryApplyClickSelection({
+        total: 5,
+        anchorIndex: null,
+        selectedIds: [],
+        clickedIndex: 5,
+        clickedId: "x",
+        additive: false,
+        range: false,
+        ids,
+      }),
+    ).toThrow(TypeError);
+    expect(() =>
+      galleryApplyClickSelection({
+        total: 5,
+        anchorIndex: null,
+        selectedIds: [],
+        clickedIndex: 0,
+        clickedId: "a",
+        additive: true,
+        range: true,
+        ids,
+      }),
+    ).toThrow(TypeError);
+  });
+
+  it("selects all and clears with fixed anchors", () => {
+    expect(gallerySelectAll(ids).selectedIds).toEqual(ids);
+    expect(gallerySelectAll([]).anchorIndex).toBeNull();
+    expect(galleryClearSelection().selectedIds).toEqual([]);
   });
 });

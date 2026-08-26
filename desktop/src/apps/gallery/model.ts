@@ -663,3 +663,201 @@ export function galleryVisibleRange(input: GalleryWindowingInput): GalleryWindow
     startOffsetY: startRow * rowHeight,
   });
 }
+
+// ---- G2-3 沉浸式查看器（只读）模型 ----
+
+export interface GalleryAnnotation {
+  readonly asset_id: string;
+  readonly txt_state: GalleryTxtState;
+  readonly content: string | null;
+  readonly txt_version: number;
+}
+
+const ANNOTATION_KEYS = new Set(["asset_id", "txt_state", "content", "txt_version"]);
+
+export function sanitizeGalleryAnnotation(raw: unknown): GalleryAnnotation {
+  const value = strictRecord(raw, ANNOTATION_KEYS, "gallery_annotation");
+  return Object.freeze({
+    asset_id: idText(value.asset_id, "gallery_asset_id"),
+    txt_state: vocabularyValue(value.txt_state, TXT_STATE_VALUES, "gallery_txt_state"),
+    content: optionalText(value.content, "gallery_annotation_content", 2_000_000),
+    txt_version: countValue(value.txt_version, "gallery_txt_version", 0),
+  });
+}
+
+/**
+ * 逗号标签视图：把 TXT 原文按逗号切分为标签列表。
+ * 只读展示辅助——绝不改写或重排 TXT 原文（记忆 #35）。
+ */
+export function parseGalleryTxtTags(content: string | null): readonly string[] {
+  if (content === null) return Object.freeze([]);
+  const tags: string[] = [];
+  for (const part of content.split(",")) {
+    const tag = part.trim();
+    if (tag.length > 0 && !tags.includes(tag)) tags.push(tag);
+  }
+  return Object.freeze(tags);
+}
+
+/** 查看器画布几何（纯函数）：适应画布 / 指针缩放 / 平移钳制。 */
+export interface GalleryCanvasSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface GalleryFitInput {
+  readonly canvas: GalleryCanvasSize;
+  readonly image: GalleryCanvasSize;
+}
+
+export interface GalleryViewportState {
+  readonly scale: number;
+  readonly offsetX: number;
+  readonly offsetY: number;
+}
+
+export const GALLERY_VIEWER_MIN_SCALE = 0.05;
+export const GALLERY_VIEWER_MAX_SCALE = 40;
+
+export function galleryFitViewport(input: GalleryFitInput): GalleryViewportState {
+  if (
+    !Number.isFinite(input.canvas.width) ||
+    input.canvas.width <= 0 ||
+    !Number.isFinite(input.canvas.height) ||
+    input.canvas.height <= 0 ||
+    !Number.isFinite(input.image.width) ||
+    input.image.width <= 0 ||
+    !Number.isFinite(input.image.height) ||
+    input.image.height <= 0
+  ) {
+    throw new TypeError("invalid_gallery_fit_input");
+  }
+  const scale = Math.min(
+    input.canvas.width / input.image.width,
+    input.canvas.height / input.image.height,
+  );
+  return Object.freeze({
+    scale,
+    offsetX: (input.canvas.width - input.image.width * scale) / 2,
+    offsetY: (input.canvas.height - input.image.height * scale) / 2,
+  });
+}
+
+export interface GalleryZoomAtPointerInput {
+  readonly canvas: GalleryCanvasSize;
+  readonly image: GalleryCanvasSize;
+  readonly viewport: GalleryViewportState;
+  readonly pointerX: number;
+  readonly pointerY: number;
+  readonly factor: number;
+}
+
+/**
+ * 以指针位置为锚点缩放：缩放前后指针指向的图片内容点保持不动。
+ * 内容超过画布时钳制偏移使边缘不露出空白；未超过时保持居中。
+ */
+export function galleryZoomAtPointer(input: GalleryZoomAtPointerInput): GalleryViewportState {
+  const { canvas, image, viewport, pointerX, pointerY } = input;
+  if (!Number.isFinite(input.factor) || input.factor <= 0) {
+    throw new TypeError("invalid_gallery_zoom_factor");
+  }
+  if (
+    !Number.isFinite(pointerX) || pointerX < 0 || pointerX > canvas.width ||
+    !Number.isFinite(pointerY) || pointerY < 0 || pointerY > canvas.height
+  ) {
+    throw new TypeError("invalid_gallery_zoom_pointer");
+  }
+  const scale = Math.min(GALLERY_VIEWER_MAX_SCALE, Math.max(GALLERY_VIEWER_MIN_SCALE, viewport.scale * input.factor));
+  // 指针相对视口中心的偏移；内容点在画布坐标系中的位置。
+  const contentX = (pointerX - viewport.offsetX) / viewport.scale;
+  const contentY = (pointerY - viewport.offsetY) / viewport.scale;
+  return galleryClampViewport({ canvas, image, scale, offsetX: pointerX - contentX * scale, offsetY: pointerY - contentY * scale });
+}
+
+export function galleryClampViewport(input: {
+  readonly canvas: GalleryCanvasSize;
+  readonly image: GalleryCanvasSize;
+} & GalleryViewportState): GalleryViewportState {
+  const { canvas, image } = input;
+  const scale = Math.min(GALLERY_VIEWER_MAX_SCALE, Math.max(GALLERY_VIEWER_MIN_SCALE, input.scale));
+  const scaledWidth = image.width * scale;
+  const scaledHeight = image.height * scale;
+  let offsetX = input.offsetX;
+  let offsetY = input.offsetY;
+  if (scaledWidth <= canvas.width) offsetX = (canvas.width - scaledWidth) / 2;
+  else offsetX = Math.min(0, Math.max(canvas.width - scaledWidth, offsetX));
+  if (scaledHeight <= canvas.height) offsetY = (canvas.height - scaledHeight) / 2;
+  else offsetY = Math.min(0, Math.max(canvas.height - scaledHeight, offsetY));
+  return Object.freeze({ scale, offsetX, offsetY });
+}
+
+/**
+ * 1:1 视图：以画布中心对齐原图尺寸，随后钳制。
+ */
+export function galleryOneToOneViewport(input: {
+  readonly canvas: GalleryCanvasSize;
+  readonly image: GalleryCanvasSize;
+}): GalleryViewportState {
+  return galleryClampViewport({
+    canvas: input.canvas,
+    image: input.image,
+    scale: 1,
+    offsetX: (input.canvas.width - input.image.width) / 2,
+    offsetY: (input.canvas.height - input.image.height) / 2,
+  });
+}
+
+// ---- G2-3 网格选择（多选模型，纯函数） ----
+
+export interface GallerySelectionPatch {
+  readonly anchorIndex: number | null;
+  readonly selectedIds: readonly string[];
+}
+
+/**
+ * 单击选中（替换既有选择）；Ctrl/Cmd+单击切换；Shift+单击范围选择（锚点到点击项）。
+ */
+export function galleryApplyClickSelection(input: {
+  readonly total: number;
+  readonly anchorIndex: number | null;
+  readonly selectedIds: readonly string[];
+  readonly clickedIndex: number;
+  readonly clickedId: string;
+  readonly additive: boolean;
+  readonly range: boolean;
+  readonly ids: readonly string[];
+}): GallerySelectionPatch {
+  if (
+    !Number.isSafeInteger(input.clickedIndex) ||
+    input.clickedIndex < 0 ||
+    input.clickedIndex >= input.total
+  ) {
+    throw new TypeError("invalid_gallery_selection_index");
+  }
+  if (input.additive && input.range) throw new TypeError("invalid_gallery_selection_flags");
+  const selected = new Set(input.selectedIds);
+  let anchor = input.anchorIndex;
+  if (input.additive) {
+    if (selected.has(input.clickedId)) selected.delete(input.clickedId);
+    else selected.add(input.clickedId);
+    anchor = input.clickedIndex;
+  } else if (input.range && anchor !== null) {
+    selected.clear();
+    const from = Math.min(anchor, input.clickedIndex);
+    const to = Math.max(anchor, input.clickedIndex);
+    for (let index = from; index <= to; index += 1) selected.add(input.ids[index]);
+  } else {
+    selected.clear();
+    selected.add(input.clickedId);
+    anchor = input.clickedIndex;
+  }
+  return Object.freeze({ anchorIndex: anchor, selectedIds: Object.freeze([...selected]) });
+}
+
+export function gallerySelectAll(ids: readonly string[]): GallerySelectionPatch {
+  return Object.freeze({ anchorIndex: ids.length > 0 ? 0 : null, selectedIds: Object.freeze([...ids]) });
+}
+
+export function galleryClearSelection(): GallerySelectionPatch {
+  return Object.freeze({ anchorIndex: null, selectedIds: Object.freeze([]) });
+}

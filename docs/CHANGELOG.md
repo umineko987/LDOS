@@ -128,3 +128,20 @@
 - `gallery.css`：夜间玻璃主题全量使用真实 token（glass-surface/border/state 系列）；forced-colors/prefers-contrast/reduced-motion/data-motion 无障碍块与 export.css 对齐；`:has()` 适配窗口正文全高布局。
 - 应用定义 gallery `preview → ready`；`p4-gallery-export-target`、`preview-apps-components`、`api-response-budget-contract`、`applications/definitions.test` 合同同步演进：gallery=live（传输收敛于 service，view=desktop 纳入监管）、export=preview（保持到 G6）。
 - 阻塞：无。
+
+### [G2-3] feat(desktop): G2-3 沉浸式查看器与网格多选
+
+- 状态：✅ `npm run check` 0 错误 0 警告；桌面 359 tests 中 356 通过（3 红为 G6 导出合同预期红）；后端 665 tests（3 红为 G3/G5 预期红）
+- `Viewer.svelte`（新增，覆盖在 Gallery 工作区之上的沉浸层）：
+  - 顶栏：返回目录按钮、文件名+当前位置序号（x / N）、画布缩放按钮（适应画布 `0`、100% `1`、放大 `+`、缩小 `−`）。
+  - 中央画布：中性不透明深底、透明图片棋盘底；滚轮以指针位置为中心缩放（1%–800%，1.2 步进）、按住拖拽平移、双指捏合；切换上一张/下一张始终重置为适应画布并居中（不跨图片保留缩放/平移）。
+  - 右侧常驻 TXT 面板：默认原文只读视图、可选标签视图（逗号拆分只读展示，不自动改写 TXT 原文）；六态客观状态徽标（missing/blank/invalid_encoding/io_error/pair_conflict/normal）。
+  - 底部缩略图片带：当前项高亮、点击跳转、支持方向键持续导航；图片来源一律 512 档缩略图，画布用原图。
+  - 键盘：←/→ 上一张/下一张（边界 no-op）、Escape 返回目录；文本输入控件中不劫持按键（`closest("input, textarea, select, [contenteditable=true]")` 防御）。
+  - 打开时焦点移入查看器、关闭时焦点归还网格（记录最后聚焦卡片）。
+- `model.ts` 新增纯函数：`sanitizeGalleryAnnotation`（注解投影白名单+六态校验）、`parseGalleryTxtTags`（标签解析去空去重、上限 200）、`galleryFitViewport`/`galleryOneToOneViewport`/`galleryZoomAtPointer`（画布几何纯计算，scale 1–800%、指针锚定）、`galleryApplyClickSelection`/`gallerySelectAll`/`galleryClearSelection`（多选补丁：单击重建、Ctrl/Cmd 切换、Shift 区间锚点、Ctrl/Cmd+A 全选、非法索引/互斥标志 TypeError）。
+- `service.ts` 新增 `getAnnotation`（`view=desktop`）；`state.ts` 新增 viewer 段（打开/移动/注解三态/关闭重置）与 selection 段（applySelection/clearSelection，翻页与目录切换自动清空选择）。
+- `controller.ts` 新增 viewer/selection/refresh 编排：openViewer 校验资产在当前列表、注解 AbortController 竞态防护、越界导航 no-op、注解错误落稳定错误码；clickAsset/selectAllAssets/clearAssetSelection；refreshDirectory 重进目录拉新。
+- `Gallery.svelte`：网格卡片与列表行接入单击选择/Ctrl 切换/Shift 区间/双击与 Enter/Space 打开查看器、Ctrl/Cmd+A 全选、Delete 预留（G3 确认流程）；空选择与多选时显示批量栏（选中计数）；查看器打开时主内容 `inert` 防焦点逃逸。
+- 测试：`model.test.ts` +9（注解清洗往返、标签解析边界、几何缩放钳制与指针锚定、选择补丁语义）、`controller.test.ts` +6（查看器打开/导航/关闭/错误码、选择五语义）、`state.test.ts` 扩展 viewer/selection 状态机。
+- 阻塞：无。

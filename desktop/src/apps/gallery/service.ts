@@ -1,8 +1,10 @@
 import type { ApiClient } from "../../core/api/client";
 import {
+  sanitizeGalleryAnnotation,
   sanitizeGalleryDirectoryPage,
   sanitizeGallerySourcePage,
   validateGalleryQuery,
+  type GalleryAnnotation,
   type GalleryDirectoryPage,
   type GallerySourceSummary,
   type GalleryTxtState,
@@ -33,6 +35,7 @@ export interface GalleryService {
   ): Promise<GalleryDirectoryPage>;
   thumbnailUrl(assetId: string): string;
   contentUrl(assetId: string): string;
+  getAnnotation(assetId: string, signal: AbortSignal): Promise<GalleryAnnotation>;
 }
 
 function endpointId(id: string): string {
@@ -76,6 +79,11 @@ export function createGalleryService(api: ApiClient): GalleryService {
     },
     contentUrl(assetId) {
       return api.resourceUrl(`/api/v1/gallery/assets/${endpointId(assetId)}/content`);
+    },
+    async getAnnotation(assetId, signal) {
+      return sanitizeGalleryAnnotation(
+        await api.get(`/api/v1/gallery/assets/${endpointId(assetId)}/annotation?view=desktop`, { signal }),
+      );
     },
   };
   return Object.freeze(service);
