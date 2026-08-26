@@ -111,7 +111,7 @@ const definitions = [
     group: "workflow",
     order: 2,
     description: "浏览、搜索和整理已下载的图片。",
-    availability: "preview",
+    availability: "ready",
     dockOrder: 2,
     defaultWindow: { rect: DEFAULT_WINDOW_RECT, state: "normal" },
   },

@@ -43,23 +43,17 @@ function props(appId: "gallery" | "export") {
 }
 
 describe("Svelte Gallery and Export preview integration", () => {
-  it("renders Gallery's accessible unavailable information architecture without fake media", () => {
-    const body = render(Gallery).body;
+  it("renders Gallery's live browse empty state without fake media", () => {
+    const body = render(Gallery, { props: { api } }).body;
     for (const marker of [
       "data-gallery-app",
       'data-domain-owner="gallery"',
-      'data-preview-availability="unavailable"',
-      "01 · 浏览",
-      "02 · 内容",
-      "03 · 检查器",
-      "图库",
-      "收藏",
-      "来源",
-      "打开 Quick Look",
-      "后端能力尚未接入",
-      'aria-label="图片库三栏预览工作区；普通窗口可横向滚动"',
+      'data-preview-availability="live"',
+      "媒体浏览工作区",
+      "来源与目录",
+      "选择一个来源开始浏览",
+      "左侧选择下载批次或导入目录",
     ]) expect(body).toContain(marker);
-    expect(body).toContain("disabled");
     expect(body).not.toMatch(/<img|role="progressbar"|data:image|blob:/);
   });
 
@@ -85,7 +79,7 @@ describe("Svelte Gallery and Export preview integration", () => {
   });
 
   it("routes both preview definitions without a placeholder or generic app fallback", () => {
-    expect(getApplicationDefinition("gallery").availability).toBe("preview");
+    expect(getApplicationDefinition("gallery").availability).toBe("ready");
     expect(getApplicationDefinition("export").availability).toBe("preview");
     expect(render(AppWindow, { props: props("gallery") }).body).toContain("data-gallery-app");
     expect(render(AppWindow, { props: props("export") }).body).toContain("data-export-app");
@@ -94,24 +88,28 @@ describe("Svelte Gallery and Export preview integration", () => {
     expect(appWindowSource).not.toContain("ApplicationPlaceholder");
   });
 
-  it("keeps one domain owner, zero I/O paths, flat surfaces and accessible fallbacks", () => {
+  it("keeps one domain owner, guarded IO surfaces and accessible fallbacks", () => {
     expect(gallerySource.match(/createGalleryStore\s*\(/g)).toHaveLength(1);
     expect(exportSource.match(/createExportStore\s*\(/g)).toHaveLength(1);
-    expect(galleryModelSource).toContain('phase: "unavailable"');
+    expect(galleryModelSource).toContain("galleryVisibleRange");
     expect(exportModelSource).toContain('phase: "unavailable"');
-    const combined = [gallerySource, galleryControllerSource, galleryModelSource, galleryStateSource, exportSource, exportControllerSource, exportModelSource, exportStateSource].join("\n");
-    expect(combined).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|\/api\/|\bsetInterval\s*\(|\bsetTimeout\s*\(|localStorage|sessionStorage|indexedDB|console\.|innerHTML|URL\.createObjectURL|new Blob/);
+    const exportOnly = [exportSource, exportControllerSource, exportModelSource, exportStateSource].join("\n");
+    expect(exportOnly).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|\/api\/|\bsetInterval\s*\(|\bsetTimeout\s*\(|localStorage|sessionStorage|indexedDB|console\.|innerHTML|URL\.createObjectURL|new Blob/);
+    // Gallery 已接入真实后端：传输只经过 service 的 api 客户端，组件与状态层保持零 IO。
+    const gallerySurfaces = [gallerySource, galleryControllerSource, galleryModelSource, galleryStateSource].join("\n");
+    expect(gallerySurfaces).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|\bsetInterval\s*\(|localStorage|sessionStorage|indexedDB|console\.|innerHTML|URL\.createObjectURL|new Blob/);
+    // Export 预览仍保持窄窗横向滚动；Gallery 已是响应式正式应用，不再钉最小宽度。
     for (const css of [galleryCss, exportCss]) {
-      expect(css).toContain("min-width: 1100px");
-      expect(css).toContain("overflow-x: auto");
       expect(css).toContain("@media (forced-colors: active)");
       expect(css).toContain("@media (prefers-contrast: more)");
       expect(css).toContain("@media (prefers-reduced-motion: reduce)");
       expect(css).toContain(':root[data-motion="off"]');
-      expect(css).toContain("ButtonFace");
+      expect(css).toContain(css === galleryCss ? "LinkText" : "ButtonFace");
       expect(css).not.toMatch(/^\s*(?:-webkit-)?backdrop-filter\s*:/m);
       expect(css).not.toMatch(/^\s*filter\s*:/m);
       expect(css).not.toMatch(/@media\s*\(max-width\s*:/);
     }
+    expect(exportCss).toContain("min-width: 1100px");
+    expect(exportCss).toContain("overflow-x: auto");
   });
 });

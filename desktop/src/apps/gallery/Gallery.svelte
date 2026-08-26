@@ -1,30 +1,127 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
 
+  import type { ApiClient } from "../../core/api/client";
   import { createGalleryController } from "./controller";
-  import { galleryPreviewPresentation, type GalleryCollection, type GalleryMode, type GallerySort } from "./model";
-  import { createGalleryStore } from "./state";
+  import {
+    GALLERY_AVAILABILITY_LABELS,
+    GALLERY_DEDUP_STATE_LABELS,
+    GALLERY_SOURCE_KIND_LABELS,
+    GALLERY_TXT_STATE_LABELS,
+    galleryBreadcrumb,
+    galleryVisibleRange,
+    type GalleryAssetEntry,
+    type GalleryDirectoryEntry,
+    type GalleryTxtState,
+  } from "./model";
+  import { createGalleryService } from "./service";
+  import { createGalleryStore, type GalleryBrowseState } from "./state";
   import "./gallery.css";
+
+  let { api }: { api: ApiClient } = $props();
 
   const runtime = untrack(() => {
     const store = createGalleryStore();
-    return { store, controller: createGalleryController(store) };
+    const service = createGalleryService(api);
+    return { store, service, controller: createGalleryController({ store, service }) };
   });
-  const { store, controller } = runtime;
-  const snapshot = $derived($store);
-  const presentation = galleryPreviewPresentation();
-  const disabledReason = "图片库后端能力尚未接入；动作已禁用，不会读取下载目录、修改文件或发送业务请求。";
+  const { store, service, controller } = runtime;
+  const snapshot: GalleryBrowseState = $derived($store);
 
-  function chooseCollection(collection: GalleryCollection): void { controller.selectCollection(collection); }
-  function chooseMode(mode: GalleryMode): void { controller.setMode(mode); }
-  function updateQuery(event: Event): void { controller.setQuery((event.currentTarget as HTMLInputElement).value); }
-  function updateSort(event: Event): void { controller.setSort((event.currentTarget as HTMLSelectElement).value as GallerySort); }
-  function scrollWorkspace(event: KeyboardEvent): void {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
+  // ---- 虚拟化窗口状态（滚动驱动，非 store 事务） ----
+  let contentScroll = $state(0);
+  let contentHeight = $state(0);
+  let gridColumns = $state(4);
+  const GRID_CELL = 208;
+  const GRID_ROW = 268;
+  const LIST_ROW = 56;
+  const OVERSCAN = 2;
+
+  const rowHeight = $derived(snapshot.viewMode === "grid" ? GRID_ROW : LIST_ROW);
+  const windowing = $derived(
+    galleryVisibleRange({
+      total: snapshot.assets.length,
+      scrollTop: contentScroll,
+      viewportHeight: contentHeight,
+      columnCount: snapshot.viewMode === "grid" ? gridColumns : 1,
+      rowHeight,
+      overscanRows: OVERSCAN,
+    }),
+  );
+  const visibleAssets = $derived(
+    snapshot.assets.slice(windowing.startIndex, windowing.endIndex + 1),
+  );
+
+  const breadcrumb = $derived(
+    snapshot.activeSourceId
+      ? galleryBreadcrumb(
+          snapshot.sources.find((item) => item.source_id === snapshot.activeSourceId)?.display_name
+            ?? "来源",
+          snapshot.path,
+        )
+      : [],
+  );
+
+  const txtStateOptions: readonly { value: string; label: string }[] = [
+    { value: "", label: "全部 TXT 状态" },
+    ...(Object.keys(GALLERY_TXT_STATE_LABELS) as GalleryTxtState[]).map((state) => ({
+      value: state,
+      label: GALLERY_TXT_STATE_LABELS[state],
+    })),
+  ];
+
+  let searchDraft = $state("");
+
+  function onContentScroll(event: Event): void {
     const element = event.currentTarget as HTMLElement;
-    const distance = Math.max(240, element.clientWidth * 0.72);
-    element.scrollBy({ left: event.key === "ArrowRight" ? distance : -distance });
+    contentScroll = element.scrollTop;
+    if (
+      element.scrollTop + element.clientHeight >= element.scrollHeight - rowHeight * 3 &&
+      (snapshot.directoryCursor !== null || snapshot.assetCursor !== null)
+    ) {
+      void controller.loadMore();
+    }
+  }
+
+  function onContentResize(entries: ResizeObserverEntry[]): void {
+    for (const entry of entries) {
+      contentHeight = entry.contentRect.height;
+      gridColumns = Math.max(1, Math.floor(entry.contentRect.width / GRID_CELL));
+    }
+  }
+
+  function submitSearch(event: SubmitEvent): void {
+    event.preventDefault();
+    void controller.submitQuery(searchDraft);
+  }
+
+  function clearSearch(): void {
+    searchDraft = "";
+    void controller.submitQuery("");
+  }
+
+  function txtBadge(asset: GalleryAssetEntry): string {
+    return GALLERY_TXT_STATE_LABELS[asset.txt_state];
+  }
+
+  function txtBadgeKind(asset: GalleryAssetEntry): string {
+    if (asset.txt_state === "normal") return "ok";
+    if (asset.txt_state === "missing") return "muted";
+    return "warn";
+  }
+
+  function directoryLabel(directory: GalleryDirectoryEntry): string {
+    return directory.name.length > 0 ? directory.name : "根目录";
+  }
+
+  function formatCount(value: number): string {
+    return value.toLocaleString("zh-Hans-CN");
+  }
+
+  function sourceSubtitle(source: GalleryBrowseState["sources"][number]): string {
+    const parts = [GALLERY_SOURCE_KIND_LABELS[source.kind], GALLERY_AVAILABILITY_LABELS[source.availability]];
+    if (source.dedup_required) parts.push(GALLERY_DEDUP_STATE_LABELS[source.dedup_state]);
+    return parts.join(" · ");
   }
 
   onMount(() => {
@@ -33,65 +130,232 @@
   });
 </script>
 
-<section class="gallery-app" data-gallery-app data-domain-owner="gallery" data-preview-availability="unavailable" aria-labelledby="gallery-heading">
+
+<section class="gallery-app" data-gallery-app data-domain-owner="gallery" data-preview-availability="live" aria-labelledby="gallery-heading">
   <header class="gallery-header">
-    <div><p>图片库 · Preview</p><h1 id="gallery-heading">媒体浏览工作区</h1></div>
-    <span class="gallery-status" data-kind={presentation.kind}>{presentation.label}</span>
+    <div><p>图片库</p><h1 id="gallery-heading">媒体浏览工作区</h1></div>
+    <span class="gallery-status" data-kind={snapshot.sourcesPhase}>{snapshot.sourcesPhase === "ready" ? `${formatCount(snapshot.sources.length)} 个来源` : snapshot.sourcesPhase === "error" ? "来源加载失败" : "正在加载来源"}</span>
   </header>
-  <p class="gallery-live" role="status" aria-live="polite">{presentation.message}</p>
 
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-scrollable gallery workspace) -->
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions (keyboard-scrollable gallery workspace) -->
-  <section class="gallery-workspace" tabindex="0" onkeydown={scrollWorkspace} aria-label="图片库三栏预览工作区；普通窗口可横向滚动">
-    <div class="gallery-workspace-track">
-      <aside class="gallery-column gallery-column--navigation" aria-labelledby="gallery-navigation-heading">
-        <header class="gallery-column-header"><p>01 · 浏览</p><h2 id="gallery-navigation-heading">资料库导航</h2><span>保留浏览、筛选和视图结构，不读取真实媒体。</span></header>
-        <div class="gallery-column-scroll">
-          <nav class="gallery-navigation" aria-label="图片库分区">
-            <button type="button" aria-pressed={snapshot.collection === "library"} onclick={() => chooseCollection("library")}>图库</button>
-            <button type="button" aria-pressed={snapshot.collection === "favorites"} onclick={() => chooseCollection("favorites")}>收藏</button>
-            <button type="button" aria-pressed={snapshot.collection === "sources"} onclick={() => chooseCollection("sources")}>来源</button>
-          </nav>
-          <label class="gallery-field"><span>安全搜索预览</span><input type="search" value={snapshot.query} maxlength="80" autocomplete="off" placeholder="搜索标题或站点" oninput={updateQuery} /></label>
-          <label class="gallery-field"><span>排序</span><select value={snapshot.sort} onchange={updateSort}><option value="newest">最近完成</option><option value="oldest">最早完成</option><option value="site">按站点</option></select></label>
-          <p class="gallery-note">搜索与排序仅改变当前内存中的预览控件；不会触发文件扫描或网络请求。</p>
+  <div class="gallery-body">
+    <aside class="gallery-tree" aria-labelledby="gallery-tree-heading">
+      <h2 id="gallery-tree-heading">来源与目录</h2>
+      {#if snapshot.sourcesPhase === "loading" || snapshot.sourcesPhase === "idle"}
+        <p class="gallery-hint" role="status">正在加载来源…</p>
+      {:else if snapshot.sourcesPhase === "error"}
+        <p class="gallery-hint gallery-hint--error" role="alert">来源加载失败（{snapshot.sourcesErrorCode}）</p>
+        <button type="button" class="gallery-link" onclick={() => void controller.refreshSources()}>重试加载来源</button>
+      {:else if snapshot.sources.length === 0}
+        <p class="gallery-hint">暂无图库来源。完成下载批次或导入本地目录后，这里会显示可浏览的来源。</p>
+      {:else}
+        <ul class="gallery-source-list">
+          {#each snapshot.sources as source (source.source_id)}
+            <li>
+              <button
+                type="button"
+                class="gallery-source"
+                aria-current={snapshot.activeSourceId === source.source_id ? "true" : undefined}
+                onclick={() => void controller.openSource(source.source_id)}
+              >
+                <span class="gallery-source__name">{source.display_name}</span>
+                <span class="gallery-source__meta">{sourceSubtitle(source)}</span>
+                <span class="gallery-source__count">{formatCount(source.asset_count)} 张图片{source.root_directory_id === null ? " · 待扫描" : ""}</span>
+              </button>
+              {#if snapshot.activeSourceId === source.source_id && snapshot.path.length > 0}
+                <ul class="gallery-pathlist" aria-label="当前目录路径">
+                  {#each snapshot.path as segment (segment.directory_id)}
+                    <li><button type="button" class="gallery-link" onclick={() => void controller.openDirectory(segment.directory_id)}>{segment.name}</button></li>
+                  {/each}
+                </ul>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </aside>
+
+    <main class="gallery-content" aria-labelledby="gallery-content-heading">
+      <h2 id="gallery-content-heading" class="gallery-visually-hidden">目录内容</h2>
+      {#if snapshot.activeSourceId === null}
+        <div class="gallery-empty" role="status">
+          <strong>选择一个来源开始浏览</strong>
+          <p>左侧选择下载批次或导入目录；这里会显示目录树和图片网格。</p>
         </div>
-      </aside>
-
-      <main class="gallery-column gallery-column--content" aria-labelledby="gallery-content-heading">
-        <header class="gallery-column-header"><p>02 · 内容</p><h2 id="gallery-content-heading">媒体与批次</h2><span>网格、列表和 Quick Look 的信息架构已明确；真实媒体能力尚不可用。</span></header>
-        <div class="gallery-column-scroll">
-          <section class="gallery-toolbar" aria-label="图片库视图选项">
-            <span>视图</span>
-            <div role="group" aria-label="媒体显示方式">
-              <button type="button" aria-pressed={snapshot.mode === "grid"} onclick={() => chooseMode("grid")}>网格</button>
-              <button type="button" aria-pressed={snapshot.mode === "list"} onclick={() => chooseMode("list")}>列表</button>
+      {:else}
+        <nav class="gallery-toolbar" aria-label="目录浏览工具">
+          <ol class="gallery-breadcrumb" aria-label="目录路径">
+            {#each breadcrumb as segment, index (index)}
+              <li>
+                {#if index < breadcrumb.length - 1}
+                  <button type="button" class="gallery-link" onclick={() => void controller.navigateToBreadcrumb(index)}>{segment.label}</button>
+                {:else}
+                  <span aria-current="page">{segment.label}</span>
+                {/if}
+              </li>
+            {/each}
+          </ol>
+          <form class="gallery-search" onsubmit={submitSearch} role="search">
+            <label class="gallery-visually-hidden" for="gallery-search-input">搜索当前范围</label>
+            <input
+              id="gallery-search-input"
+              type="search"
+              placeholder="搜索文件名、相对路径或 TXT 原文"
+              maxlength="256"
+              autocomplete="off"
+              bind:value={searchDraft}
+            />
+            <button type="submit">搜索</button>
+            {#if snapshot.query.length > 0}
+              <button type="button" onclick={clearSearch}>清除</button>
+            {/if}
+          </form>
+          <div class="gallery-toolbar-controls" role="group" aria-label="范围与筛选">
+            <label>
+              <span>范围</span>
+              <select value={snapshot.searchScope} onchange={(event) => void controller.setSearchScope((event.currentTarget as HTMLSelectElement).value as typeof snapshot.searchScope)}>
+                <option value="directory">当前目录</option>
+                <option value="source">整个来源</option>
+              </select>
+            </label>
+            <label>
+              <span>包含子目录</span>
+              <input
+                type="checkbox"
+                checked={snapshot.includeDescendants}
+                disabled={snapshot.searchScope === "source"}
+                onchange={(event) => void controller.setIncludeDescendants((event.currentTarget as HTMLInputElement).checked)}
+              />
+            </label>
+            <label>
+              <span>TXT 状态</span>
+              <select value={snapshot.txtStateFilter ?? ""} onchange={(event) => { const value = (event.currentTarget as HTMLSelectElement).value; void controller.setTxtStateFilter(value === "" ? null : (value as GalleryTxtState)); }}>
+                {#each txtStateOptions as option (option.value)}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+            </label>
+            <div class="gallery-viewtoggle" role="group" aria-label="视图方式">
+              <button type="button" aria-pressed={snapshot.viewMode === "grid"} onclick={() => controller.setViewMode("grid")}>网格</button>
+              <button type="button" aria-pressed={snapshot.viewMode === "list"} onclick={() => controller.setViewMode("list")}>列表</button>
             </div>
-          </section>
-          <section class="gallery-unavailable" role="status" aria-live="polite">
-            <strong>暂无安全媒体事实</strong>
-            <p>后端能力接入前不会生成示例图片、路径、计数或批次记录。</p>
-            {#if snapshot.query}<small>当前仅预览筛选词：{snapshot.query}</small>{/if}
-          </section>
-          <section class="gallery-actions" aria-labelledby="gallery-write-reason">
-            <button type="button" disabled aria-describedby="gallery-write-reason" title={disabledReason}>打开 Quick Look</button>
-            <button type="button" disabled aria-describedby="gallery-write-reason" title={disabledReason}>收藏</button>
-            <button type="button" disabled aria-describedby="gallery-write-reason" title={disabledReason}>从收藏移除</button>
-          </section>
-          <p id="gallery-write-reason" class="gallery-disabled-reason">{disabledReason}</p>
-        </div>
-      </main>
+          </div>
+        </nav>
 
-      <aside class="gallery-column gallery-column--inspector" aria-labelledby="gallery-inspector-heading" data-inspector-open={snapshot.inspectorOpen}>
-        <header class="gallery-column-header"><p>03 · 检查器</p><h2 id="gallery-inspector-heading">安全媒体事实</h2><span>只展示未来可验证的安全字段，不展示文件名、路径或原始地址。</span></header>
-        <div class="gallery-column-scroll">
-          <button class="gallery-inspector-toggle" type="button" aria-expanded={snapshot.inspectorOpen} onclick={() => controller.toggleInspector()}>{snapshot.inspectorOpen ? "收起检查器" : "展开检查器"}</button>
-          {#if snapshot.inspectorOpen}
-            <section class="gallery-inspector-empty" role="status"><strong>尚未选择媒体</strong><p>后端能力尚未接入，因此没有可检查的媒体事实。</p></section>
+        {#if snapshot.pagePhase === "loading" && snapshot.directories.length === 0 && snapshot.assets.length === 0}
+          <p class="gallery-hint" role="status">正在加载目录内容…</p>
+        {:else if snapshot.pagePhase === "error"}
+          <p class="gallery-hint gallery-hint--error" role="alert">目录加载失败（{snapshot.pageErrorCode}）</p>
+          <button type="button" class="gallery-link" onclick={() => void controller.navigateToBreadcrumb(-1)}>重试</button>
+        {:else if snapshot.directories.length === 0 && snapshot.assets.length === 0}
+          <div class="gallery-empty" role="status">
+            <strong>此目录为空{snapshot.query ? "或没有匹配的搜索结果" : ""}</strong>
+            {#if snapshot.query}<p>搜索词：{snapshot.query}</p>{/if}
+          </div>
+        {:else}
+          {#if snapshot.directories.length > 0}
+            <ul class="gallery-folders" aria-label="子目录">
+              {#each snapshot.directories as directory (directory.directory_id)}
+                <li>
+                  <button type="button" class="gallery-folder" onclick={() => void controller.openDirectory(directory.directory_id)}>
+                    <span class="gallery-folder__cover" data-count={Math.min(directory.recursive_asset_count, 4)} aria-hidden="true">
+                      {#each directory.cover_asset_ids.slice(0, 4) as coverId (coverId)}
+                        <img src={service.thumbnailUrl(coverId)} alt="" loading="lazy" decoding="async" />
+                      {/each}
+                    </span>
+                    <span class="gallery-folder__name">{directoryLabel(directory)}</span>
+                    <span class="gallery-folder__meta">{formatCount(directory.recursive_asset_count)} 张 · {formatCount(directory.direct_asset_count)} 张直属</span>
+                  </button>
+                </li>
+              {/each}
+              {#if snapshot.directoryCursor !== null}
+                <li class="gallery-folders__more"><button type="button" class="gallery-link" onclick={() => void controller.loadMore()}>加载更多目录</button></li>
+              {/if}
+            </ul>
           {/if}
-          <dl class="gallery-facts"><div><dt>收藏视图</dt><dd>{snapshot.collection === "favorites" ? "已选择" : "未选择"}</dd></div><div><dt>内容模式</dt><dd>{snapshot.mode === "grid" ? "网格" : "列表"}</dd></div><div><dt>写入能力</dt><dd>不可用</dd></div></dl>
-        </div>
-      </aside>
-    </div>
-  </section>
+          {#if snapshot.assets.length > 0}
+            {#if snapshot.viewMode === "grid"}
+              <div
+                class="gallery-grid-scroll"
+                aria-label="图片网格"
+                onscroll={onContentScroll}
+                use:resizeObserver={{ onContentResize }}
+              >
+                <div class="gallery-grid" style={`grid-template-columns: repeat(${gridColumns}, minmax(0, 1fr)); height: ${windowing.totalHeight}px;`}>
+                  <div class="gallery-grid-window" style={`transform: translateY(${windowing.startOffsetY}px);`}>
+                    {#each visibleAssets as asset (asset.asset_id)}
+                      <button type="button" class="gallery-card" data-gallery-asset title={asset.relative_path}>
+                        <span class="gallery-card__media">
+                          <img src={service.thumbnailUrl(asset.asset_id)} alt={asset.name} loading="lazy" decoding="async" />
+                        </span>
+                        <span class="gallery-card__name">{asset.name}</span>
+                        <span class="gallery-card__badges">
+                          <span class="gallery-badge" data-kind={txtBadgeKind(asset)}>{txtBadge(asset)}</span>
+                          {#if asset.dedup_visibility === "excluded"}<span class="gallery-badge" data-kind="muted">已排除</span>{/if}
+                        </span>
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              </div>
+            {:else}
+              <div
+                class="gallery-list-scroll"
+                aria-label="图片列表"
+                onscroll={onContentScroll}
+                use:resizeObserver={{ onContentResize }}
+              >
+                <div class="gallery-list" role="table" aria-label="当前目录图片明细">
+                  <div class="gallery-list-head" role="row">
+                    <span role="columnheader">文件名</span>
+                    <span role="columnheader">相对路径</span>
+                    <span role="columnheader">TXT 状态</span>
+                    <span role="columnheader">大小</span>
+                    <span role="columnheader">尺寸</span>
+                  </div>
+                  <div class="gallery-list-body" style={`height: ${windowing.totalHeight}px;`}>
+                    <div class="gallery-list-window" style={`transform: translateY(${windowing.startOffsetY}px);`}>
+                      {#each visibleAssets as asset (asset.asset_id)}
+                        <div class="gallery-list-row" role="row" data-gallery-asset>
+                          <span class="gallery-list-row__thumb" role="cell"><img src={service.thumbnailUrl(asset.asset_id)} alt="" loading="lazy" decoding="async" /></span>
+                          <span class="gallery-list-row__name" role="cell">{asset.name}</span>
+                          <span class="gallery-list-row__path" role="cell">{asset.relative_path}</span>
+                          <span role="cell"><span class="gallery-badge" data-kind={txtBadgeKind(asset)}>{txtBadge(asset)}</span></span>
+                          <span class="gallery-list-row__size" role="cell">{formatCount(asset.size_bytes)} B</span>
+                          <span class="gallery-list-row__dims" role="cell">{asset.width}×{asset.height}</span>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {/if}
+          {/if}
+        {/if}
+      {/if}
+    </main>
+  </div>
 </section>
+
+<script module lang="ts">
+  // ResizeObserver 指令：观察内容滚动视口高度以驱动虚拟化窗口。
+  import type { Action } from "svelte/action";
+
+  export const resizeObserver: Action<HTMLElement, { onContentResize: (entries: ResizeObserverEntry[]) => void }> =
+    (element, parameters) => {
+      let observer: ResizeObserver | null = null;
+      const observe = (callback: (entries: ResizeObserverEntry[]) => void) => {
+        observer?.disconnect();
+        observer = new ResizeObserver(callback);
+        observer.observe(element);
+      };
+      if (parameters) observe(parameters.onContentResize);
+      return {
+        update(next: { onContentResize: (entries: ResizeObserverEntry[]) => void }) {
+          observe(next.onContentResize);
+        },
+        destroy() {
+          observer?.disconnect();
+        },
+      };
+    };
+</script>

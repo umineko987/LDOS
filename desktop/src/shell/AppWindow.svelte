@@ -126,7 +126,7 @@
     {:else if record.appId === "personalization"}
       <Personalization {persistence} registerUnsavedChanges={shellUnsaved ? (reader: () => boolean, discard?: () => void) => shellUnsaved("personalization", reader, discard) : undefined} />
     {:else if record.appId === "gallery"}
-      <Gallery />
+      <Gallery {api} />
     {:else if record.appId === "export"}
       <Export />
     {/if}

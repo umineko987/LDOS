@@ -17,7 +17,7 @@ const expected = [
   ["policy", "/policy", "站点设置", "sliders", "connections", 2, "ready", null, "normal"],
   ["diagnostics", "/diagnostics", "系统诊断", "activity", "system", 0, "ready", null, "normal"],
   ["personalization", "/personalization", "外观设置", "sliders", "system", 1, "ready", null, "normal"],
-  ["gallery", "/gallery", "图片库", "folder", "workflow", 2, "preview", 2, "normal"],
+  ["gallery", "/gallery", "图片库", "folder", "workflow", 2, "ready", 2, "normal"],
   ["export", "/export", "数据集导出", "archive", "workflow", 4, "preview", null, "normal"],
 ] as const;
 
@@ -39,9 +39,9 @@ describe("typed application definitions", () => {
       Array.from({ length: 10 }, () => ({ x: 160, y: 64, w: 800, h: 560 })),
     );
     expect(APPLICATION_DEFINITIONS.filter(({ availability }) => availability === "ready").map(({ id }) => id))
-      .toEqual(["crawl", "tasks", "proxy", "vault", "review", "policy", "diagnostics", "personalization"]);
+      .toEqual(["crawl", "tasks", "proxy", "vault", "review", "policy", "diagnostics", "personalization", "gallery"]);
     expect(APPLICATION_DEFINITIONS.filter(({ availability }) => availability === "preview").map(({ id }) => id))
-      .toEqual(["gallery", "export"]);
+      .toEqual(["export"]);
   });
 
   it("keeps groups, IDs, routes, and group order unique and immutable", () => {
