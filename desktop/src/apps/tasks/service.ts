@@ -33,7 +33,7 @@ export function taskPagePath(query: TaskPageQuery): string {
     : "";
   return taskBatchPath(
     query.batchId,
-    `/tasks?limit=${TASK_PAGE_LIMIT}&offset=${offset}${address}`,
+    `/tasks?limit=${TASK_PAGE_LIMIT}&offset=${offset}&view=tasks${address}`,
   );
 }
 

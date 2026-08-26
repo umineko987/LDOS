@@ -159,10 +159,11 @@ function apiUrl(origin: string, path: string): string {
   return url.href;
 }
 
-function parseResponseText(text: string): { kind: "empty" | "invalid" | "json"; value: unknown } {
+function parseResponseText(text: string): { kind: "empty" | "invalid" | "json" | "too_large"; value: unknown } {
   if (!text.trim()) return { kind: "empty", value: null };
+  if (text.length > MAX_RESPONSE_CHARS) return { kind: "too_large", value: null };
   try {
-    return { kind: "json", value: JSON.parse(text.slice(0, MAX_RESPONSE_CHARS)) };
+    return { kind: "json", value: JSON.parse(text) };
   } catch {
     return { kind: "invalid", value: null };
   }
@@ -240,6 +241,14 @@ export function createApiClient(
     }
 
     if (!response.ok) throw normalizedApiError(response.status, parsed.value, responseRequestId);
+    if (parsed.kind === "too_large") {
+      throw new ApiError({
+        status: response.status,
+        code: "response_too_large",
+        message: "服务响应超出安全大小限制",
+        requestId: responseRequestId,
+      });
+    }
     if (parsed.kind === "invalid") {
       throw new ApiError({
         status: response.status,

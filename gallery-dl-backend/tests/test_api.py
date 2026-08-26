@@ -2598,6 +2598,77 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(progressed["sources"][1]["addresses"][0]["status"], "pending")
         self.assertEqual(len(self.container.db.list_crawl_tasks(batch_id)), 3)
 
+    def test_crawl_task_tasks_view_projects_a_full_desktop_page(self):
+        batch_id = "batch-task-view"
+        tasks = [
+            {
+                "id": f"task-{index}",
+                "site": "danbooru",
+                "status": "queued",
+                "source_order": 0,
+                "address_order": 0,
+                "sequence_no": index + 1,
+                "attempt_count": 0,
+                "max_attempts": 3,
+                "crawl_address_id": "address-task-view",
+                "artifact_count": 0,
+                "artifact_bytes": 0,
+                "last_error_class": "",
+                "url": f"https://danbooru.donmai.us/posts/{index}",
+                "output_dir": "/private/output/" + ("x" * 512),
+                "last_error": "private upstream response " + ("x" * 1_024),
+                "policy": {"private": "x" * 512},
+            }
+            for index in range(100)
+        ]
+        with (
+            patch.object(
+                self.container.db,
+                "get_crawl_batch",
+                return_value={"id": batch_id},
+            ),
+            patch.object(self.container.db, "list_crawl_tasks", return_value=tasks),
+        ):
+            legacy = self.client.get(
+                f"/api/v1/crawls/{batch_id}/tasks?limit=100",
+                headers=self.headers,
+            )
+            response = self.client.get(
+                f"/api/v1/crawls/{batch_id}/tasks?limit=100&view=tasks",
+                headers=self.headers,
+            )
+
+        self.assertEqual(legacy.status_code, 200, legacy.text)
+        self.assertGreater(len(legacy.text), 65_536)
+        self.assertEqual(legacy.json()["items"][0]["url"], tasks[0]["url"])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertLess(len(response.text), 65_536)
+        payload = response.json()
+        self.assertEqual(payload["limit"], 100)
+        self.assertEqual(payload["offset"], 0)
+        self.assertEqual(len(payload["items"]), 100)
+        self.assertEqual(
+            set(payload["items"][0]),
+            {
+                "id",
+                "site",
+                "status",
+                "source_order",
+                "address_order",
+                "sequence_no",
+                "attempt_count",
+                "max_attempts",
+                "crawl_address_id",
+                "artifact_count",
+                "artifact_bytes",
+                "last_error_class",
+            },
+        )
+        self.assertNotIn("url", payload["items"][0])
+        self.assertNotIn("output_dir", payload["items"][0])
+        self.assertNotIn("policy", payload["items"][0])
+        self.assertNotIn("last_error", payload["items"][0])
+
     def test_ordered_crawl_probes_each_new_address_for_its_site(self):
         import asyncio
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import JSONResponse
@@ -27,6 +27,26 @@ from .validation import (
 # These states have a worker actively scanning or moving the batch tree. A
 # finished/stale review does not touch files and must not block a crawl rerun.
 _REVIEW_IN_FLIGHT = {"pending", "analyzing", "applying", "auto_applying"}
+_TASKS_VIEW_FIELDS = (
+    "id",
+    "site",
+    "status",
+    "source_order",
+    "address_order",
+    "sequence_no",
+    "attempt_count",
+    "max_attempts",
+    "crawl_address_id",
+    "artifact_count",
+    "artifact_bytes",
+)
+CrawlTaskResponseView = Literal["legacy", "tasks"]
+
+
+def _tasks_view_item(task: dict[str, Any]) -> dict[str, Any]:
+    item = {field: task.get(field) for field in _TASKS_VIEW_FIELDS}
+    item["last_error_class"] = str(task.get("last_error_class") or "")[:80]
+    return item
 
 
 def _source_value(body: CrawlRequest, source: Any, name: str) -> Any:
@@ -257,20 +277,20 @@ def create_crawls_router() -> APIRouter:
         address_id: str | None = None,
         limit: int = Query(default=100, ge=1, le=1000),
         offset: int = Query(default=0, ge=0),
+        view: CrawlTaskResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
         if container.db.get_crawl_batch(batch_id) is None:
             raise ApiError(404, "crawl_not_found", "爬取批次不存在")
-        return {
-            "items": container.db.list_crawl_tasks(
-                batch_id,
-                address_id=address_id,
-                limit=limit,
-                offset=offset,
-            ),
-            "limit": limit,
-            "offset": offset,
-        }
+        items = container.db.list_crawl_tasks(
+            batch_id,
+            address_id=address_id,
+            limit=limit,
+            offset=offset,
+        )
+        if view == "tasks":
+            items = [_tasks_view_item(task) for task in items]
+        return {"items": items, "limit": limit, "offset": offset}
 
     @router.post("/crawls/{batch_id}/cancel")
     async def cancel_crawl(

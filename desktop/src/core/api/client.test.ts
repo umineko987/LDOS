@@ -62,7 +62,7 @@ describe("API client", () => {
     expect(new Headers(calls[2][1]?.headers).has("Content-Type")).toBe(false);
   });
 
-  it("normalizes backend, HTTP, embedded, and invalid response errors", async () => {
+  it("normalizes backend, HTTP, embedded, invalid, and oversized response errors", async () => {
     const responses = [
       jsonResponse({ error: {
         code: "conflict",
@@ -73,6 +73,10 @@ describe("API client", () => {
       new Response("<html>gateway</html>", { status: 502, headers: { "X-Request-ID": "gateway-id" } }),
       jsonResponse({ error: { code: "unexpected_success_error", message: "拒绝" } }),
       new Response("{broken", { status: 200, headers: { "X-Request-ID": "invalid-id" } }),
+      new Response(JSON.stringify({ data: "x".repeat(65_536) }), {
+        status: 200,
+        headers: { "X-Request-ID": "large-response-id" },
+      }),
     ];
     const client = createApiClient(runtime, { fetchImpl: async () => responses.shift()! });
 
@@ -97,6 +101,11 @@ describe("API client", () => {
       status: 200,
       code: "invalid_response",
       requestId: "invalid-id",
+    });
+    await expect(client.get("/too-large", { requestId: "five" })).rejects.toMatchObject({
+      status: 200,
+      code: "response_too_large",
+      requestId: "large-response-id",
     });
   });
 

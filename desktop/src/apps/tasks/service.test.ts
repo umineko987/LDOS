@@ -63,9 +63,9 @@ describe("Tasks API service", () => {
     expect(TASKS_ENDPOINTS).toEqual({ crawls: "/api/v1/crawls" });
     expect(taskBatchPath("batch:service.1")).toBe("/api/v1/crawls/batch%3Aservice.1");
     expect(taskPagePath({ batchId: "batch:service.1", offset: 0, addressId: "" }))
-      .toBe("/api/v1/crawls/batch%3Aservice.1/tasks?limit=100&offset=0");
+      .toBe("/api/v1/crawls/batch%3Aservice.1/tasks?limit=100&offset=0&view=tasks");
     expect(taskPagePath({ batchId: "batch:service.1", offset: 200, addressId: "address:one" }))
-      .toBe("/api/v1/crawls/batch%3Aservice.1/tasks?limit=100&offset=200&address_id=address%3Aone");
+      .toBe("/api/v1/crawls/batch%3Aservice.1/tasks?limit=100&offset=200&view=tasks&address_id=address%3Aone");
     expect(TASK_PAGE_LIMIT).toBe(100);
     expect(() => taskPagePath({ batchId: "batch:service.1", offset: 1, addressId: "" })).toThrow("invalid_task_offset");
     expect(() => taskPagePath({ batchId: "bad/path", offset: 0, addressId: "" })).toThrow("invalid_batch_id");
@@ -76,7 +76,7 @@ describe("Tasks API service", () => {
     const summary = deferred<unknown>();
     const page = deferred<unknown>();
     const get = vi.fn((path: string) => {
-      if (path.endsWith("/tasks?limit=100&offset=100")) return page.promise;
+      if (path.endsWith("/tasks?limit=100&offset=100&view=tasks")) return page.promise;
       return summary.promise;
     });
     const client = api(get as ApiClient["get"]);
@@ -87,7 +87,7 @@ describe("Tasks API service", () => {
     expect(client.get).toHaveBeenCalledTimes(2);
     expect(client.get.mock.calls.map(([path]) => path)).toEqual([
       "/api/v1/crawls/batch%3Aservice.1",
-      "/api/v1/crawls/batch%3Aservice.1/tasks?limit=100&offset=100",
+      "/api/v1/crawls/batch%3Aservice.1/tasks?limit=100&offset=100&view=tasks",
     ]);
     const signals = client.get.mock.calls.map(([, options]) => options.signal as AbortSignal);
     expect(signals[0]).toBe(signals[1]);
@@ -147,7 +147,7 @@ describe("Tasks API service", () => {
   it("aborts the sibling on partial failure and propagates an external abort to both reads", async () => {
     const never = deferred<unknown>();
     const failure = new Error("summary failed");
-    const partialGet = vi.fn((path: string) => path.endsWith("/tasks?limit=100&offset=0")
+    const partialGet = vi.fn((path: string) => path.endsWith("/tasks?limit=100&offset=0&view=tasks")
       ? never.promise
       : Promise.reject(failure));
     const partialClient = api(partialGet as ApiClient["get"]);
