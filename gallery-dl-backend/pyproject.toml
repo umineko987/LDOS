@@ -20,6 +20,7 @@ dependencies = [
   "PyYAML>=6.0",
   "filelock>=3.13",
   "websocket-client>=1.8",
+  "Pillow==12.1.1",
 ]
 
 # 后端、去重、Proxy_pool 与测试工具的直接依赖只在本文件维护；
