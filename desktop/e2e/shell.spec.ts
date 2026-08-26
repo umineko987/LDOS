@@ -25,9 +25,30 @@ const APPLICATIONS = [
 
 test.describe("桌面壳层", () => {
   test("启动门显示真实连接阶段并处理健康检查失败", async ({ page }) => {
-    await installMockApi(page, { health: "failed", delayMs: 100 });
-    await page.goto("/");
-    await expect(page.locator("[data-startup-phase=\"starting\"]")).toBeVisible();
+    await installMockApi(page, { health: "failed" });
+    let releaseHealth: () => void = () => {};
+    const healthGate = new Promise<void>((resolve) => {
+      releaseHealth = () => resolve();
+    });
+    await page.route("**/healthz", async (route) => {
+      await healthGate;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: false,
+          components: { process: { status: "error" }, database: { status: "ok" } },
+          time: 1_700_000_000,
+        }),
+      });
+    });
+
+    try {
+      await page.goto("/");
+      await expect(page.locator("[data-startup-phase=\"starting\"]")).toBeVisible();
+    } finally {
+      releaseHealth();
+    }
     await expect(page.locator("[data-startup-phase=\"failed\"]")).toBeVisible();
     await expect(page.getByRole("heading", { name: "桌面宿主暂时不可用" })).toBeVisible();
     await expect(page.getByText("请求失败（HTTP 503）")).toBeVisible();

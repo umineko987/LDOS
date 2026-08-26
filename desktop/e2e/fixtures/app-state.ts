@@ -23,6 +23,9 @@ export async function prepareRichState(page: Page, appId: AppId): Promise<void> 
   const window = appWindow(page, appId);
   if (appId === "crawl") {
     await window.locator("[data-crawl-keyword]").fill("fixture");
+    const suggestion = window.getByRole("option", { name: /Fixture Artist/ });
+    await expect(suggestion).toBeVisible();
+    await suggestion.click();
     await window.getByRole("button", { name: "搜索来源" }).click();
     await expect(window.locator("[data-crawl-candidate]").first()).toBeVisible();
   } else if (appId === "tasks") {
