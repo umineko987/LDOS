@@ -92,3 +92,18 @@
 - 测试（`adapter.test.ts`，+3）：浏览器能力不可用、取消返回 null/畸形返回拒绝/宿主失败包装、reveal 载荷校验与调用次数断言。
 - G1 退出条件至此全部满足（API 注册临时目录/分页/搜索/缩略图 ✅ + 目录选择 adapter ✅）；浏览器与 headed Tauri GUI 测试按验收规则记为未执行。
 - 阻塞：无。
+
+---
+
+## G2 · 只读图库正式界面
+
+### [G2-1] feat(desktop): 图库目标模型——安全投影消费与自然排序
+
+- 状态：✅ G0 图库目标合同 5/5 转绿（剩余 3 红为 G6 导出合同）；`npm run check` 0 错误；桌面 333 tests 中 330 通过
+- `desktop/src/apps/gallery/model.ts` 新增 G2 目标模型段（P4 preview API 原样保留，G2-2 替换界面时再收口）：
+  - `sanitizeGallerySourceSummary` / `sanitizeGalleryDirectoryEntry` / `sanitizeGalleryAssetEntry`：白名单字段 + 客观词汇表（kind、availability、TXT 六态、dedup_visibility、lifecycle、read_state、固定 error_code 集合），未知字段/人工质量标签（approved、needs_review）/绝对路径/反斜杠/`..` 段/控制字符/原型注入一律 TypeError；产出冻结视图模型，缺省字段填客观默认值。
+  - `galleryNaturalCompare`：镜像后端 `natural_sort_key`（casefold + 数字游程两位长度前缀，99 位以上回退原数字），折叠并列以原始串代码单元序做确定性 tie-break；`2.jpg < 10.jpg`。
+  - 纳秒时间戳（modified_ns）超出 `Number.MAX_SAFE_INTEGER`：按有限非负 double 透传（仅展示），精确比较始终由后端在全精度下进行——真实投影探针确认了该约束。
+- 与后端真实投影逐键核对：来源 15 键、目录 11 键、资产 23 键与白名单完全一致（`list_sources`/`list_directory_entries`/`search_assets` 实测）。
+- 测试：`model.test.ts` 新增 5 个 describe 用例（全量投影往返+冻结、缺省默认、来源漂移拒绝、目录含空根路径与封面列表上限、资产默认值/危险路径/`__proto__` 注入、比较器边界）；`dedup_state` 词汇暂为 not_required|pending_analysis，G4 落地时扩展。
+- 阻塞：无。
