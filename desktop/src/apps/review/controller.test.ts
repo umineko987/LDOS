@@ -130,6 +130,18 @@ describe("review controller", () => {
     runtime.controller.destroy();
   });
 
+  it("advances again from an already confirmed group after returning with Escape", async () => {
+    const runtime = harness({}, snapshot("ready", 2, false));
+    runtime.controller.activate();
+    await flush();
+    await expect(runtime.controller.confirmAndAdvance()).resolves.toBe(true);
+    expect(runtime.store.getState().focusedGroupId).toBe("group-2");
+    expect(runtime.controller.moveGroup(-1)).toBe(true);
+    expect(runtime.store.getState().focusedGroupId).toBe("group-1");
+    await expect(runtime.controller.confirmAndAdvance()).resolves.toBe(true);
+    expect(runtime.store.getState().focusedGroupId).toBe("group-2");
+    runtime.controller.destroy();
+  });
   it("keeps the complete draft on a failed write and retries an identical payload", async () => {
     const failure = Object.assign(new Error("unsafe secret"), { code: "review_state_conflict", status: 409, details: { token: "unsafe" } });
     const runtime = harness({ writeDecisions: vi.fn().mockRejectedValueOnce(failure) }, snapshot("ready", 2, false));

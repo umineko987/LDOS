@@ -9,6 +9,7 @@ import {
   getReviewContainRect,
   normalizeReviewImageDimensions,
   normalizeReviewPointer,
+  projectReviewPointer,
   selectReviewReferenceImage,
   updateReviewMagnification,
   type ReviewEngineFrame,
@@ -64,6 +65,8 @@ class FakeCard {
   readonly canvas = new FakeCanvas();
   readonly crosshair = new FakeCrosshair();
   readonly attributes = new Map<string, string>();
+  readonly dataset: { reviewEngineCard: string };
+  constructor(id: string) { this.dataset = { reviewEngineCard: id }; }
   querySelector(selector: string) {
     if (selector === "[data-review-engine-image]") return this.preview;
     if (selector === "[data-review-engine-lens]") return this.canvas;
@@ -82,7 +85,7 @@ class FakeHost {
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 600, height: 400, right: 600, bottom: 400, x: 0, y: 0, toJSON: () => ({}) }),
   };
   clientHeight = 400;
-  constructor(ids: readonly string[]) { for (const id of ids) this.cards.set(id, new FakeCard()); }
+  constructor(ids: readonly string[]) { for (const id of ids) this.cards.set(id, new FakeCard(id)); }
   addEventListener(type: string, listener: EventListener) {
     const set = this.listeners.get(type) ?? new Set<EventListener>();
     set.add(listener);
@@ -151,6 +154,8 @@ describe("review engine kernel", () => {
     expect(getReviewContainRect({ width: 400, height: 200 }, { left: 10, top: 20, width: 500, height: 300 })).toEqual({ left: 10, top: 45, width: 500, height: 250 });
     expect(normalizeReviewPointer({ x: 260, y: 170 }, { left: 10, top: 20, width: 500, height: 300 })).toEqual({ u: 0.5, v: 0.5 });
     expect(normalizeReviewPointer({ x: -1, y: 999 }, { left: 0, top: 0, width: 500, height: 300 })).toEqual({ u: 0, v: 1 });
+    expect(projectReviewPointer({ u: 0.25, v: 0.8 }, { left: 60, top: 45, width: 400, height: 250 }, { left: 10, top: 20 })).toEqual({ left: 150, top: 225 });
+    expect(() => projectReviewPointer({ u: 1.1, v: 0.5 }, { left: 0, top: 0, width: 10, height: 10 }, { left: 0, top: 0 })).toThrow(TypeError);
     const crop = calculateReviewCrop({ target: image("target", 1200, 1800), reference: image("reference", 1448, 2048), outputWidth: 180, outputHeight: 120, magnification: 0.5, u: 1, v: 1 });
     expect(crop).not.toBeNull();
     expect((crop?.x ?? 0) + (crop?.sourceWidth ?? 0)).toBeLessThanOrEqual(1200);
@@ -182,6 +187,7 @@ describe("review imperative engine lifecycle", () => {
     const canvas = host.cards.get("image-1")?.canvas;
     expect(canvas?.width).toBe(180 * REVIEW_MAX_CANVAS_DPR);
     expect(canvas?.context.imageSmoothingEnabled).toBe(false);
+    expect(host.cards.get("image-1")?.crosshair.style).toEqual({ left: "90px", top: "60px" });
     engine.release();
     expect(engine.getResourceCounts()).toEqual({ listeners: 3, observer: 0, frame: 0, images: 0, preloads: 0 });
     expect([...host.cards.values()].every(({ preview }) => preview.src === "")).toBe(true);
@@ -189,6 +195,23 @@ describe("review imperative engine lifecycle", () => {
     expect(observers.every((entry) => !entry.connected)).toBe(true);
     engine.destroy();
     expect(engine.getResourceCounts()).toEqual({ listeners: 0, observer: 0, frame: 0, images: 0, preloads: 0 });
+  });
+
+  it("leaves ordinary wheel scrolling available and reserves modified wheel for loupe zoom", () => {
+    const { engine, host } = engineHarness();
+    engine.update(frame());
+    const card = host.cards.get("image-1")!;
+    const listener = [...(host.listeners.get("wheel") ?? [])][0]!;
+    const target = { closest: () => card };
+    const ordinaryPreventDefault = vi.fn();
+    listener({ target, ctrlKey: false, metaKey: false, deltaY: -100, deltaMode: 0, clientX: 90, clientY: 60, preventDefault: ordinaryPreventDefault } as unknown as Event);
+    expect(ordinaryPreventDefault).not.toHaveBeenCalled();
+    const initial = engine.getLoupeState().magnification;
+    const zoomPreventDefault = vi.fn();
+    listener({ target, ctrlKey: true, metaKey: false, deltaY: -100, deltaMode: 0, clientX: 90, clientY: 60, preventDefault: zoomPreventDefault } as unknown as Event);
+    expect(zoomPreventDefault).toHaveBeenCalledOnce();
+    expect(engine.getLoupeState().magnification).toBeGreaterThan(initial);
+    engine.destroy();
   });
 
   it("returns to baseline over twenty update/release cycles and rejects unsafe media URLs", () => {

@@ -150,6 +150,11 @@ describe("review model", () => {
 
   it("keeps command, media-path, and safe error projections closed", () => {
     expect(resolveReviewCommand("Enter", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBe("accept-advance");
+    expect(resolveReviewCommand("Escape", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBe("previous-group");
+    expect(resolveReviewCommand("ArrowLeft", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBe("focus-previous-image");
+    expect(resolveReviewCommand("ArrowRight", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBe("focus-next-image");
+    expect(resolveReviewCommand("ArrowUp", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBeNull();
+    expect(resolveReviewCommand("ArrowDown", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBeNull();
     expect(resolveReviewCommand("X", { editable: false, readOnly: true, hasImages: true, loupeAvailable: true })).toBe("toggle-loupe");
     expect(reviewImagePath("batch-review", "image-1")).toBe("/api/v1/crawls/batch-review/review/images/image-1");
     for (const value of ["", "../batch", "batch/child", SECRET]) expect(() => reviewImagePath(value, "image-1")).toThrow(TypeError);

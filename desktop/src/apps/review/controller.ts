@@ -324,7 +324,7 @@ export function createReviewController({
       const state = store.getState();
       const snapshot = state.snapshot;
       const group = focusedReviewGroup(state);
-      if (!snapshot || !group || !store.confirmGroup(group.id)) return false;
+      if (!snapshot || !group || (!group.decided && !store.confirmGroup(group.id))) return false;
       stopPolling();
       const index = snapshot.groupOrder.indexOf(group.id);
       const next = reviewStepIndex(index, snapshot.groupOrder.length, 1);

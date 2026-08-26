@@ -41,6 +41,7 @@
   const images = $derived(focusedGroup ? focusedGroup.imageOrder.map((id) => focusedGroup.images[id]) : []);
   const listable = $derived(reviewCanList(snapshot.snapshot?.summary ?? null));
   let engineHost = $state<HTMLElement>();
+  let reviewDeck = $state<HTMLElement>();
   let confirmationDialog = $state<HTMLDialogElement>();
   let returnFocus: FocusTarget | null = null;
   let loupeEnabled = $state(false);
@@ -59,13 +60,40 @@
       else engine.release();
     });
   }
+  function focusActiveImage(): void {
+    void tick().then(() => {
+      const target = reviewDeck?.querySelector<HTMLElement>('[data-review-engine-card][data-active="true"]') ?? reviewDeck;
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  }
+  async function loadSelectedAndFocus(): Promise<void> {
+    if (await controller.loadSelected()) focusActiveImage();
+  }
+  async function setFilterAndFocus(filter: (typeof REVIEW_FILTERS)[number]["id"]): Promise<void> {
+    if (await controller.setFilter(filter)) focusActiveImage();
+  }
+  function moveGroupAndFocus(direction: -1 | 1): void {
+    if (controller.moveGroup(direction)) focusActiveImage();
+  }
+  function moveImageAndFocus(direction: -1 | 1): void {
+    if (controller.moveImage(direction)) focusActiveImage();
+  }
+  async function confirmAndAdvanceAndFocus(): Promise<void> {
+    if (await controller.confirmAndAdvance()) focusActiveImage();
+  }
+  async function saveAndFocus(): Promise<void> {
+    if (await controller.save()) focusActiveImage();
+  }
   function toggleLoupe(): void {
     loupeEnabled = !loupeEnabled;
     if (!loupeEnabled) engine?.setPinned(false);
     updateEngine();
+    focusActiveImage();
   }
   function toggleLoupePin(): void {
     engine?.setPinned(!loupeState.pinned);
+    focusActiveImage();
   }
   function toggleImage(groupId: string, imageId: string): void {
     controller.setActiveImage(imageId);
@@ -94,7 +122,10 @@
   }
   function onDeckKeydown(event: KeyboardEvent): void {
     if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || snapshot.busy) return;
-    if ((event.target as Element | null)?.closest?.("input, select, textarea, button, a[href], [contenteditable]")) return;
+    const target = event.target as Element | null;
+    if (target?.closest?.("input, select, textarea, a[href], [contenteditable]")) return;
+    const imageCard = target?.closest?.("[data-review-engine-card]");
+    if (!imageCard && (event.key === " " || event.key === "Enter")) return;
     const command = resolveReviewCommand(event.key, {
       editable: snapshot.snapshot?.summary.status === "ready" && Boolean(focusedGroup?.imageOrder.length),
       readOnly: Boolean(snapshot.snapshot && snapshot.snapshot.summary.status !== "ready"),
@@ -103,12 +134,12 @@
     });
     if (!command) return;
     event.preventDefault();
-    if (command === "previous-group") controller.moveGroup(-1);
-    else if (command === "focus-previous-image") controller.moveImage(-1);
-    else if (command === "focus-next-image") controller.moveImage(1);
+    if (command === "previous-group") moveGroupAndFocus(-1);
+    else if (command === "focus-previous-image") moveImageAndFocus(-1);
+    else if (command === "focus-next-image") moveImageAndFocus(1);
     else if (command === "toggle-active-image" && focusedGroup && snapshot.activeImageId) controller.toggleImage(focusedGroup.id, snapshot.activeImageId);
-    else if (command === "accept-advance") void controller.confirmAndAdvance();
-    else if (command === "browse-next-group") controller.moveGroup(1);
+    else if (command === "accept-advance") void confirmAndAdvanceAndFocus();
+    else if (command === "browse-next-group") moveGroupAndFocus(1);
     else if (command === "toggle-loupe") toggleLoupe();
   }
   function formatTime(value: number | null): string {
@@ -147,7 +178,8 @@
   });
 </script>
 
-<section class="review-app" data-review-app data-domain-owner="review" data-mode={listable ? "deck" : "panel"} aria-labelledby="review-heading" aria-busy={Boolean(snapshot.busy)}>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions (application-level review shortcuts) -->
+<section class="review-app" data-review-app data-domain-owner="review" data-mode={listable ? "deck" : "panel"} aria-labelledby="review-heading" aria-busy={Boolean(snapshot.busy)} onkeydown={onDeckKeydown}>
   <header class="review-header">
     <div><p>去重审核</p><h1 id="review-heading">比较、确认与文件整理</h1></div>
     <span class="review-status" data-kind={snapshot.presentation.kind}>{snapshot.presentation.label}</span>
@@ -163,7 +195,7 @@
   <section class="review-picker" aria-labelledby="review-picker-heading">
     <div><p>批次</p><h2 id="review-picker-heading">已结束批次</h2></div>
     <label><span class="visually-hidden">已结束批次</span><select aria-label="已结束批次" value={snapshot.selectedBatchId} disabled={Boolean(snapshot.busy)} onchange={(event) => controller.selectBatch(selectValue(event))}><option value="">{snapshot.recent.some((batch) => batch.terminal) ? "选择已结束批次" : "暂无已结束批次"}</option>{#each snapshot.recent.filter((batch) => batch.terminal) as batch (batch.id)}<option value={batch.id}>{batch.statusLabel} · {formatTime(batch.createdAt)} · {batch.id.slice(0, 12)}</option>{/each}</select></label>
-    <div class="review-picker-actions"><button type="button" class="review-button review-button--primary" disabled={Boolean(snapshot.busy || !snapshot.selectedBatchId)} onclick={() => void controller.loadSelected()}>打开审核</button><button type="button" disabled={Boolean(snapshot.busy)} onclick={() => void controller.refresh()}>刷新</button><button type="button" onclick={() => onNavigate("tasks")}>打开批次管理</button></div>
+    <div class="review-picker-actions"><button type="button" class="review-button review-button--primary" disabled={Boolean(snapshot.busy || !snapshot.selectedBatchId)} onclick={() => void loadSelectedAndFocus()}>打开审核</button><button type="button" disabled={Boolean(snapshot.busy)} onclick={() => void controller.refresh()}>刷新</button><button type="button" onclick={() => onNavigate("tasks")}>打开批次管理</button></div>
   </section>
 
   <p class="review-operation-live" data-review-dirty={Boolean(snapshot.snapshot?.dirty)} role="status" aria-live="polite">{snapshot.message}</p>
@@ -171,9 +203,9 @@
   <section class="review-engine-host" bind:this={engineHost}>
     {#if snapshot.snapshot}
       <section class="review-toolbar" aria-label="审核工具栏">
-        <div class="review-tabs" role="tablist" aria-label="审核组筛选">{#each REVIEW_FILTERS as filter (filter.id)}<button type="button" role="tab" class:review-tab--active={snapshot.snapshot.filter === filter.id} aria-selected={snapshot.snapshot.filter === filter.id} disabled={Boolean(snapshot.busy)} onclick={() => void controller.setFilter(filter.id)}>{filter.label}</button>{/each}</div>
+        <div class="review-tabs" role="tablist" aria-label="审核组筛选">{#each REVIEW_FILTERS as filter (filter.id)}<button type="button" role="tab" class:review-tab--active={snapshot.snapshot.filter === filter.id} aria-selected={snapshot.snapshot.filter === filter.id} disabled={Boolean(snapshot.busy)} onclick={() => void setFilterAndFocus(filter.id)}>{filter.label}</button>{/each}</div>
         <div class="review-toolbar-actions">
-          <button type="button" disabled={Boolean(snapshot.busy || !snapshot.snapshot.dirty)} onclick={() => void controller.save()}>保存待提交组</button>
+          <button type="button" disabled={Boolean(snapshot.busy || !snapshot.snapshot.dirty)} onclick={() => void saveAndFocus()}>保存待提交组</button>
           <button type="button" aria-pressed={loupeEnabled} disabled={!images.some((image) => image.readable)} onclick={toggleLoupe}>{loupeEnabled ? "关闭放大镜" : "开启放大镜"}</button>
           <button type="button" aria-pressed={loupeState.pinned} disabled={!loupeEnabled || !images.some((image) => image.readable)} onclick={toggleLoupePin}>{loupeState.pinned ? "解除锁定" : "锁定坐标"}</button>
           {#if snapshot.snapshot.summary.status === "not_started" || snapshot.snapshot.summary.status === "waiting_for_crawl"}<button type="button" class="review-button review-button--primary" disabled={Boolean(snapshot.busy)} onclick={() => void controller.run("start")}>开始分析</button>{/if}
@@ -184,11 +216,10 @@
 
       {#if listable && focusedGroup}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-operated review deck) -->
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions (keyboard-operated review deck) -->
-        <section class="review-deck" tabindex="0" onkeydown={onDeckKeydown} aria-label="去重审核全高分拣台；方向键移动图片，空格切换保留，Enter 采纳并前进，X 切换放大镜">
+        <section class="review-deck" data-review-deck bind:this={reviewDeck} tabindex="0" aria-label="去重审核全高分拣台；左右键移动图片，空格切换保留，Enter 采纳并前进，Escape 返回上一组，X 切换放大镜">
           <header class="review-deck-header">
             <div><p>当前筛选全量组选择器</p><h2>组 {focusedGroup.ordinal} · {focusedGroup.kind === "duplicate" ? "重复组" : focusedGroup.kind === "single" ? "独立图片" : "读取受限"}</h2></div>
-            <div class="review-group-controls"><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === 0} onclick={() => controller.moveGroup(-1)}>上一组</button><label><span class="visually-hidden">当前筛选全量组选择器</span><select data-review-group-select aria-label="当前筛选全量组选择器" value={focusedGroup.id} disabled={Boolean(snapshot.busy)} onchange={(event) => controller.setFocusedGroup(selectValue(event))}>{#each groups as group (group.id)}<option value={group.id}>{group.ordinal}. {group.kind} · {group.selectedImageCount}/{group.imageCount} 保留{group.decided ? " · 已确认" : ""}</option>{/each}</select></label><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === snapshot.snapshot.groupOrder.length - 1} onclick={() => controller.moveGroup(1)}>下一组</button></div>
+            <div class="review-group-controls"><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === 0} onclick={() => moveGroupAndFocus(-1)}>上一组</button><label><span class="visually-hidden">当前筛选全量组选择器</span><select data-review-group-select aria-label="当前筛选全量组选择器" value={focusedGroup.id} disabled={Boolean(snapshot.busy)} onchange={(event) => { if (controller.setFocusedGroup(selectValue(event))) focusActiveImage(); }}>{#each groups as group (group.id)}<option value={group.id}>{group.ordinal}. {group.kind} · {group.selectedImageCount}/{group.imageCount} 保留{group.decided ? " · 已确认" : ""}</option>{/each}</select></label><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === snapshot.snapshot.groupOrder.length - 1} onclick={() => moveGroupAndFocus(1)}>下一组</button></div>
           </header>
 
           <section class="review-deck-stage" aria-label={`组 ${focusedGroup.ordinal} 图片比较舞台`}>
@@ -205,8 +236,8 @@
 
           <footer class="review-deck-statusbar">
             <div><span>{snapshot.snapshot.summary.decidedGroupCount} / {snapshot.snapshot.summary.totalGroupCount} 组已确认</span><span>当前组 {focusedGroup.selectedImageCount} / {focusedGroup.imageCount} 保留</span><span>{loupeEnabled ? `同步放大镜 ${formatReviewMagnification(loupeState.magnification)}${loupeState.pinned ? " · 坐标已锁定" : loupeState.active ? " · 正在检查" : ""}` : "放大镜已关闭"}</span></div>
-            <div class="review-shortcut-hints"><kbd>←/→</kbd> 图片 <kbd>Space</kbd> 保留/移除 <kbd>Enter</kbd> 采纳并前进 <kbd>X</kbd> 放大镜</div>
-            <button type="button" class="review-button review-button--primary" disabled={snapshot.snapshot.summary.status !== "ready" || Boolean(snapshot.busy)} onclick={() => void controller.confirmAndAdvance()}>采纳并前进</button>
+            <div class="review-shortcut-hints"><kbd>←/→</kbd> 图片 <kbd>Space</kbd> 保留/移除 <kbd>Enter</kbd> 采纳并前进 <kbd>Esc</kbd> 上一组 <kbd>X</kbd> 放大镜 <kbd>Ctrl+滚轮</kbd> 缩放</div>
+            <button type="button" class="review-button review-button--primary" disabled={snapshot.snapshot.summary.status !== "ready" || Boolean(snapshot.busy)} onclick={() => void confirmAndAdvanceAndFocus()}>采纳并前进</button>
           </footer>
         </section>
       {:else}

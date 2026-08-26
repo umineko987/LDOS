@@ -189,6 +189,21 @@ export function normalizeReviewPointer(
   });
 }
 
+export function projectReviewPointer(
+  pointer: Readonly<{ u: number; v: number }>,
+  content: Readonly<{ left: number; top: number; width: number; height: number }>,
+  container: Readonly<{ left: number; top: number }>,
+): Readonly<{ left: number; top: number }> {
+  if (!finite(pointer.u) || !finite(pointer.v) || !finite(container.left) || !finite(container.top)) throw new TypeError("invalid_review_pointer_projection");
+  if (pointer.u < 0 || pointer.u > 1 || pointer.v < 0 || pointer.v > 1 || !finite(content.left) || !finite(content.top) || !finite(content.width) || content.width <= 0 || !finite(content.height) || content.height <= 0) {
+    throw new TypeError("invalid_review_pointer_projection");
+  }
+  return freeze({
+    left: content.left - container.left + pointer.u * content.width,
+    top: content.top - container.top + pointer.v * content.height,
+  });
+}
+
 export function calculateReviewCrop({
   target,
   reference,
@@ -313,6 +328,16 @@ function defaultResizeObserver(callback: ResizeObserverCallback): ResizeObserver
   }
 }
 
+function decodedReviewImage(image: ReviewEngineImage, preview: HTMLImageElement): NormalizedReviewImage | null {
+  if (!preview.complete || preview.naturalWidth <= 0 || preview.naturalHeight <= 0) return null;
+  return freeze({
+    width: preview.naturalWidth,
+    height: preview.naturalHeight,
+    readable: image.readable,
+    recommended: image.recommended,
+  });
+}
+
 function sameMedia(left: ReviewEngineFrame | null, right: ReviewEngineFrame): boolean {
   return Boolean(left && left.key === right.key && left.images.length === right.images.length && left.images.every((image, index) => {
     const candidate = right.images[index];
@@ -380,7 +405,11 @@ export function createReviewEngine({
       return;
     }
     const reference = selectReviewReferenceImage(frame.images);
-    if (!reference.available || !reference.image) {
+    const referenceItem = reference.available ? frame.images[reference.index] : null;
+    const referenceCard = referenceItem ? host.querySelector<HTMLElement>(`[data-review-engine-card="${referenceItem.id}"]`) : null;
+    const referencePreview = referenceCard?.querySelector<HTMLImageElement>("[data-review-engine-image]") ?? null;
+    const referenceImage = referenceItem && referencePreview ? decodedReviewImage(referenceItem, referencePreview) : null;
+    if (!referenceImage) {
       hideLenses();
       return;
     }
@@ -390,20 +419,26 @@ export function createReviewEngine({
       const preview = card?.querySelector<HTMLImageElement>("[data-review-engine-image]");
       const canvas = card?.querySelector<HTMLCanvasElement>("[data-review-engine-lens]");
       const crosshair = card?.querySelector<HTMLElement>("[data-review-engine-crosshair]");
-      if (!card || !preview || !canvas || !crosshair || !preview.complete || preview.naturalWidth <= 0 || preview.naturalHeight <= 0) continue;
+      if (!card || !preview || !canvas || !crosshair) continue;
+      const targetImage = decodedReviewImage(image, preview);
+      if (!targetImage) continue;
+      const previewRect = preview.getBoundingClientRect();
+      const contentRect = getReviewContainRect(targetImage, previewRect);
+      if (!contentRect) continue;
+      const crosshairPoint = projectReviewPointer(pointer, contentRect, previewRect);
       const rect = canvas.getBoundingClientRect();
       const ratio = Math.min(REVIEW_MAX_CANVAS_DPR, Math.max(1, devicePixelRatio()));
       canvas.width = Math.max(1, Math.floor(rect.width * ratio));
       canvas.height = Math.max(1, Math.floor(rect.height * ratio));
-      const crop = calculateReviewCrop({ target: image, reference: reference.image, outputWidth: canvas.width, outputHeight: canvas.height, magnification, ...pointer });
+      const crop = calculateReviewCrop({ target: targetImage, reference: referenceImage, outputWidth: canvas.width, outputHeight: canvas.height, magnification, ...pointer });
       const context = crop ? canvas.getContext("2d") : null;
       if (!crop || !context) continue;
       try {
         context.imageSmoothingEnabled = false;
         context.drawImage(preview, crop.x, crop.y, crop.sourceWidth, crop.sourceHeight, 0, 0, canvas.width, canvas.height);
         canvas.hidden = false;
-        crosshair.style.left = `${pointer.u * 100}%`;
-        crosshair.style.top = `${pointer.v * 100}%`;
+        crosshair.style.left = `${crosshairPoint.left}px`;
+        crosshair.style.top = `${crosshairPoint.top}px`;
         crosshair.hidden = false;
         card.removeAttribute("data-review-engine-error");
       } catch {
@@ -502,7 +537,9 @@ export function createReviewEngine({
     const item = frame?.images.find((image) => image.id === imageId);
     const preview = card?.querySelector<HTMLImageElement>("[data-review-engine-image]");
     if (!item || !preview) return false;
-    const content = getReviewContainRect(item, preview.getBoundingClientRect());
+    const targetImage = decodedReviewImage(item, preview);
+    if (!targetImage) return false;
+    const content = getReviewContainRect(targetImage, preview.getBoundingClientRect());
     if (!content) return false;
     pointer = normalizeReviewPointer({ x: event.clientX, y: event.clientY }, content);
     return true;
@@ -523,7 +560,7 @@ export function createReviewEngine({
 
   const wheel = (event: WheelEvent): void => {
     const target = event.target as Element | null;
-    if (!frame?.loupeEnabled || !target?.closest?.("[data-review-engine-card]") || (!pinned && !updatePointer(event))) return;
+    if (!(event.ctrlKey || event.metaKey) || !frame?.loupeEnabled || !target?.closest?.("[data-review-engine-card]") || (!pinned && !updatePointer(event))) return;
     event.preventDefault();
     magnification = updateReviewMagnification(magnification, event.deltaY, event.deltaMode, Math.max(1, host.clientHeight || 800));
     publishLoupe();

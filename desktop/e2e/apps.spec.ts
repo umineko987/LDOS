@@ -166,11 +166,81 @@ test.describe("可用应用关键旅程", () => {
 
     await expect(window.getByRole("heading", { name: /组 1/ })).toBeVisible();
     await expect(window.locator("[data-review-engine-image]").first()).toHaveAttribute("data-review-engine-decoded", "true");
-    await window.locator("[data-review-engine-card=\"image-2\"]").click();
-    await window.getByRole("button", { name: "采纳并前进" }).click();
+    const deck = window.locator("[data-review-deck]");
+    await expect(deck).toBeVisible();
+    expect(await deck.evaluate((element) => {
+      const host = element.closest(".review-engine-host");
+      const statusbar = element.querySelector(".review-deck-statusbar");
+      return Boolean(host && statusbar && statusbar.getBoundingClientRect().bottom <= host.getBoundingClientRect().bottom + 1);
+    })).toBe(true);
+    const firstCard = window.locator('[data-review-engine-card="image-1"]');
+    const secondCard = window.locator('[data-review-engine-card="image-2"]');
+    await expect(firstCard).toBeFocused();
+    await window.getByRole("button", { name: "刷新" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(secondCard).toHaveAttribute("data-active", "true");
+    await expect(secondCard).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(secondCard).toHaveAttribute("data-selected", "false");
+
+    await page.keyboard.press("x");
+    await expect(window.getByRole("button", { name: "关闭放大镜" })).toHaveAttribute("aria-pressed", "true");
+    const preview = secondCard.locator("[data-review-engine-image]");
+    const pointer = await preview.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const image = element as HTMLImageElement;
+      const scale = Math.min(rect.width / image.naturalWidth, rect.height / image.naturalHeight);
+      const width = image.naturalWidth * scale;
+      const height = image.naturalHeight * scale;
+      const left = rect.left + (rect.width - width) / 2;
+      const top = rect.top + (rect.height - height) / 2;
+      return { x: left + width * 0.23, y: top + height * 0.31 };
+    });
+    await page.mouse.move(pointer.x, pointer.y);
+    const crosshair = secondCard.locator("[data-review-engine-crosshair]");
+    await expect(crosshair).toBeVisible();
+    await expect.poll(async () => {
+      const box = await crosshair.boundingBox();
+      return box ? Math.hypot(box.x + box.width / 2 - pointer.x, box.y + box.height / 2 - pointer.y) : Number.POSITIVE_INFINITY;
+    }).toBeLessThan(2);
+
+    const scroller = window.locator(".review-deck-cards");
+    await scroller.evaluate((element) => {
+      const spacer = document.createElement("div");
+      spacer.dataset.reviewScrollFixture = "true";
+      spacer.style.height = "600px";
+      spacer.style.gridColumn = "1 / -1";
+      element.append(spacer);
+    });
+    const cardBox = await secondCard.boundingBox();
+    expect(cardBox).not.toBeNull();
+    await page.mouse.move(cardBox!.x + cardBox!.width / 2, cardBox!.y + cardBox!.height / 2);
+    await page.mouse.wheel(0, 320);
+    await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    const wheelCancellation = await secondCard.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 });
+      element.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    expect(wheelCancellation).toBe(true);
+    await scroller.evaluate((element) => {
+      element.querySelector('[data-review-scroll-fixture="true"]')?.remove();
+      element.scrollTop = 0;
+    });
+
+    await page.keyboard.press("Enter");
     await expect(window.getByRole("heading", { name: /组 2/ })).toBeVisible();
-    await window.locator("[data-review-engine-card=\"image-4\"]").click();
-    await window.getByRole("button", { name: "采纳并前进" }).click();
+    await page.keyboard.press("Escape");
+    await expect(window.getByRole("heading", { name: /组 1/ })).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(window.getByRole("heading", { name: /组 2/ })).toBeVisible();
+    await page.keyboard.press("ArrowRight");
+    const fourthCard = window.locator('[data-review-engine-card="image-4"]');
+    await expect(fourthCard).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(fourthCard).toHaveAttribute("data-selected", "false");
+    await page.keyboard.press("Enter");
 
     await expect.poll(() => api.count("PUT", "/api/v1/crawls/batch-review/review/decisions")).toBeGreaterThan(0);
     const apply = window.getByRole("button", { name: "应用并整理文件" });

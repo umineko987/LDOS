@@ -592,9 +592,9 @@ export function resolveReviewCommand(key: string, {
   readonly hasImages: boolean;
   readonly loupeAvailable: boolean;
 }): "previous-group" | "focus-previous-image" | "focus-next-image" | "toggle-active-image" | "accept-advance" | "browse-next-group" | "toggle-loupe" | null {
-  if (key === "Backspace") return "previous-group";
-  if (hasImages && (key === "ArrowLeft" || key === "ArrowUp")) return "focus-previous-image";
-  if (hasImages && (key === "ArrowRight" || key === "ArrowDown")) return "focus-next-image";
+  if (key === "Escape" || key === "Backspace") return "previous-group";
+  if (hasImages && key === "ArrowLeft") return "focus-previous-image";
+  if (hasImages && key === "ArrowRight") return "focus-next-image";
   if (key === " " && editable) return "toggle-active-image";
   if (key === "Enter" && editable) return "accept-advance";
   if (key === "Enter" && readOnly) return "browse-next-group";
