@@ -46,12 +46,12 @@ export function createCrawlService(api: ApiClient): CrawlService {
     },
     async search(draft, signal) {
       return sanitizeCrawlSearchResponse(
-        await api.post(CRAWL_ENDPOINTS.search, buildSearchPayload(draft), { signal }),
+        await api.post(`${CRAWL_ENDPOINTS.search}?view=desktop`, buildSearchPayload(draft), { signal }),
       );
     },
     async create(snapshot, operations, draft, signal) {
       return sanitizeCreatedCrawl(await api.post(
-        CRAWL_ENDPOINTS.crawls,
+        `${CRAWL_ENDPOINTS.crawls}?view=desktop`,
         buildCrawlPayload(snapshot, operations, draft),
         { signal, idempotencyKey: true },
       ));

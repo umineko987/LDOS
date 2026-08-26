@@ -47,28 +47,50 @@ describe("review service", () => {
     const signal = new AbortController().signal;
     calls.get.mockResolvedValueOnce({ items: [{ id: "batch-review", status: "succeeded" }] });
     expect(await service.readRecent(signal)).toEqual([{ id: "batch-review", status: "succeeded", statusLabel: "成功", createdAt: null, terminal: true }]);
-    expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.crawls}?limit=30`, { signal });
+    expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.crawls}?limit=30&view=desktop`, { signal });
 
     calls.get.mockResolvedValueOnce(rawPage);
     const page = await service.readPage("batch-review", "duplicate", signal);
     expect(page.batchId).toBe("batch-review");
-    expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.crawls}/batch-review/review?all=true&kind=duplicate`, { signal });
+    expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.crawls}/batch-review/review?limit=50&offset=0&view=desktop&kind=duplicate`, { signal });
 
     const payload = Object.freeze({ groups: Object.freeze([{ group_id: "group-1", selected_image_ids: Object.freeze(["image-1"]) }]) });
     calls.put.mockResolvedValueOnce(rawPage);
     await service.writeDecisions("batch-review", payload, signal);
-    expect(calls.put).toHaveBeenCalledWith(`${REVIEW_ENDPOINTS.crawls}/batch-review/review/decisions`, payload, { signal });
+    expect(calls.put).toHaveBeenCalledWith(`${REVIEW_ENDPOINTS.crawls}/batch-review/review/decisions?view=desktop`, payload, { signal });
 
     for (const operation of ["start", "retry", "apply"] as const) {
       calls.post.mockResolvedValueOnce(rawPage);
       await service.run(operation, "batch-review", signal);
-      expect(calls.post).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.crawls}/batch-review/review/${operation}`, {}, { signal });
+      expect(calls.post).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.crawls}/batch-review/review/${operation}?view=desktop`, {}, { signal });
     }
     expect(service.imageUrl("batch-review", "image-1")).toBe("http://127.0.0.1:8787/api/v1/crawls/batch-review/review/images/image-1");
     expect(calls.resourceUrl).toHaveBeenCalledWith("/api/v1/crawls/batch-review/review/images/image-1");
     expect(JSON.stringify(calls.put.mock.calls)).not.toContain("url");
   });
 
+  it("loads a review workspace through bounded sequential pages", async () => {
+    const calls = api();
+    const service = createReviewService(calls.client);
+    const signal = new AbortController().signal;
+    const firstGroup = rawPage.groups.items[0];
+    const secondGroup = {
+      ...firstGroup,
+      id: "group-2",
+      ordinal: 2,
+      images: [{ ...firstGroup.images[0], id: "image-2", ordinal: 2 }],
+    };
+    const summary = { total_image_count: 2, total_group_count: 2, duplicate_group_count: 2, selected_image_count: 2 };
+    calls.get
+      .mockResolvedValueOnce({ ...rawPage, ...summary, groups: { items: [firstGroup], offset: 0, limit: 50, total: 2 } })
+      .mockResolvedValueOnce({ ...rawPage, ...summary, groups: { items: [secondGroup], offset: 1, limit: 50, total: 2 } });
+    const snapshot = await service.readPage("batch-review", "", signal);
+    expect(snapshot.groupOrder).toEqual(["group-1", "group-2"]);
+    expect(calls.get.mock.calls.map(([path]) => path)).toEqual([
+      "/api/v1/crawls/batch-review/review?limit=50&offset=0&view=desktop",
+      "/api/v1/crawls/batch-review/review?limit=50&offset=1&view=desktop",
+    ]);
+  });
   it("rejects invalid status operations and rethrows aborts unchanged", async () => {
     const calls = api();
     const service = createReviewService(calls.client);

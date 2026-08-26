@@ -5,11 +5,13 @@ import {
   REVIEW_GROUP_LIMIT,
   REVIEW_POLL_INTERVAL_MS,
   buildReviewDecisionPayload,
+  mergeReviewPageChunks,
   createReviewRequestGate,
   resolveReviewCommand,
   reviewErrorPresentation,
   reviewImagePath,
   sanitizeReviewPage,
+  sanitizeReviewPageChunk,
   splitReviewDecisionPayload,
   updateReviewImageSelection,
   type ReviewSnapshot,
@@ -86,6 +88,29 @@ describe("review model", () => {
     expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
   });
 
+
+  it("merges bounded review pages and rejects gaps or cross-page duplicates", () => {
+    const summary = { total_image_count: 4, total_group_count: 2, duplicate_group_count: 2, selected_image_count: 4 };
+    const first = sanitizeReviewPageChunk(rawPage([rawGroup(1)], {
+      ...summary,
+      groups: { items: [rawGroup(1)], offset: 0, limit: 1, total: 2 },
+    }), { batchId: "batch-review", filter: "", requestedOffset: 0 });
+    const second = sanitizeReviewPageChunk(rawPage([rawGroup(2)], {
+      ...summary,
+      groups: { items: [rawGroup(2)], offset: 1, limit: 1, total: 2 },
+    }), { batchId: "batch-review", filter: "", requestedOffset: 1 });
+    const snapshot = mergeReviewPageChunks([first, second]);
+    expect(snapshot.groupOrder).toEqual(["group-1", "group-2"]);
+    expect(snapshot.summary.totalGroupCount).toBe(2);
+    expect(() => sanitizeReviewPageChunk(rawPage([], {
+      ...summary,
+      groups: { items: [], offset: 2, limit: 1, total: 2 },
+    }), { batchId: "batch-review", filter: "", requestedOffset: 1 })).toThrow(TypeError);
+    expect(() => mergeReviewPageChunks([first, sanitizeReviewPageChunk(rawPage([rawGroup(1)], {
+      ...summary,
+      groups: { items: [rawGroup(1)], offset: 1, limit: 1, total: 2 },
+    }), { batchId: "batch-review", filter: "", requestedOffset: 1 })])).toThrow(TypeError);
+  });
   it("updates one keyed image and chunks only confirmed business identifiers", () => {
     const groups = Array.from({ length: 101 }, (_, index) => rawGroup(index + 1, [rawImage(index + 1)]));
     let snapshot = sanitize(groups);

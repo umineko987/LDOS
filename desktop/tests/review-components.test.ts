@@ -106,7 +106,9 @@ describe("Svelte Review integration", () => {
       /data:image/,
     ]) expect(combined).not.toMatch(forbidden);
     expect(serviceSource.match(/"\/api\/v1\//g)).toHaveLength(1);
-    expect(serviceSource.match(/\?all=true/g)).toHaveLength(1);
+    expect(serviceSource.match(/view=desktop/g)).toHaveLength(4);
+    expect(serviceSource).toContain("REVIEW_PAGE_LIMIT = 50");
+    expect(serviceSource).not.toContain("all=true");
     expect(controllerSource).toContain('REVIEW_POLL_KEY = "review.active"');
     expect(controllerSource).toContain("intervalMs: REVIEW_POLL_INTERVAL_MS");
     expect(controllerSource).toContain("polling.stopScope(REVIEW_SCOPE)");

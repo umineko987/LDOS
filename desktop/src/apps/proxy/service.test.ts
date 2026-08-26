@@ -43,8 +43,8 @@ describe("Proxy API service", () => {
     const controller = new AbortController();
     const authority = await service.readAuthority(controller.signal);
     expect(client.get.mock.calls).toEqual([
-      [PROXY_ENDPOINTS.status, { signal: expect.any(AbortSignal) }],
-      [PROXY_ENDPOINTS.sources, { signal: expect.any(AbortSignal) }],
+      [`${PROXY_ENDPOINTS.status}?view=desktop`, { signal: expect.any(AbortSignal) }],
+      [`${PROXY_ENDPOINTS.sources}?view=desktop`, { signal: expect.any(AbortSignal) }],
     ]);
     expect(authority.status.nodeOrder).toEqual(["proxy-stage4-node"]);
     expect(authority.sources.subscriptionOrder).toEqual([SUBSCRIPTION_ID]);
@@ -60,10 +60,10 @@ describe("Proxy API service", () => {
     await service.runtime("reload", signal);
     await service.runtime("probe", signal);
     expect(client.post.mock.calls).toEqual([
-      [PROXY_ENDPOINTS.start, { force_refresh: true }, { signal }],
-      [PROXY_ENDPOINTS.stop, { force: false }, { signal }],
-      [PROXY_ENDPOINTS.reload, { force_refresh: true }, { signal }],
-      [PROXY_ENDPOINTS.probe, {}, { signal }],
+      [`${PROXY_ENDPOINTS.start}?view=desktop`, { force_refresh: true }, { signal }],
+      [`${PROXY_ENDPOINTS.stop}?view=desktop`, { force: false }, { signal }],
+      [`${PROXY_ENDPOINTS.reload}?view=desktop`, { force_refresh: true }, { signal }],
+      [`${PROXY_ENDPOINTS.probe}?view=desktop`, {}, { signal }],
     ]);
     await expect(service.runtime("bad" as never, signal)).rejects.toThrow("invalid_proxy_runtime_action");
   });
@@ -84,19 +84,19 @@ describe("Proxy API service", () => {
     await service.remove("node-file", "", signal);
     await service.remove("override", "", signal);
     expect(client.post.mock.calls).toEqual([
-      [PROXY_ENDPOINTS.subscriptions, { url: subscription }, { signal }],
-      [PROXY_ENDPOINTS.inlineNodes, { nodes: nodes.split("\n") }, { signal }],
+      [`${PROXY_ENDPOINTS.subscriptions}?view=desktop`, { url: subscription }, { signal }],
+      [`${PROXY_ENDPOINTS.inlineNodes}?view=desktop`, { nodes: nodes.split("\n") }, { signal }],
     ]);
     expect(client.put.mock.calls).toEqual([
-      [`${PROXY_ENDPOINTS.subscriptions}/${SUBSCRIPTION_ID}`, { url: subscription }, { signal }],
-      [PROXY_ENDPOINTS.nodeFile, { path: "../subscriptions/nodes.yaml" }, { signal }],
-      [`${PROXY_ENDPOINTS.inlineNodes}/${INLINE_ID}`, { node: "trojan://secret@replacement.invalid:443#two" }, { signal }],
+      [`${PROXY_ENDPOINTS.subscriptions}/${SUBSCRIPTION_ID}?view=desktop`, { url: subscription }, { signal }],
+      [`${PROXY_ENDPOINTS.nodeFile}?view=desktop`, { path: "../subscriptions/nodes.yaml" }, { signal }],
+      [`${PROXY_ENDPOINTS.inlineNodes}/${INLINE_ID}?view=desktop`, { node: "trojan://secret@replacement.invalid:443#two" }, { signal }],
     ]);
     expect(client.delete.mock.calls.map(([path]) => path)).toEqual([
-      `${PROXY_ENDPOINTS.subscriptions}/${SUBSCRIPTION_ID}`,
-      `${PROXY_ENDPOINTS.inlineNodes}/${INLINE_ID}`,
-      PROXY_ENDPOINTS.nodeFile,
-      PROXY_ENDPOINTS.override,
+      `${PROXY_ENDPOINTS.subscriptions}/${SUBSCRIPTION_ID}?view=desktop`,
+      `${PROXY_ENDPOINTS.inlineNodes}/${INLINE_ID}?view=desktop`,
+      `${PROXY_ENDPOINTS.nodeFile}?view=desktop`,
+      `${PROXY_ENDPOINTS.override}?view=desktop`,
     ]);
   });
 
@@ -105,7 +105,7 @@ describe("Proxy API service", () => {
     const client = api();
     client.get.mockImplementation((path: string, options: { signal: AbortSignal }) => {
       signals.push(options.signal);
-      return path === PROXY_ENDPOINTS.status ? Promise.reject(new Error("failed")) : new Promise(() => {});
+      return path === `${PROXY_ENDPOINTS.status}?view=desktop` ? Promise.reject(new Error("failed")) : new Promise(() => {});
     });
     const service = createProxyService(client);
     await expect(service.readAuthority(new AbortController().signal)).rejects.toThrow("failed");

@@ -48,11 +48,13 @@ describe("Crawl API service", () => {
       sources: [{
         site: "danbooru",
         status: "succeeded",
+        enrichment_error_count: 7,
         addresses: [{
           id: "one",
           label: "One",
           address_type: "artist_tag",
           url: "https://danbooru.donmai.us/posts?tags=one",
+          related_profile_count: 9,
         }],
         weak_evidence: [],
       }],
@@ -69,6 +71,8 @@ describe("Crawl API service", () => {
     ]);
     const projection = await service.search(searchDraft, controller.signal);
     const key = "candidate:danbooru:one" as const;
+    expect(projection.snapshot.sources[projection.snapshot.sourceOrder[0]]?.enrichmentIssueCount).toBe(7);
+    expect(projection.snapshot.candidates[key]?.relatedProfileCount).toBe(9);
     const selected = {
       ...projection.snapshot,
       candidates: {
@@ -83,14 +87,14 @@ describe("Crawl API service", () => {
       { signal: controller.signal },
     );
     expect(api.post.mock.calls).toEqual([
-      [CRAWL_ENDPOINTS.search, {
+      [`${CRAWL_ENDPOINTS.search}?view=desktop`, {
         keyword: "stage 4",
         sites: ["danbooru"],
         limit: 20,
         proxy_mode: "required",
         source_options: {},
       }, { signal: controller.signal }],
-      [CRAWL_ENDPOINTS.crawls, {
+      [`${CRAWL_ENDPOINTS.crawls}?view=desktop`, {
         sources: [{
           site: "danbooru",
           addresses: [{

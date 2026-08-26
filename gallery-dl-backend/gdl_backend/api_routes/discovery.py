@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, Literal
 
 from fastapi import APIRouter, Depends
 
@@ -27,6 +28,14 @@ from .validation import validate_network_target
 
 _ALIAS_LOOKUP_WAIT_SECONDS = 30.0
 _search_logger = logging.getLogger("gdl_backend.search")
+
+_DESKTOP_SEARCH_SOURCE_LIMIT = 5
+_DESKTOP_SEARCH_CANDIDATE_LIMIT = 1_000
+_DESKTOP_SEARCH_CANDIDATE_BYTES = 8 * 1024 * 1024
+_DESKTOP_SEARCH_RELATED_PROFILE_LIMIT = 80
+_DESKTOP_SEARCH_RELATED_PROFILE_BYTES = 512 * 1024
+_DESKTOP_SEARCH_FACET_LIMIT = 32
+_DESKTOP_SEARCH_FACET_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -714,6 +723,213 @@ async def _perform_search(body: SearchRequest, container: Any) -> dict[str, Any]
     )
 
 
+def _bounded_desktop_rows(
+    values: list[Any],
+    projector: Callable[[Any], dict[str, Any]],
+    *,
+    maximum_count: int,
+    maximum_bytes: int,
+) -> tuple[list[dict[str, Any]], int, bool]:
+    rows: list[dict[str, Any]] = []
+    used_bytes = 0
+    for value in values:
+        if len(rows) >= maximum_count:
+            break
+        row = projector(value)
+        row_bytes = len(
+            json.dumps(
+                row,
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ).encode("ascii")
+        ) + 1
+        if used_bytes + row_bytes > maximum_bytes:
+            break
+        rows.append(row)
+        used_bytes += row_bytes
+    return rows, used_bytes, len(rows) < len(values)
+
+
+def _desktop_search_candidate(value: Any) -> dict[str, Any]:
+    candidate = value if isinstance(value, dict) else {}
+    projected: dict[str, Any] = {}
+    limits = {
+        "id": 200,
+        "url": 8192,
+        "address_type": 100,
+        "label": 200,
+        "tag": 200,
+        "title": 200,
+        "confidence": 32,
+        "origin": 64,
+        "thumbnail_url": 2048,
+    }
+    for key, limit in limits.items():
+        field = candidate.get(key)
+        if field is not None:
+            projected[key] = str(field)[:limit]
+    if isinstance(candidate.get("media_count"), int):
+        projected["media_count"] = max(0, candidate["media_count"])
+    reasons = candidate.get("evidence_reasons")
+    projected["evidence_reasons"] = [
+        str(item)[:80] for item in reasons[:12] if item is not None
+    ] if isinstance(reasons, list) else []
+    profiles = candidate.get("related_profiles")
+    projected["related_profile_count"] = (
+        min(len(profiles), 1_000) if isinstance(profiles, list) else 0
+    )
+    metadata = candidate.get("metadata")
+    tags = metadata.get("tags") if isinstance(metadata, dict) else None
+    projected["metadata"] = {
+        "tags": [str(item)[:180] for item in tags[:160] if item is not None]
+        if isinstance(tags, list) else []
+    }
+    return projected
+
+
+def _desktop_search_facet(value: Any) -> dict[str, Any]:
+    facet = value if isinstance(value, dict) else {}
+    tags = facet.get("tags")
+    return {
+        "namespace": str(facet.get("namespace") or "")[:80],
+        "label": str(facet.get("label") or "")[:80],
+        "gallery_count": (
+            facet.get("gallery_count")
+            if isinstance(facet.get("gallery_count"), int)
+            else 0
+        ),
+        "tags": [
+            {
+                "tag": str(item.get("tag") or "")[:180],
+                "count": item.get("count") if isinstance(item.get("count"), int) else 0,
+            }
+            for item in tags[:160]
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _desktop_search_profile(value: Any) -> dict[str, Any]:
+    profile = value if isinstance(value, dict) else {}
+    return {
+        "artist_name": str(profile.get("artist_name") or "")[:100],
+        "platform": str(profile.get("platform") or "")[:40],
+        "url": str(profile.get("url") or "")[:2048],
+    }
+
+
+def _desktop_search_response(value: dict[str, Any]) -> dict[str, Any]:
+    projected_sources: list[dict[str, Any]] = []
+    sources = value.get("sources")
+    source_rows = (
+        sources[:_DESKTOP_SEARCH_SOURCE_LIMIT] if isinstance(sources, list) else []
+    )
+    projection_truncated = (
+        isinstance(sources, list) and len(sources) > _DESKTOP_SEARCH_SOURCE_LIMIT
+    )
+    remaining_candidates = _DESKTOP_SEARCH_CANDIDATE_LIMIT
+    remaining_candidate_bytes = _DESKTOP_SEARCH_CANDIDATE_BYTES
+    remaining_facets = _DESKTOP_SEARCH_FACET_LIMIT
+    remaining_facet_bytes = _DESKTOP_SEARCH_FACET_BYTES
+    for raw_source in source_rows:
+        source = raw_source if isinstance(raw_source, dict) else {}
+        error = source.get("error") if isinstance(source.get("error"), dict) else {}
+        auth = source.get("auth") if isinstance(source.get("auth"), dict) else {}
+        aliases = source.get("alias_keywords")
+        facets = source.get("tag_facets")
+        enrichment_errors = source.get("enrichment_errors")
+        address_values = source.get("addresses")
+        address_rows = address_values if isinstance(address_values, list) else []
+        projected_addresses, address_bytes, addresses_truncated = _bounded_desktop_rows(
+            address_rows,
+            _desktop_search_candidate,
+            maximum_count=remaining_candidates,
+            maximum_bytes=remaining_candidate_bytes,
+        )
+        remaining_candidates -= len(projected_addresses)
+        remaining_candidate_bytes -= address_bytes
+        weak_values = source.get("weak_evidence")
+        weak_rows = weak_values if isinstance(weak_values, list) else []
+        projected_weak, weak_bytes, weak_truncated = _bounded_desktop_rows(
+            weak_rows,
+            _desktop_search_candidate,
+            maximum_count=remaining_candidates,
+            maximum_bytes=remaining_candidate_bytes,
+        )
+        remaining_candidates -= len(projected_weak)
+        remaining_candidate_bytes -= weak_bytes
+        facet_rows = facets if isinstance(facets, list) else []
+        projected_facets, facet_bytes, facets_truncated = _bounded_desktop_rows(
+            facet_rows,
+            _desktop_search_facet,
+            maximum_count=remaining_facets,
+            maximum_bytes=remaining_facet_bytes,
+        )
+        remaining_facets -= len(projected_facets)
+        remaining_facet_bytes -= facet_bytes
+        projection_truncated = projection_truncated or any(
+            (addresses_truncated, weak_truncated, facets_truncated)
+        )
+        projected_sources.append({
+            "site": str(source.get("site") or "")[:128],
+            "status": str(source.get("status") or "failed")[:32],
+            "evidence_count": (
+                source.get("evidence_count")
+                if isinstance(source.get("evidence_count"), int)
+                else 0
+            ),
+            "preview_count": (
+                source.get("preview_count")
+                if isinstance(source.get("preview_count"), int)
+                else 0
+            ),
+            "attempts": (
+                source.get("attempts")
+                if isinstance(source.get("attempts"), int)
+                else 0
+            ),
+            "alias_keywords": [
+                str(item)[:80] for item in aliases[:8] if item is not None
+            ] if isinstance(aliases, list) else [],
+            "error": {
+                "code": str(error.get("code") or "")[:128],
+                "message": redact_text(error.get("message") or "", limit=500),
+            },
+            "enrichment_error_count": (
+                min(len(enrichment_errors), 1_000)
+                if isinstance(enrichment_errors, list)
+                else 0
+            ),
+            "auth": {
+                "state": str(auth.get("state") or "unknown")[:32],
+                "authorized": auth.get("authorized") is True,
+            },
+            "tag_facets": projected_facets,
+            "addresses": projected_addresses,
+            "weak_evidence": projected_weak,
+        })
+    profiles = value.get("related_profiles")
+    profile_rows = (
+        [item for item in profiles if isinstance(item, dict)]
+        if isinstance(profiles, list)
+        else []
+    )
+    projected_profiles, _, profiles_truncated = _bounded_desktop_rows(
+        profile_rows,
+        _desktop_search_profile,
+        maximum_count=_DESKTOP_SEARCH_RELATED_PROFILE_LIMIT,
+        maximum_bytes=_DESKTOP_SEARCH_RELATED_PROFILE_BYTES,
+    )
+    projection_truncated = projection_truncated or profiles_truncated
+    return {
+        "response_profile": "desktop",
+        "projection_truncated": projection_truncated,
+        "candidate_limit": _DESKTOP_SEARCH_CANDIDATE_LIMIT,
+        "sources": projected_sources,
+        "related_profiles": projected_profiles,
+    }
+
+
 def create_discovery_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
@@ -752,8 +968,10 @@ def create_discovery_router() -> APIRouter:
     @router.post("/search")
     async def search_candidates(
         body: SearchRequest,
+        view: Literal["legacy", "desktop"] = "legacy",
         container: Any = Depends(get_service),
     ):
-        return await _perform_search(body, container)
+        response = await _perform_search(body, container)
+        return _desktop_search_response(response) if view == "desktop" else response
 
     return router

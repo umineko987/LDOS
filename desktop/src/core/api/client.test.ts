@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiError, buildRequestOptions, createApiClient, createIdempotencyKey, createRequestId } from "./client";
+import {
+  API_MAX_RESPONSE_CHARS,
+  ApiError,
+  buildRequestOptions,
+  createApiClient,
+  createIdempotencyKey,
+  createRequestId,
+} from "./client";
 
 const runtime = Object.freeze({ apiOrigin: "http://127.0.0.1:8787", backendVersion: "0.5.2" });
 
@@ -73,7 +80,8 @@ describe("API client", () => {
       new Response("<html>gateway</html>", { status: 502, headers: { "X-Request-ID": "gateway-id" } }),
       jsonResponse({ error: { code: "unexpected_success_error", message: "拒绝" } }),
       new Response("{broken", { status: 200, headers: { "X-Request-ID": "invalid-id" } }),
-      new Response(JSON.stringify({ data: "x".repeat(65_536) }), {
+      jsonResponse({ data: "x".repeat(800_000) }),
+      new Response(JSON.stringify({ data: "x".repeat(API_MAX_RESPONSE_CHARS) }), {
         status: 200,
         headers: { "X-Request-ID": "large-response-id" },
       }),
@@ -102,6 +110,11 @@ describe("API client", () => {
       code: "invalid_response",
       requestId: "invalid-id",
     });
+    const projected = await client.get(
+      "/bounded-review-page",
+      { requestId: "bounded" },
+    ) as { data: string };
+    expect(projected.data).toHaveLength(800_000);
     await expect(client.get("/too-large", { requestId: "five" })).rejects.toMatchObject({
       status: 200,
       code: "response_too_large",

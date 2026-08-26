@@ -40,7 +40,7 @@ export function taskPagePath(query: TaskPageQuery): string {
 export function createTasksService(api: ApiClient): TasksService {
   return Object.freeze({
     async readRecent(signal: AbortSignal) {
-      return sanitizeRecentBatches(await api.get(`${TASKS_ENDPOINTS.crawls}?limit=30`, { signal }));
+      return sanitizeRecentBatches(await api.get(`${TASKS_ENDPOINTS.crawls}?limit=30&view=desktop`, { signal }));
     },
     async readAuthority(query: TaskPageQuery, signal: AbortSignal) {
       const controller = new AbortController();
@@ -49,7 +49,7 @@ export function createTasksService(api: ApiClient): TasksService {
       else signal.addEventListener("abort", abort, { once: true });
       try {
         const [rawSummary, rawPage] = await Promise.all([
-          api.get(taskBatchPath(query.batchId), { signal: controller.signal }),
+          api.get(taskBatchPath(query.batchId, "?view=desktop"), { signal: controller.signal }),
           api.get(taskPagePath(query), { signal: controller.signal }),
         ]);
         return Object.freeze({
@@ -65,11 +65,11 @@ export function createTasksService(api: ApiClient): TasksService {
     },
     async write(operation: TasksOperation, batchId: string, signal: AbortSignal) {
       if (operation === "retry") {
-        await api.post(taskBatchPath(batchId, "/retry"), { additional_attempts: 2 }, { signal });
+        await api.post(taskBatchPath(batchId, "/retry?view=desktop"), { additional_attempts: 2 }, { signal });
         return;
       }
       if (operation === "cancel" || operation === "rerun") {
-        await api.post(taskBatchPath(batchId, `/${operation}`), {}, { signal });
+        await api.post(taskBatchPath(batchId, `/${operation}?view=desktop`), {}, { signal });
         return;
       }
       throw new TypeError("invalid_tasks_operation");

@@ -32,7 +32,9 @@ test.describe("可用应用关键旅程", () => {
     expect(api.count("GET", "/api/v1/search/autocomplete")).toBeGreaterThan(0);
     expect(api.count("POST", "/api/v1/search")).toBe(1);
     expect(api.count("POST", "/api/v1/crawls")).toBe(1);
-    const create = api.requests.find((request) => request.method === "POST" && request.path === "/api/v1/crawls");
+    const create = api.requests.find(
+      (request) => request.method === "POST" && request.path === "/api/v1/crawls?view=desktop",
+    );
     expect(create?.body).toMatchObject({ concurrency: 20, max_tasks: 10000 });
     expect(api.unhandled).toEqual([]);
   });

@@ -136,6 +136,12 @@ describe("Proxy runtime sanitizer", () => {
     }));
     expect(status.nodeOrder).toHaveLength(500);
     expect(status.nodesTruncated).toBe(true);
+    const projected = sanitizeProxyStatus(rawProxyStatus({
+      nodes: rawProxyStatus().nodes.slice(0, 1),
+      node_rows_truncated: true,
+    }));
+    expect(projected.nodeOrder).toHaveLength(1);
+    expect(projected.nodesTruncated).toBe(true);
     expect(PROXY_NODE_RENDER_LIMIT).toBe(160);
     expect(() => sanitizeProxyStatus(null)).toThrow("invalid_proxy_status");
     expect(() => sanitizeProxySources([])).toThrow("invalid_proxy_sources");

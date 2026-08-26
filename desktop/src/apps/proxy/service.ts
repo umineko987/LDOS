@@ -51,10 +51,10 @@ function validatedValue(result: ReturnType<typeof validateSubscriptionInput> | R
 
 export function createProxyService(api: ApiClient): ProxyService {
   const readStatus = async (signal: AbortSignal): Promise<ProxyStatus> => (
-    sanitizeProxyStatus(await api.get(PROXY_ENDPOINTS.status, { signal }))
+    sanitizeProxyStatus(await api.get(`${PROXY_ENDPOINTS.status}?view=desktop`, { signal }))
   );
   const readSources = async (signal: AbortSignal): Promise<ProxySources> => (
-    sanitizeProxySources(await api.get(PROXY_ENDPOINTS.sources, { signal }))
+    sanitizeProxySources(await api.get(`${PROXY_ENDPOINTS.sources}?view=desktop`, { signal }))
   );
 
   const service: ProxyService = {
@@ -80,43 +80,43 @@ export function createProxyService(api: ApiClient): ProxyService {
     },
     async runtime(action, signal) {
       if (action === "start" || action === "reload") {
-        await api.post(PROXY_ENDPOINTS[action], { force_refresh: true }, { signal });
+        await api.post(`${PROXY_ENDPOINTS[action]}?view=desktop`, { force_refresh: true }, { signal });
         return;
       }
       if (action === "stop") {
-        await api.post(PROXY_ENDPOINTS.stop, { force: false }, { signal });
+        await api.post(`${PROXY_ENDPOINTS.stop}?view=desktop`, { force: false }, { signal });
         return;
       }
       if (action === "probe") {
-        await api.post(PROXY_ENDPOINTS.probe, {}, { signal });
+        await api.post(`${PROXY_ENDPOINTS.probe}?view=desktop`, {}, { signal });
         return;
       }
       throw new TypeError("invalid_proxy_runtime_action");
     },
     async addSubscription(value, signal) {
-      await api.post(PROXY_ENDPOINTS.subscriptions, {
+      await api.post(`${PROXY_ENDPOINTS.subscriptions}?view=desktop`, {
         url: validatedValue(validateSubscriptionInput(value)),
       }, { signal });
     },
     async replaceSubscription(id, value, signal) {
-      await api.put(`${PROXY_ENDPOINTS.subscriptions}/${sourceId(id, "sub")}`, {
+      await api.put(`${PROXY_ENDPOINTS.subscriptions}/${sourceId(id, "sub")}?view=desktop`, {
         url: validatedValue(validateSubscriptionInput(value)),
       }, { signal });
     },
     async setNodeFile(value, signal) {
-      await api.put(PROXY_ENDPOINTS.nodeFile, {
+      await api.put(`${PROXY_ENDPOINTS.nodeFile}?view=desktop`, {
         path: validatedValue(validateNodeFileInput(value)),
       }, { signal });
     },
     async addInlineNodes(value, signal) {
       const result = validateInlineNodeInput(value, true);
       if (!result.valid || !Array.isArray(result.value)) throw new TypeError("invalid_inline_node");
-      await api.post(PROXY_ENDPOINTS.inlineNodes, { nodes: result.value }, { signal });
+      await api.post(`${PROXY_ENDPOINTS.inlineNodes}?view=desktop`, { nodes: result.value }, { signal });
     },
     async replaceInlineNode(id, value, signal) {
       const result = validateInlineNodeInput(value, false);
       if (!result.valid || typeof result.value !== "string") throw new TypeError("invalid_inline_node");
-      await api.put(`${PROXY_ENDPOINTS.inlineNodes}/${sourceId(id, "node")}`, {
+      await api.put(`${PROXY_ENDPOINTS.inlineNodes}/${sourceId(id, "node")}?view=desktop`, {
         node: result.value,
       }, { signal });
     },
@@ -131,7 +131,7 @@ export function createProxyService(api: ApiClient): ProxyService {
               ? PROXY_ENDPOINTS.override
               : null;
       if (!path) throw new TypeError("invalid_proxy_delete_action");
-      await api.delete(path, { signal });
+      await api.delete(`${path}?view=desktop`, { signal });
     },
   };
   return Object.freeze(service);

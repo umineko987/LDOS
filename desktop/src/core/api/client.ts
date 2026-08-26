@@ -6,7 +6,7 @@ import {
 } from "../runtime/sanitize";
 
 const METHODS = ["GET", "POST", "PUT", "DELETE"] as const;
-const MAX_RESPONSE_CHARS = 65_536;
+export const API_MAX_RESPONSE_CHARS = 16 * 1024 * 1024;
 
 type HttpMethod = typeof METHODS[number];
 type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -161,7 +161,7 @@ function apiUrl(origin: string, path: string): string {
 
 function parseResponseText(text: string): { kind: "empty" | "invalid" | "json" | "too_large"; value: unknown } {
   if (!text.trim()) return { kind: "empty", value: null };
-  if (text.length > MAX_RESPONSE_CHARS) return { kind: "too_large", value: null };
+  if (text.length > API_MAX_RESPONSE_CHARS) return { kind: "too_large", value: null };
   try {
     return { kind: "json", value: JSON.parse(text) };
   } catch {

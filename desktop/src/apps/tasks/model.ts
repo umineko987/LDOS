@@ -98,6 +98,7 @@ export interface BatchSummary {
   readonly resumable: boolean;
   readonly current: BatchCurrentAddress | null;
   readonly sources: readonly BatchSource[];
+  readonly addressesTruncated: boolean;
   readonly review: BatchReviewSummary | null;
 }
 
@@ -406,6 +407,7 @@ export function sanitizeBatchSummary(value: unknown, expectedId?: string): Batch
     resumable: Boolean(own(record, "resumable")),
     current: sanitizeCurrent(own(record, "current")),
     sources: sanitizeSources(own(record, "sources")),
+    addressesTruncated: own(record, "address_rows_truncated") === true,
     review: sanitizeReview(own(record, "review"), id),
   });
 }

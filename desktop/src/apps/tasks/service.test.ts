@@ -86,7 +86,7 @@ describe("Tasks API service", () => {
 
     expect(client.get).toHaveBeenCalledTimes(2);
     expect(client.get.mock.calls.map(([path]) => path)).toEqual([
-      "/api/v1/crawls/batch%3Aservice.1",
+      "/api/v1/crawls/batch%3Aservice.1?view=desktop",
       "/api/v1/crawls/batch%3Aservice.1/tasks?limit=100&offset=100&view=tasks",
     ]);
     const signals = client.get.mock.calls.map(([, options]) => options.signal as AbortSignal);
@@ -114,7 +114,7 @@ describe("Tasks API service", () => {
     await expect(service.readRecent(controller.signal)).resolves.toEqual([
       expect.objectContaining({ id: "batch:service.1", status: "succeeded", terminal: true }),
     ]);
-    expect(client.get).toHaveBeenCalledWith("/api/v1/crawls?limit=30", { signal: controller.signal });
+    expect(client.get).toHaveBeenCalledWith("/api/v1/crawls?limit=30&view=desktop", { signal: controller.signal });
   });
 
   it("uses exact POST endpoints and bodies for cancel, retry, and rerun", async () => {
@@ -125,9 +125,9 @@ describe("Tasks API service", () => {
     await service.write("retry", "batch:service.1", controller.signal);
     await service.write("rerun", "batch:service.1", controller.signal);
     expect(client.post.mock.calls).toEqual([
-      ["/api/v1/crawls/batch%3Aservice.1/cancel", {}, { signal: controller.signal }],
-      ["/api/v1/crawls/batch%3Aservice.1/retry", { additional_attempts: 2 }, { signal: controller.signal }],
-      ["/api/v1/crawls/batch%3Aservice.1/rerun", {}, { signal: controller.signal }],
+      ["/api/v1/crawls/batch%3Aservice.1/cancel?view=desktop", {}, { signal: controller.signal }],
+      ["/api/v1/crawls/batch%3Aservice.1/retry?view=desktop", { additional_attempts: 2 }, { signal: controller.signal }],
+      ["/api/v1/crawls/batch%3Aservice.1/rerun?view=desktop", {}, { signal: controller.signal }],
     ]);
     await expect(service.write("invalid" as never, "batch:service.1", controller.signal))
       .rejects.toThrow("invalid_tasks_operation");

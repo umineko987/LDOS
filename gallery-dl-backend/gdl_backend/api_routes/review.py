@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
@@ -12,6 +13,130 @@ from ..review import resolve_review_file
 from ..schemas import ReviewDecisions
 from .dependencies import get_service
 from .errors import ApiError
+
+ReviewResponseView = Literal["legacy", "desktop"]
+REVIEW_RESPONSE_PROFILE = "desktop-review-v1"
+_DESKTOP_REVIEW_PAGE_BYTES = 768 * 1024
+_DESKTOP_REVIEW_GROUP_IMAGE_LIMIT = 1_000
+
+
+def _count(value: Any, *, maximum: int = 1_000_000_000) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return min(maximum, max(0, number))
+
+
+def _desktop_review_image(image: dict[str, Any]) -> dict[str, Any]:
+    metadata = image.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return {
+        "id": str(image.get("id") or "")[:128],
+        "ordinal": _count(image.get("ordinal"), maximum=100_000),
+        "readable": bool(image.get("readable")),
+        "recommended": bool(image.get("recommended")),
+        "selected": bool(image.get("selected")),
+        "metadata": {
+            "w": _count(metadata.get("w", metadata.get("width")), maximum=1_000_000),
+            "h": _count(metadata.get("h", metadata.get("height")), maximum=1_000_000),
+        },
+    }
+
+
+def _desktop_review_group(group: dict[str, Any]) -> dict[str, Any]:
+    images = group.get("images")
+    if not isinstance(images, list):
+        images = []
+    if len(images) > _DESKTOP_REVIEW_GROUP_IMAGE_LIMIT:
+        raise ApiError(
+            413,
+            "review_group_too_large",
+            f"单个审核组超过 {_DESKTOP_REVIEW_GROUP_IMAGE_LIMIT} 张图片上限",
+        )
+    return {
+        "id": str(group.get("id") or "")[:128],
+        "ordinal": _count(group.get("ordinal"), maximum=100_000),
+        "kind": str(group.get("kind") or "single")[:32],
+        "decided": bool(group.get("decided")),
+        "images": [
+            _desktop_review_image(image)
+            for image in images
+            if isinstance(image, dict)
+        ],
+    }
+
+
+def _desktop_review_response(
+    review: dict[str, Any],
+    page: dict[str, Any],
+) -> dict[str, Any]:
+    raw_groups = page.get("items")
+    group_rows = (
+        [group for group in raw_groups if isinstance(group, dict)]
+        if isinstance(raw_groups, list)
+        else []
+    )
+    projected_groups: list[dict[str, Any]] = []
+    used_bytes = 0
+    for group in group_rows:
+        projected = _desktop_review_group(group)
+        projected_bytes = len(
+            json.dumps(
+                projected,
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ).encode("ascii")
+        ) + 1
+        if used_bytes + projected_bytes > _DESKTOP_REVIEW_PAGE_BYTES:
+            if not projected_groups:
+                raise ApiError(
+                    413,
+                    "review_group_response_too_large",
+                    "单个审核组超过桌面响应预算",
+                )
+            break
+        projected_groups.append(projected)
+        used_bytes += projected_bytes
+    return {
+        "response_profile": REVIEW_RESPONSE_PROFILE,
+        "batch_id": str(review.get("batch_id") or "")[:128],
+        "status": str(review.get("status") or "failed")[:32],
+        "totalImageCount": _count(review.get("total_image_count")),
+        "totalGroupCount": _count(review.get("total_group_count")),
+        "duplicateGroupCount": _count(review.get("duplicate_group_count")),
+        "unreadableImageCount": _count(review.get("unreadable_image_count")),
+        "automaticGroupCount": _count(review.get("automatic_group_count")),
+        "automaticRejectedImageCount": _count(
+            review.get("automatic_rejected_image_count")
+        ),
+        "selectedImageCount": _count(review.get("selected_image_count")),
+        "decidedGroupCount": _count(review.get("decided_group_count")),
+        "keptImageCount": _count(review.get("kept_image_count")),
+        "rejectedImageCount": _count(review.get("rejected_image_count")),
+        "failedImageCount": _count(review.get("failed_image_count")),
+        "hasError": bool(review.get("error")),
+        "groups": {
+            "items": projected_groups,
+            "byte_truncated": len(projected_groups) < len(group_rows),
+            "total": _count(page.get("total"), maximum=MAX_CRAWL_REVIEW_GROUPS),
+            "limit": _count(page.get("limit"), maximum=MAX_CRAWL_REVIEW_GROUPS),
+            "offset": _count(page.get("offset"), maximum=MAX_CRAWL_REVIEW_GROUPS),
+        },
+    }
+
+
+def _desktop_review_operation(review: dict[str, Any] | None) -> dict[str, Any]:
+    projected = _desktop_review_response(
+        review if isinstance(review, dict) else {},
+        _empty_review_groups(limit=0, offset=0),
+    )
+    projected.pop("groups")
+    projected["response_profile"] = "desktop-review-operation-v1"
+    return projected
 
 
 def _empty_review_groups(*, limit: int, offset: int) -> dict[str, Any]:
@@ -36,6 +161,7 @@ def create_review_router() -> APIRouter:
         limit: int = Query(default=12, ge=1, le=50),
         offset: int = Query(default=0, ge=0),
         all_groups: bool = Query(default=False, alias="all"),
+        view: ReviewResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
         batch = container.db.get_crawl_batch(batch_id)
@@ -58,14 +184,14 @@ def create_review_router() -> APIRouter:
             status = (
                 "not_started" if container.settings.dedup.enabled else "disabled"
             )
-            return {
-                "batch_id": batch_id,
-                "status": status,
-                "groups": _empty_review_groups(
-                    limit=response_limit,
-                    offset=response_offset,
-                ),
-            }
+            empty_page = _empty_review_groups(
+                limit=response_limit,
+                offset=response_offset,
+            )
+            empty_review = {"batch_id": batch_id, "status": status}
+            if view == "desktop":
+                return _desktop_review_response(empty_review, empty_page)
+            return {**empty_review, "groups": empty_page}
         page = _empty_review_groups(
             limit=response_limit,
             offset=response_offset,
@@ -90,17 +216,21 @@ def create_review_router() -> APIRouter:
                     image["url"] = (
                         f"/api/v1/crawls/{batch_id}/review/images/{image['id']}"
                     )
+        if view == "desktop":
+            return _desktop_review_response(review, page)
         return {**review, "groups": page}
 
     @router.post("/crawls/{batch_id}/review/start", status_code=202)
     async def start_crawl_review(
         batch_id: str,
+        view: ReviewResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
         if not container.settings.dedup.enabled:
             raise ApiError(409, "dedup_disabled", "去重功能未启用")
         try:
-            return container.reviews.start_analysis(batch_id)
+            result = container.reviews.start_analysis(batch_id)
+            return _desktop_review_operation(result) if view == "desktop" else result
         except KeyError as exc:
             raise ApiError(404, "crawl_not_found", "爬取批次不存在") from exc
         except RuntimeError as exc:
@@ -110,6 +240,7 @@ def create_review_router() -> APIRouter:
     async def update_crawl_review_decisions(
         batch_id: str,
         body: ReviewDecisions,
+        view: ReviewResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
         try:
@@ -128,17 +259,19 @@ def create_review_router() -> APIRouter:
         review = container.db.get_crawl_review(batch_id)
         if review is None:
             raise ApiError(404, "review_not_found", "审核批次不存在")
-        return review
+        return _desktop_review_operation(review) if view == "desktop" else review
 
     @router.post("/crawls/{batch_id}/review/apply")
     async def apply_crawl_review(
         batch_id: str,
+        view: ReviewResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
         if container.db.get_crawl_batch(batch_id) is None:
             raise ApiError(404, "crawl_not_found", "爬取批次不存在")
         try:
-            return await asyncio.to_thread(container.reviews.apply, batch_id)
+            result = await asyncio.to_thread(container.reviews.apply, batch_id)
+            return _desktop_review_operation(result) if view == "desktop" else result
         except KeyError as exc:
             raise ApiError(404, "review_not_found", "审核批次不存在") from exc
         except RuntimeError as exc:
@@ -147,6 +280,7 @@ def create_review_router() -> APIRouter:
     @router.post("/crawls/{batch_id}/review/retry", status_code=202)
     async def retry_crawl_review(
         batch_id: str,
+        view: ReviewResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
         try:
@@ -155,7 +289,8 @@ def create_review_router() -> APIRouter:
             raise ApiError(409, "review_state_conflict", str(exc)) from exc
         if not retried:
             raise ApiError(404, "review_not_found", "审核批次不存在")
-        return container.db.get_crawl_review(batch_id)
+        review = container.db.get_crawl_review(batch_id)
+        return _desktop_review_operation(review) if view == "desktop" else review
 
     @router.get("/crawls/{batch_id}/review/images/{image_id}")
     async def get_crawl_review_image(

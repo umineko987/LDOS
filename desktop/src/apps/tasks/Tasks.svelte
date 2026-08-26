@@ -255,6 +255,9 @@
                   <p>来源卡只显示聚合；地址可用于当前页查询。</p>
                 </div>
               </div>
+              {#if snapshot.summary.addressesTruncated}
+                <p class="tasks-muted" role="status">来源地址数量过多；当前仅显示前 2,000 项，可按批次任务分页继续查看。</p>
+              {/if}
               <label class="tasks-field">
                 <span>任务地址筛选</span>
                 <select

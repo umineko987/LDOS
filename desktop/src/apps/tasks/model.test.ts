@@ -124,6 +124,7 @@ describe("Tasks runtime sanitizer and derived facts", () => {
       current: { addressId: "address-one", site: "pixiv", status: "running" },
       review: { status: "ready", kind: "ready", totalGroupCount: 12 },
     });
+    expect(sanitizeBatchSummary(rawBatch({ address_rows_truncated: true })).addressesTruncated).toBe(true);
     expect(summary.sources[0].addresses[0]).toMatchObject({
       id: "address-one",
       label: "画师作品",

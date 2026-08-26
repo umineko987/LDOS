@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from gdl_backend.api_routes.errors import ApiError
+from gdl_backend.api_routes.review import _desktop_review_response
 from gdl_backend.app import ServiceContainer, create_app
 from gdl_backend.config import DedupSettings
 from gdl_backend.database import CrawlReviewGroupLimitExceeded, Database
@@ -390,6 +393,77 @@ class ReviewApiTests(unittest.TestCase):
             full_groups["items"][0]["images"][0]["url"],
         )
 
+
+    def test_desktop_review_view_is_paginated_and_path_free(self):
+        first = self.client.get(
+            "/api/v1/crawls/batch-api-review/review?view=desktop&limit=1&offset=0"
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        payload = first.json()
+        self.assertEqual(payload["response_profile"], "desktop-review-v1")
+        self.assertEqual(payload["groups"]["total"], 2)
+        self.assertEqual(payload["groups"]["offset"], 0)
+        self.assertEqual(len(payload["groups"]["items"]), 1)
+        image = payload["groups"]["items"][0]["images"][0]
+        self.assertEqual(
+            set(image),
+            {"id", "ordinal", "readable", "recommended", "selected", "metadata"},
+        )
+        self.assertEqual(set(image["metadata"]), {"w", "h"})
+        self.assertNotIn(str(self.root), first.text)
+        self.assertLess(len(first.content), 65_536)
+
+        second = self.client.get(
+            "/api/v1/crawls/batch-api-review/review?view=desktop&limit=1&offset=1"
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(second.json()["groups"]["offset"], 1)
+        self.assertNotEqual(
+            payload["groups"]["items"][0]["id"],
+            second.json()["groups"]["items"][0]["id"],
+        )
+
+    def test_desktop_review_projection_pages_by_encoded_response_budget(self):
+        image = {
+            "id": "i" * 128,
+            "ordinal": 1,
+            "readable": True,
+            "recommended": False,
+            "selected": False,
+            "metadata": {"w": 4_096, "h": 4_096},
+        }
+        group = {
+            "id": "g" * 128,
+            "ordinal": 1,
+            "kind": "duplicate",
+            "decided": False,
+            "images": [image] * 1_000,
+        }
+        payload = _desktop_review_response(
+            {"batch_id": "batch-api-review", "status": "ready"},
+            {"items": [group] * 50, "total": 50, "limit": 50, "offset": 0},
+        )
+        projected_groups = payload["groups"]["items"]
+        self.assertGreater(len(projected_groups), 0)
+        self.assertLess(len(projected_groups), 50)
+        self.assertTrue(payload["groups"]["byte_truncated"])
+        self.assertLess(
+            len(json.dumps(payload, ensure_ascii=False).encode("utf-8")),
+            1_048_576,
+        )
+
+        with self.assertRaises(ApiError) as raised:
+            _desktop_review_response(
+                {"batch_id": "batch-api-review", "status": "ready"},
+                {
+                    "items": [{**group, "images": [image] * 1_001}],
+                    "total": 1,
+                    "limit": 1,
+                    "offset": 0,
+                },
+            )
+        self.assertEqual(raised.exception.code, "review_group_too_large")
+
     def test_review_api_maps_controlled_all_group_limit(self):
         with mock.patch.object(
             self.container.db,
@@ -415,7 +489,7 @@ class ReviewApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(image_url).status_code, 200)
 
         decision = self.client.put(
-            "/api/v1/crawls/batch-api-review/review/decisions",
+            "/api/v1/crawls/batch-api-review/review/decisions?view=desktop",
             json={
                 "groups": [
                     {"group_id": "duplicate-group", "selected_image_ids": []}
@@ -423,7 +497,9 @@ class ReviewApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(decision.status_code, 200, decision.text)
-        self.assertEqual(decision.json()["selected_image_count"], 1)
+        self.assertEqual(decision.json()["response_profile"], "desktop-review-operation-v1")
+        self.assertEqual(decision.json()["selectedImageCount"], 1)
+        self.assertNotIn("groups", decision.json())
         partial = self.client.get(
             "/api/v1/crawls/batch-api-review/review?all=true"
         )
@@ -453,9 +529,10 @@ class ReviewApiTests(unittest.TestCase):
         self.assertEqual(single.status_code, 200, single.text)
 
         applied = self.client.post(
-            "/api/v1/crawls/batch-api-review/review/apply", json={}
+            "/api/v1/crawls/batch-api-review/review/apply?view=desktop", json={}
         )
         self.assertEqual(applied.status_code, 200, applied.text)
+        self.assertEqual(applied.json()["response_profile"], "desktop-review-operation-v1")
         self.assertEqual(applied.json()["status"], "applied")
 
 

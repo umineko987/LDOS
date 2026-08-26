@@ -446,6 +446,40 @@ class ProxySourceApiTests(unittest.TestCase):
         self.assertEqual(reset.json()["source"], "none")
         self.assertFalse(reset.json()["has_runtime_override"])
 
+
+    def test_desktop_source_mutation_returns_bounded_operation_profile(self):
+        response = self.client.post(
+            "/api/v1/proxy/sources/subscriptions?view=desktop",
+            json={"url": TEST_SUBSCRIPTION},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json(),
+            {"response_profile": "desktop-proxy-operation-v1"},
+        )
+        sources = self.client.get("/api/v1/proxy/sources")
+        self.assertEqual(sources.status_code, 200, sources.text)
+        self.assertEqual(sources.json()["counts"]["subscriptions"], 1)
+        desktop = self.client.get("/api/v1/proxy/sources?view=desktop")
+        self.assertEqual(desktop.status_code, 200, desktop.text)
+        payload = desktop.json()
+        self.assertEqual(payload["response_profile"], "desktop-proxy-sources-v1")
+        self.assertEqual(payload["counts"]["subscriptions"], 1)
+        self.assertEqual(len(payload["subscriptions"]), 1)
+        self.assertEqual(
+            set(payload["subscriptions"][0]),
+            {
+                "id",
+                "source",
+                "scheme",
+                "host",
+                "port",
+                "credentials_redacted",
+                "sensitive_parts_redacted",
+            },
+        )
+        self.assertNotIn("display_url", payload["subscriptions"][0])
+
     def test_inline_batch_crud_and_atomic_invalid_index(self):
         added = self.client.post(
             "/api/v1/proxy/sources/inline-nodes",

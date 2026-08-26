@@ -79,7 +79,9 @@ describe("P4 Review target ownership", () => {
     expect(controllerSource).toContain("queueMicrotask(() =>");
     expect(controllerSource).toContain("beforeLeave: save");
     expect(serviceSource.match(/"\/api\/v1\//g)).toHaveLength(1);
-    expect(serviceSource.match(/\?all=true/g)).toHaveLength(1);
+    expect(serviceSource.match(/view=desktop/g)).toHaveLength(4);
+    expect(serviceSource).toContain("REVIEW_PAGE_LIMIT = 50");
+    expect(serviceSource).not.toContain("all=true");
     const combined = [reviewSource, controllerSource, modelSource, serviceSource, stateSource].join("\n");
     expect(combined).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|\bsetInterval\s*\(|innerHTML|console\.|URL\.createObjectURL|new Blob/);
   });

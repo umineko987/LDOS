@@ -1096,6 +1096,127 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status.json()["engine"], "native")
         self.assertFalse(status.json()["executable_required"])
 
+
+    def test_desktop_proxy_status_caps_and_projects_node_rows(self):
+        nodes = [
+            {
+                "id": f"node-{index}",
+                "name": f"Proxy {index}",
+                "protocol": "http",
+                "endpoint": "http://***@proxy.invalid:8080",
+                "tags": ["general"],
+                "healthy": True,
+                "retry_eligible": True,
+                "ref_count": 0,
+                "success_count": 0,
+                "fail_count": 0,
+                "last_latency_ms": 10,
+                "cooldown_until": 0,
+                "last_error": "upstream failure " + ("x" * 10_000),
+                "private_config": "x" * 10_000,
+            }
+            for index in range(600)
+        ]
+        status = {
+            "enabled": True,
+            "engine": "native",
+            "managed_by_backend": True,
+            "auto_start": False,
+            "running": True,
+            "total": 600,
+            "healthy": 600,
+            "retry_eligible": 600,
+            "leases": 0,
+            "last_error": "",
+            "configured_revision": "a" * 64,
+            "active_revision": "a" * 64,
+            "reload_required": False,
+            "transport_core": {},
+            "sources": {},
+            "nodes": nodes,
+        }
+        with patch.object(self.container.proxy, "status", return_value=status):
+            legacy = self.client.get("/api/v1/proxy/status", headers=self.headers)
+            desktop = self.client.get(
+                "/api/v1/proxy/status?view=desktop", headers=self.headers
+            )
+
+        self.assertGreater(len(legacy.content), 10_000_000)
+        self.assertEqual(desktop.status_code, 200, desktop.text)
+        self.assertLess(len(desktop.content), 1_048_576)
+        payload = desktop.json()
+        self.assertEqual(payload["response_profile"], "desktop-proxy-v1")
+        self.assertEqual(payload["total"], 600)
+        self.assertEqual(len(payload["nodes"]), 500)
+        self.assertEqual(payload["node_rows_total"], 600)
+        self.assertTrue(payload["node_rows_truncated"])
+        self.assertLessEqual(len(payload["nodes"][0]["last_error"]), 300)
+        self.assertNotIn("private_config", payload["nodes"][0])
+
+
+    def test_desktop_high_volume_routes_expose_bounded_view_contracts(self):
+        contracts = {
+            ("/api/v1/search", "post"): "desktop",
+            ("/api/v1/crawls", "get"): "desktop",
+            ("/api/v1/crawls", "post"): "desktop",
+            ("/api/v1/crawls/{batch_id}", "get"): "desktop",
+            ("/api/v1/crawls/{batch_id}/tasks", "get"): "tasks",
+            ("/api/v1/crawls/{batch_id}/cancel", "post"): "desktop",
+            ("/api/v1/crawls/{batch_id}/retry", "post"): "desktop",
+            ("/api/v1/crawls/{batch_id}/rerun", "post"): "desktop",
+            ("/api/v1/crawls/{batch_id}/review", "get"): "desktop",
+            ("/api/v1/crawls/{batch_id}/review/start", "post"): "desktop",
+            ("/api/v1/crawls/{batch_id}/review/decisions", "put"): "desktop",
+            ("/api/v1/crawls/{batch_id}/review/apply", "post"): "desktop",
+            ("/api/v1/crawls/{batch_id}/review/retry", "post"): "desktop",
+            ("/api/v1/proxy/status", "get"): "desktop",
+            ("/api/v1/proxy/start", "post"): "desktop",
+            ("/api/v1/proxy/reload", "post"): "desktop",
+            ("/api/v1/proxy/stop", "post"): "desktop",
+            ("/api/v1/proxy/probe", "post"): "desktop",
+            ("/api/v1/proxy/sources/subscriptions", "post"): "desktop",
+            ("/api/v1/proxy/sources/subscriptions/{source_id}", "put"): "desktop",
+            ("/api/v1/proxy/sources/subscriptions/{source_id}", "delete"): "desktop",
+            ("/api/v1/proxy/sources/node-file", "put"): "desktop",
+            ("/api/v1/proxy/sources/node-file", "delete"): "desktop",
+            ("/api/v1/proxy/sources/inline-nodes", "post"): "desktop",
+            ("/api/v1/proxy/sources/inline-nodes/{source_id}", "put"): "desktop",
+            ("/api/v1/proxy/sources/inline-nodes/{source_id}", "delete"): "desktop",
+            ("/api/v1/proxy/sources/override", "delete"): "desktop",
+            ("/api/v1/auth", "get"): "vault",
+            ("/api/v1/auth/{site}", "get"): "vault",
+            ("/api/v1/auth/{site}/login/{session_id}", "get"): "vault",
+            ("/api/v1/auth/proxy", "put"): "vault",
+            ("/api/v1/auth/proxy", "delete"): "vault",
+            ("/api/v1/auth/{site}/login/start", "post"): "vault",
+            ("/api/v1/auth/{site}/login/{session_id}", "delete"): "vault",
+            ("/api/v1/auth/pixiv/oauth/start", "post"): "vault",
+            ("/api/v1/auth/pixiv/oauth/session", "delete"): "vault",
+            ("/api/v1/auth/browser-profile", "delete"): "vault",
+            ("/api/v1/auth/{site}", "delete"): "vault",
+            ("/api/v1/sites/policies", "get"): "policy",
+            ("/api/v1/sites/policies/{site}", "get"): "policy",
+            ("/api/v1/sites/policies/{site}", "put"): "policy",
+            ("/api/v1/sites/policies/{site}", "delete"): "policy",
+            ("/api/v1/config", "get"): "diagnostics",
+            ("/api/v1/scheduler/status", "get"): "diagnostics",
+        }
+        paths = self.client.get("/openapi.json").json()["paths"]
+        for (path, method), expected_view in contracts.items():
+            operation = paths[path][method]
+            view_parameter = next(
+                parameter
+                for parameter in operation.get("parameters", [])
+                if parameter.get("name") == "view" and parameter.get("in") == "query"
+            )
+            schema = view_parameter["schema"]
+            values = set(schema.get("enum", []))
+            for option in schema.get("anyOf", []):
+                values.update(option.get("enum", []))
+                if option.get("const") is not None:
+                    values.add(option["const"])
+            self.assertIn(expected_view, values, f"{method.upper()} {path}")
+
     def test_policy_view_four_field_roundtrip_builds_fixed_runtime_policy(self):
         legacy = self.client.get("/api/v1/sites/policies")
         self.assertEqual(legacy.status_code, 200, legacy.text)
@@ -1588,6 +1709,215 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["selection_contract"]["execution_order"], "source_then_address")
         self.assertEqual(payload["selection_contract"]["default_visibility"], "addresses_only")
         self.assertEqual(self.container.discovery.search.await_args.kwargs["site"], "danbooru")
+
+    def test_desktop_search_view_projects_only_crawl_workspace_fields(self):
+        raw = {
+            "sources": [{
+                "site": "danbooru",
+                "status": "partial",
+                "evidence_count": 1,
+                "preview_count": 1,
+                "attempts": 2,
+                "alias_keywords": ["artist"],
+                "error": {"code": "partial", "message": "retry"},
+                "enrichment_errors": [{"private": "x"}] * 7,
+                "auth": {"state": "authorized", "authorized": True, "private": "x"},
+                "tag_facets": [],
+                "addresses": [{
+                    "id": "123",
+                    "url": "https://danbooru.donmai.us/posts?tags=artist",
+                    "title": "Artist",
+                    "address_type": "artist_tag",
+                    "media_count": 3,
+                    "related_profiles": [{"private": "x"}] * 9,
+                    "metadata": {"tags": ["artist:name"], "private": "x"},
+                    "download_url": "https://private.invalid/download",
+                    "private": "x" * 100_000,
+                }],
+                "weak_evidence": [],
+                "private": "x" * 100_000,
+            }],
+            "related_profiles": [{
+                "artist_name": "Artist",
+                "platform": "twitter",
+                "url": "https://x.com/artist",
+                "private": "x" * 100_000,
+            }],
+            "private": "x" * 100_000,
+        }
+        candidate = raw["sources"][0]["addresses"][0]
+        raw["sources"][0]["addresses"] = [candidate] * 250
+        raw["sources"][0]["weak_evidence"] = [candidate] * 100
+        raw["sources"][0]["tag_facets"] = [{
+            "namespace": "x" * 1_000,
+            "label": "x" * 1_000,
+            "gallery_count": 1,
+            "tags": [{"tag": "x" * 1_000, "count": 1}] * 160,
+        }] * 10
+        raw["related_profiles"] *= 50
+        with patch(
+            "gdl_backend.api_routes.discovery._perform_search",
+            new=AsyncMock(return_value=raw),
+        ):
+            response = self.client.post(
+                "/api/v1/search?view=desktop",
+                headers=self.headers,
+                json={"sites": ["danbooru"], "keyword": "artist", "limit": 20},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["response_profile"], "desktop")
+        self.assertFalse(payload["projection_truncated"])
+        self.assertEqual(len(payload["sources"][0]["addresses"]), 250)
+        self.assertEqual(len(payload["sources"][0]["weak_evidence"]), 100)
+        self.assertEqual(len(payload["sources"][0]["tag_facets"]), 10)
+        self.assertEqual(len(payload["related_profiles"]), 50)
+        source = payload["sources"][0]
+        self.assertEqual(source["enrichment_error_count"], 7)
+        self.assertEqual(source["addresses"][0]["related_profile_count"], 9)
+        self.assertNotIn("download_url", source["addresses"][0])
+        self.assertNotIn("private", response.text)
+        self.assertLess(len(response.content), 1_048_576)
+
+    def test_desktop_search_view_enforces_encoded_byte_budget(self):
+        control_text = "\x01" * 10_000
+        candidate = {
+            "id": control_text,
+            "url": "https://example.invalid/" + ("x" * 10_000),
+            "address_type": control_text,
+            "label": control_text,
+            "tag": control_text,
+            "title": control_text,
+            "confidence": control_text,
+            "origin": control_text,
+            "thumbnail_url": "https://example.invalid/" + ("y" * 10_000),
+            "media_count": 1,
+            "evidence_reasons": [control_text] * 20,
+            "related_profiles": [{}] * 1_000,
+            "metadata": {"tags": [control_text] * 20},
+        }
+        source = {
+            "site": "danbooru",
+            "status": "succeeded",
+            "tag_facets": [],
+            "addresses": [candidate] * 1_000,
+            "weak_evidence": [candidate] * 1_000,
+        }
+        raw = {
+            "sources": [source] * 5,
+            "related_profiles": [
+                {
+                    "artist_name": control_text,
+                    "platform": control_text,
+                    "url": control_text,
+                }
+            ] * 1_000,
+        }
+        with patch(
+            "gdl_backend.api_routes.discovery._perform_search",
+            new=AsyncMock(return_value=raw),
+        ):
+            response = self.client.post(
+                "/api/v1/search?view=desktop",
+                headers=self.headers,
+                json={"sites": ["danbooru"], "keyword": "artist", "limit": 200},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        projected_candidates = sum(
+            len(source["addresses"]) + len(source["weak_evidence"])
+            for source in payload["sources"]
+        )
+        self.assertGreater(projected_candidates, 0)
+        self.assertLess(projected_candidates, 1_000)
+        self.assertTrue(payload["projection_truncated"])
+        self.assertLess(len(response.content), 16 * 1024 * 1024)
+
+    def test_desktop_search_view_preserves_eh_filter_tags_consistently(self):
+        tags = [f"artist:name-{index}" for index in range(200)]
+        raw = {
+            "sources": [
+                {
+                    "site": "exhentai",
+                    "status": "succeeded",
+                    "addresses": [
+                        {
+                            "id": "gallery-1",
+                            "url": "https://e-hentai.org/g/1/aaaaaaaaaa/",
+                            "metadata": {"tags": tags},
+                        }
+                    ],
+                    "weak_evidence": [],
+                    "tag_facets": [
+                        {
+                            "namespace": "artist",
+                            "label": "画师",
+                            "gallery_count": 1,
+                            "tags": [{"tag": tag, "count": 1} for tag in tags],
+                        }
+                    ],
+                }
+            ],
+            "related_profiles": [],
+        }
+        with patch(
+            "gdl_backend.api_routes.discovery._perform_search",
+            new=AsyncMock(return_value=raw),
+        ):
+            response = self.client.post(
+                "/api/v1/search?view=desktop",
+                headers=self.headers,
+                json={"sites": ["exhentai"], "keyword": "artist", "limit": 200},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        source = response.json()["sources"][0]
+        self.assertEqual(source["addresses"][0]["metadata"]["tags"], tags[:160])
+        self.assertEqual(
+            [tag["tag"] for tag in source["tag_facets"][0]["tags"]],
+            tags[:160],
+        )
+
+    def test_desktop_search_view_preserves_all_five_normal_source_pages(self):
+        sites = ("danbooru", "twitter", "pixiv", "exhentai", "pawchive")
+        raw = {
+            "sources": [
+                {
+                    "site": site,
+                    "status": "succeeded",
+                    "addresses": [
+                        {
+                            "id": f"{site}-{index}",
+                            "url": f"https://example.invalid/{site}/{index}",
+                            "label": f"{site} {index}",
+                            "metadata": {"tags": []},
+                        }
+                        for index in range(200)
+                    ],
+                    "weak_evidence": [],
+                    "tag_facets": [],
+                }
+                for site in sites
+            ],
+            "related_profiles": [],
+        }
+        with patch(
+            "gdl_backend.api_routes.discovery._perform_search",
+            new=AsyncMock(return_value=raw),
+        ):
+            response = self.client.post(
+                "/api/v1/search?view=desktop",
+                headers=self.headers,
+                json={"sites": ["danbooru"], "keyword": "artist", "limit": 200},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertFalse(payload["projection_truncated"])
+        self.assertEqual(payload["candidate_limit"], 1_000)
+        self.assertEqual(
+            sum(len(source["addresses"]) for source in payload["sources"]),
+            1_000,
+        )
+        self.assertLess(len(response.content), 16 * 1024 * 1024)
 
     def test_proxy_backed_search_skips_local_strict_dns_and_calls_discovery(self):
         self.container.settings.server.allow_private_targets = False
@@ -2668,6 +2998,104 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("output_dir", payload["items"][0])
         self.assertNotIn("policy", payload["items"][0])
         self.assertNotIn("last_error", payload["items"][0])
+
+
+    def test_desktop_crawl_views_project_recent_and_authority_payloads(self):
+        batch_id = "batch-desktop-view"
+        private = "private-credential-" + ("x" * 70_000)
+        batch = {
+            "id": batch_id,
+            "status": "running",
+            "created_at": 1.0,
+            "updated_at": 2.0,
+            "finished_at": None,
+            "cancel_requested": False,
+            "concurrency": 4,
+            "max_tasks": 10_000,
+            "task_count": 2,
+            "succeeded_task_count": 1,
+            "failed_task_count": 0,
+            "cancelled_task_count": 0,
+            "pre_dedup_skipped_count": 0,
+            "resumable": False,
+            "current": None,
+            "output_dir": private,
+            "sources": [{
+                "order": 0,
+                "site": "danbooru",
+                "status": "running",
+                "pre_dedup_skipped_count": 0,
+                "addresses": [{
+                    "id": "address-desktop-view",
+                    "address_order": 0,
+                    "label": "artist",
+                    "address_type": "artist_tag",
+                    "status": "running",
+                    "planned_task_count": 2,
+                    "succeeded_task_count": 1,
+                    "failed_task_count": 0,
+                    "cancelled_task_count": 0,
+                    "pre_dedup_skipped_count": 0,
+                    "probed_proxy_count": 4,
+                    "healthy_proxy_count": 3,
+                    "url": private,
+                    "cookies_file": private,
+                    "planning_error": private,
+                }],
+            }],
+            "review": None,
+        }
+        with (
+            patch.object(self.container.db, "get_crawl_batch", return_value=batch),
+            patch.object(self.container.db, "list_crawl_batches", return_value=[batch]),
+        ):
+            legacy = self.client.get(
+                f"/api/v1/crawls/{batch_id}", headers=self.headers
+            )
+            detail = self.client.get(
+                f"/api/v1/crawls/{batch_id}?view=desktop", headers=self.headers
+            )
+            recent = self.client.get(
+                "/api/v1/crawls?limit=30&view=desktop", headers=self.headers
+            )
+
+        self.assertGreater(len(legacy.text), 65_536)
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertLess(len(detail.text), 65_536)
+        payload = detail.json()
+        self.assertEqual(payload["response_profile"], "desktop-crawl-v1")
+        address = payload["sources"][0]["addresses"][0]
+        self.assertNotIn("url", address)
+        self.assertNotIn("cookies_file", address)
+        self.assertEqual(address["planning_error"], private[:499] + "…")
+        self.assertNotIn(private, detail.text)
+        self.assertEqual(
+            recent.json()["items"],
+            [{"id": batch_id, "status": "running", "created_at": 1.0}],
+        )
+        from gdl_backend.api_routes.crawls import _desktop_batch_crawl
+        large_address = {
+            **batch["sources"][0]["addresses"][0],
+            "label": "l" * 5_000,
+        }
+        large_addresses = [large_address] * 500
+        large_batch = {
+            **batch,
+            "sources": [
+                {**batch["sources"][0], "order": index, "addresses": large_addresses}
+                for index in range(20)
+            ],
+        }
+        bounded = _desktop_batch_crawl(large_batch)
+        self.assertTrue(bounded["address_rows_truncated"])
+        self.assertEqual(
+            sum(len(source["addresses"]) for source in bounded["sources"]),
+            2_000,
+        )
+        self.assertLess(
+            len(json.dumps(bounded, ensure_ascii=False).encode("utf-8")),
+            4 * 1024 * 1024,
+        )
 
     def test_ordered_crawl_probes_each_new_address_for_its_site(self):
         import asyncio

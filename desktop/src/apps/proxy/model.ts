@@ -287,7 +287,8 @@ export function sanitizeProxyStatus(value: unknown): ProxyStatus {
     nodes: Object.freeze(nodes),
     nodeOrder: Object.freeze(nodeOrder),
     nodeRowsReceived: Array.isArray(rawNodes) ? rawNodes.length : 0,
-    nodesTruncated: Array.isArray(rawNodes) && rawNodes.length > PROXY_STATUS_NODE_LIMIT,
+    nodesTruncated: own(root, "node_rows_truncated") === true
+      || (Array.isArray(rawNodes) && rawNodes.length > PROXY_STATUS_NODE_LIMIT),
   });
 }
 

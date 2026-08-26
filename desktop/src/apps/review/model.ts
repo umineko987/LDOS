@@ -79,6 +79,13 @@ export interface ReviewSnapshot {
   readonly dirtyGroupIds: readonly string[];
 }
 
+export interface ReviewPageChunk {
+  readonly snapshot: ReviewSnapshot;
+  readonly offset: number;
+  readonly limit: number;
+  readonly total: number;
+}
+
 export interface ReviewRecentBatch {
   readonly id: string;
   readonly status: string;
@@ -347,7 +354,7 @@ export function sanitizeReviewSummary(value: unknown, batchId?: string): ReviewS
   });
 }
 
-export function sanitizeReviewPage(value: unknown, {
+export function sanitizeReviewPageChunk(value: unknown, {
   batchId,
   filter = "",
   requestedOffset = 0,
@@ -355,16 +362,18 @@ export function sanitizeReviewPage(value: unknown, {
   readonly batchId: string;
   readonly filter?: ReviewFilter;
   readonly requestedOffset?: number;
-}): ReviewSnapshot {
+}): ReviewPageChunk {
   const record = requireRecord(value, "invalid_review_page");
   const groupsRecord = requireRecord(own(record, "groups"), "invalid_review_page_groups");
   const items = own(groupsRecord, "items");
   const safeBatchId = validateReviewId(batchId);
-  if (!Array.isArray(items) || !REVIEW_FILTER_SET.has(filter) || requestedOffset !== 0) throw new TypeError("invalid_review_page");
+  if (!Array.isArray(items) || !REVIEW_FILTER_SET.has(filter) || !Number.isInteger(requestedOffset) || requestedOffset < 0 || requestedOffset > REVIEW_GROUP_LIMIT) {
+    throw new TypeError("invalid_review_page");
+  }
   const offset = strictCount(own(groupsRecord, "offset"), "invalid_review_page_offset", REVIEW_GROUP_LIMIT);
   const total = strictCount(own(groupsRecord, "total"), "invalid_review_page_total", REVIEW_GROUP_LIMIT);
   const limit = strictCount(own(groupsRecord, "limit"), "invalid_review_page_limit", REVIEW_GROUP_LIMIT);
-  if (offset !== 0 || items.length > REVIEW_GROUP_LIMIT || total !== items.length || limit !== items.length) {
+  if (offset !== requestedOffset || items.length > limit || offset + items.length > total || (offset < total && items.length === 0)) {
     throw new TypeError("invalid_review_page_boundary");
   }
   const groups = Object.create(null) as Record<string, ReviewGroup>;
@@ -380,7 +389,7 @@ export function sanitizeReviewPage(value: unknown, {
     groups[group.id] = group;
     groupOrder.push(group.id);
   }
-  return Object.freeze({
+  const snapshot = Object.freeze({
     batchId: safeBatchId,
     summary: sanitizeReviewSummary(value, safeBatchId),
     groupOrder: Object.freeze(groupOrder),
@@ -389,6 +398,60 @@ export function sanitizeReviewPage(value: unknown, {
     dirty: false,
     dirtyGroupIds: Object.freeze([]),
   });
+  return Object.freeze({ snapshot, offset, limit, total });
+}
+
+export function mergeReviewPageChunks(chunks: readonly ReviewPageChunk[]): ReviewSnapshot {
+  if (!Array.isArray(chunks) || chunks.length === 0 || chunks.length > REVIEW_GROUP_LIMIT) throw new TypeError("invalid_review_pages");
+  const first = chunks[0];
+  const batchId = first.snapshot.batchId;
+  const filter = first.snapshot.filter;
+  const total = first.total;
+  const summary = first.snapshot.summary;
+  const serializedSummary = JSON.stringify(summary);
+  const groups = Object.create(null) as Record<string, ReviewGroup>;
+  const groupOrder: string[] = [];
+  const imageIds = new Set<string>();
+  let expectedOffset = 0;
+  for (const chunk of chunks) {
+    const snapshot = validateReviewSnapshot(chunk.snapshot);
+    if (chunk.offset !== expectedOffset || chunk.total !== total || snapshot.batchId !== batchId || snapshot.filter !== filter || JSON.stringify(snapshot.summary) !== serializedSummary) {
+      throw new TypeError("review_page_changed");
+    }
+    for (const groupId of snapshot.groupOrder) {
+      const group = snapshot.groups[groupId];
+      if (Object.hasOwn(groups, groupId)) throw new TypeError("duplicate_review_group");
+      for (const imageId of group.imageOrder) {
+        if (imageIds.has(imageId)) throw new TypeError("duplicate_review_image");
+        imageIds.add(imageId);
+      }
+      groups[groupId] = group;
+      groupOrder.push(groupId);
+    }
+    expectedOffset += snapshot.groupOrder.length;
+  }
+  if (expectedOffset !== total) throw new TypeError("incomplete_review_pages");
+  return Object.freeze({
+    batchId,
+    summary,
+    groupOrder: Object.freeze(groupOrder),
+    groups: Object.freeze(groups) as Readonly<Record<string, ReviewGroup>>,
+    filter,
+    dirty: false,
+    dirtyGroupIds: Object.freeze([]),
+  });
+}
+
+export function sanitizeReviewPage(value: unknown, options: {
+  readonly batchId: string;
+  readonly filter?: ReviewFilter;
+  readonly requestedOffset?: number;
+}): ReviewSnapshot {
+  const chunk = sanitizeReviewPageChunk(value, options);
+  if (chunk.offset !== 0 || chunk.total !== chunk.snapshot.groupOrder.length || chunk.limit !== chunk.snapshot.groupOrder.length) {
+    throw new TypeError("invalid_review_page_boundary");
+  }
+  return chunk.snapshot;
 }
 
 export function validateReviewSnapshot(value: ReviewSnapshot): ReviewSnapshot {

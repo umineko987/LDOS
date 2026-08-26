@@ -380,7 +380,9 @@ function sanitizeCandidate(
       confidence,
       origin: safeText(own(record, "origin"), "", 64),
       mediaCount: boundedInteger(own(record, "media_count")),
-      relatedProfileCount: Array.isArray(relatedProfiles) ? Math.min(relatedProfiles.length, 1_000) : 0,
+      relatedProfileCount: Array.isArray(relatedProfiles)
+        ? Math.min(relatedProfiles.length, 1_000)
+        : boundedInteger(own(record, "related_profile_count"), 1_000),
       evidence: Object.freeze(evidence),
       tags: sanitizeTags(metadata ? own(metadata, "tags") : undefined),
       thumbnailUrl: safeThumbnail(own(record, "thumbnail_url"), site),
@@ -473,7 +475,9 @@ export function sanitizeCrawlSearchResponse(value: unknown): CrawlSearchProjecti
         : []),
       errorCode: safeIdentifier(rawError ? own(rawError, "code") : undefined),
       errorMessage: safeText(rawError ? own(rawError, "message") : undefined, "", 500),
-      enrichmentIssueCount: Array.isArray(enrichmentErrors) ? Math.min(enrichmentErrors.length, 1_000) : 0,
+      enrichmentIssueCount: Array.isArray(enrichmentErrors)
+        ? Math.min(enrichmentErrors.length, 1_000)
+        : boundedInteger(own(sourceRecord, "enrichment_error_count"), 1_000),
       auth: sanitizeAuth(own(sourceRecord, "auth")),
       tagFacets: site === "exhentai" ? sanitizeFacets(own(sourceRecord, "tag_facets")) : Object.freeze([]),
     });

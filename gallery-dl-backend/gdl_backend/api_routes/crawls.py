@@ -13,6 +13,7 @@ from ..discovery import (
     search_site,
     validate_discovery_args,
 )
+from ..redaction import redact_text
 from ..schemas import CrawlRerunRequest, CrawlRequest, RetryRequest
 from .dependencies import get_service
 from .errors import ApiError
@@ -41,6 +42,135 @@ _TASKS_VIEW_FIELDS = (
     "artifact_bytes",
 )
 CrawlTaskResponseView = Literal["legacy", "tasks"]
+CrawlResponseView = Literal["legacy", "desktop"]
+
+_DESKTOP_BATCH_FIELDS = (
+    "id",
+    "status",
+    "created_at",
+    "updated_at",
+    "finished_at",
+    "cancel_requested",
+    "concurrency",
+    "max_tasks",
+    "task_count",
+    "succeeded_task_count",
+    "failed_task_count",
+    "cancelled_task_count",
+    "pre_dedup_skipped_count",
+    "resumable",
+)
+_DESKTOP_ADDRESS_FIELDS = (
+    "id",
+    "address_order",
+    "label",
+    "address_type",
+    "status",
+    "planned_task_count",
+    "succeeded_task_count",
+    "failed_task_count",
+    "cancelled_task_count",
+    "pre_dedup_skipped_count",
+    "probed_proxy_count",
+    "healthy_proxy_count",
+)
+_DESKTOP_REVIEW_FIELDS = (
+    "status",
+    "total_image_count",
+    "duplicate_group_count",
+    "decided_group_count",
+    "total_group_count",
+)
+_DESKTOP_CRAWL_ADDRESS_ROWS = 2_000
+
+
+def _desktop_recent_crawl(batch: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(batch.get("id") or "")[:200],
+        "status": str(batch.get("status") or "")[:32],
+        "created_at": batch.get("created_at"),
+    }
+
+
+def _desktop_batch_crawl(batch: dict[str, Any]) -> dict[str, Any]:
+    result = {field: batch.get(field) for field in _DESKTOP_BATCH_FIELDS}
+    for key, limit in (("id", 200), ("status", 32)):
+        if result.get(key) is not None:
+            result[key] = str(result[key])[:limit]
+    current = batch.get("current")
+    if isinstance(current, dict):
+        result["current"] = {
+            field: current.get(field)
+            for field in ("address_id", "site", "source_order", "address_order", "status")
+        }
+        for key, limit in (("address_id", 200), ("site", 128), ("status", 32)):
+            if result["current"].get(key) is not None:
+                result["current"][key] = str(result["current"][key])[:limit]
+    else:
+        result["current"] = None
+    sources: list[dict[str, Any]] = []
+    source_values = batch.get("sources")
+    source_rows = source_values if isinstance(source_values, list) else []
+    projection_truncated = len(source_rows) > 20
+    remaining_addresses = _DESKTOP_CRAWL_ADDRESS_ROWS
+    for source in source_rows[:20]:
+        if not isinstance(source, dict):
+            continue
+        addresses: list[dict[str, Any]] = []
+        address_values = source.get("addresses")
+        address_rows = address_values if isinstance(address_values, list) else []
+        address_limit = min(500, remaining_addresses)
+        if len(address_rows) > address_limit:
+            projection_truncated = True
+        for address in address_rows[:address_limit]:
+            if not isinstance(address, dict):
+                continue
+            item = {field: address.get(field) for field in _DESKTOP_ADDRESS_FIELDS}
+            for key, limit in (
+                ("id", 200),
+                ("label", 200),
+                ("address_type", 100),
+                ("status", 32),
+            ):
+                if item.get(key) is not None:
+                    item[key] = str(item[key])[:limit]
+            planning_error = address.get("planning_error") or address.get("last_error")
+            item["planning_error"] = (
+                redact_text(planning_error, limit=500) if planning_error else ""
+            )
+            addresses.append(item)
+        remaining_addresses -= len(addresses)
+        sources.append(
+            {
+                "order": source.get("order"),
+                "site": str(source.get("site") or "")[:128],
+                "status": str(source.get("status") or "")[:32],
+                "pre_dedup_skipped_count": source.get("pre_dedup_skipped_count"),
+                "addresses": addresses,
+            }
+        )
+    result["sources"] = sources
+    result["address_rows_limit"] = _DESKTOP_CRAWL_ADDRESS_ROWS
+    result["address_rows_truncated"] = projection_truncated
+    review = batch.get("review")
+    result["review"] = (
+        {field: review.get(field) for field in _DESKTOP_REVIEW_FIELDS}
+        if isinstance(review, dict)
+        else None
+    )
+    result["response_profile"] = "desktop-crawl-v1"
+    return result
+
+
+def _desktop_crawl_operation(batch: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(batch, dict):
+        return {"response_profile": "desktop-crawl-operation-v1"}
+    return {
+        "response_profile": "desktop-crawl-operation-v1",
+        "id": str(batch.get("id") or "")[:200],
+        "status": str(batch.get("status") or "")[:32],
+        "cancel_requested": batch.get("cancel_requested"),
+    }
 
 
 def _tasks_view_item(task: dict[str, Any]) -> dict[str, Any]:
@@ -232,6 +362,7 @@ def create_crawls_router() -> APIRouter:
             default=None,
             alias="Idempotency-Key",
         ),
+        view: CrawlResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
         result, created = await _perform_crawl(
@@ -239,16 +370,21 @@ def create_crawls_router() -> APIRouter:
             container=container,
             idempotency_key=idempotency_key,
         )
-        return JSONResponse(status_code=202 if created else 200, content=result)
+        content = _desktop_crawl_operation(result) if view == "desktop" else result
+        return JSONResponse(status_code=202 if created else 200, content=content)
 
     @router.get("/crawls")
     async def list_crawls(
         limit: int = Query(default=50, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
+        view: CrawlResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
+        items = container.db.list_crawl_batches(limit=limit, offset=offset)
+        if view == "desktop":
+            items = [_desktop_recent_crawl(batch) for batch in items]
         return {
-            "items": container.db.list_crawl_batches(limit=limit, offset=offset),
+            "items": items,
             "limit": limit,
             "offset": offset,
         }
@@ -256,6 +392,7 @@ def create_crawls_router() -> APIRouter:
     @router.get("/crawls/{batch_id}")
     async def get_crawl(
         batch_id: str,
+        view: CrawlResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
         batch = container.db.get_crawl_batch(batch_id)
@@ -269,7 +406,7 @@ def create_crawls_router() -> APIRouter:
                 "not_started" if container.settings.dedup.enabled else "disabled"
             )
             batch["review"] = {"batch_id": batch_id, "status": status}
-        return batch
+        return _desktop_batch_crawl(batch) if view == "desktop" else batch
 
     @router.get("/crawls/{batch_id}/tasks")
     async def list_crawl_tasks(
@@ -295,6 +432,7 @@ def create_crawls_router() -> APIRouter:
     @router.post("/crawls/{batch_id}/cancel")
     async def cancel_crawl(
         batch_id: str,
+        view: CrawlResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
         batch, task_ids = container.db.request_cancel_crawl_batch(batch_id)
@@ -304,12 +442,14 @@ def create_crawls_router() -> APIRouter:
             await container.scheduler.cancel(task_id)
         container.ordered_crawls.notify()
         container.db.finish_crawl_batch_if_ready(batch_id)
-        return container.db.get_crawl_batch(batch_id)
+        result = container.db.get_crawl_batch(batch_id)
+        return _desktop_crawl_operation(result) if view == "desktop" else result
 
     @router.post("/crawls/{batch_id}/retry", status_code=202)
     async def retry_crawl_failed(
         batch_id: str,
         body: RetryRequest,
+        view: CrawlResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
         batch = container.db.get_crawl_batch(batch_id)
@@ -351,15 +491,19 @@ def create_crawls_router() -> APIRouter:
         for address_id in result.get("address_ids", []):
             container.db.finish_crawl_address_if_terminal(address_id)
         container.db.finish_crawl_batch_if_ready(batch_id)
+        batch = container.db.get_crawl_batch(batch_id)
+        if view == "desktop":
+            return _desktop_crawl_operation(batch)
         return {
             **result,
-            "batch": container.db.get_crawl_batch(batch_id),
+            "batch": batch,
         }
 
     @router.post("/crawls/{batch_id}/rerun", status_code=202)
     async def rerun_crawl(
         batch_id: str,
         body: CrawlRerunRequest,
+        view: CrawlResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
         batch = container.db.get_crawl_batch(batch_id)
@@ -397,9 +541,12 @@ def create_crawls_router() -> APIRouter:
             )
         container.scheduler.notify()
         container.ordered_crawls.notify()
+        rerun_batch = container.db.get_crawl_batch(batch_id)
+        if view == "desktop":
+            return _desktop_crawl_operation(rerun_batch)
         return {
             **result,
-            "batch": container.db.get_crawl_batch(batch_id),
+            "batch": rerun_batch,
         }
 
     return router
