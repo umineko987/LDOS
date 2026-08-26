@@ -181,8 +181,10 @@ describe("Tasks controller lifecycle", () => {
     runtime.controller.activate();
     await flush();
     const previousTask = runtime.store.getState().entities["task-controller-0"];
+    expect(runtime.controller.requestOperation("cancel")).toBe(true);
+    const confirmation = runtime.store.getState().confirmation;
     await expect(runtime.polling.trigger("tasks.active")).resolves.toBe(false);
-    expect(runtime.store.getState()).toMatchObject({ phase: "partial", busy: "" });
+    expect(runtime.store.getState()).toMatchObject({ phase: "partial", busy: "", confirmation });
     expect(runtime.store.getState().entities["task-controller-0"]).toBe(previousTask);
     expect(runtime.polling.getSummary()).toEqual([expect.objectContaining({ key: "tasks.active" })]);
     runtime.controller.destroy();

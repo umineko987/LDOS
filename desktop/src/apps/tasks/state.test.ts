@@ -128,6 +128,22 @@ describe("the one Tasks domain state owner", () => {
     expect(store.getState().recent[0].status).toBe("running");
     unsubscribe();
   });
+  it("keeps an actionable confirmation across successful and failed passive polls, then closes it at terminal state", () => {
+    const store = createTasksStore({ activeBatchId: "batch-state" });
+    store.commitAuthority(authority());
+    expect(store.requestConfirmation("cancel")).toBe(true);
+    const confirmation = store.getState().confirmation;
+
+    expect(store.commitAuthority(authority(), { clearBusy: true })).toBe(true);
+    expect(store.getState().confirmation).toBe(confirmation);
+
+    const pollError = tasksErrorPresentation({ status: 503, code: "network_error" });
+    expect(store.failAuthority(pollError, { clearBusy: true })).toBe(true);
+    expect(store.getState()).toMatchObject({ phase: "partial", confirmation });
+
+    expect(store.commitAuthority(authority({ batch: rawBatch({ status: "cancelled" }) }))).toBe(true);
+    expect(store.getState().confirmation).toBeNull();
+  });
 
   it("owns page/address queries and rejects stale authority commits", () => {
     const store = createTasksStore({ activeBatchId: "batch-state" });

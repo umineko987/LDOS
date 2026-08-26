@@ -3077,6 +3077,46 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(all(task["status"] == "cancelled" for task in linked))
         self.assertEqual(len(self.container.db.list_tasks(limit=500)), 50)
 
+    def test_cancel_race_does_not_append_a_late_chunk(self):
+        import asyncio
+
+        batch, address, units = self._prepare_chunk_plan(120)
+        original_create = self.container.db.create_crawl_media_tasks
+        calls = 0
+
+        def cancel_before_write(address_id, items):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                self.container.db.request_cancel_crawl_batch(batch["id"])
+            return original_create(address_id, items)
+
+        with (
+            patch.object(
+                self.container.ordered_crawls,
+                "_plan_address",
+                new=AsyncMock(return_value=(units, 0)),
+            ),
+            patch.object(
+                self.container.db,
+                "create_crawl_media_tasks",
+                new=cancel_before_write,
+            ),
+        ):
+            asyncio.run(
+                self.container.ordered_crawls._activate_address(batch, address)
+            )
+
+        linked = self.container.db.crawl_address_tasks(address["id"])
+        self.assertEqual(calls, 1)
+        self.assertEqual(linked, [])
+        self.assertEqual(self.container.db.list_tasks(limit=500), [])
+        self.assertTrue(self.container.db.finish_crawl_batch_if_ready(batch["id"]))
+        self.assertEqual(
+            self.container.db.get_crawl_batch(batch["id"])["status"],
+            "cancelled",
+        )
+
     def test_event_loop_yields_between_chunks(self):
         import asyncio
 

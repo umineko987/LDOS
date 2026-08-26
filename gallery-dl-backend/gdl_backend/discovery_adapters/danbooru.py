@@ -34,6 +34,8 @@ ApiRequest = Callable[..., Any]
 ApiJson = Callable[..., Awaitable[tuple[Any, dict[str, Any], int]]]
 PostsSearch = Callable[..., Awaitable[dict[str, Any]]]
 
+_DANBOORU_PROBE_URL = "https://danbooru.donmai.us/"
+
 
 class DanbooruApiRequestError(RuntimeError):
     def __init__(
@@ -79,6 +81,12 @@ class DanbooruDiscoveryAdapter:
         self._gallery_discover = gallery_discover
         self._api_request = api_request
 
+    @staticmethod
+    def _target_policy(policy: SitePolicy) -> SitePolicy:
+        if policy.probe_url:
+            return policy
+        return policy.model_copy(update={"probe_url": _DANBOORU_PROBE_URL})
+
     def _node_tags(self, policy: SitePolicy) -> list[str]:
         if policy.node_tags:
             return list(policy.node_tags)
@@ -104,6 +112,7 @@ class DanbooruDiscoveryAdapter:
         proxy_mode: ProxyMode | None,
         secure_search: bool = True,
     ) -> tuple[Any, dict[str, Any], int]:
+        policy = self._target_policy(policy)
         mode: ProxyMode = proxy_mode or policy.proxy_mode
         preferred_tags = self._node_tags(policy)
         fallback_tags = [] if preferred_tags and not policy.node_tags else None
@@ -314,6 +323,7 @@ class DanbooruDiscoveryAdapter:
         timeout_seconds: float,
         posts_search: PostsSearch | None = None,
     ) -> dict[str, Any]:
+        policy = self._target_policy(policy)
         fallback = posts_search or self.search_posts_api
         url = search_site("danbooru").search_url(keyword)
         try:
@@ -373,6 +383,7 @@ class DanbooruDiscoveryAdapter:
         timeout_seconds: float,
         posts_search: PostsSearch | None = None,
     ) -> dict[str, Any]:
+        policy = self._target_policy(policy)
         fallback = posts_search or self.search_posts_api
         if keyword is None and not extra_args and not any(
             (credentials_ref, cookies_file, config_file)
@@ -430,6 +441,7 @@ class DanbooruDiscoveryAdapter:
         proxy_mode: ProxyMode | None,
         api_json: ApiJson | None = None,
     ) -> dict[str, Any]:
+        policy = self._target_policy(policy)
         request = api_json or self.api_json
         payload, proxy_info, attempts = await request(
             "https://danbooru.donmai.us/autocomplete.json",
@@ -485,6 +497,7 @@ class DanbooruDiscoveryAdapter:
         timeout_seconds: float,
         artists_search: PostsSearch | None = None,
     ) -> dict[str, Any]:
+        policy = self._target_policy(policy)
         fallback = artists_search or self.search_artists_api
         parts = [part for part in re.split(r"\s+", keyword.strip()) if part]
         pattern = " ".join(parts)
@@ -575,6 +588,7 @@ class DanbooruDiscoveryAdapter:
         policy: SitePolicy,
         proxy_mode: ProxyMode | None,
     ) -> dict[str, Any] | None:
+        policy = self._target_policy(policy)
         preferred_tags = self._node_tags(policy)
         fallback_tags = [] if preferred_tags and not policy.node_tags else None
         target_url = "https://danbooru.donmai.us/artists.json"

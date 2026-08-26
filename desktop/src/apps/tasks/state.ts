@@ -286,6 +286,11 @@ export function createTasksStore({ activeBatchId = "" }: { readonly activeBatchI
       ) return false;
       const page = pageEntities(state.entities, snapshot.page.items);
       const recent = mergeRecent(state.recent, snapshot.summary);
+      const nextBusy = options.clearBusy ? "" : state.busy;
+      const confirmation = state.confirmation
+        && deriveOperationAvailability(snapshot.summary, nextBusy)[state.confirmation.operation]
+        ? state.confirmation
+        : null;
       return publish({
         ...state,
         summary: snapshot.summary,
@@ -295,23 +300,28 @@ export function createTasksStore({ activeBatchId = "" }: { readonly activeBatchI
         selectedRecentId: state.selectedRecentId || snapshot.summary.id,
         phase: phaseFor(snapshot.summary),
         error: options.error ?? null,
-        busy: options.clearBusy ? "" : state.busy,
+        busy: nextBusy,
         operationMessage: options.operationMessage ?? (
           TERMINAL_BATCH_STATUSES.has(snapshot.summary.status)
             ? "批次已结束，自动刷新已停止。"
             : "批次摘要与当前任务页已更新。"
         ),
-        confirmation: null,
+        confirmation,
       });
     },
     failAuthority(error, options = {}) {
+      const nextBusy = options.clearBusy ? "" : state.busy;
+      const confirmation = state.confirmation
+        && deriveOperationAvailability(state.summary, nextBusy)[state.confirmation.operation]
+        ? state.confirmation
+        : null;
       return publish({
         ...state,
         phase: state.summary ? "partial" : "error",
         error: options.error ?? error,
-        busy: options.clearBusy ? "" : state.busy,
+        busy: nextBusy,
         operationMessage: options.operationMessage ?? "未获得完整摘要与任务页；已保留上一次完整快照。",
-        confirmation: null,
+        confirmation,
       });
     },
     clearMissing(error) {

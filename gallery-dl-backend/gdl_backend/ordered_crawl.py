@@ -378,6 +378,10 @@ class OrderedCrawlManager:
                     str(result["task_id"]) for result in chunk_results
                 )
                 if len(chunk_results) != len(bodies):
+                    latest = await self._read_batch_tick_view(batch["id"])
+                    if self._batch_no_longer_plannable(latest):
+                        await cancel_linked()
+                        return
                     raise RuntimeError("批量任务入队返回数量不匹配")
                 await asyncio.sleep(0)
             latest = await self._read_batch_tick_view(batch["id"])

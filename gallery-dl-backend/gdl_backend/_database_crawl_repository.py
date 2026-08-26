@@ -98,6 +98,27 @@ class CrawlRepository:
     ) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         with self._transaction() as conn:
+            address_row = conn.execute(
+                """
+                SELECT ca.batch_id, ca.status AS address_status, cb.cancel_requested
+                FROM crawl_addresses ca
+                JOIN crawl_batches cb ON cb.id=ca.batch_id
+                WHERE ca.id=?
+                """,
+                (address_id,),
+            ).fetchone()
+            if address_row is None:
+                raise ValueError("爬取地址不存在")
+            batch_id = str(address_row["batch_id"])
+            batch_cancelled = bool(address_row["cancel_requested"]) or str(
+                address_row["address_status"]
+            ) == "cancelled"
+            # Do not create a late chunk after cancellation has committed. The
+            # cancellation endpoint may finalize the batch as soon as all currently
+            # linked tasks are terminal; returning before any INSERT keeps a planner
+            # that lost the race from appending new tasks after that authority read.
+            if batch_cancelled:
+                return []
             for item in items:
                 values = item["task"]
                 idempotency_key = item["idempotency_key"]
@@ -197,16 +218,10 @@ class CrawlRepository:
                     )
 
                 if already_linked is None:
-                    address_row = conn.execute(
-                        "SELECT batch_id FROM crawl_addresses WHERE id=?",
-                        (address_id,),
-                    ).fetchone()
-                    if address_row:
-                        conn.execute(
-                            "UPDATE crawl_batches SET task_count=task_count+1, "
-                            "updated_at=? WHERE id=?",
-                            (link_now, address_row["batch_id"]),
-                        )
+                    conn.execute(
+                        "UPDATE crawl_batches SET task_count=task_count+1, updated_at=? WHERE id=?",
+                        (link_now, batch_id),
+                    )
                 results.append({"task_id": task_id, "created": created})
         return results
 
@@ -1103,8 +1118,23 @@ class CrawlRepository:
             ).fetchall()
             statuses = [str(row["status"]) for row in rows]
             terminal = {"succeeded", "failed", "cancelled"}
+            has_active_tasks = conn.execute(
+                """
+                SELECT 1
+                FROM crawl_address_tasks cat
+                JOIN crawl_addresses ca ON ca.id=cat.address_id
+                JOIN tasks t ON t.id=cat.task_id
+                WHERE ca.batch_id=? AND t.status NOT IN ('succeeded','failed','cancelled')
+                LIMIT 1
+                """,
+                (batch_id,),
+            ).fetchone() is not None
             self._refresh_crawl_batch_counts(conn, batch_id)
-            if not statuses or any(status not in terminal for status in statuses):
+            if (
+                not statuses
+                or any(status not in terminal for status in statuses)
+                or has_active_tasks
+            ):
                 next_status = "cancelling" if batch["cancel_requested"] else "running"
                 conn.execute(
                     "UPDATE crawl_batches SET status=?, updated_at=? WHERE id=?",

@@ -477,6 +477,35 @@ class DatabaseTests(unittest.TestCase):
         )
         self.assertEqual(self.db.get_crawl_batch("batch-media")["task_count"], 2)
 
+    def test_cancelled_batch_waits_for_linked_tasks_to_reach_terminal_state(self):
+        create_media_batch(
+            self.db,
+            self.root,
+            batch_id="batch-cancel-drain",
+            address_id="address-cancel-drain",
+        )
+        self.assertTrue(self.db.begin_crawl_address_planning("address-cancel-drain"))
+        created = self.db.create_crawl_media_tasks(
+            "address-cancel-drain",
+            [media_task_item(self.root, 1)],
+        )
+        task_id = created[0]["task_id"]
+
+        batch, task_ids = self.db.request_cancel_crawl_batch("batch-cancel-drain")
+
+        self.assertIsNotNone(batch)
+        self.assertTrue(batch["cancel_requested"])
+        current = self.db.get_crawl_batch("batch-cancel-drain")
+        self.assertEqual(current["sources"][0]["addresses"][0]["status"], "cancelled")
+        self.assertEqual(task_ids, [task_id])
+        self.assertFalse(self.db.finish_crawl_batch_if_ready("batch-cancel-drain"))
+        self.assertEqual(self.db.get_crawl_batch("batch-cancel-drain")["status"], "cancelling")
+
+        cancelled = self.db.request_cancel(task_id)
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertTrue(self.db.finish_crawl_batch_if_ready("batch-cancel-drain"))
+        self.assertEqual(self.db.get_crawl_batch("batch-cancel-drain")["status"], "cancelled")
+
     def test_task_attempt_retry_and_completion(self):
         created, is_new = self.db.create_task(task_values(self.root), idempotency_key="same")
         self.assertTrue(is_new)

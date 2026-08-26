@@ -1,3 +1,5 @@
+import type { Route } from "@playwright/test";
+
 import {
   bootDesktop,
   expect,
@@ -52,6 +54,28 @@ test.describe("可用应用关键旅程", () => {
     await window.getByRole("button", { name: "取消批次" }).click();
     const confirmation = window.locator("[data-tasks-confirmation=\"cancel\"]");
     await expect(confirmation).toBeVisible();
+    const readsBeforeConfirmation = api.count("GET", "/api/v1/crawls/batch-running");
+    await expect.poll(
+      () => api.count("GET", "/api/v1/crawls/batch-running"),
+      { timeout: 4_000 },
+    ).toBeGreaterThan(readsBeforeConfirmation);
+    await expect(confirmation).toBeVisible();
+    let failedTaskPageReads = 0;
+    const taskPagePattern = /\/api\/v1\/crawls\/batch-running\/tasks(?:\?|$)/;
+    const failTaskPage = (route: Route) => {
+      failedTaskPageReads += 1;
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "injected_task_page_failure", message: "任务页暂时不可用" },
+        }),
+      });
+    };
+    await page.route(taskPagePattern, failTaskPage);
+    await expect.poll(() => failedTaskPageReads, { timeout: 4_000 }).toBeGreaterThan(0);
+    await expect(confirmation).toBeVisible();
+    await page.unroute(taskPagePattern, failTaskPage);
     await confirmation.locator("button.tasks-danger").click();
     await expect.poll(() => api.count("POST", "/api/v1/crawls/batch-running/cancel")).toBe(1);
     await expect(window.getByText(/取消请求已接受/).first()).toBeVisible();

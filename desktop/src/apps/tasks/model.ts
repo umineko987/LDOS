@@ -603,7 +603,7 @@ export function deriveWorkspacePresentation(phase: TasksPhase) {
 export function deriveOperationAvailability(summary: BatchSummary | null, busy: TasksOperation | "load" | "refresh" | "") {
   const terminal = Boolean(summary && TERMINAL_BATCH_STATUSES.has(summary.status));
   return Object.freeze({
-    cancel: !busy && Boolean(summary) && !terminal,
+    cancel: !busy && Boolean(summary) && !terminal && !summary?.cancelRequested && summary?.status !== "cancelling",
     retry: !busy && Boolean(summary?.resumable) && terminal,
     rerun: !busy && Boolean(summary) && terminal,
   });

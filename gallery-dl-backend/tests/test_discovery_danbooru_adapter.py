@@ -151,6 +151,10 @@ class DanbooruAdapterTests(unittest.TestCase):
             [call[2] for call in self.validator.proxy_calls],
             [calls[0]["proxy_url"], calls[1]["proxy_url"]],
         )
+        self.assertEqual(
+            [kwargs["probe_url"] for _operation_id, kwargs in self.proxy.acquired],
+            ["https://danbooru.donmai.us/", "https://danbooru.donmai.us/"],
+        )
         self.assertTrue(self.proxy.released[0][1]["proxy_fault"])
         self.assertFalse(self.proxy.released[1][1]["proxy_fault"])
 
@@ -181,6 +185,10 @@ class DanbooruAdapterTests(unittest.TestCase):
             )
 
         discover.assert_awaited_once()
+        self.assertEqual(
+            discover.await_args.kwargs["policy"].probe_url,
+            "https://danbooru.donmai.us/",
+        )
         self.assertEqual(result["transport"], "danbooru_api_honest_ua")
         self.assertEqual([item["id"] for item in result["candidates"]], ["9"])
 
