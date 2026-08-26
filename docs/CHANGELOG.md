@@ -23,7 +23,32 @@
   - 两个 schema 版本断言 `"8"` → `"9"`（合法版本合同前进）。
 - `.gitignore`：新增 `!/docs/CHANGELOG.md` 白名单；`docs/图库(含导出).md` 保持本地不入库。
 
-### 阶段备注
+### [G0-2] feat(gallery): 图库目录与导出合同纯函数
 
+- 状态：✅ 后端全量测试通过（602 tests，含新增 33 个合同测试）
+- `gallery-dl-backend/gdl_backend/gallery_catalog.py`（新增）：四种受支持扩展名（大小写不敏感、基本名非空）、`foo.bar.jpg ↔ foo.bar.txt` 配对、严格 UTF-8 解码（接受 BOM、绝不替换字符）、六态客观 TXT 分类（优先级 pair_conflict > io_error > missing > invalid_encoding > blank > normal）、跨平台自然排序键（casefold + 数字游程两位长度前缀）、相对路径安全（拒绝绝对/`..`/反斜杠/控制字符/Windows 尾随点与空格；按原始斜杠分段校验以防 PurePosixPath 吞掉 `.`）、`.imageweave` 保留树、来源根 canonical key（realpath + normcase）与 same/ancestor/descendant/disjoint 关系、回收区 `files/` 与 `operation.json` 布局。
+- `gallery-dl-backend/gdl_backend/dataset_export.py`（新增）：12 态导出状态机（draft→preflighting→blocked|ready→staging→paused|failed|staged→committing→completed，恢复分支 recovery_required→committing|staged|discarded；staging/committing 进行中不可直接丢弃，必须先暂停/失败/恢复）、输出别名与 `<别名>/<原相对路径>` 构造、暂存区与 manifest 隐藏布局、Manifest v1 任务/样本记录构造与 JSONL 序列化（首行任务记录、样本按输出相对路径自然排序、确定性输出、禁用键与绝对路径式取值校验）。
+- 测试：`tests/test_gallery_catalog_contract.py`、`tests/test_dataset_export_contract.py`。
+
+### [G0-3] test(gallery): 后端 API 路由 red-first 契约
+
+- 状态：🔴 预期红（3 个测试失败：28 个 §7 目标路由未实现）
+- `gallery-dl-backend/tests/test_gallery_export_api_contract.py`（新增）：
+  - §7.1–§7.4 全部 28 个 gallery/dataset-exports 操作清单；
+  - 9 个高容量读路由必须声明 `view=desktop` 安全投影（含 query enum 校验）；
+  - 16 个稳定错误码词表（source_not_found、asset_not_found、txt_version_conflict、export_target_conflict 等），404 实体缺失走既有 error envelope。
+- 决策：`test_app_routing_contract.py` 的全量 OpenAPI 相等断言留到 G1 路由真实落地时一并更新，避免现在把整个路由契约测试变红。
+
+### [G0-4] test(desktop): 桌面端 Gallery/Export 目标合同（red）
+
+- 状态：🔴 预期红（8 个测试失败：目标 model API 未实现）；`npm run check` 保持 0 错误、其余 316 个前端测试通过
+- `desktop/tests/g0-gallery-export-target.test.ts`（新增）：
+  - 图库：sanitizeGallerySourceSummary / sanitizeGalleryDirectoryEntry / sanitizeGalleryAssetEntry / galleryNaturalCompare；只接受客观 kind/availability/txt_state（拒绝 approved/needs_review 等人工质量标签）、拒绝绝对路径/raw error/`root_path` 泄露/`__proto__` 注入；`2.jpg < 10.jpg` 自然排序；
+  - 导出：EXPORT_JOB_STATES 镜像后端 12 态状态机、EXPORT_TERMINAL_STATES；sanitizeExportJobSummary 只接受权威计数（拒绝 `progress_percent` 模拟进度）、sanitizeExportBlocker 固定阻断码（拒绝 raw exception 与负计数）。
+- 决策：经命名空间导入 + 运行时 typeof 守卫表达合同，red 期间不破坏 `npm run check`；现有 P4 Preview 断言与 preview 组件测试保持不动（availability 仍为 preview，G2/G6 重写时再收口）。
+
+### G0 阶段收口
+
+- 退出条件核验：✅ 目标测试（后端 3 + 前端 8）只因实现尚未存在而失败；现有正式应用测试无回归（后端 599/602，前端 316/324，check 0 错误）。
+- 预期红清单（后续阶段逐一转绿）：`gallery-dl-backend/tests/test_gallery_export_api_contract.py`（G1/G3/G5）、`desktop/tests/g0-gallery-export-target.test.ts`（G2/G6）。
 - 阻塞：无。
-- 待办（本阶段内）：G0-2 纯函数合同（TXT 状态/自然排序/路径安全/manifest）、G0-3 后端 API 路由 red-first 契约、G0-4 桌面端 Gallery/Export 目标合同测试（red）。
