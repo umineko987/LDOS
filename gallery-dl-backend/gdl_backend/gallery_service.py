@@ -55,10 +55,19 @@ _PROBE_ERROR_CODES: frozenset[str] = frozenset(
 )
 
 
-def _public_source(source: dict[str, Any], *, asset_count: int | None = None) -> dict[str, Any]:
-    """公开来源投影：剥离 root_path 与 canonical_root_key（§6.4）。"""
+def _public_source(
+    source: dict[str, Any],
+    *,
+    asset_count: int | None = None,
+    root_directory_id: str | None = None,
+) -> dict[str, Any]:
+    """公开来源投影：剥离 root_path 与 canonical_root_key（§6.4）。
+
+    root_directory_id 是进入来源首页所需的稳定目录 ID；首次扫描前为 None。
+    """
     projected = {
         "source_id": source["source_id"],
+        "root_directory_id": root_directory_id,
         "kind": source["kind"],
         "batch_id": source["batch_id"],
         "display_name": source["display_name"],
@@ -196,13 +205,25 @@ class GalleryCatalogService:
         source = self._repo.get_source(source_id)
         if source is None:
             raise GallerySourceNotFound(source_id)
-        return _public_source(source, asset_count=self._repo.count_source_assets(source_id))
+        return _public_source(
+            source,
+            asset_count=self._repo.count_source_assets(source_id),
+            root_directory_id=self._root_directory_id(source_id),
+        )
 
     def list_sources(self) -> list[dict[str, Any]]:
         return [
-            _public_source(source, asset_count=self._repo.count_source_assets(source["source_id"]))
+            _public_source(
+                source,
+                asset_count=self._repo.count_source_assets(source["source_id"]),
+                root_directory_id=self._root_directory_id(source["source_id"]),
+            )
             for source in self._repo.list_sources()
         ]
+
+    def _root_directory_id(self, source_id: str) -> str | None:
+        root = self._repo.get_root_directory(source_id)
+        return root["directory_id"] if root is not None else None
 
     def resolve_source_root(self, source_id: str) -> Path:
         """仅供媒体端点使用的内部路径解析（不进入公开投影）。"""

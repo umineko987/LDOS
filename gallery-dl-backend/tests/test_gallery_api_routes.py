@@ -87,12 +87,18 @@ class GallerySourceRoutesTest(GalleryApiTestBase):
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(len(listing.json()["sources"]), 1)
         self.assertNotIn("root_path", listing.json()["sources"][0])
+        # 加法扩展（G2-2）：来源投影携带进入首页所需的根目录 ID。
+        root_directory_id = listing.json()["sources"][0]["root_directory_id"]
+        self.assertIsInstance(root_directory_id, str)
+        self.assertTrue(root_directory_id)
+
 
         detail = self.client.get(
             f"/api/v1/gallery/sources/{source['source_id']}", params={"view": "desktop"}
         )
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["asset_count"], 1)
+        self.assertEqual(detail.json()["root_directory_id"], root_directory_id)
 
     def test_import_conflict_and_missing_paths(self) -> None:
         missing = self.client.post(

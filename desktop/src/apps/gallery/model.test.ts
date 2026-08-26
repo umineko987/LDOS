@@ -41,6 +41,7 @@ describe("gallery preview model", () => {
 describe("gallery target model (G2 安全投影消费)", () => {
   const backendSource = {
     source_id: "src-1",
+    root_directory_id: "dir-root-1",
     kind: "crawl_batch",
     batch_id: "batch-9",
     display_name: "Danbooru 批次",

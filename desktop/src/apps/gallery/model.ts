@@ -137,6 +137,7 @@ const ASSET_ERROR_CODES = new Set(["", "unidentified", "decode_failed", "probe_e
 
 const SOURCE_SUMMARY_KEYS = new Set([
   "source_id",
+  "root_directory_id",
   "kind",
   "batch_id",
   "display_name",
@@ -192,6 +193,8 @@ const ASSET_ENTRY_KEYS = new Set([
 
 export interface GallerySourceSummary {
   readonly source_id: string;
+  /** 进入来源首页所需的稳定根目录 ID；首次扫描前为 null。 */
+  readonly root_directory_id: string | null;
   readonly kind: GallerySourceKind;
   readonly batch_id: string | null;
   readonly display_name: string;
@@ -349,6 +352,7 @@ export function sanitizeGallerySourceSummary(raw: unknown): GallerySourceSummary
   const value = strictRecord(raw, SOURCE_SUMMARY_KEYS, "gallery_source_summary");
   return Object.freeze({
     source_id: idText(value.source_id, "gallery_source_id"),
+    root_directory_id: optionalText(value.root_directory_id, "gallery_root_directory_id", 128),
     kind: vocabularyValue(value.kind, SOURCE_KINDS, "gallery_source_kind"),
     batch_id: optionalText(value.batch_id, "gallery_batch_id", 128),
     display_name: boundedText(value.display_name, "gallery_display_name", 256),
@@ -475,4 +479,187 @@ export function galleryNaturalCompare(left: string, right: string): number {
   // 折叠后并列时以原始文件名做次级排序（与后端 sort_key 语义一致）。
   if (left !== right) return left < right ? -1 : 1;
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// G2-2 浏览页模型：分页投影清洗、目录树/面包屑、虚拟化窗口与 UI 标签。
+// ---------------------------------------------------------------------------
+
+export interface GallerySourcePage {
+  readonly sources: readonly GallerySourceSummary[];
+}
+
+export interface GalleryDirectoryPage {
+  readonly directory: GalleryDirectoryEntry;
+  readonly directories: readonly GalleryDirectoryEntry[];
+  readonly assets: readonly GalleryAssetEntry[];
+  readonly directory_cursor: string | null;
+  readonly asset_cursor: string | null;
+  readonly include_descendants: boolean;
+  readonly limit: number;
+}
+
+const SOURCE_PAGE_KEYS = new Set(["sources"]);
+const DIRECTORY_PAGE_KEYS = new Set([
+  "directory",
+  "directories",
+  "assets",
+  "directory_cursor",
+  "asset_cursor",
+  "include_descendants",
+  "limit",
+]);
+
+
+export function sanitizeGallerySourcePage(raw: unknown): GallerySourcePage {
+  const value = strictRecord(raw, SOURCE_PAGE_KEYS, "gallery_source_page");
+  if (!Array.isArray(value.sources)) throw new TypeError("invalid_gallery_sources");
+  return Object.freeze({ sources: Object.freeze(value.sources.map(sanitizeGallerySourceSummary)) });
+}
+
+export function sanitizeGalleryDirectoryPage(raw: unknown): GalleryDirectoryPage {
+  const value = strictRecord(raw, DIRECTORY_PAGE_KEYS, "gallery_directory_page");
+  if (!Array.isArray(value.directories)) throw new TypeError("invalid_gallery_directories");
+  if (!Array.isArray(value.assets)) throw new TypeError("invalid_gallery_assets");
+  return Object.freeze({
+    directory: sanitizeGalleryDirectoryEntry(value.directory),
+    directories: Object.freeze(value.directories.map(sanitizeGalleryDirectoryEntry)),
+    assets: Object.freeze(value.assets.map(sanitizeGalleryAssetEntry)),
+    directory_cursor: optionalText(value.directory_cursor, "gallery_directory_cursor", 512),
+    asset_cursor: optionalText(value.asset_cursor, "gallery_asset_cursor", 512),
+    include_descendants: booleanValue(value.include_descendants, "gallery_include_descendants", false),
+    limit: countValue(value.limit, "gallery_page_limit", 0),
+  });
+}
+
+export function sortGalleryDirectoryEntries(
+  entries: readonly GalleryDirectoryEntry[],
+): readonly GalleryDirectoryEntry[] {
+  // 稳定排序（Array#sort 稳定）；折叠并列由原始串确定性 tie-break。
+  return [...entries].sort((left, right) => galleryNaturalCompare(left.name, right.name));
+}
+
+export function sortGalleryAssetEntries(
+  entries: readonly GalleryAssetEntry[],
+): readonly GalleryAssetEntry[] {
+  return [...entries].sort((left, right) => galleryNaturalCompare(left.relative_path, right.relative_path));
+}
+
+export const GALLERY_TXT_STATE_LABELS: Readonly<Record<GalleryTxtState, string>> = Object.freeze({
+  normal: "TXT 正常",
+  missing: "TXT 缺失",
+  blank: "TXT 空白",
+  invalid_encoding: "TXT 编码异常",
+  pair_conflict: "同名配对冲突",
+  io_error: "TXT 读取失败",
+});
+
+export const GALLERY_AVAILABILITY_LABELS: Readonly<Record<GallerySourceAvailability, string>> =
+  Object.freeze({
+    available: "可用",
+    offline: "目录不可访问",
+    conflict: "路径冲突",
+    scanning: "扫描中",
+    error: "扫描失败",
+  });
+
+export const GALLERY_DEDUP_STATE_LABELS: Readonly<Record<GalleryDedupState, string>> = Object.freeze({
+  not_required: "无需去重",
+  pending_analysis: "待去重分析",
+});
+
+export const GALLERY_SOURCE_KIND_LABELS: Readonly<Record<GallerySourceKind, string>> = Object.freeze({
+  imported: "导入目录",
+  crawl_batch: "下载批次",
+});
+
+export type GallerySearchScope = "directory" | "source" | "library";
+
+export interface GalleryPathSegment {
+  readonly directory_id: string;
+  readonly name: string;
+}
+
+export interface GalleryBreadcrumbSegment {
+  readonly directory_id: string;
+  readonly label: string;
+}
+
+export function galleryBreadcrumb(
+  sourceName: string,
+  path: readonly GalleryPathSegment[],
+): readonly GalleryBreadcrumbSegment[] {
+  if (sourceName.length === 0) throw new TypeError("invalid_gallery_source_name");
+  const segments: GalleryBreadcrumbSegment[] = [{ directory_id: "", label: sourceName }];
+  for (const segment of path) {
+    segments.push({
+      directory_id: idText(segment.directory_id, "gallery_directory_id"),
+      label: boundedText(segment.name, "gallery_directory_name", 255),
+    });
+  }
+  return Object.freeze(segments);
+}
+
+export function validateGalleryQuery(query: string): string {
+  if (typeof query !== "string") throw new TypeError("invalid_gallery_query");
+  const trimmed = query.trim();
+  if (trimmed.length === 0) return "";
+  if (trimmed.length > 256) throw new TypeError("invalid_gallery_query");
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) throw new TypeError("invalid_gallery_query");
+  return trimmed;
+}
+
+// 虚拟化网格窗口计算（纯函数，供网格与列表共用行窗口逻辑）。
+export interface GalleryWindowingInput {
+  readonly total: number;
+  readonly scrollTop: number;
+  readonly viewportHeight: number;
+  readonly columnCount: number;
+  readonly rowHeight: number;
+  readonly overscanRows: number;
+}
+
+export interface GalleryWindowingRange {
+  readonly startIndex: number;
+  readonly endIndex: number;
+  readonly totalHeight: number;
+  readonly startOffsetY: number;
+}
+
+export function galleryVisibleRange(input: GalleryWindowingInput): GalleryWindowingRange {
+  const {
+    total,
+    scrollTop,
+    viewportHeight,
+    columnCount,
+    rowHeight,
+    overscanRows,
+  } = input;
+  if (
+    !Number.isFinite(total) ||
+    !Number.isFinite(scrollTop) ||
+    !Number.isFinite(viewportHeight) ||
+    !Number.isSafeInteger(columnCount) ||
+    columnCount < 1 ||
+    !Number.isFinite(rowHeight) ||
+    rowHeight < 1 ||
+    !Number.isSafeInteger(overscanRows) ||
+    overscanRows < 0
+  ) {
+    throw new TypeError("invalid_gallery_windowing");
+  }
+  if (total <= 0 || viewportHeight <= 0) {
+    return { startIndex: 0, endIndex: 0, totalHeight: 0, startOffsetY: 0 };
+  }
+  const rowCount = Math.ceil(total / columnCount);
+  const firstVisibleRow = Math.max(0, Math.floor(scrollTop / rowHeight));
+  const visibleRowCount = Math.ceil(viewportHeight / rowHeight);
+  const startRow = Math.max(0, firstVisibleRow - overscanRows);
+  const endRow = Math.min(rowCount - 1, firstVisibleRow + visibleRowCount + overscanRows);
+  return Object.freeze({
+    startIndex: startRow * columnCount,
+    endIndex: Math.min(total - 1, (endRow + 1) * columnCount - 1),
+    totalHeight: rowCount * rowHeight,
+    startOffsetY: startRow * rowHeight,
+  });
 }
