@@ -145,3 +145,29 @@
 - `Gallery.svelte`：网格卡片与列表行接入单击选择/Ctrl 切换/Shift 区间/双击与 Enter/Space 打开查看器、Ctrl/Cmd+A 全选、Delete 预留（G3 确认流程）；空选择与多选时显示批量栏（选中计数）；查看器打开时主内容 `inert` 防焦点逃逸。
 - 测试：`model.test.ts` +9（注解清洗往返、标签解析边界、几何缩放钳制与指针锚定、选择补丁语义）、`controller.test.ts` +6（查看器打开/导航/关闭/错误码、选择五语义）、`state.test.ts` 扩展 viewer/selection 状态机。
 - 阻塞：无。
+
+### [G3-1] feat(gallery): TXT 注解保存——原子写、乐观版本与 FTS 同步
+
+- 状态：✅ 后端 669 tests（3 红为 G5 预期红；G3 trash 路由部分由 G3-2 补齐）
+- `gallery-dl-backend/gdl_backend/_database_gallery_repository.py`：`update_annotation()` 单事务推进 `txt_version`/来源 `annotation_version`、先删后插同步 FTS 行；`GalleryVersionConflict`（`txt_version_conflict` / `asset_not_active`）。
+- `gallery-dl-backend/gdl_backend/gallery_service.py`：`save_annotation()` 严格 UTF-8 无 BOM 临时文件 + `os.replace` 原子写 + fsync；同名规则补建缺失 TXT；版本冲突在触碰磁盘前拒绝（前端草稿得以保留）。
+- `gallery-dl-backend/gdl_backend/api_routes/gallery.py`：`PUT /api/v1/gallery/assets/{id}/annotation` 乐观锁（`expected_txt_version`）、409 `txt_version_conflict`/`asset_not_active`/`source_offline`、422 写失败。
+- 测试 +6（`test_gallery_api_routes.py`）：保存更新内容与版本、缺失 TXT 补建、409 版本冲突（磁盘未被触碰）、404、FTS 搜索反映保存内容、幂等键校验。
+- 阻塞：无。
+
+### [G3-2] feat(gallery): 文件事务引擎——重命名、回收、撤销、恢复与永久清除
+
+- 状态：✅ 后端 678 tests（3 红为 G5 预期红）；图库 HTTP 层 23/23
+- `gallery-dl-backend/gdl_backend/gallery_file_operations.py`（新增，单一所有者引擎）：
+  - 持久化操作日志（`gallery_file_operations` + items 表）：`planned → applying → committed`；失败自动逆序回滚已完成项 → `rolled_back`；回滚失败 → `recovery_required`（来源保持锁定，重启后重试）。
+  - `rename_asset`：成对重命名图片+TXT（`os.replace` 原子）、ID/版本稳定、FTS 同步、目标冲突全组拒绝（`rename_target_conflict`）、非法目标 stem 拒绝（`invalid_rename_target`）、同名 no-op 拒绝（`rename_noop`）。
+  - `trash_assets`：批量成对移入 `.imageweave/trash/<op-id>/files/<原相对目录>/`，`operation.json` 自描述清单；资产 `lifecycle_state=trashed`、FTS 移除、目录计数自动校正（列表只投影 active）；单项失败全组回滚。
+  - `undo_trash`（最近一次回收的组级 Ctrl+Z）与 `restore_trash`（回收区列表内恢复）共用恢复引擎：文件移回原位、`lifecycle_state=active`、FTS 重建；目标冲突拒绝（`restore_target_conflict`）。
+  - `purge_trash`/`purge_all_trash`：物理删除回收区文件 + 资产记录 + FTS（不可逆）；`list_trash` 游标分页。
+  - 来源级互斥：同来源存在未终结操作时新写入拒绝（`operation_in_progress`）。
+  - `recover_unfinished()`：重启恢复——`applying` 重放幂等移动推进至 committed；`rolling_back`/`recovery_required` 重试回滚。回滚项的 `txt_origin` 运行期字段缺失时从资产记录派生。
+- `gallery-dl-backend/gdl_backend/api_routes/gallery.py`：新增 `POST /gallery/assets/{id}/rename`、`POST /gallery/file-operations/trash`、`POST /gallery/file-operations/{id}/undo`、`GET /gallery/trash`（view=desktop）、`POST /gallery/trash/{id}/restore`、`DELETE /gallery/trash/{id}`、`DELETE /gallery/trash`（清空）；`_file_operation_api_error` 稳定错误码映射（404/409/422/500）。
+- `gallery-dl-backend/gdl_backend/app.py`：`ServiceContainer.gallery_file_operations` 挂载。
+- 测试：`tests/test_gallery_file_operations.py`（新增 14 tests：重命名五态、回收成对移动+清单+索引、批量原子回滚、撤销、恢复冲突、永久清除、分页、来源锁、崩溃恢复 applying/rolling_back 两分支）；`tests/test_gallery_api_routes.py` +6 HTTP 层。
+- `tests/test_app_routing_contract.py`：OpenAPI 固定契约同步 8 个新操作（PUT annotation、rename、file-operations×2、trash×4）。
+- 阻塞：无。
