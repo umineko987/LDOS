@@ -13,6 +13,7 @@ from ._database_crawl_repository import (
     CrawlRepository,
     refresh_crawl_batch_counts,
 )
+from ._database_gallery_repository import GalleryRepository
 from ._database_policy_repository import SitePolicyRepository
 from ._database_proxy_repository import ProxyProbeRepository
 from ._database_repository import (
@@ -100,6 +101,11 @@ class Database:
             get_probe=lambda address_id: self.get_crawl_address_proxy_probe(address_id),
         )
         self._site_policy_repository = SitePolicyRepository(
+            read=self._read,
+            transaction=self._transaction,
+            clock=lambda: time.time(),
+        )
+        self._gallery_repository = GalleryRepository(
             read=self._read,
             transaction=self._transaction,
             clock=lambda: time.time(),
@@ -710,6 +716,11 @@ class Database:
     # 站点策略删除属于写路径，必须保留单一写事务。
     def delete_site_policy(self, site: str) -> bool:
         return self._site_policy_repository.delete_site_policy(site)
+
+    # 图库索引读写全部经由 GalleryRepository 的单一写事务边界。
+    @property
+    def gallery(self) -> GalleryRepository:
+        return self._gallery_repository
 
     def incomplete_processes(self) -> list[dict[str, Any]]:
         return self._task_repository.incomplete_processes()
