@@ -343,5 +343,133 @@ class GalleryAssetRoutesTest(GalleryApiTestBase):
         self.assertEqual(response.json()["error"]["code"], "asset_file_missing")
 
 
+class GalleryAnnotationPutRoutesTest(GalleryApiTestBase):
+    """G3-1：TXT 保存契约——原子写、乐观版本、UTF-8 严格、FTS 同步。"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.source = self.import_source(
+            {
+                "pic.jpg": _png_bytes(5, 2),
+                "pic.txt": "tag_one",
+                "no_txt.jpg": _png_bytes(),
+            }
+        )
+        repo = self.container.db.gallery
+        root_dir = repo.get_root_directory(self.source["source_id"])
+        assert root_dir is not None
+        entries = repo.list_directory_entries(directory_id=root_dir["directory_id"])
+        self.assets = {asset["name"]: asset for asset in entries["assets"]}
+
+    def _get_annotation(self, name: str) -> dict:
+        asset_id = self.assets[name]["asset_id"]
+        response = self.client.get(f"/api/v1/gallery/assets/{asset_id}/annotation")
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_save_updates_content_and_version(self) -> None:
+        annotation = self._get_annotation("pic.jpg")
+        response = self.client.put(
+            f"/api/v1/gallery/assets/{self.assets['pic.jpg']['asset_id']}/annotation",
+            json={
+                "content": "updated content",
+                "expected_txt_version": annotation["txt_version"],
+            },
+            headers={"Idempotency-Key": "test-save-1"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual(result["txt_state"], "normal")
+        self.assertEqual(result["content"], "updated content")
+        self.assertEqual(result["txt_version"], annotation["txt_version"] + 1)
+
+        # 磁盘文件是严格 UTF-8 无 BOM。
+        raw = (self.root / "src-a" / "pic.txt").read_bytes()
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
+        self.assertEqual(raw.decode("utf-8"), "updated content")
+
+        # 索引同步：GET annotation 反映新内容与状态。
+        fresh = self._get_annotation("pic.jpg")
+        self.assertEqual(fresh["content"], "updated content")
+        self.assertEqual(fresh["txt_version"], annotation["txt_version"] + 1)
+
+    def test_save_creates_missing_txt(self) -> None:
+        annotation = self._get_annotation("no_txt.jpg")
+        self.assertEqual(annotation["txt_state"], "missing")
+        response = self.client.put(
+            f"/api/v1/gallery/assets/{self.assets['no_txt.jpg']['asset_id']}/annotation",
+            json={
+                "content": "new tags",
+                "expected_txt_version": annotation["txt_version"],
+            },
+            headers={"Idempotency-Key": "test-save-2"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        # 同名规则创建 no_txt.txt。
+        self.assertEqual(
+            (self.root / "src-a" / "no_txt.txt").read_text(encoding="utf-8"),
+            "new tags",
+        )
+        fresh = self._get_annotation("no_txt.jpg")
+        self.assertEqual(fresh["txt_state"], "normal")
+        self.assertEqual(fresh["content"], "new tags")
+
+    def test_version_conflict_returns_409(self) -> None:
+        response = self.client.put(
+            f"/api/v1/gallery/assets/{self.assets['pic.jpg']['asset_id']}/annotation",
+            json={"content": "stale", "expected_txt_version": 999},
+            headers={"Idempotency-Key": "test-save-3"},
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["error"]["code"], "txt_version_conflict")
+        # 磁盘未被触碰。
+        self.assertEqual(
+            (self.root / "src-a" / "pic.txt").read_text(encoding="utf-8"), "tag_one"
+        )
+
+    def test_missing_asset_404(self) -> None:
+        response = self.client.put(
+            "/api/v1/gallery/assets/missing/annotation",
+            json={"content": "x", "expected_txt_version": 1},
+            headers={"Idempotency-Key": "test-save-4"},
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "asset_not_found")
+
+    def test_search_index_reflects_saved_content(self) -> None:
+        annotation = self._get_annotation("pic.jpg")
+        self.client.put(
+            f"/api/v1/gallery/assets/{self.assets['pic.jpg']['asset_id']}/annotation",
+            json={
+                "content": "zebra_unique_marker",
+                "expected_txt_version": annotation["txt_version"],
+            },
+            headers={"Idempotency-Key": "test-save-5"},
+        )
+        root_dir = self.container.db.gallery.get_root_directory(
+            self.source["source_id"]
+        )
+        entries = self.container.db.gallery.list_directory_entries(
+            directory_id=root_dir["directory_id"], query="zebra_unique_marker"
+        )
+        self.assertEqual(len(entries["assets"]), 1)
+        self.assertEqual(entries["assets"][0]["name"], "pic.jpg")
+
+    def test_idempotency_key_validated_when_present(self) -> None:
+        # 空白 Idempotency-Key 被拒绝（与仓库现有 write-origin 惯例一致：键可选，但提供时必须合法）。
+        response = self.client.put(
+            f"/api/v1/gallery/assets/{self.assets['pic.jpg']['asset_id']}/annotation",
+            json={
+                "content": "x",
+                "expected_txt_version": self._get_annotation("pic.jpg")["txt_version"],
+            },
+            headers={"Idempotency-Key": "   "},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["error"]["code"], "invalid_idempotency_key"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

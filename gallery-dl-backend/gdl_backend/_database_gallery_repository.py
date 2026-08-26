@@ -36,6 +36,14 @@ class GallerySourceConflictError(Exception):
         self.existing_source = dict(existing_source)
 
 
+class GalleryVersionConflict(Exception):
+    """乐观版本检查失败（TXT 保存、文件操作执行前校验）。"""
+
+    def __init__(self, code: str, details: Mapping[str, Any]) -> None:
+        super().__init__(code)
+        self.code = code
+        self.details = dict(details)
+
 class GalleryCursorError(ValueError):
     """游标格式或取值非法。"""
 
@@ -896,6 +904,85 @@ class GalleryRepository:
                 (source_id,),
             ).fetchone()
         return int(row["total"])
+
+    # ---- TXT 注解写路径（§7.2 PUT annotation；G3-1） ----
+
+    def update_annotation(
+        self,
+        asset_id: str,
+        *,
+        expected_txt_version: int,
+        txt_state: str,
+        txt_size_bytes: int,
+        txt_modified_ns: int,
+        txt_sha256: str,
+        txt_relative_path: str,
+        txt_content: str,
+    ) -> dict[str, Any]:
+        """提交已写入磁盘后的注解索引更新（乐观版本检查 + FTS 同步）。
+
+        调用方（service）已保证磁盘 TXT 原子写完成；本方法只负责把索引
+        与统计推进到新版本。返回更新后的资产投影。
+        """
+        now = self._clock()
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM gallery_assets WHERE id=?", (asset_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError("gallery_asset_not_found")
+            if int(row["txt_version"]) != expected_txt_version:
+                raise GalleryVersionConflict(
+                    "txt_version_conflict",
+                    {"asset_id": asset_id, "expected": expected_txt_version,
+                     "actual": int(row["txt_version"])},
+                )
+            if row["lifecycle_state"] != "active":
+                raise GalleryVersionConflict(
+                    "asset_not_active", {"asset_id": asset_id,
+                     "lifecycle": row["lifecycle_state"]},
+                )
+            # FTS 行先删后插，保证 txt_content 与新版本一致。
+            conn.execute(
+                "DELETE FROM gallery_search_index WHERE asset_id=?", (asset_id,)
+            )
+            conn.execute(
+                ""
+                "INSERT INTO gallery_search_index(asset_id, source_id, file_name, relative_path, txt_content)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (asset_id, row["source_id"], row["name"], row["relative_path"],
+                 txt_content if txt_state == "normal" else ""),
+            )
+            new_version = expected_txt_version + 1
+            conn.execute(
+                ""
+                "UPDATE gallery_assets SET"
+                " txt_state=?, txt_size_bytes=?, txt_modified_ns=?,"
+                " txt_sha256=?, txt_version=?, txt_relative_path=?, updated_at=?"
+                " WHERE id=?",
+                (
+                    txt_state,
+                    txt_size_bytes,
+                    txt_modified_ns,
+                    txt_sha256,
+                    new_version,
+                    txt_relative_path,
+                    now,
+                    asset_id,
+                ),
+            )
+            conn.execute(
+                ""
+                "UPDATE gallery_sources"
+                " SET annotation_version=annotation_version+1, updated_at=?"
+                " WHERE id=?",
+                (now, row["source_id"]),
+            )
+            updated = conn.execute(
+                "SELECT * FROM gallery_assets WHERE id=?", (asset_id,)
+            ).fetchone()
+        return self._project_asset_row(updated)
+
     def get_assets_by_ids(self, asset_ids: Iterable[str]) -> list[dict[str, Any]]:
         ids = list(dict.fromkeys(asset_ids))
         if not ids:
@@ -963,6 +1050,7 @@ def _path_exists(path: str) -> bool:
 __all__ = [
     "GalleryRepository",
     "GallerySourceConflictError",
+    "GalleryVersionConflict",
     "GalleryCursorError",
     "gallery_directory_id",
     "gallery_asset_id",

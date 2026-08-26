@@ -18,13 +18,17 @@ from pydantic import BaseModel, Field
 from .._database_gallery_repository import (
     GalleryCursorError,
     GallerySourceConflictError,
+    GalleryVersionConflict,
 )
 from ..gallery_catalog import TXT_STATES, decode_txt_bytes
 from ..gallery_service import (
+    GalleryAnnotationError,
+    GalleryAssetNotFound,
     GalleryCatalogService,
     GalleryRootMissing,
     GalleryScanInProgress,
     GallerySourceNotFound,
+    GallerySourceOffline,
 )
 from ..gallery_thumbnails import SUPPORTED_THUMBNAIL_SIZES, ThumbnailUnavailable
 from .dependencies import get_service
@@ -52,6 +56,11 @@ class GallerySourcePatchRequest(BaseModel):
 
 class GalleryRelinkRequest(BaseModel):
     root_path: str = Field(min_length=1, max_length=4096)
+
+
+class GalleryAnnotationPutRequest(BaseModel):
+    content: str = Field(max_length=2 * 1024 * 1024)
+    expected_txt_version: int = Field(ge=1)
 
 
 def _source_not_found(source_id: str) -> ApiError:
@@ -345,6 +354,50 @@ def create_gallery_router() -> APIRouter:
             "content": text,
             "txt_version": asset["txt_version"],
         }
+    @router.put("/gallery/assets/{asset_id}/annotation")
+    async def put_gallery_asset_annotation(
+        asset_id: str,
+        request: GalleryAnnotationPutRequest,
+        container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        validate_idempotency_key(idempotency_key)
+        catalog: GalleryCatalogService = container.gallery_catalog
+        try:
+            result = catalog.save_annotation(
+                asset_id,
+                request.content,
+                expected_txt_version=request.expected_txt_version,
+            )
+        except GalleryAssetNotFound:
+            raise _asset_not_found(asset_id) from None
+        except GalleryVersionConflict as conflict:
+            if conflict.code == "asset_not_active":
+                raise ApiError(
+                    409,
+                    "asset_not_active",
+                    "资产已不在活跃状态",
+                    details={"asset_id": asset_id},
+                ) from None
+            raise ApiError(
+                409,
+                "txt_version_conflict",
+                "TXT 已被外部修改，请重新加载后重试",
+                details={
+                    "asset_id": asset_id,
+                    "expected_txt_version": request.expected_txt_version,
+                },
+            ) from None
+        except GallerySourceOffline:
+            raise ApiError(
+                409, "source_offline", "来源当前不可用，无法保存 TXT"
+            ) from None
+        except GalleryAnnotationError as error:
+            raise ApiError(
+                422, error.code, "TXT 保存失败"
+            ) from None
+        return result
+
 
     return router
 

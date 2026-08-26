@@ -19,6 +19,7 @@ from PIL import Image, UnidentifiedImageError
 from ._database_gallery_repository import (
     GalleryRepository,
     GallerySourceConflictError,
+    GalleryVersionConflict,
 )
 from .gallery_catalog import (
     classify_txt_state,
@@ -42,6 +43,29 @@ class GalleryScanInProgress(Exception):
 
 class GalleryRootMissing(Exception):
     """导入或重关联指定的来源根目录不存在（source_path_not_found）。"""
+
+
+class GalleryAssetNotFound(Exception):
+    def __init__(self, asset_id: str) -> None:
+        super().__init__(f"gallery_asset_not_found:{asset_id}")
+        self.asset_id = asset_id
+
+
+class GallerySourceOffline(Exception):
+    """来源当前不可用（source_offline），写操作被拒绝。"""
+
+    def __init__(self, source_id: str) -> None:
+        super().__init__(f"gallery_source_offline:{source_id}")
+        self.source_id = source_id
+
+
+class GalleryAnnotationError(Exception):
+    """TXT 写路径失败（txt_write_failed / txt_target_not_regular_file）。"""
+
+    def __init__(self, code: str, txt_relative_path: str) -> None:
+        super().__init__(code)
+        self.code = code
+        self.txt_relative_path = txt_relative_path
 
 
 SCAN_STATES: frozenset[str] = frozenset(
@@ -231,6 +255,94 @@ class GalleryCatalogService:
         if source is None:
             raise GallerySourceNotFound(source_id)
         return Path(source["root_path"])
+
+
+    # ---- TXT 注解保存（§3.4/§7.2；G3-1） ----
+
+    def save_annotation(
+        self,
+        asset_id: str,
+        content: str,
+        *,
+        expected_txt_version: int,
+    ) -> dict[str, Any]:
+        """严格 UTF-8（无 BOM）原子写 TXT，并推进索引版本。
+
+        - expected_txt_version 与当前索引不一致时抛 GalleryVersionConflict
+          （txt_version_conflict），磁盘不被触碰，前端草稿得以保留；
+        - 磁盘写通过临时文件 + os.replace 原子完成；
+        - 成功后 txt_version +1、来源 annotation_version +1、FTS 同步。
+        """
+        asset = self._repo.get_asset(asset_id)
+        if asset is None:
+            raise GalleryAssetNotFound(asset_id)
+        if asset["lifecycle_state"] != "active":
+            raise GalleryVersionConflict(
+                "asset_not_active", {"asset_id": asset_id},
+            )
+        if int(asset["txt_version"]) != expected_txt_version:
+            raise GalleryVersionConflict(
+                "txt_version_conflict",
+                {"asset_id": asset_id, "expected": expected_txt_version,
+                 "actual": int(asset["txt_version"])},
+            )
+        source = self._repo.get_source(asset["source_id"])
+        if source is None:
+            raise GallerySourceNotFound(asset["source_id"])
+        if source["availability"] != "available":
+            raise GallerySourceOffline(asset["source_id"])
+        root = Path(source["root_path"])
+
+        # 目标 TXT：已有配对路径优先；缺失时按同名规则创建。
+        if asset["txt_relative_path"] and asset["txt_state"] not in {"missing", "pair_conflict"}:
+            txt_relative = asset["txt_relative_path"]
+        else:
+            txt_relative = _txt_relative_for_image(asset["relative_path"])
+        txt_path = root / txt_relative
+        if txt_path.is_symlink():
+            raise GalleryAnnotationError(
+                "txt_target_not_regular_file", txt_relative)
+
+        # 严格 UTF-8 无 BOM 原子写（§3.4：任何成功保存都写为无 BOM UTF-8）。
+        data = content.encode("utf-8", errors="strict")
+        parent = txt_path.parent
+        parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = txt_path.with_name(txt_path.name + ".imageweave-tmp")
+        try:
+            with open(tmp_path, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_path, txt_path)
+        except OSError:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise GalleryAnnotationError("txt_write_failed", txt_relative) from None
+
+        stat = txt_path.stat()
+        new_state = classify_txt_state(
+            exists=True,
+            read_ok=True,
+            data=data,
+        )
+        updated = self._repo.update_annotation(
+            asset_id,
+            expected_txt_version=expected_txt_version,
+            txt_state=new_state,
+            txt_size_bytes=stat.st_size,
+            txt_modified_ns=stat.st_mtime_ns,
+            txt_sha256="",
+            txt_relative_path=txt_relative,
+            txt_content=content if new_state == "normal" else "",
+        )
+        return {
+            "asset_id": asset_id,
+            "txt_state": updated["txt_state"],
+            "txt_version": updated["txt_version"],
+            "content": content,
+        }
 
     # ---- 扫描（§6.1） ----
 
@@ -445,6 +557,13 @@ class GalleryCatalogService:
             "txt_content": txt_content,
         }
 
+
+
+def _txt_relative_for_image(image_relative_path: str) -> str:
+    """按同名规则推导 TXT 相对路径（§3.4：foo.jpg → foo.txt）。"""
+    parts = image_relative_path.rsplit("/", 1)
+    directory = parts[0] + "/" if len(parts) == 2 else ""
+    return f"{directory}{txt_name_for_image(parts[-1])}"
 
 def _decode_txt(data: bytes) -> tuple[bool, str]:
     return decode_txt_bytes(data)
