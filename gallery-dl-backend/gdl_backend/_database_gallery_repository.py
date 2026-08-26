@@ -828,6 +828,65 @@ class GalleryRepository:
             ).fetchone()
         return None if row is None else self._project_asset_row(row)
 
+
+    def get_source_asset_stats(self, source_id: str) -> dict[str, dict[str, Any]]:
+        """扫描增量复用所需的既有资产统计（相对路径 → 大小/mtime/解码结果）。"""
+        with self._read() as conn:
+            rows = conn.execute(
+                """
+                SELECT relative_path, size_bytes, modified_ns, format, width,
+                       height, read_state, error_code
+                FROM gallery_assets WHERE source_id=? AND lifecycle_state='active'
+                """,
+                (source_id,),
+            ).fetchall()
+        return {
+            row["relative_path"]: {
+                "size_bytes": row["size_bytes"],
+                "modified_ns": row["modified_ns"],
+                "format": row["format"],
+                "width": row["width"],
+                "height": row["height"],
+                "read_state": row["read_state"],
+                "error_code": row["error_code"],
+            }
+            for row in rows
+        }
+
+    def set_source_availability(self, source_id: str, availability: str) -> None:
+        if availability not in {"available", "offline", "error"}:
+            raise ValueError("invalid_gallery_source_availability")
+        with self._transaction() as conn:
+            updated = conn.execute(
+                """
+                UPDATE gallery_sources SET availability=?, updated_at=?
+                WHERE id=?
+                """,
+                (availability, self._clock(), source_id),
+            ).rowcount
+        if not updated:
+            raise ValueError("gallery_source_not_found")
+
+    def rename_source(self, source_id: str, display_name: str) -> None:
+        with self._transaction() as conn:
+            updated = conn.execute(
+                """
+                UPDATE gallery_sources SET display_name=?, updated_at=?
+                WHERE id=?
+                """,
+                (display_name, self._clock(), source_id),
+            ).rowcount
+        if not updated:
+            raise ValueError("gallery_source_not_found")
+
+    def count_source_assets(self, source_id: str) -> int:
+        with self._read() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM gallery_assets"
+                " WHERE source_id=? AND lifecycle_state='active'",
+                (source_id,),
+            ).fetchone()
+        return int(row["total"])
     def get_assets_by_ids(self, asset_ids: Iterable[str]) -> list[dict[str, Any]]:
         ids = list(dict.fromkeys(asset_ids))
         if not ids:
