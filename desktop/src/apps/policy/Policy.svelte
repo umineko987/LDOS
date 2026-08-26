@@ -66,8 +66,12 @@
     draftInitialized = true;
   }
 
+  function updateDraft(patch: Partial<PolicyDraft>): void {
+    draft = { ...draft, ...patch };
+  }
+
   $effect(() => {
-    if (!draftInitialized || (!dirty && current)) loadDraft();
+    if (!draftInitialized && current) loadDraft();
   });
 
   function discardDraft(): void {
@@ -212,8 +216,8 @@
     <div class="policy-workspace-track">
       <nav class="policy-column policy-column--navigation" aria-labelledby="policy-sites-heading">
         <header><p>01 · 站点</p><h2 id="policy-sites-heading">站点设置来源</h2><span>固定顺序显示五个后端支持的站点。</span></header>
-        <div class="policy-column-scroll">
-          <div class="policy-site-nav" role="list" aria-label="五个站点的设置状态">
+        <div class="policy-column-scroll" tabindex="0" aria-label="站点设置来源内容；可滚动">
+          <div class="policy-site-nav" role="group" aria-label="五个站点的设置状态">
             {#each items as entry (entry.definition.id)}
               <button
                 type="button"
@@ -235,7 +239,7 @@
 
       <main class="policy-column policy-column--editor" aria-labelledby="policy-editor-heading">
         <header><p>02 · 当前站点</p><h2 id="policy-editor-heading">完整四字段编辑器</h2><span>无效草稿不会发送请求。</span></header>
-        <div class="policy-column-scroll">
+        <div class="policy-column-scroll" tabindex="0" aria-label="站点设置编辑器内容；可滚动">
           <section class="policy-workspace-state" data-policy-workspace-state={presentation.state} role="status" aria-live="polite">
             <span class="policy-status" data-kind={presentation.kind}>{presentation.label}</span>
             <p>{presentation.message}</p>
@@ -244,10 +248,10 @@
           <form class="policy-form" autocomplete="off" novalidate onsubmit={(event) => { event.preventDefault(); void save(); }}>
             <div class="policy-editor-heading"><h3>{current?.label ?? "站点设置"}</h3><p>四个字段组成完整设置；保存始终提交全部四项。</p></div>
             <div class="policy-field-grid">
-              <label class="policy-field"><span>最大并发数</span><input data-policy-field="max_concurrency" type="number" min="1" max="128" required aria-describedby="policy-max-help policy-validation" aria-invalid={formLoaded && validation.field === "max_concurrency"} disabled={Boolean(snapshot.busy || !current?.editable)} bind:value={draft.max_concurrency} /><small id="policy-max-help">范围 1–128；仍受系统总上限限制。</small></label>
-              <label class="policy-field"><span>重试次数</span><input data-policy-field="retry_limit" type="number" min="0" max="20" required aria-describedby="policy-retry-help policy-validation" aria-invalid={formLoaded && validation.field === "retry_limit"} disabled={Boolean(snapshot.busy || !current?.editable)} bind:value={draft.retry_limit} /><small id="policy-retry-help">范围 0–20；0 表示不自动重试。</small></label>
-              <label class="policy-field"><span>首次重试等待（秒）</span><input data-policy-field="backoff_base_seconds" type="number" min="0" max="3600" step="0.1" required aria-describedby="policy-backoff-help policy-validation" aria-invalid={formLoaded && validation.field === "backoff_base_seconds"} disabled={Boolean(snapshot.busy || !current?.editable)} bind:value={draft.backoff_base_seconds} /><small id="policy-backoff-help">范围 0–3600；后续等待随连续失败增加。</small></label>
-              <label class="policy-field"><span>连接方式</span><select data-policy-field="proxy_mode" aria-describedby="policy-proxy-help policy-validation" aria-invalid={formLoaded && validation.field === "proxy_mode"} disabled={Boolean(snapshot.busy || !current?.editable)} bind:value={draft.proxy_mode}><option value="direct">直连</option><option value="prefer">优先代理（不可用时直连）</option><option value="required">仅代理（不可用时失败）</option></select><small id="policy-proxy-help">单次搜索或批次中的显式连接设置优先。</small></label>
+              <label class="policy-field"><span>最大并发数</span><input data-policy-field="max_concurrency" type="number" min="1" max="128" required aria-describedby="policy-max-help policy-validation" aria-invalid={formLoaded && validation.field === "max_concurrency"} disabled={Boolean(snapshot.busy || !current?.editable)} value={draft.max_concurrency} oninput={(event) => updateDraft({ max_concurrency: event.currentTarget.value })} /><small id="policy-max-help">范围 1–128；仍受系统总上限限制。</small></label>
+              <label class="policy-field"><span>重试次数</span><input data-policy-field="retry_limit" type="number" min="0" max="20" required aria-describedby="policy-retry-help policy-validation" aria-invalid={formLoaded && validation.field === "retry_limit"} disabled={Boolean(snapshot.busy || !current?.editable)} value={draft.retry_limit} oninput={(event) => updateDraft({ retry_limit: event.currentTarget.value })} /><small id="policy-retry-help">范围 0–20；0 表示不自动重试。</small></label>
+              <label class="policy-field"><span>首次重试等待（秒）</span><input data-policy-field="backoff_base_seconds" type="number" min="0" max="3600" step="0.1" required aria-describedby="policy-backoff-help policy-validation" aria-invalid={formLoaded && validation.field === "backoff_base_seconds"} disabled={Boolean(snapshot.busy || !current?.editable)} value={draft.backoff_base_seconds} oninput={(event) => updateDraft({ backoff_base_seconds: event.currentTarget.value })} /><small id="policy-backoff-help">范围 0–3600；后续等待随连续失败增加。</small></label>
+              <label class="policy-field"><span>连接方式</span><select data-policy-field="proxy_mode" aria-describedby="policy-proxy-help policy-validation" aria-invalid={formLoaded && validation.field === "proxy_mode"} disabled={Boolean(snapshot.busy || !current?.editable)} value={draft.proxy_mode} onchange={(event) => updateDraft({ proxy_mode: event.currentTarget.value as PolicyDraft["proxy_mode"] })}><option value="direct">直连</option><option value="prefer">优先代理（不可用时直连）</option><option value="required">仅代理（不可用时失败）</option></select><small id="policy-proxy-help">单次搜索或批次中的显式连接设置优先。</small></label>
             </div>
             <p id="policy-validation" class="policy-validation" role="alert" aria-live="assertive">{validationMessage()}</p>
             <button type="submit" class="policy-button policy-button--primary" disabled={controls.save.disabled} title={controls.save.reason}>{controls.save.label}</button>
@@ -257,7 +261,7 @@
 
       <aside class="policy-column policy-column--actions" aria-labelledby="policy-actions-heading">
         <header><p>03 · 状态与操作</p><h2 id="policy-actions-heading">来源、草稿与保存</h2><span>保存和恢复仅影响后续新建任务。</span></header>
-        <div class="policy-column-scroll">
+        <div class="policy-column-scroll" tabindex="0" aria-label="站点设置状态与操作内容；可滚动">
           <section class="policy-panel"><h3>当前来源</h3><p class="policy-source-title">{sourceLabel()}</p><p>{editor.message}</p><p class="policy-impact">{editor.scope}</p></section>
           <section class="policy-panel"><h3>草稿状态</h3><p class="policy-dirty-live" data-dirty={dirty}>{!formLoaded ? "该站点设置暂时无法编辑。" : !validation.valid ? "草稿无效：请修正标记字段，尚未发送请求。" : dirty ? "有未保存的更改。离开、最小化或关闭前会要求确认。" : "所有更改均已保存。"}</p><p class="policy-operation-live" aria-live="polite">{snapshot.message}</p></section>
           <section class="policy-panel"><h3>保存与危险恢复</h3><div class="policy-actions"><button type="button" class="policy-button policy-button--primary" disabled={controls.save.disabled} onclick={() => void save()}>{controls.save.label}</button><button type="button" class="policy-button policy-button--dangerous" disabled={controls.reset.disabled} onclick={reset}>{controls.reset.label}</button></div><p class="policy-action-reason" aria-live="polite">{controls.save.reason || controls.reset.reason || "保存会提交完整四字段；恢复默认只影响当前站点。"}</p></section>

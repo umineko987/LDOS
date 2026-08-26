@@ -21,6 +21,8 @@ Desktop.ini
 **/venv/
 /desktop/node_modules/
 /desktop/coverage/
+/desktop/playwright-report/
+/desktop/test-results/
 /desktop/src-tauri/target/
 /desktop/src-tauri/gen/
 /desktop/src-tauri/release/

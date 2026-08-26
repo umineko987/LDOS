@@ -79,7 +79,7 @@
 .policy-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .policy-field { display: grid; gap: 6px; min-width: 0; font-size: 0.82rem; font-weight: 700; }
 .policy-field input,
-.policy-field select { width: 100%; min-width: 0; min-height: 44px; }
+.policy-field select { width: 100%; min-width: 0; min-height: 44px; color: var(--imageweave-text-primary); background: var(--imageweave-glass-surface-input); }
 .policy-field small { color: var(--imageweave-text-muted); font-size: 0.75rem; font-weight: 400; }
 .policy-field input[aria-invalid="true"],
 .policy-field select[aria-invalid="true"] { border-color: var(--imageweave-state-danger); }

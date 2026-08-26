@@ -173,7 +173,7 @@
     <div class="proxy-workspace__track">
       <aside class="proxy-column proxy-column--status" aria-labelledby="proxy-status-heading">
         <header><p>01 · 状态</p><h2 id="proxy-status-heading">状态总览</h2><span>运行、健康、传输核心和版本关系。</span></header>
-        <div class="proxy-column__scroll">
+        <div class="proxy-column__scroll" tabindex="0" aria-label="代理状态内容；可滚动">
           {#if snapshot.status}
             <div class="proxy-metrics" aria-label="代理聚合事实">
               <div><span>节点总数</span><strong>{snapshot.status.total}</strong></div>
@@ -206,7 +206,7 @@
 
       <main class="proxy-column" aria-labelledby="proxy-runtime-heading">
         <header><p>02 · 运行池</p><h2 id="proxy-runtime-heading">运行池控制</h2><span>启动、停止、显式应用配置和探活。</span></header>
-        <div class="proxy-column__scroll">
+        <div class="proxy-column__scroll" tabindex="0" aria-label="代理运行池内容；可滚动">
           <div class="proxy-action-panel" aria-label="代理池操作">
             <div class="proxy-actions" aria-label="代理池操作">
               <button type="button" disabled={controls.start} aria-describedby={controls.start ? "proxy-start-reason" : undefined} onclick={() => void controller.runtime("start")}>{snapshot.busy === "start" ? "正在启动…" : "启动代理池"}</button>
@@ -244,7 +244,7 @@
 
       <aside class="proxy-column" aria-labelledby="proxy-sources-heading">
         <header><p>03 · 来源</p><h2 id="proxy-sources-heading">来源编辑</h2><span>保存只更新配置草稿；显式应用后运行池才会改变。</span></header>
-        <div class="proxy-column__scroll">
+        <div class="proxy-column__scroll" tabindex="0" aria-label="代理来源内容；可滚动">
           {#if snapshot.sources}
             <section class="proxy-panel"><h3>来源摘要</h3><dl>
               <div><dt>当前来源</dt><dd>{snapshot.sources.source === "runtime" ? "界面自定义配置" : snapshot.sources.source === "config" ? "配置文件默认值" : "未配置"}</dd></div>

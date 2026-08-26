@@ -182,8 +182,8 @@
     <div class="vault-workspace-track">
       <nav class="vault-column vault-column--navigation" aria-labelledby="vault-sites-heading">
         <header><p>01 · 站点</p><h2 id="vault-sites-heading">授权目标</h2><span>固定顺序显示五个后端支持的站点。</span></header>
-        <div class="vault-column-scroll">
-          <div class="vault-site-nav" role="list" aria-label="授权站点">
+        <div class="vault-column-scroll" tabindex="0" aria-label="授权目标内容；可滚动">
+          <div class="vault-site-nav" role="group" aria-label="授权站点">
             {#each siteItems as item (item.definition.id)}
               <button
                 type="button"
@@ -204,7 +204,7 @@
 
       <main class="vault-column vault-column--materials" aria-labelledby="vault-materials-heading">
         <header><p>02 · 材料与会话</p><h2 id="vault-materials-heading">{selectedStatus?.label ?? getVaultSiteDefinition(snapshot.selectedSite)?.label ?? "授权站点"}</h2><span>只展示是否存在、是否有效和活动会话事实。</span></header>
-        <div class="vault-column-scroll">
+        <div class="vault-column-scroll" tabindex="0" aria-label="授权材料与会话内容；可滚动">
           <section class="vault-waiting-host" data-vault-workspace-state={presentation.state} aria-live="polite">
             <span class="vault-status" data-kind={presentation.kind}>{presentation.label}</span>
             <p>{presentation.message}</p>
@@ -254,7 +254,7 @@
 
       <aside class="vault-column vault-column--recovery" aria-labelledby="vault-recovery-heading">
         <header><p>03 · 共享与恢复</p><h2 id="vault-recovery-heading">共享授权浏览器</h2><span>共享材料和登录代理只显示受控事实。</span></header>
-        <div class="vault-column-scroll">
+        <div class="vault-column-scroll" tabindex="0" aria-label="共享授权与恢复内容；可滚动">
           <section class="vault-profile-status" aria-labelledby="vault-profile-heading">
             <h3 id="vault-profile-heading">共享授权浏览器数据</h3>
             {#if snapshot.snapshot?.browserProfile}

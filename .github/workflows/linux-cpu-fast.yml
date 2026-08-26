@@ -127,6 +127,24 @@ jobs:
       - name: Desktop core coverage 门槛
         working-directory: desktop
         run: npm run test:coverage
+      - name: 安装 Chromium GUI 测试运行时与 CJK 字体
+        working-directory: desktop
+        run: |
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+      - name: Chromium 全应用 GUI、键盘、无障碍与视觉回归
+        working-directory: desktop
+        run: npm run test:e2e
+      - name: 保存 GUI 测试诊断
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-gui-playwright-linux
+          path: |
+            desktop/playwright-report
+            desktop/test-results
+          if-no-files-found: ignore
+          retention-days: 14
       - name: 生成并同步 canonical 前端
         working-directory: desktop
         run: npm run build

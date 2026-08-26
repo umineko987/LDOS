@@ -62,7 +62,7 @@
     <div class="diagnostics-workspace-track">
       <aside class="diagnostics-column diagnostics-column--summary" aria-labelledby="diagnostics-summary-heading">
         <header><p>01 · 摘要</p><h2 id="diagnostics-summary-heading">连接与检查</h2><span>四项只读检查复用同一检查周期。</span></header>
-        <div class="diagnostics-column-scroll">
+        <div class="diagnostics-column-scroll" tabindex="0" aria-label="诊断摘要内容；可滚动">
           <section class="diagnostics-workspace-state" data-diagnostics-workspace-state={presentation.state} role="status" aria-live="polite"><span class="diagnostics-status" data-kind={presentation.kind}>{presentation.label}</span><p>{presentation.message}</p></section>
           <div class="diagnostics-actions"><button type="button" disabled={!snapshot.snapshot || snapshot.busy} onclick={copySummary}>复制诊断摘要</button><a href="/docs" target="_blank" rel="noreferrer noopener">打开 API 文档</a></div>
           {#if snapshot.snapshot}<div class="diagnostics-metrics"><div><span>连接</span><strong>{snapshot.snapshot.offline ? "离线" : "在线"}</strong></div><div><span>健康</span><strong>{statusLabel(snapshot.snapshot.health?.ok)}</strong></div><div><span>就绪</span><strong>{snapshot.snapshot.readiness?.ready ? "已就绪" : "未完全就绪"}</strong></div><div><span>检查时间</span><strong>{formatCheckedAt(snapshot.snapshot.lastCheckedAt)}</strong></div></div>{/if}
@@ -72,7 +72,7 @@
 
       <main class="diagnostics-column diagnostics-column--facts" aria-labelledby="diagnostics-facts-heading">
         <header><p>02 · 服务事实</p><h2 id="diagnostics-facts-heading">安全配置与调度</h2><span>配置与 scheduler 均来自 diagnostics 白名单投影。</span></header>
-        <div class="diagnostics-column-scroll">
+        <div class="diagnostics-column-scroll" tabindex="0" aria-label="服务事实内容；可滚动">
           {#if snapshot.snapshot?.config}
             <section class="diagnostics-panel"><h3>安全配置</h3><dl class="diagnostics-definitions"><div><dt>回环监听</dt><dd>{snapshot.snapshot.config.loopbackOnly ? "是" : "否（异常）"}</dd></div><div><dt>CORS</dt><dd>{snapshot.snapshot.config.corsEnabled ? "已配置" : "未启用"}</dd></div><div><dt>私网目标</dt><dd>{snapshot.snapshot.config.privateTargetsEnabled ? "允许" : "禁止"}</dd></div><div><dt>授权缓存</dt><dd>{snapshot.snapshot.config.managedAuthCache ? "启用" : "禁用"}</dd></div><div><dt>代理池</dt><dd>{snapshot.snapshot.config.proxyEnabled ? `启用 · 自动启动 ${snapshot.snapshot.config.proxyAutoStart ? "开" : "关"}` : "禁用"}</dd></div><div><dt>任务容量</dt><dd>{snapshot.snapshot.config.schedulerCapacity}</dd></div><div><dt>去重配置</dt><dd>{snapshot.snapshot.config.dedupEnabled ? `${snapshot.snapshot.config.configuredDevice} · SSCD ${snapshot.snapshot.config.sscdEnabled ? "开" : "关"} · DINO ${snapshot.snapshot.config.dinoEnabled ? "开" : "关"}` : "禁用"}</dd></div></dl></section>
           {:else}<p class="diagnostics-empty">尚未读取安全配置。</p>{/if}
@@ -84,7 +84,7 @@
 
       <aside class="diagnostics-column diagnostics-column--components" aria-labelledby="diagnostics-components-heading">
         <header><p>03 · 组件与恢复</p><h2 id="diagnostics-components-heading">分领域诊断</h2><span>每个组件给出安全事实和下一步。</span></header>
-        <div class="diagnostics-column-scroll">
+        <div class="diagnostics-column-scroll" tabindex="0" aria-label="组件与恢复内容；可滚动">
           {#if snapshot.snapshot?.readiness?.components?.length}
             {#each snapshot.snapshot.readiness.components as component (component.id)}
               <article class="diagnostics-component" data-component-id={component.id}>

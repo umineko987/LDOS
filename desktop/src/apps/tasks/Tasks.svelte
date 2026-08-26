@@ -145,7 +145,7 @@
           <h2 id="tasks-recent-heading">最近批次</h2>
           <span>筛选、选择并载入一个权威批次。</span>
         </header>
-        <div class="tasks-column__scroll">
+        <div class="tasks-column__scroll" tabindex="0" aria-label="最近批次内容；可滚动">
           <label class="tasks-field">
             <span>批次筛选</span>
             <select
@@ -213,7 +213,7 @@
           <h2 id="tasks-detail-heading">批次摘要与当前页</h2>
           <span>完整数量来自批次摘要；表格只保留当前 100 条。</span>
         </header>
-        <div class="tasks-column__scroll tasks-column__scroll--detail">
+        <div class="tasks-column__scroll tasks-column__scroll--detail" tabindex="0" aria-label="批次事实内容；可滚动">
           <section class="tasks-workspace-state" data-phase={snapshot.phase} role="status" aria-live="polite">
             <span class="tasks-status" data-status-kind={presentation.kind}>{presentation.label}</span>
             <p>{snapshot.operationMessage || presentation.message}</p>
@@ -314,7 +314,7 @@
                 </div>
                 <span>第 {snapshot.pageIndex + 1} / {pages} 页</span>
               </div>
-              <div class="tasks-table-wrap">
+              <div class="tasks-table-wrap" tabindex="0" aria-label="当前批次任务表；可滚动">
                 <table class="tasks-table" data-task-table>
                   <caption class="visually-hidden">当前批次第 {snapshot.pageIndex + 1} 页任务，最多 100 行</caption>
                   <thead>
@@ -365,7 +365,7 @@
           <h2 id="tasks-actions-heading">操作与恢复</h2>
           <span>危险写操作确认后，只进行一次权威重读。</span>
         </header>
-        <div class="tasks-column__scroll">
+        <div class="tasks-column__scroll" tabindex="0" aria-label="操作与恢复内容；可滚动">
           <p class="tasks-operation-live" aria-live="polite">{snapshot.operationMessage}</p>
 
           <section class="tasks-action-card" aria-labelledby="tasks-current-heading">

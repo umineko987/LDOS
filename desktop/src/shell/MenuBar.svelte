@@ -68,7 +68,10 @@
       label: "打开应用中心",
       description: "Ctrl/⌘ + O",
       enabled: true,
-      action: () => { closeMenu(); onOpenApplicationCenter(); },
+      action: () => {
+        closeMenu(true);
+        queueMicrotask(onOpenApplicationCenter);
+      },
     }];
     if (menuId === "edit") return [
       { id: "undo", label: "撤销（由当前应用处理）", enabled: false, action: () => {} },

@@ -26,8 +26,9 @@
   }
 
   function close(restore = true): void {
+    const target = returnFocus;
     shell.setApplicationCenter(false);
-    if (restore) queueMicrotask(() => restoreFocus(returnFocus));
+    if (restore) queueMicrotask(() => restoreFocus(target));
     returnFocus = null;
   }
 

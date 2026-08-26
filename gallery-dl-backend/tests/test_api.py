@@ -667,6 +667,8 @@ class ApiTests(unittest.TestCase):
         stylesheet_path = next(path for path in manifest_paths if path.endswith(".css"))
         self.assertIn(f'src="./{javascript_path}"', index.text)
         self.assertIn(f'href="./{stylesheet_path}"', index.text)
+        favicon_path = next(path for path in manifest_paths if path.endswith(".png"))
+        self.assertIn(f'href="./{favicon_path}"', index.text)
 
         self.assertEqual(self.client.get("/ui-next/").status_code, 404)
         self.assertEqual(self.client.get("/ui/js/main.js").status_code, 404)
@@ -691,6 +693,7 @@ class ApiTests(unittest.TestCase):
             ".css": "text/css",
             ".js": "text/javascript",
             ".svg": "image/svg+xml",
+            ".png": "image/png",
         }
         for relative_path in _webui_source_inventory():
             route = f"/ui/{relative_path}"
