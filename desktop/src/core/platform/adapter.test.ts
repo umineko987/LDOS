@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { RuntimeContractError } from "../runtime/sanitize";
-import { createPlatformAdapter } from "./adapter";
+import { createPlatformAdapter, PlatformCapabilityError } from "./adapter";
 
 function bridge(isDesktop: boolean, responses: Record<string, unknown>) {
   return {
@@ -81,10 +81,81 @@ describe("platform adapter", () => {
       bridge: bridge(false, {}),
       location: { origin: "http://127.0.0.1:8787" },
     });
-    expect(Object.keys(adapter)).toEqual(["mode", "getRuntimeMetadata", "getBackendStatus"]);
+    expect(Object.keys(adapter)).toEqual([
+      "mode",
+      "capabilities",
+      "getRuntimeMetadata",
+      "getBackendStatus",
+      "selectDirectory",
+      "revealInFileManager",
+    ]);
     await expect(adapter.getBackendStatus()).resolves.toMatchObject({ state: "ready" });
 
     const missing = createPlatformAdapter({ bridge: bridge(false, {}), location: undefined });
     await expect(missing.getRuntimeMetadata()).rejects.toThrow("runtime_metadata_unavailable");
+  });
+
+  it("keeps directory selection and reveal desktop-only with explicit capability reporting", async () => {
+    const adapter = createPlatformAdapter({
+      bridge: bridge(false, {}),
+      location: { origin: "http://127.0.0.1:8787" },
+    });
+
+    expect(adapter.capabilities).toEqual({ selectDirectory: false, revealInFileManager: false });
+    await expect(adapter.selectDirectory("gallery_import")).rejects.toEqual(
+      new PlatformCapabilityError("capability_unavailable"),
+    );
+    await expect(adapter.revealInFileManager("/tmp/x")).rejects.toEqual(
+      new PlatformCapabilityError("capability_unavailable"),
+    );
+  });
+
+  it("returns a sanitized picked directory path or null when the user cancels", async () => {
+    const cancelled = createPlatformAdapter({ bridge: bridge(true, { select_directory: null }) });
+    await expect(cancelled.selectDirectory("export_target")).resolves.toBeNull();
+
+    const picked = createPlatformAdapter({
+      bridge: bridge(true, { select_directory: "/home/user/图库" }),
+    });
+    expect(picked.capabilities).toEqual({ selectDirectory: true, revealInFileManager: true });
+    await expect(picked.selectDirectory("gallery_import")).resolves.toBe("/home/user/图库");
+
+    for (const bad of ["", "  ", "/tmp/a\u0000b", 42, {}]) {
+      const failing = createPlatformAdapter({ bridge: bridge(true, { select_directory: bad }) });
+      await expect(failing.selectDirectory("gallery_import")).rejects.toEqual(
+        new PlatformCapabilityError("capability_unavailable"),
+      );
+    }
+
+    const failed = createPlatformAdapter({
+      bridge: bridge(true, { select_directory: new Error("dialog crashed") }),
+    });
+    await expect(failed.selectDirectory("gallery_import")).rejects.toEqual(
+      new PlatformCapabilityError("capability_unavailable"),
+    );
+  });
+
+  it("reveals a validated path through the host without arbitrary read access", async () => {
+    const testBridge = bridge(true, { reveal_in_file_manager: null });
+    const adapter = createPlatformAdapter({ bridge: testBridge });
+
+    await expect(adapter.revealInFileManager("/exports/manifest.jsonl")).resolves.toBeUndefined();
+    expect(testBridge.invoke).toHaveBeenCalledWith("reveal_in_file_manager", {
+      path: "/exports/manifest.jsonl",
+    });
+
+    for (const bad of ["", "  ", "/tmp/a\u0000b"]) {
+      await expect(adapter.revealInFileManager(bad)).rejects.toEqual(
+        new PlatformCapabilityError("capability_unavailable"),
+      );
+    }
+    expect(testBridge.invoke).toHaveBeenCalledTimes(1);
+
+    const failing = createPlatformAdapter({
+      bridge: bridge(true, { reveal_in_file_manager: new Error("opener failed") }),
+    });
+    await expect(failing.revealInFileManager("/tmp/x")).rejects.toEqual(
+      new PlatformCapabilityError("capability_unavailable"),
+    );
   });
 });

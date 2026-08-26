@@ -6,6 +6,7 @@ mod process_tree;
 use backend::{BackendManager, BackendStatus, RuntimeMetadata};
 use tauri::{plugin::TauriPlugin, Manager, RunEvent, Runtime, State, Url};
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_dialog::DialogExt;
 
 #[tauri::command]
 fn backend_status(manager: State<'_, BackendManager>) -> BackendStatus {
@@ -15,6 +16,33 @@ fn backend_status(manager: State<'_, BackendManager>) -> BackendStatus {
 #[tauri::command]
 fn runtime_metadata(manager: State<'_, BackendManager>) -> Result<RuntimeMetadata, &'static str> {
     manager.metadata()
+}
+
+/// 窄平台能力（图库计划 §8.1）：只开放目录选择与结果定位，
+/// 不开放任意读、写、删除或 shell。返回的绝对路径只允许进入
+/// 前端短生命周期表单草稿与 write request（不进持久状态/日志）。
+#[tauri::command]
+async fn select_directory(app: tauri::AppHandle) -> Result<Option<String>, &'static str> {
+    // 异步命令运行在后台线程池上，阻塞式目录对话框不会卡死主线程
+    //（tauri-plugin-dialog 文档模式）。None 表示用户取消。
+    match app.dialog().file().blocking_pick_folder() {
+        None => Ok(None),
+        Some(picked) => {
+            let path = picked.into_path().map_err(|_| "dialog_path_unavailable")?;
+            path.to_str().map(|s| Some(s.to_owned())).ok_or("dialog_path_not_utf8")
+        }
+    }
+}
+
+/// 在系统文件管理器中定位结果（只读“显示”，不读取内容进 WebView）。
+#[tauri::command]
+fn reveal_in_file_manager(app: tauri::AppHandle, path: String) -> Result<(), &'static str> {
+    if path.is_empty() || path.contains('\u{0}') {
+        return Err("invalid_reveal_path");
+    }
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|_| "reveal_failed")
 }
 
 fn navigation_plugin<R: Runtime>() -> TauriPlugin<R> {
@@ -55,8 +83,14 @@ pub fn run() {
             },
         ))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(navigation_plugin())
-        .invoke_handler(tauri::generate_handler![backend_status, runtime_metadata])
+        .invoke_handler(tauri::generate_handler![
+            backend_status,
+            runtime_metadata,
+            select_directory,
+            reveal_in_file_manager
+        ])
         .setup(|app| {
             let manager = BackendManager::new();
             app.manage(manager.clone());

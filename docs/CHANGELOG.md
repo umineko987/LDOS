@@ -83,3 +83,12 @@
 - 决策：来源详情 GET 端点为计划 §7 清单的加法式扩展（重扫描轮询需要），已在合同测试固定集合中登记；relink 与 import 一致地自动触发重扫描。
 - 遗留：G1 退出条件中的平台目录选择 adapter（desktop 侧）尚未实现，随 G2 界面推进。
 - 阻塞：无。
+
+### [G1-4] feat(desktop): 平台目录选择与结果定位 adapter（窄能力）
+
+- 状态：✅ cargo check/test 通过（14 tests）；`npm run check` 0 错误；前端 327 tests 中 319 通过，剩 8 个为 G0 预期红（G2/G6 目标合同）
+- Rust（`desktop/src-tauri/src/lib.rs`、`Cargo.toml`）：新增 `tauri-plugin-dialog =2.7.2` 与两个窄命令——`select_directory`（async 命令 + `blocking_pick_folder` 文档模式；None=取消；非 UTF-8 路径报 `dialog_path_not_utf8`）、`reveal_in_file_manager`（opener 只读定位，空/含 NUL 路径拒绝）。WebView 侧不授任何 dialog/fs 权限（capabilities 不变），文件读写仍归 FastAPI。
+- TS（`desktop/src/core/platform/adapter.ts`）：`PlatformAdapter` 增加 `capabilities`、`selectDirectory(purpose)`、`revealInFileManager(path)`；浏览器模式两者抛 `PlatformCapabilityError("capability_unavailable")` 并以 capabilities=false 供 UI 禁用按钮说明原因（计划 §8.1：同一组件，不建第二套浏览器页面）；选定路径经最小消毒（非空、非空白、无控制字符）只进短生命周期表单草稿。
+- 测试（`adapter.test.ts`，+3）：浏览器能力不可用、取消返回 null/畸形返回拒绝/宿主失败包装、reveal 载荷校验与调用次数断言。
+- G1 退出条件至此全部满足（API 注册临时目录/分页/搜索/缩略图 ✅ + 目录选择 adapter ✅）；浏览器与 headed Tauri GUI 测试按验收规则记为未执行。
+- 阻塞：无。
