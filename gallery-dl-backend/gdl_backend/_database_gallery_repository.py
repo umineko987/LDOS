@@ -119,7 +119,7 @@ class GalleryRepository:
                     canonical_root_key, availability, crawl_complete,
                     dedup_required, dedup_state, content_version,
                     annotation_version, indexed_version, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'available', 0, ?, 'not_required', 1, 1, 0, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, 'available', 0, ?, ?, 1, 1, 0, ?, ?)
                 """,
                 (
                     source_id,
@@ -129,6 +129,7 @@ class GalleryRepository:
                     str(root_path),
                     canonical,
                     1 if dedup_required else 0,
+                    "pending_analysis" if dedup_required else "not_required",
                     now,
                     now,
                 ),
@@ -160,6 +161,14 @@ class GalleryRepository:
         return conn.execute(
             "SELECT * FROM gallery_sources WHERE id=?", (source_id,)
         ).fetchone()
+
+    def get_source_by_batch_id(self, batch_id: str) -> dict[str, Any] | None:
+        with self._read() as conn:
+            row = conn.execute(
+                "SELECT * FROM gallery_sources WHERE batch_id=? ORDER BY created_at LIMIT 1",
+                (batch_id,),
+            ).fetchone()
+        return None if row is None else self._project_source_row(row)
 
     def get_source(self, source_id: str) -> dict[str, Any] | None:
         row = self._source_row_by_id(None, source_id)

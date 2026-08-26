@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -44,12 +46,17 @@ from .file_security import ensure_private_directory, secure_sqlite_files
 MAX_CRAWL_REVIEW_GROUPS = 10_000
 
 
+logger = logging.getLogger(__name__)
+
+
 class Database:
     def __init__(self, path: Path, *, max_logs_per_task: int = 5000) -> None:
         # 不先 resolve 叶节点，否则 SQLite 文件符号链接会被静默解引用。
         self.path = Path(os.path.abspath(os.fspath(path)))
         # 已存在的自定义外部父目录保持用户权限；新目录仍以 0700 创建。
         ensure_private_directory(self.path.parent, repair_existing=False)
+        # 图库批次自动注册钩子（ServiceContainer 注入）。见 finish_crawl_batch_if_ready。
+        self.gallery_batch_registrar: Callable[[str], None] | None = None
         secure_sqlite_files(self.path)
         self.max_logs_per_task = max(100, int(max_logs_per_task))
         self._since_prune: dict[str, int] = {}
@@ -712,6 +719,20 @@ class Database:
 
     def list_site_policies(self) -> list[dict[str, Any]]:
         return self._site_policy_repository.list_site_policies()
+
+    # 批次终态后的图库自动注册钩子：由 ServiceContainer 直接注入为实例属性，
+    # Database 只负责在批次终态时调用并吞掉一切异常（不阻断爬取收尾）。
+    def finish_crawl_batch_if_ready(self, batch_id: str) -> bool:
+        finished = self._crawl_repository.finish_crawl_batch_if_ready(batch_id)
+        registrar = getattr(self, "gallery_batch_registrar", None)
+        if finished and registrar is not None:
+            try:
+                registrar(batch_id)
+            except Exception:
+                logger.exception(
+                    "gallery batch auto-registration failed; batch_id=%s", batch_id
+                )
+        return finished
 
     # 站点策略删除属于写路径，必须保留单一写事务。
     def delete_site_policy(self, site: str) -> bool:

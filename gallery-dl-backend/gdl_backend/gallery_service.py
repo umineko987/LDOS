@@ -84,6 +84,7 @@ class GalleryCatalogService:
         self._clock = clock
         self._scan_jobs: dict[str, dict[str, Any]] = {}
         self._scan_lock = threading.Lock()
+        self._scan_threads: dict[str, threading.Thread] = {}
 
     # ---- 来源生命周期（§3.1） ----
 
@@ -121,6 +122,36 @@ class GalleryCatalogService:
         except GallerySourceConflictError as conflict:
             raise conflict
         return _public_source(source, asset_count=0)
+
+    def auto_register_batch_source(
+        self,
+        *,
+        batch_id: str,
+        root_path: str,
+        display_name: str,
+        dedup_required: bool,
+    ) -> dict[str, Any] | None:
+        """批次终态后的自动注册（§4 来源生命周期）。
+
+        幂等：同批次已注册时直接返回 None；
+        冲突或根目录缺失时静默跳过（不打断爬取收尾），由启动对账重试。
+        """
+        if self._repo.get_source_by_batch_id(batch_id) is not None:
+            return None
+        root = Path(root_path).expanduser()
+        if not root.is_dir() or root.is_symlink():
+            return None
+        try:
+            source = self.register_batch_source(
+                batch_id=batch_id,
+                root_path=str(root.resolve()),
+                display_name=display_name,
+                dedup_required=dedup_required,
+            )
+        except GallerySourceConflictError:
+            return None
+        self.start_scan(source["source_id"])
+        return source
 
     def update_source(self, source_id: str, *, display_name: str) -> dict[str, Any]:
         source = self._repo.get_source(source_id)
@@ -205,8 +236,17 @@ class GalleryCatalogService:
             name=f"gallery-scan-{source_id[:8]}",
             daemon=True,
         )
+        with self._scan_lock:
+            self._scan_threads[source_id] = thread
         thread.start()
         return self.get_scan(source_id)
+
+    def stop(self, timeout: float = 30.0) -> None:
+        """等待所有运行中的扫描线程结束（应用关停前调用，避免写已关闭的库）。"""
+        with self._scan_lock:
+            threads = list(self._scan_threads.values())
+        for thread in threads:
+            thread.join(timeout=timeout)
 
     def get_scan(self, source_id: str) -> dict[str, Any]:
         source = self._repo.get_source(source_id)

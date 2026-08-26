@@ -40,6 +40,8 @@ class GalleryServiceTestBase(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.repo: GalleryRepository = self.db.gallery
         self.service = GalleryCatalogService(self.repo)
+        # LIFO：先等扫描线程结束，再关闭数据库，避免线程写已关闭的库。
+        self.addCleanup(self.service.stop)
 
     def make_source(
         self, files: dict[str, bytes | str | None] | None = None, name: str = "图库A"
@@ -259,6 +261,184 @@ class GalleryScanTest(GalleryServiceTestBase):
     def test_async_scan_missing_source(self) -> None:
         with self.assertRaises(GallerySourceNotFound):
             self.service.start_scan("missing-source")
+
+
+class GalleryBatchAutoRegisterTest(GalleryServiceTestBase):
+    def _batch_root(self) -> Path:
+        root = self.root / "batch-out"
+        root.mkdir(exist_ok=True)
+        (root / "img.jpg").write_bytes(_png_bytes())
+        (root / "img.txt").write_text("标签", encoding="utf-8")
+        return root
+
+    def _create_batch(self, batch_id: str, root: Path) -> None:
+        # gallery_sources.batch_id 有 FK + UNIQUE，批次行必须真实存在。
+        self.db.create_crawl_batch(
+            {
+                "id": batch_id,
+                "output_dir": str(root),
+                "concurrency": 1,
+                "max_tasks": 1,
+            },
+            [
+                {
+                    "id": f"{batch_id}-addr",
+                    "site": "example.com",
+                    "source_order": 0,
+                    "address_order": 0,
+                    "url": "https://example.com/gallery",
+                    "proxy_mode": "direct",
+                    "max_attempts": 1,
+                    "priority": 3,
+                }
+            ],
+        )
+
+    def test_auto_register_dedup_and_idempotent(self) -> None:
+        root = self._batch_root()
+        self._create_batch("batch-1", root)
+        source = self.service.auto_register_batch_source(
+            batch_id="batch-1",
+            root_path=str(root),
+            display_name="Danbooru 批次 2026-08-27",
+            dedup_required=True,
+        )
+        assert source is not None
+        self.assertEqual(source["kind"], "crawl_batch")
+        self.assertEqual(source["dedup_required"], True)
+        detail = self.repo.get_source(source["source_id"])
+        self.assertEqual(detail["dedup_state"], "pending_analysis")
+        for _ in range(200):
+            record = self.service.get_scan(source["source_id"])
+            if record["state"] != "running":
+                break
+            time.sleep(0.02)
+        self.assertEqual(record["state"], "succeeded")
+        # 同批次幂等：再次调用不新建来源。
+        again = self.service.auto_register_batch_source(
+            batch_id="batch-1",
+            root_path=str(root),
+            display_name="重复",
+            dedup_required=True,
+        )
+        self.assertIsNone(again)
+        self.assertEqual(len(self.service.list_sources()), 1)
+
+    def test_auto_register_skips_missing_root_and_conflicts(self) -> None:
+        self._create_batch("batch-2", self.root / "gone")
+        skipped = self.service.auto_register_batch_source(
+            batch_id="batch-2",
+            root_path=str(self.root / "gone"),
+            display_name="缺失",
+            dedup_required=False,
+        )
+        self.assertIsNone(skipped)
+
+        root = self._batch_root()
+        self._create_batch("batch-3", root)
+        # 先作为导入来源占用，再尝试同根批次 → 冲突静默跳过。
+        self.service.import_source(str(root), display_name="已有导入")
+        conflicted = self.service.auto_register_batch_source(
+            batch_id="batch-3",
+            root_path=str(root),
+            display_name="冲突批次",
+            dedup_required=False,
+        )
+        self.assertIsNone(conflicted)
+        self.assertEqual(len(self.service.list_sources()), 1)
+
+    def test_auto_register_starts_scan(self) -> None:
+        root = self._batch_root()
+        self._create_batch("batch-4", root)
+        source = self.service.auto_register_batch_source(
+            batch_id="batch-4",
+            root_path=str(root),
+            display_name="批次",
+            dedup_required=False,
+        )
+        assert source is not None
+        for _ in range(200):
+            record = self.service.get_scan(source["source_id"])
+            if record["state"] != "running":
+                break
+            time.sleep(0.02)
+        self.assertEqual(record["state"], "succeeded")
+        self.assertEqual(record["stats"]["asset_count"], 1)
+
+
+class GalleryBatchReconcileTest(unittest.TestCase):
+    """容器层集成：批次终态钩子与启动对账。"""
+
+    def setUp(self) -> None:
+        from gdl_backend.app import ServiceContainer
+        from tests.helpers import make_settings
+
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.settings = make_settings(self.root)
+        self.container = ServiceContainer(self.settings)
+        self.addCleanup(self.container.db.close)
+        # LIFO：先 join 扫描线程再关库。
+        self.addCleanup(self.container.gallery_catalog.stop)
+
+    def _create_terminal_batch(self, batch_id: str, output_dir: Path) -> None:
+        self.container.db.create_crawl_batch(
+            {
+                "id": batch_id,
+                "output_dir": str(output_dir),
+                "concurrency": 1,
+                "max_tasks": 1,
+            },
+            [
+                {
+                    "id": f"{batch_id}-addr",
+                    "site": "example.com",
+                    "source_order": 0,
+                    "address_order": 0,
+                    "url": "https://example.com/gallery",
+                    "proxy_mode": "direct",
+                    "max_attempts": 1,
+                    "priority": 3,
+                }
+            ],
+        )
+
+    def test_finish_hook_registers_source(self) -> None:
+        output_dir = self.root / "batch-a"
+        output_dir.mkdir()
+        (output_dir / "pic.jpg").write_bytes(_png_bytes())
+        self._create_terminal_batch("batch-a", output_dir)
+
+        # planning 失败使地址终态，批次随之终态（钩子触发自动注册）。
+        self.container.db.begin_crawl_address_planning("batch-a-addr")
+        self.container.db.fail_crawl_address("batch-a-addr", "planning blew up")
+        finished = self.container.db.finish_crawl_batch_if_ready("batch-a")
+        self.assertTrue(finished)
+        sources = self.container.gallery_catalog.list_sources()
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0]["kind"], "crawl_batch")
+        self.assertIn("example.com", sources[0]["display_name"])
+        self.assertEqual(sources[0]["dedup_required"], False)
+
+        # 幂等：再次终态化不重复注册。
+        self.container.db.finish_crawl_batch_if_ready("batch-a")
+        self.assertEqual(len(self.container.gallery_catalog.list_sources()), 1)
+
+    def test_reconcile_registers_pending_terminal_batches(self) -> None:
+        output_dir = self.root / "batch-b"
+        output_dir.mkdir()
+        (output_dir / "pic.jpg").write_bytes(_png_bytes())
+        self._create_terminal_batch("batch-b", output_dir)
+        # 模拟批次在应用关闭期间终态（无钩子触发）。
+        self.container.db.begin_crawl_address_planning("batch-b-addr")
+        self.container.db.fail_crawl_address("batch-b-addr", "planning blew up")
+        self.container.db._crawl_repository.finish_crawl_batch_if_ready("batch-b")
+
+        registered = self.container.reconcile_gallery_batch_sources()
+        self.assertEqual(registered, 1)
+        again = self.container.reconcile_gallery_batch_sources()
+        self.assertEqual(again, 0)
 
 
 class GallerySearchIntegrationTest(GalleryServiceTestBase):

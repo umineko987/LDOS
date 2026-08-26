@@ -24,6 +24,7 @@ from .api_routes import (
     create_crawls_router,
     create_diagnostics_router,
     create_discovery_router,
+    create_gallery_router,
     create_ordered_task_enqueuer,
     create_policies_router,
     create_proxy_router,
@@ -34,6 +35,8 @@ from .api_routes import (
 # Keep these names importable from gdl_backend.app while their implementations
 # live outside the composition root.
 from .api_routes.errors import ApiError
+from .gallery_service import GalleryCatalogService
+from .gallery_thumbnails import ThumbnailService
 from .api_routes.validation import (
     validate_network_target as _validate_network_target,
 )
@@ -84,6 +87,12 @@ class ServiceContainer:
             source_provider=self.proxy_sources,
         )
         self.auth = AuthManager(settings)
+        self.gallery_catalog = GalleryCatalogService(self.db.gallery)
+        self.gallery_thumbnails = ThumbnailService(
+            settings.runtime_dir / "gallery-cache"
+        )
+        # 批次终态 → 图库来源自动注册（无冲突时）；异常绝不阻断爬取收尾。
+        self.db.gallery_batch_registrar = self._register_gallery_batch_source
         self.gallery = GalleryRunner(settings.gallery, settings.project_dir)
         self.log_writer = TaskLogWriter(self.db)
         self.scheduler = TaskScheduler(
@@ -148,6 +157,59 @@ class ServiceContainer:
         raw = stored["policy"] if stored else self.settings.default_site_policy
         return build_runtime_site_policy(raw)
 
+    def _register_gallery_batch_source(self, batch_id: str) -> dict | None:
+        batch = self.db.get_crawl_batch(batch_id)
+        if batch is None:
+            return None
+        if batch["status"] not in {"succeeded", "completed_with_errors", "cancelled"}:
+            return None
+        sites = sorted(
+            {
+                str(source["site"])
+                for source in batch.get("sources", [])
+                if source.get("site")
+            }
+        )
+        created = time.strftime(
+            "%Y-%m-%d", time.localtime(float(batch["created_at"]))
+        )
+        base = "、".join(sites) if sites else "爬取批次"
+        display_name = f"{base} 批次 {created}"
+        dedup_required = self.db.get_crawl_review(batch_id) is not None
+        return self.gallery_catalog.auto_register_batch_source(
+            batch_id=batch_id,
+            root_path=str(batch["output_dir"]),
+            display_name=display_name,
+            dedup_required=dedup_required,
+        )
+
+    def reconcile_gallery_batch_sources(self) -> int:
+        """启动对账：为所有终态但未注册的批次补建图库来源。"""
+        registered = 0
+        offset = 0
+        while True:
+            page = self.db.list_crawl_batches(limit=50, offset=offset)
+            if not page:
+                break
+            for batch in page:
+                if batch["status"] not in {
+                    "succeeded",
+                    "completed_with_errors",
+                    "cancelled",
+                }:
+                    continue
+                if (
+                    self.db.gallery.get_source_by_batch_id(str(batch["id"]))
+                    is not None
+                ):
+                    continue
+                if self._register_gallery_batch_source(str(batch["id"])) is not None:
+                    registered += 1
+            if len(page) < 50:
+                break
+            offset += 50
+        return registered
+
     async def start(self, *, background: bool = True) -> None:
         if self._started:
             return
@@ -183,6 +245,7 @@ class ServiceContainer:
             await self.scheduler.start()
             await self.ordered_crawls.start()
             await self.reviews.start()
+            await asyncio.to_thread(self.reconcile_gallery_batch_sources)
             self._health_task = asyncio.create_task(self._proxy_health_loop(), name="proxy-health-monitor")
 
     async def stop(self) -> None:
@@ -195,6 +258,7 @@ class ServiceContainer:
         await self.ordered_crawls.stop()
         await self.scheduler.stop()
         await self.auth.stop()
+        await asyncio.to_thread(self.gallery_catalog.stop)
         try:
             await asyncio.to_thread(self.proxy.stop, force=True)
         except Exception as exc:
@@ -493,6 +557,7 @@ def create_app(
     app.include_router(create_crawls_router())
     app.include_router(create_review_router())
     app.include_router(create_policies_router())
+    app.include_router(create_gallery_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
 

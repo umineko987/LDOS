@@ -52,3 +52,34 @@
 - 退出条件核验：✅ 目标测试（后端 3 + 前端 8）只因实现尚未存在而失败；现有正式应用测试无回归（后端 599/602，前端 316/324，check 0 错误）。
 - 预期红清单（后续阶段逐一转绿）：`gallery-dl-backend/tests/test_gallery_export_api_contract.py`（G1/G3/G5）、`desktop/tests/g0-gallery-export-target.test.ts`（G2/G6）。
 - 阻塞：无。
+
+---
+
+## G1 · 图库 repository、来源注册与扫描
+
+### [G1-1] feat(gallery): 图库索引 repository 与数据库挂载
+
+- 状态：✅ 后端全量测试通过（提交 `feff138`）
+- `gallery-dl-backend/gdl_backend/_database_gallery_repository.py`（新增）：来源注册/解除/重关联（realpath 规范化、同路径与祖先/后代冲突检查、批量来源根互不重叠）、单事务整树扫描提交（uuid5 稳定 ID、自然排序 sort_key、封面拼图、direct/recursive 计数、FTS5 重建、缺失资产标记 missing 而非删除）、目录条目与资产搜索的游标分页。
+- `gallery-dl-backend/gdl_backend/database.py`：挂载 gallery repository（保持单一写事务边界）。
+- 来源级 content/annotation/indexed 版本按计划 §6.1 语义递增；测试 `tests/test_database_gallery_repository.py`（18 tests）。
+- 教训记录：本项目 `Database(":memory:")` 会创建字面量 `:memory:` 文件而非内存库，测试一律用临时目录下的真实文件路径。
+
+### [G1-2] feat(gallery): 目录服务、递归扫描与异步扫描任务
+
+- 状态：✅ 后端全量测试通过（提交 `4f4e374`）；Pillow 12.1.1 进入主依赖并重锁（提交 `8fee4a9`，共享运行时架构下与去重 worker 同版本）
+- `gallery-dl-backend/gdl_backend/gallery_service.py`（新增）：GalleryCatalogService——导入/改名/解除/重关联（root 存在性与符号链接检查、公开投影剥离 root_path）、同步全量扫描与线程化异步扫描（running/succeeded/failed + 固定 error_code）。
+- 扫描遵守 G0 合同：仅 .jpg/.jpeg/.png/.webp（大小写不敏感）、跳过符号链接文件/目录/junction、`.imageweave` 保留树排除、严格 UTF-8 TXT 解码与六态客观分类、增量检查（相对路径+大小+mtime）。
+- 测试 `tests/test_gallery_service.py`（12 tests）：真实临时目录、真实小图片、符号链接、编码异常、增量重扫。
+
+### [G1-3] feat(gallery): 图库 API 路由、缩略图与批次来源自动注册
+
+- 状态：✅ 后端 651 tests 中 648 通过，剩余 3 个失败均为 G0 预期红（trash=G3、dataset-exports=G5 未实现）
+- `gallery-dl-backend/gdl_backend/api_routes/gallery.py`（新增）：来源列表/详情/改名/解除/重关联/重扫描、目录条目分页（kind/txt_state/recursive 筛选 + 游标）、资产详情/搜索、缩略图与原图媒体端点（ETag、条件请求、声明式 content-type、媒体响应预算）。所有高量读取端点要求 `view=desktop`（`Literal` 校验层拒绝，与 policies 一致）。
+- `gallery-dl-backend/gdl_backend/gallery_thumbnails.py`（新增）：有界解码缩略图缓存（Pillow，尺寸上限与磁盘缓存）。
+- 批次来源自动注册（计划 §4）：`Database.finish_crawl_batch_if_ready` 终态时经注入的 registrar 钩子自动注册无冲突批次来源（display_name=站点+日期、dedup_required=存在审核记录即视觉去重、dedup_state 初值 pending_analysis）；`ServiceContainer.reconcile_gallery_batch_sources` 启动对账补注册关机期间终态的批次；钩子异常只记日志绝不阻断爬取收尾。
+- 线程生命周期：`GalleryCatalogService.stop()` join 扫描线程后关库（ServiceContainer.stop 与测试清理均调用，修复扫描线程写已关闭数据库导致的测试核心转储）。
+- 测试：`tests/test_gallery_api_routes.py`（11 tests，HTTP 级集成）、`tests/test_gallery_service.py` 新增自动注册/对账 5 tests、`tests/test_app_routing_contract.py` 收录 gallery 路由域。
+- 决策：来源详情 GET 端点为计划 §7 清单的加法式扩展（重扫描轮询需要），已在合同测试固定集合中登记；relink 与 import 一致地自动触发重扫描。
+- 遗留：G1 退出条件中的平台目录选择 adapter（desktop 侧）尚未实现，随 G2 界面推进。
+- 阻塞：无。

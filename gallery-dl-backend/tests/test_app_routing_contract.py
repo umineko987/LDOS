@@ -35,6 +35,19 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("POST", "/api/v1/auth/pixiv/oauth/start"): ("auth_start_pixiv_api_v1_auth_pixiv_oauth_start_post", ("200", "422")),
     ("DELETE", "/api/v1/auth/pixiv/oauth/session"): ("auth_cancel_pixiv_api_v1_auth_pixiv_oauth_session_delete", ("200", "422")),
     ("DELETE", "/api/v1/auth/browser-profile"): ("auth_clear_browser_profile_api_v1_auth_browser_profile_delete", ("200", "422")),
+    ("GET", "/api/v1/gallery/sources"): ("list_gallery_sources_api_v1_gallery_sources_get", ("200", "422")),
+    ("GET", "/api/v1/gallery/sources/{source_id}"): ("get_gallery_source_api_v1_gallery_sources__source_id__get", ("200", "422")),
+    ("POST", "/api/v1/gallery/imports"): ("import_gallery_source_api_v1_gallery_imports_post", ("201", "422")),
+    ("PATCH", "/api/v1/gallery/sources/{source_id}"): ("patch_gallery_source_api_v1_gallery_sources__source_id__patch", ("200", "422")),
+    ("DELETE", "/api/v1/gallery/sources/{source_id}"): ("delete_gallery_source_api_v1_gallery_sources__source_id__delete", ("200", "422")),
+    ("POST", "/api/v1/gallery/sources/{source_id}/relink"): ("relink_gallery_source_api_v1_gallery_sources__source_id__relink_post", ("200", "422")),
+    ("POST", "/api/v1/gallery/sources/{source_id}/scan"): ("start_gallery_scan_api_v1_gallery_sources__source_id__scan_post", ("202", "422")),
+    ("GET", "/api/v1/gallery/sources/{source_id}/scan"): ("get_gallery_scan_api_v1_gallery_sources__source_id__scan_get", ("200", "422")),
+    ("GET", "/api/v1/gallery/directories/{directory_id}/entries"): ("list_gallery_directory_entries_api_v1_gallery_directories__directory_id__entries_get", ("200", "422")),
+    ("GET", "/api/v1/gallery/assets/{asset_id}"): ("get_gallery_asset_api_v1_gallery_assets__asset_id__get", ("200", "422")),
+    ("GET", "/api/v1/gallery/assets/{asset_id}/content"): ("get_gallery_asset_content_api_v1_gallery_assets__asset_id__content_get", ("200", "422")),
+    ("GET", "/api/v1/gallery/assets/{asset_id}/thumbnail"): ("get_gallery_asset_thumbnail_api_v1_gallery_assets__asset_id__thumbnail_get", ("200", "422")),
+    ("GET", "/api/v1/gallery/assets/{asset_id}/annotation"): ("get_gallery_asset_annotation_api_v1_gallery_assets__asset_id__annotation_get", ("200", "422")),
     ("POST", "/api/v1/tasks"): ("create_task_api_v1_tasks_post", ("200", "422")),
     ("GET", "/api/v1/tasks"): ("list_tasks_api_v1_tasks_get", ("200", "422")),
     ("GET", "/api/v1/tasks/{task_id}"): ("get_task_api_v1_tasks__task_id__get", ("200", "422")),
@@ -179,6 +192,7 @@ class AppRoutingContractTests(unittest.TestCase):
             "discovery": "gdl_backend.api_routes.discovery",
             "crawls": "gdl_backend.api_routes.crawls",
             "review": "gdl_backend.api_routes.review",
+            "gallery": "gdl_backend.api_routes.gallery",
             "policies": "gdl_backend.api_routes.policies",
             "proxy": "gdl_backend.api_routes.proxy",
             "scheduler": "gdl_backend.api_routes.scheduler",
@@ -198,6 +212,8 @@ class AppRoutingContractTests(unittest.TestCase):
                 domain = "review"
             elif path.startswith("/api/v1/crawls"):
                 domain = "crawls"
+            elif path.startswith("/api/v1/gallery"):
+                domain = "gallery"
             elif path.startswith("/api/v1/sites/policies"):
                 domain = "policies"
             elif path.startswith("/api/v1/proxy"):
