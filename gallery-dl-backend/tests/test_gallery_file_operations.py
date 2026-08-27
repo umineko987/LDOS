@@ -314,8 +314,8 @@ class RecoveryTest(GalleryFileOperationsTestBase):
         op_id = "op-rollback"
         trash_dir = self.root / ".imageweave" / "trash" / op_id / "files"
         trash_dir.mkdir(parents=True)
-        (trash_dir / "a.jpg").write_bytes(_png_bytes())
-        (trash_dir / "a.txt").write_text("x", encoding="utf-8")
+        (self.root / "a.jpg").rename(trash_dir / "a.jpg")
+        (self.root / "a.txt").rename(trash_dir / "a.txt")
         with self.db.gallery._transaction() as conn:  # noqa: SLF001
             conn.execute(
                 """

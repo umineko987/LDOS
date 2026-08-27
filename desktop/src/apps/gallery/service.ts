@@ -49,6 +49,7 @@ export interface GalleryService {
     assetId: string,
     content: string,
     expectedTxtVersion: number,
+    expectedDiskVersion: string,
   ): Promise<GalleryAnnotation>;
   renameAsset(assetId: string, newStem: string): Promise<GalleryFileOperationResult>;
   trashAssets(assetIds: readonly string[]): Promise<GalleryFileOperationResult>;
@@ -124,11 +125,12 @@ export function createGalleryService(api: ApiClient): GalleryService {
         await api.get(`/api/v1/gallery/assets/${endpointId(assetId)}/annotation?view=desktop`, { signal }),
       );
     },
-    async saveAnnotation(assetId, content, expectedTxtVersion) {
+    async saveAnnotation(assetId, content, expectedTxtVersion, expectedDiskVersion) {
       return sanitizeGalleryAnnotation(
         await api.put(`/api/v1/gallery/assets/${endpointId(assetId)}/annotation`, {
           content,
           expected_txt_version: expectedTxtVersion,
+          expected_disk_version: expectedDiskVersion,
         }),
       );
     },

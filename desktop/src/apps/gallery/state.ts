@@ -74,6 +74,7 @@ export interface GalleryBrowseState {
   // ---- 撤销 toast（G3-3） ----
   /** 最近一次回收操作（供撤销）。 */
   readonly undoableOperationId: string | null;
+  readonly undoItemCount: number;
   readonly undoToastVisible: boolean;
   readonly undoBusy: boolean;
   // ---- 回收区面板（G3-3） ----
@@ -123,6 +124,7 @@ export const GALLERY_BROWSE_DEFAULTS: GalleryBrowseState = Object.freeze({
   trashConfirmAssetIds: Object.freeze([]),
   trashConfirmError: null,
   undoableOperationId: null,
+  undoItemCount: 0,
   undoToastVisible: false,
   undoBusy: false,
   trashPanelPhase: "closed" as const,
@@ -180,7 +182,7 @@ export interface GalleryStore {
   setTrashConfirm(phase: GalleryDialogPhase, error: string | null): boolean;
   closeTrashConfirm(): boolean;
   // ---- G3-3 撤销 toast ----
-  showUndoToast(operationId: string): boolean;
+  showUndoToast(operationId: string, itemCount: number): boolean;
   setUndoBusy(busy: boolean): boolean;
   hideUndoToast(): boolean;
   // ---- G3-3 回收区面板 ----
@@ -235,6 +237,7 @@ function statesEqual(left: GalleryBrowseState, right: GalleryBrowseState): boole
     left.trashConfirmAssetIds === right.trashConfirmAssetIds &&
     left.trashConfirmError === right.trashConfirmError &&
     left.undoableOperationId === right.undoableOperationId &&
+    left.undoItemCount === right.undoItemCount &&
     left.undoToastVisible === right.undoToastVisible &&
     left.undoBusy === right.undoBusy &&
     left.trashPanelPhase === right.trashPanelPhase &&
@@ -487,10 +490,11 @@ export function createGalleryStore(): GalleryStore {
         trashConfirmError: null,
       });
     },
-    showUndoToast(operationId) {
+    showUndoToast(operationId, itemCount) {
       return publish({
         ...state,
         undoableOperationId: operationId,
+        undoItemCount: itemCount,
         undoToastVisible: true,
         undoBusy: false,
       });
@@ -499,7 +503,13 @@ export function createGalleryStore(): GalleryStore {
       return publish({ ...state, undoBusy: busy });
     },
     hideUndoToast() {
-      return publish({ ...state, undoToastVisible: false, undoBusy: false });
+      return publish({
+        ...state,
+        undoableOperationId: null,
+        undoItemCount: 0,
+        undoToastVisible: false,
+        undoBusy: false,
+      });
     },
     setTrashPanelLoading() {
       return publish({

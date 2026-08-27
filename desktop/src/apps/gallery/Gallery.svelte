@@ -592,7 +592,7 @@
 
 {#if snapshot.undoToastVisible}
   <div class="gallery-undo-toast" role="status">
-    <p>已移入回收区 {formatCount(snapshot.trashConfirmAssetIds.length)} 项。</p>
+    <p>已移入回收区 {formatCount(snapshot.undoItemCount)} 项。</p>
     <button
       type="button"
       disabled={snapshot.undoBusy}

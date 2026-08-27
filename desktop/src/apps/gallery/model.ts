@@ -700,9 +700,16 @@ export interface GalleryAnnotation {
   readonly txt_state: GalleryTxtState;
   readonly content: string | null;
   readonly txt_version: number;
+  readonly disk_version: string;
 }
 
-const ANNOTATION_KEYS = new Set(["asset_id", "txt_state", "content", "txt_version"]);
+const ANNOTATION_KEYS = new Set([
+  "asset_id",
+  "txt_state",
+  "content",
+  "txt_version",
+  "disk_version",
+]);
 
 export function sanitizeGalleryAnnotation(raw: unknown): GalleryAnnotation {
   const value = strictRecord(raw, ANNOTATION_KEYS, "gallery_annotation");
@@ -711,6 +718,7 @@ export function sanitizeGalleryAnnotation(raw: unknown): GalleryAnnotation {
     txt_state: vocabularyValue(value.txt_state, TXT_STATE_VALUES, "gallery_txt_state"),
     content: optionalText(value.content, "gallery_annotation_content", 2_000_000),
     txt_version: countValue(value.txt_version, "gallery_txt_version", 0),
+    disk_version: idText(value.disk_version, "gallery_disk_version"),
   });
 }
 

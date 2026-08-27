@@ -39,6 +39,7 @@ from .api_routes.errors import ApiError
 from .gallery_service import GalleryCatalogService
 from .dataset_export_manager import DatasetExportManager
 from .gallery_file_operations import GalleryFileOperations
+from .gallery_safe_paths import GalleryFilesystemLocks
 from .gallery_thumbnails import ThumbnailService
 from .api_routes.validation import (
     validate_network_target as _validate_network_target,
@@ -90,8 +91,13 @@ class ServiceContainer:
             source_provider=self.proxy_sources,
         )
         self.auth = AuthManager(settings)
-        self.gallery_catalog = GalleryCatalogService(self.db.gallery)
-        self.gallery_file_operations = GalleryFileOperations(self.db.gallery)
+        self.gallery_filesystem_locks = GalleryFilesystemLocks()
+        self.gallery_catalog = GalleryCatalogService(
+            self.db.gallery, filesystem_locks=self.gallery_filesystem_locks
+        )
+        self.gallery_file_operations = GalleryFileOperations(
+            self.db.gallery, filesystem_locks=self.gallery_filesystem_locks
+        )
         self.dataset_export_manager = DatasetExportManager(
             repository=self.db.dataset_exports,
             gallery_repository=self.db.gallery,

@@ -7,6 +7,7 @@ remain green.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import io
 import os
 import tempfile
@@ -70,6 +71,31 @@ class GalleryPathAndAnnotationRegressionTest(GalleryApiTestBase):
         self.assertEqual(response.json()["error"]["code"], "txt_disk_conflict")
         self.assertEqual(txt_path.read_bytes(), b"externally changed")
 
+
+    def test_concurrent_saves_have_one_winner_and_one_fixed_conflict(self) -> None:
+        annotation = self.client.get(f"{self.asset_url}/annotation").json()
+        request = {
+            "expected_txt_version": annotation["txt_version"],
+            "expected_disk_version": annotation["disk_version"],
+        }
+
+        def save(content: str):
+            return self.client.put(
+                f"{self.asset_url}/annotation",
+                json={**request, "content": content},
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            responses = list(executor.map(save, ["first writer", "second writer"]))
+        self.assertEqual(sorted(response.status_code for response in responses), [200, 409])
+        conflict = next(response for response in responses if response.status_code == 409)
+        self.assertIn(
+            conflict.json()["error"]["code"],
+            {"txt_version_conflict", "txt_disk_conflict"},
+        )
+        winner = next(response for response in responses if response.status_code == 200)
+        txt_path = self.root / "src-a" / "nested" / "pic.txt"
+        self.assertEqual(txt_path.read_text(encoding="utf-8"), winner.json()["content"])
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks are unavailable")
     def test_parent_symlink_swap_blocks_content_thumbnail_annotation_and_rename(self) -> None:
         annotation = self.client.get(f"{self.asset_url}/annotation").json()
@@ -109,11 +135,51 @@ class GalleryPathAndAnnotationRegressionTest(GalleryApiTestBase):
         )
         self.assertEqual(rename.status_code, 409, rename.text)
         self.assertEqual(rename.json()["error"]["code"], "unsafe_source_path")
+        trash = self.client.post(
+            "/api/v1/gallery/file-operations/trash",
+            json={"asset_ids": [self.asset["asset_id"]]},
+        )
+        self.assertEqual(trash.status_code, 409, trash.text)
+        self.assertEqual(trash.json()["error"]["code"], "unsafe_source_path")
 
         self.assertEqual((outside_parent / "pic.txt").read_bytes(), b"outside sentinel")
         self.assertTrue((outside_parent / "pic.jpg").is_file())
         self.assertFalse((outside_parent / "renamed.jpg").exists())
 
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks are unavailable")
+    def test_parent_symlink_swap_blocks_trash_restore(self) -> None:
+        trashed = self.client.post(
+            "/api/v1/gallery/file-operations/trash",
+            json={"asset_ids": [self.asset["asset_id"]]},
+        )
+        self.assertEqual(trashed.status_code, 200, trashed.text)
+        operation_id = trashed.json()["operation_id"]
+        source_root = self.root / "src-a"
+        original_parent = source_root / "nested"
+        held_parent = source_root / "nested-held"
+        outside_parent = self.root / "outside-restore"
+        outside_parent.mkdir()
+        original_parent.rename(held_parent)
+        original_parent.symlink_to(outside_parent, target_is_directory=True)
+
+        restore = self.client.post(
+            f"/api/v1/gallery/trash/{operation_id}/restore"
+        )
+        self.assertEqual(restore.status_code, 409, restore.text)
+        self.assertEqual(restore.json()["error"]["code"], "unsafe_source_path")
+        self.assertFalse((outside_parent / "pic.jpg").exists())
+        self.assertTrue(
+            (
+                source_root
+                / ".imageweave"
+                / "trash"
+                / operation_id
+                / "files"
+                / "nested"
+                / "pic.jpg"
+            ).is_file()
+        )
 
 class GalleryFtsAndDedupRegressionTest(unittest.TestCase):
     def setUp(self) -> None:

@@ -297,13 +297,21 @@ describe("gallery TXT tags (G2-3 标签视图)", () => {
       txt_state: "normal",
       content: "hello",
       txt_version: 3,
+      disk_version: "opaque-disk-version",
     });
     expect(clean.content).toBe("hello");
     expect(Object.isFrozen(clean)).toBe(true);
 
     expect(() => sanitizeGalleryAnnotation({ asset_id: "a1", txt_state: "approved" })).toThrow(TypeError);
     expect(() =>
-      sanitizeGalleryAnnotation({ asset_id: "a1", txt_state: "normal", __proto__: null }),
+      sanitizeGalleryAnnotation({
+        asset_id: "a1",
+        txt_state: "normal",
+        content: null,
+        txt_version: 0,
+        disk_version: "opaque-disk-version",
+        __proto__: null,
+      }),
     ).not.toThrow();
   });
 });

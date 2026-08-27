@@ -374,6 +374,7 @@ class GalleryAnnotationPutRoutesTest(GalleryApiTestBase):
             json={
                 "content": "updated content",
                 "expected_txt_version": annotation["txt_version"],
+                "expected_disk_version": annotation["disk_version"],
             },
             headers={"Idempotency-Key": "test-save-1"},
         )
@@ -401,6 +402,7 @@ class GalleryAnnotationPutRoutesTest(GalleryApiTestBase):
             json={
                 "content": "new tags",
                 "expected_txt_version": annotation["txt_version"],
+                "expected_disk_version": annotation["disk_version"],
             },
             headers={"Idempotency-Key": "test-save-2"},
         )
@@ -415,9 +417,14 @@ class GalleryAnnotationPutRoutesTest(GalleryApiTestBase):
         self.assertEqual(fresh["content"], "new tags")
 
     def test_version_conflict_returns_409(self) -> None:
+        annotation = self._get_annotation("pic.jpg")
         response = self.client.put(
             f"/api/v1/gallery/assets/{self.assets['pic.jpg']['asset_id']}/annotation",
-            json={"content": "stale", "expected_txt_version": 999},
+            json={
+                "content": "stale",
+                "expected_txt_version": 999,
+                "expected_disk_version": annotation["disk_version"],
+            },
             headers={"Idempotency-Key": "test-save-3"},
         )
         self.assertEqual(response.status_code, 409, response.text)
@@ -430,7 +437,11 @@ class GalleryAnnotationPutRoutesTest(GalleryApiTestBase):
     def test_missing_asset_404(self) -> None:
         response = self.client.put(
             "/api/v1/gallery/assets/missing/annotation",
-            json={"content": "x", "expected_txt_version": 1},
+            json={
+                "content": "x",
+                "expected_txt_version": 1,
+                "expected_disk_version": "0" * 64,
+            },
             headers={"Idempotency-Key": "test-save-4"},
         )
         self.assertEqual(response.status_code, 404)
@@ -443,6 +454,7 @@ class GalleryAnnotationPutRoutesTest(GalleryApiTestBase):
             json={
                 "content": "zebra_unique_marker",
                 "expected_txt_version": annotation["txt_version"],
+                "expected_disk_version": annotation["disk_version"],
             },
             headers={"Idempotency-Key": "test-save-5"},
         )
@@ -457,11 +469,13 @@ class GalleryAnnotationPutRoutesTest(GalleryApiTestBase):
 
     def test_idempotency_key_validated_when_present(self) -> None:
         # 空白 Idempotency-Key 被拒绝（与仓库现有 write-origin 惯例一致：键可选，但提供时必须合法）。
+        annotation = self._get_annotation("pic.jpg")
         response = self.client.put(
             f"/api/v1/gallery/assets/{self.assets['pic.jpg']['asset_id']}/annotation",
             json={
                 "content": "x",
-                "expected_txt_version": self._get_annotation("pic.jpg")["txt_version"],
+                "expected_txt_version": annotation["txt_version"],
+                "expected_disk_version": annotation["disk_version"],
             },
             headers={"Idempotency-Key": "   "},
         )

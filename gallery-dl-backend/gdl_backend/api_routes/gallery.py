@@ -12,7 +12,7 @@ import hashlib
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .._database_gallery_repository import (
@@ -20,9 +20,10 @@ from .._database_gallery_repository import (
     GallerySourceConflictError,
     GalleryVersionConflict,
 )
-from ..gallery_catalog import TXT_STATES, decode_txt_bytes
+from ..gallery_catalog import TXT_STATES
 from ..gallery_service import (
     GalleryAnnotationError,
+    GalleryAssetFileError,
     GalleryAssetNotFound,
     GalleryCatalogService,
     GalleryRootMissing,
@@ -66,6 +67,7 @@ class GalleryRelinkRequest(BaseModel):
 class GalleryAnnotationPutRequest(BaseModel):
     content: str = Field(max_length=2 * 1024 * 1024)
     expected_txt_version: int = Field(ge=1)
+    expected_disk_version: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
 
 
 
@@ -90,6 +92,7 @@ _FILE_OPERATION_ERROR_STATUS: dict[str, int] = {
     "source_offline": 409,
     "source_missing": 409,
     "source_conflict": 409,
+    "unsafe_source_path": 409,
     "operation_in_progress": 409,
     "operation_not_reversible": 409,
     "rename_target_conflict": 409,
@@ -309,13 +312,34 @@ def create_gallery_router() -> APIRouter:
         asset_id: str,
         container: Any = Depends(get_service),
     ) -> Any:
-        resolved = _resolve_asset_file(container, asset_id)
-        return FileResponse(
-            resolved["path"],
-            media_type=_MEDIA_TYPES.get(resolved["extension"], "application/octet-stream"),
+        catalog: GalleryCatalogService = container.gallery_catalog
+        try:
+            opened = catalog.open_asset_content(asset_id)
+        except GalleryAssetNotFound:
+            raise _asset_not_found(asset_id) from None
+        except GalleryAssetFileError as error:
+            status = 404 if error.code == "asset_file_missing" else 409
+            raise ApiError(status, error.code, "图片文件当前不可安全读取") from None
+        etag_source = (
+            f"{asset_id}:{opened['modified_ns']}:{opened['size_bytes']}"
+        )
+        etag = 'W/"' + hashlib.sha1(etag_source.encode("utf-8")).hexdigest()[:24] + '"'
+
+        def body():
+            handle = opened["handle"]
+            try:
+                while chunk := handle.read(128 * 1024):
+                    yield chunk
+            finally:
+                handle.close()
+
+        return StreamingResponse(
+            body(),
+            media_type=_MEDIA_TYPES.get(opened["extension"], "application/octet-stream"),
             headers={
-                "ETag": resolved["etag"],
+                "ETag": etag,
                 "Cache-Control": "private, max-age=60",
+                "Content-Length": str(opened["size_bytes"]),
             },
         )
 
@@ -337,6 +361,10 @@ def create_gallery_router() -> APIRouter:
                 size=size,
             )
         except ThumbnailUnavailable as unavailable:
+            if unavailable.code == "unsafe_source_path":
+                raise ApiError(
+                    409, "unsafe_source_path", "图片来源路径已变为链接或越界"
+                ) from None
             raise ApiError(
                 422,
                 "thumbnail_unavailable",
@@ -358,53 +386,16 @@ def create_gallery_router() -> APIRouter:
         view: Literal["desktop"] = "desktop",
         container: Any = Depends(get_service),
     ) -> Any:
-        asset = container.db.gallery.get_asset(asset_id)
-        if asset is None:
-            raise _asset_not_found(asset_id)
         catalog: GalleryCatalogService = container.gallery_catalog
-        if asset["txt_state"] in {"missing", "pair_conflict"}:
-            return {
-                "asset_id": asset_id,
-                "txt_state": asset["txt_state"],
-                "content": None,
-                "txt_version": asset["txt_version"],
-            }
-        source_root = catalog.resolve_source_root(asset["source_id"])
-        txt_path = source_root / asset["txt_relative_path"]
-        if txt_path.is_symlink() or not txt_path.is_file():
-            return {
-                "asset_id": asset_id,
-                "txt_state": "missing",
-                "content": None,
-                "txt_version": asset["txt_version"],
-            }
         try:
-            data = txt_path.read_bytes()
-        except OSError:
-            raise ApiError(
-                422, "txt_read_failed", "TXT 文件读取失败"
-            ) from None
-        ok, text = decode_txt_bytes(data)
-        if not ok:
-            return {
-                "asset_id": asset_id,
-                "txt_state": "invalid_encoding",
-                "content": None,
-                "txt_version": asset["txt_version"],
-            }
-        if not text.strip():
-            return {
-                "asset_id": asset_id,
-                "txt_state": "blank",
-                "content": text,
-                "txt_version": asset["txt_version"],
-            }
-        return {
-            "asset_id": asset_id,
-            "txt_state": "normal",
-            "content": text,
-            "txt_version": asset["txt_version"],
-        }
+            return catalog.get_annotation(asset_id)
+        except GalleryAssetNotFound:
+            raise _asset_not_found(asset_id) from None
+        except GallerySourceOffline:
+            raise ApiError(409, "source_offline", "来源当前不可用") from None
+        except GalleryAnnotationError as error:
+            status = 409 if error.code == "unsafe_source_path" else 422
+            raise ApiError(status, error.code, "TXT 文件当前不可安全读取") from None
     @router.put("/gallery/assets/{asset_id}/annotation")
     async def put_gallery_asset_annotation(
         asset_id: str,
@@ -419,6 +410,7 @@ def create_gallery_router() -> APIRouter:
                 asset_id,
                 request.content,
                 expected_txt_version=request.expected_txt_version,
+                expected_disk_version=request.expected_disk_version,
             )
         except GalleryAssetNotFound:
             raise _asset_not_found(asset_id) from None
@@ -430,23 +422,33 @@ def create_gallery_router() -> APIRouter:
                     "资产已不在活跃状态",
                     details={"asset_id": asset_id},
                 ) from None
+            code = (
+                "txt_disk_conflict"
+                if conflict.code == "txt_disk_conflict"
+                else "txt_version_conflict"
+            )
+            details = {
+                "asset_id": asset_id,
+                "expected_txt_version": request.expected_txt_version,
+            }
+            if code == "txt_disk_conflict":
+                details["expected_disk_version"] = request.expected_disk_version
             raise ApiError(
                 409,
-                "txt_version_conflict",
+                code,
                 "TXT 已被外部修改，请重新加载后重试",
-                details={
-                    "asset_id": asset_id,
-                    "expected_txt_version": request.expected_txt_version,
-                },
+                details=details,
             ) from None
         except GallerySourceOffline:
             raise ApiError(
                 409, "source_offline", "来源当前不可用，无法保存 TXT"
             ) from None
         except GalleryAnnotationError as error:
-            raise ApiError(
-                422, error.code, "TXT 保存失败"
-            ) from None
+            if error.code == "unsafe_source_path":
+                raise ApiError(409, error.code, "TXT 来源路径已变为链接或越界") from None
+            if error.code == "txt_index_inconsistent":
+                raise ApiError(500, error.code, "TXT 与索引一致性恢复失败") from None
+            raise ApiError(422, error.code, "TXT 保存失败") from None
         return result
     @router.post("/gallery/assets/{asset_id}/rename")
     async def rename_asset(
@@ -542,24 +544,15 @@ def create_gallery_router() -> APIRouter:
 
 
 def _resolve_asset_file(container: Any, asset_id: str) -> dict[str, Any]:
-    """解析资产文件的安全绝对路径；仅内部使用，不进入任何响应。"""
+    """Resolve indexed metadata; filesystem access remains in safe domain services."""
     asset = container.db.gallery.get_asset(asset_id)
     if asset is None:
         raise _asset_not_found(asset_id)
     catalog: GalleryCatalogService = container.gallery_catalog
     source_root = catalog.resolve_source_root(asset["source_id"])
-    target = source_root / asset["relative_path"]
-    if target.is_symlink() or not target.is_file():
-        raise ApiError(
-            404, "asset_file_missing", "图片文件已不存在，请重新扫描来源"
-        )
-    etag_source = f"{asset_id}:{asset['modified_ns']}:{asset['size_bytes']}"
-    etag = 'W/"' + hashlib.sha1(etag_source.encode("utf-8")).hexdigest()[:24] + '"'
     return {
-        "path": target,
         "source_root": source_root,
         "relative_path": asset["relative_path"],
         "extension": asset["extension"].lower(),
         "modified_ns": asset["modified_ns"],
-        "etag": etag,
     }

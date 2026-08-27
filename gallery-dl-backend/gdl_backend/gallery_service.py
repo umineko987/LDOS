@@ -27,6 +27,11 @@ from .gallery_catalog import (
     is_supported_image_name,
     txt_name_for_image,
 )
+from .gallery_safe_paths import (
+    GalleryFilesystemLocks,
+    SafeSourceRoot,
+    UnsafeSourcePathError,
+)
 
 
 class GallerySourceNotFound(Exception):
@@ -50,6 +55,13 @@ class GalleryAssetNotFound(Exception):
         super().__init__(f"gallery_asset_not_found:{asset_id}")
         self.asset_id = asset_id
 
+
+
+class GalleryAssetFileError(Exception):
+    def __init__(self, code: str, asset_id: str) -> None:
+        super().__init__(code)
+        self.code = code
+        self.asset_id = asset_id
 
 class GallerySourceOffline(Exception):
     """来源当前不可用（source_offline），写操作被拒绝。"""
@@ -145,9 +157,16 @@ def _public_source(
 
 
 class GalleryCatalogService:
-    def __init__(self, repository: GalleryRepository, *, clock=time.time) -> None:
+    def __init__(
+        self,
+        repository: GalleryRepository,
+        *,
+        clock=time.time,
+        filesystem_locks: GalleryFilesystemLocks | None = None,
+    ) -> None:
         self._repo = repository
         self._clock = clock
+        self._filesystem_locks = filesystem_locks or GalleryFilesystemLocks()
         self._scan_jobs: dict[str, dict[str, Any]] = {}
         self._scan_lock = threading.Lock()
         self._scan_threads: dict[str, threading.Thread] = {}
@@ -343,7 +362,78 @@ class GalleryCatalogService:
         return Path(source["root_path"])
 
 
+    def open_asset_content(self, asset_id: str) -> dict[str, Any]:
+        asset = self._repo.get_asset(asset_id)
+        if asset is None:
+            raise GalleryAssetNotFound(asset_id)
+        source = self._repo.get_source(asset["source_id"])
+        if source is None:
+            raise GallerySourceNotFound(asset["source_id"])
+        try:
+            with SafeSourceRoot(source["root_path"]) as safe_root:
+                handle = safe_root.open_binary(asset["relative_path"])
+        except UnsafeSourcePathError as error:
+            code = "asset_file_missing" if error.reason == "file_missing" else "unsafe_source_path"
+            raise GalleryAssetFileError(code, asset_id) from error
+        metadata = os.fstat(handle.fileno())
+        return {
+            "handle": handle,
+            "extension": asset["extension"].lower(),
+            "modified_ns": int(metadata.st_mtime_ns),
+            "size_bytes": int(metadata.st_size),
+        }
+
     # ---- TXT 注解保存（§3.4/§7.2；G3-1） ----
+
+    def get_annotation(self, asset_id: str) -> dict[str, Any]:
+        asset = self._repo.get_asset(asset_id)
+        if asset is None:
+            raise GalleryAssetNotFound(asset_id)
+        source = self._repo.get_source(asset["source_id"])
+        if source is None:
+            raise GallerySourceNotFound(asset["source_id"])
+        if source["availability"] != "available":
+            raise GallerySourceOffline(asset["source_id"])
+        txt_relative = (
+            asset["txt_relative_path"]
+            if asset["txt_relative_path"]
+            else _txt_relative_for_image(asset["relative_path"])
+        )
+        lock_keys = (f"source:{asset['source_id']}", f"asset:{asset_id}")
+        with self._filesystem_locks.hold(*lock_keys):
+            try:
+                with SafeSourceRoot(source["root_path"]) as safe_root:
+                    try:
+                        payload, disk_version = safe_root.read_with_disk_version(
+                            txt_relative,
+                            allow_missing=True,
+                            max_bytes=_TXT_READ_MAX_BYTES,
+                        )
+                    except UnsafeSourcePathError as error:
+                        if error.reason != "file_too_large":
+                            raise
+                        payload = None
+                        disk_version = safe_root.disk_version(txt_relative)
+                        txt_state = "io_error"
+                    else:
+                        txt_state = classify_txt_state(
+                            exists=payload is not None,
+                            data=payload,
+                            pair_conflict=asset["txt_state"] == "pair_conflict",
+                        )
+            except UnsafeSourcePathError as error:
+                raise GalleryAnnotationError("unsafe_source_path", txt_relative) from error
+        content: str | None = None
+        if payload is not None and txt_state not in {"invalid_encoding", "io_error", "pair_conflict"}:
+            decoded, text = decode_txt_bytes(payload)
+            content = text if decoded else None
+        return {
+            "asset_id": asset_id,
+            "txt_state": txt_state,
+            "txt_version": int(asset["txt_version"]),
+            "disk_version": disk_version,
+            "content": content,
+        }
 
     def save_annotation(
         self,
@@ -351,82 +441,121 @@ class GalleryCatalogService:
         content: str,
         *,
         expected_txt_version: int,
+        expected_disk_version: str,
     ) -> dict[str, Any]:
-        """严格 UTF-8（无 BOM）原子写 TXT，并推进索引版本。
+        """Save strict UTF-8 TXT after checking both DB and on-disk versions.
 
-        - expected_txt_version 与当前索引不一致时抛 GalleryVersionConflict
-          （txt_version_conflict），磁盘不被触碰，前端草稿得以保留；
-        - 磁盘写通过临时文件 + os.replace 原子完成；
-        - 成功后 txt_version +1、来源 annotation_version +1、FTS 同步。
+        The process-local asset/source lock serializes Gallery mutations.  The
+        disk version is recomputed from a descriptor-anchored read immediately
+        before replacement.  If the SQLite update fails, the prior bytes are
+        restored only while the just-written version still owns the path.
         """
-        asset = self._repo.get_asset(asset_id)
-        if asset is None:
+        initial = self._repo.get_asset(asset_id)
+        if initial is None:
             raise GalleryAssetNotFound(asset_id)
-        if asset["lifecycle_state"] != "active":
-            raise GalleryVersionConflict(
-                "asset_not_active", {"asset_id": asset_id},
+        lock_keys = (f"source:{initial['source_id']}", f"asset:{asset_id}")
+        with self._filesystem_locks.hold(*lock_keys):
+            asset = self._repo.get_asset(asset_id)
+            if asset is None:
+                raise GalleryAssetNotFound(asset_id)
+            if asset["lifecycle_state"] != "active":
+                raise GalleryVersionConflict(
+                    "asset_not_active", {"asset_id": asset_id}
+                )
+            if int(asset["txt_version"]) != expected_txt_version:
+                raise GalleryVersionConflict(
+                    "txt_version_conflict",
+                    {
+                        "asset_id": asset_id,
+                        "expected": expected_txt_version,
+                        "actual": int(asset["txt_version"]),
+                    },
+                )
+            if asset["txt_state"] == "pair_conflict":
+                raise GalleryAnnotationError(
+                    "txt_pair_conflict", str(asset["txt_relative_path"] or "")
+                )
+            source = self._repo.get_source(asset["source_id"])
+            if source is None:
+                raise GallerySourceNotFound(asset["source_id"])
+            if source["availability"] != "available":
+                raise GallerySourceOffline(asset["source_id"])
+            txt_relative = (
+                asset["txt_relative_path"]
+                if asset["txt_relative_path"]
+                else _txt_relative_for_image(asset["relative_path"])
             )
-        if int(asset["txt_version"]) != expected_txt_version:
-            raise GalleryVersionConflict(
-                "txt_version_conflict",
-                {"asset_id": asset_id, "expected": expected_txt_version,
-                 "actual": int(asset["txt_version"])},
-            )
-        source = self._repo.get_source(asset["source_id"])
-        if source is None:
-            raise GallerySourceNotFound(asset["source_id"])
-        if source["availability"] != "available":
-            raise GallerySourceOffline(asset["source_id"])
-        root = Path(source["root_path"])
-
-        # 目标 TXT：已有配对路径优先；缺失时按同名规则创建。
-        if asset["txt_relative_path"] and asset["txt_state"] not in {"missing", "pair_conflict"}:
-            txt_relative = asset["txt_relative_path"]
-        else:
-            txt_relative = _txt_relative_for_image(asset["relative_path"])
-        txt_path = root / txt_relative
-        if txt_path.is_symlink():
-            raise GalleryAnnotationError(
-                "txt_target_not_regular_file", txt_relative)
-
-        # 严格 UTF-8 无 BOM 原子写（§3.4：任何成功保存都写为无 BOM UTF-8）。
-        data = content.encode("utf-8", errors="strict")
-        parent = txt_path.parent
-        parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = txt_path.with_name(txt_path.name + ".imageweave-tmp")
-        try:
-            with open(tmp_path, "wb") as handle:
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(tmp_path, txt_path)
-        except OSError:
+            data = content.encode("utf-8", errors="strict")
             try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise GalleryAnnotationError("txt_write_failed", txt_relative) from None
-
-        stat = txt_path.stat()
-        new_state = classify_txt_state(
-            exists=True,
-            read_ok=True,
-            data=data,
-        )
-        updated = self._repo.update_annotation(
-            asset_id,
-            expected_txt_version=expected_txt_version,
-            txt_state=new_state,
-            txt_size_bytes=stat.st_size,
-            txt_modified_ns=stat.st_mtime_ns,
-            txt_sha256="",
-            txt_relative_path=txt_relative,
-            txt_content=content if new_state == "normal" else "",
-        )
+                with SafeSourceRoot(source["root_path"]) as safe_root:
+                    previous_payload, actual_disk_version = safe_root.read_with_disk_version(
+                        txt_relative, allow_missing=True
+                    )
+                    if actual_disk_version != expected_disk_version:
+                        raise GalleryVersionConflict(
+                            "txt_disk_conflict",
+                            {
+                                "asset_id": asset_id,
+                                "expected": expected_disk_version,
+                                "actual": actual_disk_version,
+                            },
+                        )
+                    metadata, written_disk_version = safe_root.atomic_write_bytes(
+                        txt_relative,
+                        data,
+                        expected_disk_version=actual_disk_version,
+                    )
+                    new_state = classify_txt_state(
+                        exists=True, read_ok=True, data=data
+                    )
+                    try:
+                        updated = self._repo.update_annotation(
+                            asset_id,
+                            expected_txt_version=expected_txt_version,
+                            txt_state=new_state,
+                            txt_size_bytes=metadata.size,
+                            txt_modified_ns=metadata.modified_ns,
+                            txt_sha256="",
+                            txt_relative_path=txt_relative,
+                            txt_content=content,
+                        )
+                    except Exception:
+                        try:
+                            if previous_payload is None:
+                                safe_root.unlink_if_version(
+                                    txt_relative,
+                                    expected_disk_version=written_disk_version,
+                                )
+                            else:
+                                safe_root.atomic_write_bytes(
+                                    txt_relative,
+                                    previous_payload,
+                                    expected_disk_version=written_disk_version,
+                                )
+                        except Exception as rollback_error:
+                            raise GalleryAnnotationError(
+                                "txt_index_inconsistent", txt_relative
+                            ) from rollback_error
+                        raise
+            except GalleryVersionConflict:
+                raise
+            except GalleryAnnotationError:
+                raise
+            except UnsafeSourcePathError as error:
+                if error.reason == "disk_version_conflict":
+                    raise GalleryVersionConflict(
+                        "txt_disk_conflict", {"asset_id": asset_id}
+                    ) from error
+                raise GalleryAnnotationError(
+                    "unsafe_source_path", txt_relative
+                ) from error
+            except OSError as error:
+                raise GalleryAnnotationError("txt_write_failed", txt_relative) from error
         return {
             "asset_id": asset_id,
             "txt_state": updated["txt_state"],
             "txt_version": updated["txt_version"],
+            "disk_version": written_disk_version,
             "content": content,
         }
 
@@ -520,8 +649,11 @@ class GalleryCatalogService:
         if source is None:
             raise GallerySourceNotFound(source_id)
         root = Path(source["root_path"])
-        if not root.is_dir():
-            # 离线来源保留现有索引（§3.2），只更新可用性。
+        try:
+            safe_root = SafeSourceRoot(root)
+            safe_root.open()
+        except UnsafeSourcePathError:
+            # Offline/unsafe sources keep their previous index intact.
             self._repo.set_source_availability(source_id, "offline")
             return {"asset_count": 0, "directory_count": 0, "offline": True}
         self._repo.set_source_availability(source_id, "available")
@@ -530,38 +662,44 @@ class GalleryCatalogService:
         directories: list[dict[str, Any]] = []
         assets: list[dict[str, Any]] = []
         skipped = {"temporary": 0, "unsupported": 0}
-        for relative_path, name in _walk_source(root):
-            directories.append(
-                {
-                    "relative_path": relative_path,
-                    "name": name,
-                    "parent_relative_path": (
-                        relative_path.rpartition("/")[0] if relative_path else None
-                    ),
-                }
-            )
-            image_names: list[str] = []
-            file_entries: list[tuple[str, os.stat_result]] = []
-            for file_name, file_stat in _iter_directory_files(root, relative_path):
-                if is_supported_image_name(file_name):
-                    image_names.append(file_name)
-                    file_entries.append((file_name, file_stat))
-                elif file_name.lower().endswith(_TEMP_FILE_SUFFIXES):
-                    skipped["temporary"] += 1
-                else:
-                    skipped["unsupported"] += 1
-            conflicts = _pair_conflicts(image_names)
-            for file_name, file_stat in file_entries:
-                assets.append(
-                    self._asset_record(
-                        root,
-                        relative_path,
-                        file_name,
-                        file_stat,
-                        existing,
-                        pair_conflict=file_name in conflicts,
-                    )
+        try:
+            for directory in safe_root.iter_tree(
+                excluded_directories=frozenset({".imageweave"})
+            ):
+                relative_path = directory.relative_path
+                directories.append(
+                    {
+                        "relative_path": relative_path,
+                        "name": directory.name,
+                        "parent_relative_path": (
+                            relative_path.rpartition("/")[0] if relative_path else None
+                        ),
+                    }
                 )
+                image_names: list[str] = []
+                file_entries: list[tuple[str, os.stat_result]] = []
+                for file_name, file_stat in directory.files:
+                    if is_supported_image_name(file_name):
+                        image_names.append(file_name)
+                        file_entries.append((file_name, file_stat))
+                    elif file_name.lower().endswith(_TEMP_FILE_SUFFIXES):
+                        skipped["temporary"] += 1
+                    else:
+                        skipped["unsupported"] += 1
+                conflicts = _pair_conflicts(image_names)
+                for file_name, file_stat in file_entries:
+                    assets.append(
+                        self._asset_record(
+                            safe_root,
+                            relative_path,
+                            file_name,
+                            file_stat,
+                            existing,
+                            pair_conflict=file_name in conflicts,
+                        )
+                    )
+        finally:
+            safe_root.close()
         commit = self._repo.commit_scan(source_id, directories=directories, assets=assets)
         return {
             "asset_count": commit["asset_count"],
@@ -575,7 +713,7 @@ class GalleryCatalogService:
 
     def _asset_record(
         self,
-        root: Path,
+        safe_root: SafeSourceRoot,
         directory_relative: str,
         name: str,
         stat: os.stat_result,
@@ -588,27 +726,34 @@ class GalleryCatalogService:
         txt_relative = (
             f"{directory_relative}/{txt_name}" if directory_relative else txt_name
         )
-        txt_path = root / txt_relative
         txt_size = 0
         txt_modified_ns = 0
         txt_state = "missing"
         txt_content = ""
-        if txt_path.is_symlink() or not txt_path.exists():
-            txt_state = classify_txt_state(exists=False)
-        else:
-            txt_stat = txt_path.stat()
-            txt_size = txt_stat.st_size
-            txt_modified_ns = txt_stat.st_mtime_ns
-            if txt_size > _TXT_READ_MAX_BYTES:
+        try:
+            with safe_root.open_binary(txt_relative) as handle:
+                txt_stat = os.fstat(handle.fileno())
+                txt_size = int(txt_stat.st_size)
+                txt_modified_ns = int(txt_stat.st_mtime_ns)
+                if txt_size > _TXT_READ_MAX_BYTES:
+                    txt_state = classify_txt_state(exists=True, read_ok=False)
+                else:
+                    data = handle.read(_TXT_READ_MAX_BYTES + 1)
+                    txt_state = classify_txt_state(
+                        exists=True, data=data, pair_conflict=pair_conflict
+                    )
+                    if txt_state == "normal":
+                        ok, text = _decode_txt(data)
+                        txt_content = text if ok else ""
+        except UnsafeSourcePathError as error:
+            if error.reason == "file_missing":
+                txt_state = classify_txt_state(
+                    exists=False, pair_conflict=pair_conflict
+                )
+            elif error.reason == "file_unavailable":
                 txt_state = classify_txt_state(exists=True, read_ok=False)
             else:
-                data = txt_path.read_bytes()
-                txt_state = classify_txt_state(
-                    exists=True, data=data, pair_conflict=pair_conflict
-                )
-                if txt_state == "normal":
-                    ok, text = _decode_txt(data)
-                    txt_content = text if ok else ""
+                raise
 
         previous = existing.get(relative_path)
         if (
@@ -623,7 +768,7 @@ class GalleryCatalogService:
             error_code = previous["error_code"]
         else:
             format_name, width, height, read_state, error_code = _probe_image(
-                root / relative_path
+                safe_root, relative_path
             )
         return {
             "relative_path": relative_path,
@@ -655,44 +800,6 @@ def _decode_txt(data: bytes) -> tuple[bool, str]:
     return decode_txt_bytes(data)
 
 
-def _walk_source(root: Path):
-    """深度优先遍历目录树，产出（相对路径, 名称）目录记录。
-
-    跳过符号链接目录与 `.imageweave` 保留区（§6.1 rule 3/4）。
-    """
-    stack: list[tuple[str, str]] = [("", "")]
-    while stack:
-        relative, name = stack.pop()
-        yield relative, name
-        absolute = root / relative if relative else root
-        with os.scandir(absolute) as entries:
-            children: list[tuple[str, str]] = []
-            for entry in entries:
-                if entry.is_symlink():
-                    continue
-                if entry.is_dir(follow_symlinks=False):
-                    if entry.name == ".imageweave":
-                        continue
-                    child_relative = (
-                        f"{relative}/{entry.name}" if relative else entry.name
-                    )
-                    children.append((child_relative, entry.name))
-            for child in reversed(children):
-                stack.append(child)
-
-
-def _iter_directory_files(root: Path, directory_relative: str):
-    absolute = root / directory_relative if directory_relative else root
-    with os.scandir(absolute) as entries:
-        files: list[tuple[str, os.stat_result]] = []
-        for entry in entries:
-            if entry.is_symlink():
-                continue
-            if entry.is_file(follow_symlinks=False):
-                files.append((entry.name, entry.stat(follow_symlinks=False)))
-        files.sort(key=lambda item: item[0])
-        yield from files
-
 
 def _pair_conflicts(image_names: list[str]) -> set[str]:
     by_txt: dict[str, list[str]] = {}
@@ -705,15 +812,20 @@ def _pair_conflicts(image_names: list[str]) -> set[str]:
     return conflicts
 
 
-def _probe_image(path: Path) -> tuple[str, int, int, str, str]:
-    """有界图片探测：只读头部元数据，不整图解码（§6.3）。"""
+def _probe_image(
+    safe_root: SafeSourceRoot, relative_path: str
+) -> tuple[str, int, int, str, str]:
+    """Probe metadata from a no-follow descriptor without decoding full pixels."""
     try:
-        with Image.open(path) as image:
-            format_name = str(image.format or "")
-            width, height = image.size
-            return format_name, int(width), int(height), "ok", ""
+        with safe_root.open_binary(relative_path) as handle:
+            with Image.open(handle) as image:
+                format_name = str(image.format or "")
+                width, height = image.size
+                return format_name, int(width), int(height), "ok", ""
     except UnidentifiedImageError:
         return "", 0, 0, "failed", "unidentified"
+    except UnsafeSourcePathError:
+        raise
     except OSError:
         return "", 0, 0, "failed", "decode_failed"
     except Exception:

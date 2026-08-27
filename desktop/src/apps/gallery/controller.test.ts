@@ -190,6 +190,7 @@ describe("gallery viewer controller (G2-3 只读查看器)", () => {
       txt_state: "normal",
       content: `content of ${assetId}`,
       txt_version: 1,
+      disk_version: "disk-version-1",
     }));
     return {
       service: {
@@ -322,6 +323,7 @@ describe("gallery selection controller (G2-3 多选)", () => {
         txt_state: "missing",
         content: null,
         txt_version: 0,
+        disk_version: "missing-disk-version",
       })),
       thumbnailUrl: (assetId: string) => `thumb:${assetId}`,
       contentUrl: (assetId: string) => `content:${assetId}`,
@@ -407,12 +409,14 @@ describe("gallery file operations controller (G3-3 TXT 编辑/重命名/回收)"
         txt_state: "normal",
         content: `content of ${assetId}`,
         txt_version: 1,
+        disk_version: "disk-version-1",
       })),
       saveAnnotation: vi.fn(async (assetId: string, content: string) => ({
         asset_id: assetId,
         txt_state: "normal",
         content,
         txt_version: 2,
+        disk_version: "disk-version-2",
       })),
       renameAsset: vi.fn(async () => ({ ...operationResult, kind: "rename" })),
       trashAssets: vi.fn(async () => ({ ...operationResult })),
@@ -461,7 +465,12 @@ describe("gallery file operations controller (G3-3 TXT 编辑/重命名/回收)"
 
     const saved = await controller.saveTxtAnnotation({ advance: false });
     expect(saved).toBe(true);
-    expect(service.saveAnnotation).toHaveBeenCalledWith("asset-1", "first draft", 1);
+    expect(service.saveAnnotation).toHaveBeenCalledWith(
+      "asset-1",
+      "first draft",
+      1,
+      "disk-version-1",
+    );
     expect(store.getState().txtSavePhase).toBe("saved");
     // 保存成功后编辑器关闭，重新进入编辑态用新的已保存内容。
     expect(store.getState().txtDraft).toBe(null);

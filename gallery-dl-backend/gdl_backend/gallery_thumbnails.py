@@ -17,6 +17,7 @@ from typing import Any
 from PIL import Image, UnidentifiedImageError
 from PIL.ImageOps import exif_transpose
 
+from .gallery_safe_paths import SafeSourceRoot, UnsafeSourcePathError
 SUPPORTED_THUMBNAIL_SIZES: frozenset[int] = frozenset({256, 512})
 
 
@@ -52,13 +53,19 @@ class ThumbnailService:
         """返回 {path, etag}；缓存未命中时同步生成。"""
         if size not in SUPPORTED_THUMBNAIL_SIZES:
             raise ValueError("invalid_thumbnail_size")
-        etag = self._etag(asset_id, modified_ns, size)
-        cached = self._cache_dir / f"{asset_id}.{size}.jpg"
-        if cached.is_file():
-            return {"path": cached, "etag": etag}
-        target = source_root / relative_path
         try:
-            with Image.open(target) as image:
+            with SafeSourceRoot(source_root) as safe_root:
+                source_handle = safe_root.open_binary(relative_path)
+        except UnsafeSourcePathError as error:
+            code = "missing" if error.reason == "file_missing" else "unsafe_source_path"
+            raise ThumbnailUnavailable(code) from error
+        try:
+            actual_modified_ns = int(os.fstat(source_handle.fileno()).st_mtime_ns)
+            etag = self._etag(asset_id, actual_modified_ns, size)
+            cached = self._cache_dir / f"{asset_id}.{actual_modified_ns}.{size}.jpg"
+            if cached.is_file():
+                return {"path": cached, "etag": etag}
+            with Image.open(source_handle) as image:
                 oriented = exif_transpose(image)
                 oriented.thumbnail((size, size), Image.Resampling.LANCZOS)
                 if oriented.mode not in ("RGB", "L"):
@@ -82,4 +89,6 @@ class ThumbnailService:
             raise ThumbnailUnavailable("too_large") from None
         except OSError:
             raise ThumbnailUnavailable("decode_failed") from None
+        finally:
+            source_handle.close()
         return {"path": cached, "etag": etag}

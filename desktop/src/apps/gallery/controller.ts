@@ -322,6 +322,7 @@ export function createGalleryController({ store, service }: {
           asset.asset_id,
           state.txtDraft,
           state.viewerAnnotation.txt_version,
+          state.viewerAnnotation.disk_version,
         );
         if (destroyed) return false;
         store.setViewerAnnotation(annotation);
@@ -338,7 +339,11 @@ export function createGalleryController({ store, service }: {
       } catch (error) {
         if (destroyed) return false;
         const code = errorCode(error);
-        if (code === "txt_version_conflict" || code === "asset_not_active") {
+        if (
+          code === "txt_version_conflict" ||
+          code === "txt_disk_conflict" ||
+          code === "asset_not_active"
+        ) {
           store.setTxtSavePhase("conflict", code);
         } else {
           store.setTxtSavePhase("error", code);
@@ -395,7 +400,7 @@ export function createGalleryController({ store, service }: {
         if (destroyed) return false;
         store.closeTrashConfirm();
         store.clearSelection();
-        store.showUndoToast(result.operation_id);
+        store.showUndoToast(result.operation_id, result.item_count);
         await loadPage(false);
         return true;
       } catch (error) {

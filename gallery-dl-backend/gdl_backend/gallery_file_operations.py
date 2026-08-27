@@ -15,10 +15,9 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 import uuid
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Any, Mapping
 
 from ._database_gallery_repository import (
@@ -26,9 +25,15 @@ from ._database_gallery_repository import (
     GalleryVersionConflict,
 )
 from .gallery_catalog import (
+    decode_txt_bytes,
     natural_sort_key,
     trash_files_relative_dir,
     trash_operation_manifest_relative_path,
+)
+from .gallery_safe_paths import (
+    GalleryFilesystemLocks,
+    SafeSourceRoot,
+    UnsafeSourcePathError,
 )
 
 FILE_OPERATION_KINDS: frozenset[str] = frozenset(
@@ -67,11 +72,13 @@ class GalleryFileOperations:
         repository: GalleryRepository,
         *,
         clock: Any = None,
+        filesystem_locks: GalleryFilesystemLocks | None = None,
     ) -> None:
         import time
 
         self._repo = repository
         self._clock = clock or time.time
+        self._filesystem_locks = filesystem_locks or GalleryFilesystemLocks()
         self._source_locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
 
@@ -308,10 +315,15 @@ class GalleryFileOperations:
         for lock in locks:
             lock.acquire()
         try:
-            return self._execute_locked(
-                kind=kind, items=items, source_ids=source_ids,
-                expected_txt_version=expected_txt_version,
-            )
+            shared_keys = [*(f"source:{sid}" for sid in source_ids)]
+            shared_keys.extend(f"asset:{item['asset_id']}" for item in items)
+            with self._filesystem_locks.hold(*shared_keys):
+                return self._execute_locked(
+                    kind=kind,
+                    items=items,
+                    source_ids=source_ids,
+                    expected_txt_version=expected_txt_version,
+                )
         finally:
             for lock in reversed(locks):
                 lock.release()
@@ -367,6 +379,7 @@ class GalleryFileOperations:
                 (operation_id, kind, json.dumps(source_ids), now, now),
             )
             for ordinal, item in enumerate(items):
+                item["ordinal"] = ordinal
                 conn.execute(
                     """
                     INSERT INTO gallery_file_operation_items(
@@ -432,7 +445,7 @@ class GalleryFileOperations:
         source = self._repo.get_source(item["source_id"])
         if source is None:
             raise GalleryFileOperationError("source_not_found")
-        root = Path(source["root_path"])
+        safe_root = SafeSourceRoot(source["root_path"])
         # 崩溃恢复重放时 item 可能缺少运行期字段（txt_origin/undo_of/purge_of），
         # 从资产索引重新推导。
         asset = self._repo.get_asset(item["asset_id"])
@@ -445,51 +458,141 @@ class GalleryFileOperations:
             raise GalleryFileOperationError(
                 "asset_not_found", {"asset_id": item["asset_id"]}
             )
+        try:
+            with safe_root:
+                applied = False
+                try:
+                    if kind == "rename":
+                        self._apply_rename(safe_root, item)
+                        applied = True
+                        self._commit_rename_index(item)
+                    elif kind == "trash":
+                        self._apply_trash(safe_root, operation_id, item)
+                        applied = True
+                        self._commit_trash_index(item)
+                    elif kind == "restore":
+                        self._apply_restore(safe_root, item)
+                        applied = True
+                        self._commit_restore_index(safe_root, item)
+                    elif kind == "purge":
+                        self._apply_purge(safe_root, item)
+                        applied = True
+                        self._commit_purge_index(item)
+                    else:  # pragma: no cover - kind validated at entry
+                        raise GalleryFileOperationError("invalid_operation_kind")
+                except Exception:
+                    if applied and kind != "purge":
+                        self._rollback_applied_files(
+                            safe_root, operation_id, kind, item
+                        )
+                    raise
+        except UnsafeSourcePathError as error:
+            raise GalleryFileOperationError(
+                "unsafe_source_path",
+                {"relative_path": error.relative_path},
+            ) from error
+
+    def _rollback_applied_files(
+        self,
+        safe_root: SafeSourceRoot,
+        operation_id: str,
+        kind: str,
+        item: dict[str, Any],
+    ) -> None:
         if kind == "rename":
-            self._apply_rename(root, item)
-            self._commit_rename_index(item)
+            moves = [
+                (item["target_relative_path"], item["origin_relative_path"]),
+            ]
+            if item.get("has_txt") and item.get("txt_target"):
+                moves.append((item["txt_target"], item["txt_origin"]))
         elif kind == "trash":
-            self._apply_trash(root, operation_id, item)
-            self._commit_trash_index(item)
+            files_relative = str(trash_files_relative_dir(operation_id))
+            moves = [
+                (
+                    f"{files_relative}/{item['origin_relative_path']}",
+                    item["origin_relative_path"],
+                )
+            ]
+            if item.get("has_txt") and item.get("txt_origin"):
+                moves.append(
+                    (
+                        f"{files_relative}/{item['txt_origin']}",
+                        item["txt_origin"],
+                    )
+                )
         elif kind == "restore":
-            self._apply_restore(root, item)
-            self._commit_restore_index(item)
-        elif kind == "purge":
-            self._apply_purge(root, item)
-            self._commit_purge_index(item)
-        else:  # pragma: no cover - kind 由入口校验
-            raise GalleryFileOperationError("invalid_operation_kind")
+            files_relative = str(trash_files_relative_dir(item["undo_of"]))
+            moves = [
+                (
+                    item["target_relative_path"],
+                    f"{files_relative}/{item['target_relative_path']}",
+                )
+            ]
+            if item.get("has_txt") and item.get("txt_origin"):
+                moves.append(
+                    (
+                        item["txt_origin"],
+                        f"{files_relative}/{item['txt_origin']}",
+                    )
+                )
+        else:
+            return
+        self._rollback_moves(safe_root, moves)
 
     # rename：成对改名 + 索引原位更新（ID 保持稳定）。
 
-    def _apply_rename(self, root: Path, item: dict[str, Any]) -> None:
-        old_path = root / item["origin_relative_path"]
-        new_path = root / item["target_relative_path"]
-        _ensure_parent(new_path)
-        # 冲突预检：目标图片或 TXT 已存在时阻止整个操作。
-        if new_path.exists() or new_path.is_symlink():
-            raise GalleryFileOperationError(
-                "rename_target_conflict",
-                {"target": item["target_relative_path"]},
-            )
-        moves: list[tuple[Path, Path]] = [(old_path, new_path)]
-        if item["has_txt"]:
-            old_txt = root / item["txt_origin"]
-            new_txt = root / item["txt_target"]
-            if new_txt.exists() or new_txt.is_symlink():
-                raise GalleryFileOperationError(
-                    "rename_target_conflict",
-                    {"target": item["txt_target"]},
-                )
-            moves.append((old_txt, new_txt))
-        for source, target in moves:
-            if not source.exists():
-                raise GalleryFileOperationError(
-                    "asset_file_missing",
-                    {"relative_path": str(item["origin_relative_path"])},
-                )
-            os.replace(source, target)
 
+    @staticmethod
+    def _read_txt_for_search(safe_root: SafeSourceRoot, relative_path: str) -> str:
+        if not relative_path:
+            return ""
+        try:
+            payload = safe_root.read_bytes(relative_path, max_bytes=8 * 1024 * 1024)
+        except UnsafeSourcePathError as error:
+            if error.reason == "file_missing":
+                return ""
+            raise
+        ok, text = decode_txt_bytes(payload)
+        return text if ok else ""
+    def _apply_rename(self, safe_root: SafeSourceRoot, item: dict[str, Any]) -> None:
+        item["_txt_content"] = (
+            self._read_txt_for_search(safe_root, item["txt_origin"])
+            if item["has_txt"]
+            else ""
+        )
+        moves = [
+            (item["origin_relative_path"], item["target_relative_path"]),
+        ]
+        if item["has_txt"]:
+            moves.append((item["txt_origin"], item["txt_target"]))
+        completed: list[tuple[str, str]] = []
+        try:
+            for source_relative, target_relative in moves:
+                source_exists = safe_root.exists_regular(source_relative)
+                target_exists = safe_root.exists_regular(target_relative)
+                if source_exists and target_exists:
+                    raise GalleryFileOperationError(
+                        "rename_target_conflict", {"target": target_relative}
+                    )
+                if not source_exists:
+                    if target_exists:
+                        # Crash replay after the no-clobber move but before item status.
+                        continue
+                    raise GalleryFileOperationError(
+                        "asset_file_missing", {"relative_path": source_relative}
+                    )
+                try:
+                    safe_root.move_regular(source_relative, target_relative)
+                except FileExistsError as error:
+                    raise GalleryFileOperationError(
+                        "rename_target_conflict", {"target": target_relative}
+                    ) from error
+                completed.append((source_relative, target_relative))
+        except Exception:
+            for source_relative, target_relative in reversed(completed):
+                if safe_root.exists_regular(target_relative):
+                    safe_root.move_regular(target_relative, source_relative)
+            raise
     def _commit_rename_index(self, item: dict[str, Any]) -> None:
         now = self._clock()
         name = PurePosixPath(item["target_relative_path"]).name
@@ -523,53 +626,72 @@ class GalleryFileOperations:
                     """
                     INSERT INTO gallery_search_index(
                         asset_id, source_id, file_name, relative_path, txt_content
-                    ) VALUES (?, ?, ?, ?, '')
+                    ) VALUES (?, ?, ?, ?, ?)
                     """,
-                    (item["asset_id"], row["source_id"], name,
-                     item["target_relative_path"]),
+                    (
+                        item["asset_id"],
+                        row["source_id"],
+                        name,
+                        item["target_relative_path"],
+                        item.get("_txt_content", ""),
+                    ),
                 )
             self._bump_source_content_version(conn, item["asset_id"], now)
 
     # trash：移入 `.imageweave/trash/<op>/files/…` + lifecycle='trashed'。
 
     def _apply_trash(
-        self, root: Path, operation_id: str, item: dict[str, Any]
+        self, safe_root: SafeSourceRoot, operation_id: str, item: dict[str, Any]
     ) -> None:
-        files_dir = root / trash_files_relative_dir(operation_id)
-        image_origin = root / item["origin_relative_path"]
-        image_target = files_dir / item["origin_relative_path"]
-        _ensure_parent(image_target)
-        moves: list[tuple[Path, Path]] = []
-        if image_origin.exists():
-            if image_target.exists():
-                raise GalleryFileOperationError(
-                    "trash_target_conflict",
-                    {"operation_id": operation_id},
-                )
-            moves.append((image_origin, image_target))
-        elif not image_target.exists():
-            raise GalleryFileOperationError(
-                "asset_file_missing",
-                {"relative_path": item["origin_relative_path"]},
+        files_relative = str(trash_files_relative_dir(operation_id))
+        item["_txt_content"] = (
+            self._read_txt_for_search(safe_root, item["txt_origin"])
+            if item["has_txt"] and item["txt_origin"]
+            else ""
+        )
+        moves = [
+            (
+                item["origin_relative_path"],
+                f"{files_relative}/{item['origin_relative_path']}",
             )
+        ]
         if item["has_txt"] and item["txt_origin"]:
-            txt_origin = root / item["txt_origin"]
-            txt_target = files_dir / item["txt_origin"]
-            if txt_origin.exists():
-                if txt_target.exists():
+            moves.append(
+                (item["txt_origin"], f"{files_relative}/{item['txt_origin']}")
+            )
+        completed: list[tuple[str, str]] = []
+        try:
+            for source_relative, target_relative in moves:
+                source_exists = safe_root.exists_regular(source_relative)
+                target_exists = safe_root.exists_regular(target_relative)
+                if source_exists and target_exists:
                     raise GalleryFileOperationError(
-                        "trash_target_conflict",
-                        {"operation_id": operation_id},
+                        "trash_target_conflict", {"operation_id": operation_id}
                     )
-                moves.append((txt_origin, txt_target))
-        for source, target in moves:
-            os.replace(source, target)
-        # operation.json 元数据（幂等写）。
-        manifest_path = root / trash_operation_manifest_relative_path(operation_id)
-        _ensure_parent(manifest_path)
-        if not manifest_path.exists():
-            manifest_path.write_text(
-                json.dumps(
+                if not source_exists:
+                    if target_exists:
+                        continue
+                    if source_relative == item["origin_relative_path"]:
+                        raise GalleryFileOperationError(
+                            "asset_file_missing", {"relative_path": source_relative}
+                        )
+                    # An externally removed optional TXT does not block image trash.
+                    continue
+                try:
+                    safe_root.move_regular(source_relative, target_relative)
+                except FileExistsError as error:
+                    raise GalleryFileOperationError(
+                        "trash_target_conflict", {"operation_id": operation_id}
+                    ) from error
+                completed.append((source_relative, target_relative))
+            manifest_relative = str(
+                trash_operation_manifest_relative_path(operation_id)
+            )
+            manifest_payload, manifest_version = safe_root.read_with_disk_version(
+                manifest_relative, allow_missing=True
+            )
+            if manifest_payload is None:
+                payload = json.dumps(
                     {
                         "operation_id": operation_id,
                         "kind": "trash",
@@ -583,10 +705,15 @@ class GalleryFileOperations:
                         ],
                     },
                     ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
-
+                ).encode("utf-8")
+                safe_root.atomic_write_bytes(
+                    manifest_relative, payload, expected_disk_version=manifest_version
+                )
+        except Exception:
+            for source_relative, target_relative in reversed(completed):
+                if safe_root.exists_regular(target_relative):
+                    safe_root.move_regular(target_relative, source_relative)
+            raise
     def _commit_trash_index(self, item: dict[str, Any]) -> None:
         now = self._clock()
         with self._repo._transaction() as conn:  # noqa: SLF001
@@ -607,41 +734,58 @@ class GalleryFileOperations:
 
     # restore（undo 同路径）：移回原路径 + lifecycle='active'。
 
-    def _apply_restore(self, root: Path, item: dict[str, Any]) -> None:
+    def _apply_restore(self, safe_root: SafeSourceRoot, item: dict[str, Any]) -> None:
         operation_id = item["undo_of"]
-        files_dir = root / trash_files_relative_dir(operation_id)
-        image_target = root / item["target_relative_path"]
-        image_origin = files_dir / item["target_relative_path"]
-        _ensure_parent(image_target)
-        # 恢复前重新检查原路径冲突（§3.5：绝不覆盖）。
-        if image_target.exists() or image_target.is_symlink():
-            raise GalleryFileOperationError(
-                "restore_target_conflict",
-                {"target": item["target_relative_path"]},
+        files_relative = str(trash_files_relative_dir(operation_id))
+        item["_txt_content"] = (
+            self._read_txt_for_search(
+                safe_root, f"{files_relative}/{item['txt_origin']}"
             )
-        moves: list[tuple[Path, Path]] = []
-        if image_origin.exists():
-            moves.append((image_origin, image_target))
-        else:
-            raise GalleryFileOperationError(
-                "trash_file_missing",
-                {"operation_id": operation_id},
+            if item["has_txt"] and item["txt_origin"]
+            else ""
+        )
+        moves = [
+            (
+                f"{files_relative}/{item['target_relative_path']}",
+                item["target_relative_path"],
             )
+        ]
         if item["has_txt"] and item["txt_origin"]:
-            txt_relative = item["txt_origin"]
-            txt_origin = files_dir / txt_relative
-            txt_target = root / txt_relative
-            if txt_origin.exists():
-                if txt_target.exists():
+            moves.append(
+                (f"{files_relative}/{item['txt_origin']}", item["txt_origin"])
+            )
+        completed: list[tuple[str, str]] = []
+        try:
+            for source_relative, target_relative in moves:
+                source_exists = safe_root.exists_regular(source_relative)
+                target_exists = safe_root.exists_regular(target_relative)
+                if source_exists and target_exists:
                     raise GalleryFileOperationError(
-                        "restore_target_conflict",
-                        {"target": txt_relative},
+                        "restore_target_conflict", {"target": target_relative}
                     )
-                moves.append((txt_origin, txt_target))
-        for source, target in moves:
-            os.replace(source, target)
-
-    def _commit_restore_index(self, item: dict[str, Any]) -> None:
+                if not source_exists:
+                    if target_exists:
+                        continue
+                    if target_relative == item["target_relative_path"]:
+                        raise GalleryFileOperationError(
+                            "trash_file_missing", {"operation_id": operation_id}
+                        )
+                    continue
+                try:
+                    safe_root.move_regular(source_relative, target_relative)
+                except FileExistsError as error:
+                    raise GalleryFileOperationError(
+                        "restore_target_conflict", {"target": target_relative}
+                    ) from error
+                completed.append((source_relative, target_relative))
+        except Exception:
+            for source_relative, target_relative in reversed(completed):
+                if safe_root.exists_regular(target_relative):
+                    safe_root.move_regular(target_relative, source_relative)
+            raise
+    def _commit_restore_index(
+        self, safe_root: SafeSourceRoot, item: dict[str, Any]
+    ) -> None:
         now = self._clock()
         with self._repo._transaction() as conn:  # noqa: SLF001
             conn.execute(
@@ -664,10 +808,15 @@ class GalleryFileOperations:
                     """
                     INSERT INTO gallery_search_index(
                         asset_id, source_id, file_name, relative_path, txt_content
-                    ) VALUES (?, ?, ?, ?, '')
+                    ) VALUES (?, ?, ?, ?, ?)
                     """,
-                    (item["asset_id"], row["source_id"], row["name"],
-                     row["relative_path"]),
+                    (
+                        item["asset_id"],
+                        row["source_id"],
+                        row["name"],
+                        row["relative_path"],
+                        item.get("_txt_content", ""),
+                    ),
                 )
             self._bump_source_content_version(conn, item["asset_id"], now)
 
@@ -686,17 +835,14 @@ class GalleryFileOperations:
 
     # purge：物理删除回收文件与资产记录（不可撤销）。
 
-    def _apply_purge(self, root: Path, item: dict[str, Any]) -> None:
+    def _apply_purge(self, safe_root: SafeSourceRoot, item: dict[str, Any]) -> None:
         operation_id = item["purge_of"]
-        files_dir = root / trash_files_relative_dir(operation_id)
-        targets = [files_dir / item["origin_relative_path"]]
+        files_relative = str(trash_files_relative_dir(operation_id))
+        targets = [f"{files_relative}/{item['origin_relative_path']}"]
         if item["has_txt"] and item["txt_origin"]:
-            targets.append(files_dir / item["txt_origin"])
+            targets.append(f"{files_relative}/{item['txt_origin']}")
         for target in targets:
-            try:
-                target.unlink()
-            except FileNotFoundError:
-                pass
+            safe_root.unlink_regular(target, missing_ok=True)
 
     def _commit_purge_index(self, item: dict[str, Any]) -> None:
         """清除回收项的资产记录与 FTS 行（永久，不可撤销）。"""
@@ -739,123 +885,167 @@ class GalleryFileOperations:
         source = self._repo.get_source(item["source_id"])
         if source is None:
             raise GalleryFileOperationError("source_not_found")
-        root = Path(source["root_path"])
         if item.get("has_txt") and not item.get("txt_origin"):
             asset = self._repo.get_asset(item["asset_id"])
             item["txt_origin"] = asset["txt_relative_path"] if asset else ""
-        if kind == "rename":
-            # 反向改名。
-            old = root / item["origin_relative_path"]
-            new = root / item["target_relative_path"]
-            if new.exists():
-                os.replace(new, old)
-            if item["has_txt"] and item["txt_target"]:
-                new_txt = root / item["txt_target"]
-                old_txt = root / item["txt_origin"]
-                if new_txt.exists():
-                    os.replace(new_txt, old_txt)
-            # 索引还原。
-            now = self._clock()
-            name = PurePosixPath(item["origin_relative_path"]).name
-            with self._repo._transaction() as conn:  # noqa: SLF001
-                conn.execute(
-                    """
-                    UPDATE gallery_assets SET
-                        relative_path=?, name=?, sort_key=?,
-                        txt_relative_path=?, updated_at=?
-                    WHERE id=?
-                    """,
-                    (
-                        item["origin_relative_path"],
-                        name,
-                        natural_sort_key(name),
-                        item["txt_origin"] if item["has_txt"] else "",
-                        now,
-                        item["asset_id"],
-                    ),
-                )
-                conn.execute(
-                    "DELETE FROM gallery_search_index WHERE asset_id=?",
-                    (item["asset_id"],),
-                )
-                row = conn.execute(
-                    "SELECT source_id, relative_path FROM gallery_assets WHERE id=?",
-                    (item["asset_id"],),
-                ).fetchone()
-                if row is not None:
-                    conn.execute(
-                        """
-                        INSERT INTO gallery_search_index(
-                            asset_id, source_id, file_name, relative_path, txt_content
-                        ) VALUES (?, ?, ?, ?, '')
-                        """,
-                        (item["asset_id"], row["source_id"], name,
-                         item["origin_relative_path"]),
-                    )
-        elif kind == "trash":
-            # 从回收区移回。
-            operation_id = self._find_operation_for_item(item)
-            files_dir = root / trash_files_relative_dir(operation_id)
-            image_origin = files_dir / item["origin_relative_path"]
-            image_target = root / item["origin_relative_path"]
-            if image_origin.exists():
-                _ensure_parent(image_target)
-                os.replace(image_origin, image_target)
-            if item["has_txt"] and item["txt_origin"]:
-                txt_origin = files_dir / item["txt_origin"]
-                txt_target = root / item["txt_origin"]
-                if txt_origin.exists():
-                    os.replace(txt_origin, txt_target)
-            now = self._clock()
-            with self._repo._transaction() as conn:  # noqa: SLF001
-                conn.execute(
-                    """
-                    UPDATE gallery_assets SET
-                        lifecycle_state='active', updated_at=?
-                    WHERE id=?
-                    """,
-                    (now, item["asset_id"]),
-                )
-                row = conn.execute(
-                    "SELECT source_id, name, relative_path FROM gallery_assets WHERE id=?",
-                    (item["asset_id"],),
-                ).fetchone()
-                if row is not None:
-                    conn.execute(
-                        """
-                        INSERT INTO gallery_search_index(
-                            asset_id, source_id, file_name, relative_path, txt_content
-                        ) VALUES (?, ?, ?, ?, '')
-                        """,
-                        (item["asset_id"], row["source_id"], row["name"],
-                         row["relative_path"]),
-                    )
-        elif kind == "restore":
-            # 回滚恢复：把文件再移回回收区。
-            operation_id = item["undo_of"]
-            files_dir = root / trash_files_relative_dir(operation_id)
-            image_target = root / item["target_relative_path"]
-            image_origin = files_dir / item["target_relative_path"]
-            if image_target.exists():
-                _ensure_parent(image_origin)
-                os.replace(image_target, image_origin)
-            if item["has_txt"] and item["txt_origin"]:
-                txt_target = root / item["txt_origin"]
-                txt_origin = files_dir / item["txt_origin"]
-                if txt_target.exists():
-                    os.replace(txt_target, txt_origin)
-            now = self._clock()
-            with self._repo._transaction() as conn:  # noqa: SLF001
-                conn.execute(
-                    "UPDATE gallery_assets SET lifecycle_state='trashed', updated_at=? WHERE id=?",
-                    (now, item["asset_id"]),
-                )
-                conn.execute(
-                    "DELETE FROM gallery_search_index WHERE asset_id=?",
-                    (item["asset_id"],),
-                )
-        # purge 不可回滚（物理删除）；回滚阶段遇到 purge 项视为失败。
+        try:
+            with SafeSourceRoot(source["root_path"]) as safe_root:
+                if kind == "rename":
+                    if item.get("has_txt") and item.get("txt_target"):
+                        item["_txt_content"] = self._read_txt_for_search(
+                            safe_root, item["txt_target"]
+                        )
+                    moves = [
+                        (item["target_relative_path"], item["origin_relative_path"]),
+                    ]
+                    if item.get("has_txt") and item.get("txt_target"):
+                        moves.append((item["txt_target"], item["txt_origin"]))
+                    self._rollback_moves(safe_root, moves)
+                    now = self._clock()
+                    name = PurePosixPath(item["origin_relative_path"]).name
+                    with self._repo._transaction() as conn:  # noqa: SLF001
+                        conn.execute(
+                            """
+                            UPDATE gallery_assets SET
+                                relative_path=?, name=?, sort_key=?,
+                                txt_relative_path=?, updated_at=?
+                            WHERE id=?
+                            """,
+                            (
+                                item["origin_relative_path"],
+                                name,
+                                natural_sort_key(name),
+                                item["txt_origin"] if item["has_txt"] else "",
+                                now,
+                                item["asset_id"],
+                            ),
+                        )
+                        self._upsert_search_index(
+                            conn,
+                            asset_id=item["asset_id"],
+                            file_name=name,
+                            relative_path=item["origin_relative_path"],
+                            txt_content=item.get("_txt_content", ""),
+                        )
+                elif kind == "trash":
+                    operation_id = self._find_operation_for_item(item)
+                    files_relative = str(trash_files_relative_dir(operation_id))
+                    if item.get("has_txt") and item.get("txt_origin"):
+                        item["_txt_content"] = self._read_txt_for_search(
+                            safe_root, f"{files_relative}/{item['txt_origin']}"
+                        )
+                    moves = [
+                        (
+                            f"{files_relative}/{item['origin_relative_path']}",
+                            item["origin_relative_path"],
+                        )
+                    ]
+                    if item.get("has_txt") and item.get("txt_origin"):
+                        moves.append(
+                            (
+                                f"{files_relative}/{item['txt_origin']}",
+                                item["txt_origin"],
+                            )
+                        )
+                    self._rollback_moves(safe_root, moves)
+                    now = self._clock()
+                    with self._repo._transaction() as conn:  # noqa: SLF001
+                        conn.execute(
+                            """
+                            UPDATE gallery_assets SET
+                                lifecycle_state='active', updated_at=?
+                            WHERE id=?
+                            """,
+                            (now, item["asset_id"]),
+                        )
+                        row = conn.execute(
+                            """
+                            SELECT name, relative_path FROM gallery_assets WHERE id=?
+                            """,
+                            (item["asset_id"],),
+                        ).fetchone()
+                        if row is not None:
+                            self._upsert_search_index(
+                                conn,
+                                asset_id=item["asset_id"],
+                                file_name=row["name"],
+                                relative_path=row["relative_path"],
+                                txt_content=item.get("_txt_content", ""),
+                            )
+                elif kind == "restore":
+                    operation_id = item["undo_of"]
+                    files_relative = str(trash_files_relative_dir(operation_id))
+                    moves = [
+                        (
+                            item["target_relative_path"],
+                            f"{files_relative}/{item['target_relative_path']}",
+                        )
+                    ]
+                    if item.get("has_txt") and item.get("txt_origin"):
+                        moves.append(
+                            (
+                                item["txt_origin"],
+                                f"{files_relative}/{item['txt_origin']}",
+                            )
+                        )
+                    self._rollback_moves(safe_root, moves)
+                    now = self._clock()
+                    with self._repo._transaction() as conn:  # noqa: SLF001
+                        conn.execute(
+                            """
+                            UPDATE gallery_assets SET
+                                lifecycle_state='trashed', updated_at=?
+                            WHERE id=?
+                            """,
+                            (now, item["asset_id"]),
+                        )
+                        conn.execute(
+                            "DELETE FROM gallery_search_index WHERE asset_id=?",
+                            (item["asset_id"],),
+                        )
+        except UnsafeSourcePathError as error:
+            raise GalleryFileOperationError(
+                "unsafe_source_path", {"relative_path": error.relative_path}
+            ) from error
 
+    @staticmethod
+    def _rollback_moves(
+        safe_root: SafeSourceRoot, moves: list[tuple[str, str]]
+    ) -> None:
+        for source_relative, target_relative in moves:
+            source_exists = safe_root.exists_regular(source_relative)
+            target_exists = safe_root.exists_regular(target_relative)
+            if source_exists and target_exists:
+                raise GalleryFileOperationError(
+                    "rollback_target_conflict", {"target": target_relative}
+                )
+            if source_exists:
+                safe_root.move_regular(source_relative, target_relative)
+
+    @staticmethod
+    def _upsert_search_index(
+        conn: Any,
+        *,
+        asset_id: str,
+        file_name: str,
+        relative_path: str,
+        txt_content: str,
+    ) -> None:
+        row = conn.execute(
+            "SELECT source_id FROM gallery_assets WHERE id=?", (asset_id,)
+        ).fetchone()
+        conn.execute("DELETE FROM gallery_search_index WHERE asset_id=?", (asset_id,))
+        if row is None:
+            return
+        conn.execute(
+            """
+            INSERT INTO gallery_search_index(
+                asset_id, source_id, file_name, relative_path, txt_content
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (asset_id, row["source_id"], file_name, relative_path, txt_content),
+        )
+        # purge is intentionally irreversible once its physical delete starts.
     # ---- 恢复 ----
 
     def _recover_one(self, operation: dict[str, Any]) -> dict[str, Any]:
@@ -1100,8 +1290,6 @@ def _parent_relative(relative: str) -> str:
     return parent
 
 
-def _ensure_parent(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
 
 
 __all__ = [

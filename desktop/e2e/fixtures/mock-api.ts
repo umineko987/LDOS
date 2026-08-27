@@ -733,11 +733,23 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
     }
     const galleryAnnotationMatch = url.pathname.match(/^\/api\/v1\/gallery\/assets\/([^/]+)\/annotation$/);
     if (galleryAnnotationMatch && request.method() === "GET") {
-      await respond(route, { asset_id: decodeURIComponent(galleryAnnotationMatch[1]), txt_state: "normal", content: "e2e 标注文本", txt_version: 1 });
+      await respond(route, {
+        asset_id: decodeURIComponent(galleryAnnotationMatch[1]),
+        txt_state: "normal",
+        content: "e2e 标注文本",
+        txt_version: 1,
+        disk_version: "e2e-disk-version-1",
+      });
       return;
     }
     if (galleryAnnotationMatch && request.method() === "PUT") {
-      await respond(route, { asset_id: decodeURIComponent(galleryAnnotationMatch[1]), txt_state: "normal", txt_version: 2 });
+      await respond(route, {
+        asset_id: decodeURIComponent(galleryAnnotationMatch[1]),
+        txt_state: "normal",
+        content: "e2e 已保存标注",
+        txt_version: 2,
+        disk_version: "e2e-disk-version-2",
+      });
       return;
     }
     if (url.pathname === "/api/v1/gallery/trash" && request.method() === "GET") {
