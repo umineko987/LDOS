@@ -11,6 +11,7 @@ import type { PollingService } from "../src/core/polling/service";
 import AppWindow from "../src/shell/AppWindow.svelte";
 import exportControllerSource from "../src/apps/export/controller.ts?raw";
 import exportModelSource from "../src/apps/export/model.ts?raw";
+import exportServiceSource from "../src/apps/export/service.ts?raw";
 import exportSource from "../src/apps/export/Export.svelte?raw";
 import exportStateSource from "../src/apps/export/state.ts?raw";
 import galleryControllerSource from "../src/apps/gallery/controller.ts?raw";
@@ -42,7 +43,7 @@ function props(appId: "gallery" | "export") {
   };
 }
 
-describe("Svelte Gallery and Export preview integration", () => {
+describe("Svelte Gallery and Export live integration", () => {
   it("renders Gallery's live browse empty state without fake media", () => {
     const body = render(Gallery, { props: { api } }).body;
     for (const marker of [
@@ -53,38 +54,39 @@ describe("Svelte Gallery and Export preview integration", () => {
       "来源与目录",
       "选择一个来源开始浏览",
       "左侧选择下载批次或导入目录",
+      "导入目录…",
     ]) expect(body).toContain(marker);
     expect(body).not.toMatch(/<img|role="progressbar"|data:image|blob:/);
   });
 
-  it("renders Export's disabled three-column structure without fake jobs or progress", () => {
-    const body = render(Export).body;
+  it("renders Export's live empty state without fake jobs or progress", () => {
+    const body = render(Export, { props: { api, polling } }).body;
     for (const marker of [
       "data-export-app",
       'data-domain-owner="export"',
-      'data-preview-availability="unavailable"',
-      "01 · 来源",
-      "02 · 配置",
-      "03 · 进度与结果",
-      "Manifest",
-      "COCO",
-      "WebDataset",
-      "开始导出",
-      "暂无进度事实",
-      "不会自行启动导出",
-      'aria-label="数据集导出三栏预览工作区；普通窗口可横向滚动"',
+      'data-preview-availability="live"',
+      "确定性导出工作区",
+      "导出任务",
+      "暂无导出任务",
+      "新建导出",
     ]) expect(body).toContain(marker);
-    expect(body).toContain("disabled");
+    // 权威进度只能来自后端计数；不虚构进度条或百分比。
     expect(body).not.toMatch(/role="progressbar"|\b[0-9]{1,3}%\b|data:image|blob:/);
   });
 
-  it("routes both preview definitions without a placeholder or generic app fallback", () => {
+  it("renders Export's unavailable fallback without an api client", () => {
+    const body = render(Export).body;
+    expect(body).toContain("后端连接不可用");
+  });
+
+  it("routes both live definitions without a placeholder or generic app fallback", () => {
     expect(getApplicationDefinition("gallery").availability).toBe("ready");
-    expect(getApplicationDefinition("export").availability).toBe("preview");
+    expect(getApplicationDefinition("export").availability).toBe("ready");
     expect(render(AppWindow, { props: props("gallery") }).body).toContain("data-gallery-app");
     expect(render(AppWindow, { props: props("export") }).body).toContain("data-export-app");
     expect(appWindowSource).toContain('record.appId === "gallery"');
     expect(appWindowSource).toContain('record.appId === "export"');
+    expect(appWindowSource).toContain("<Export {api} {polling}");
     expect(appWindowSource).not.toContain("ApplicationPlaceholder");
   });
 
@@ -92,13 +94,15 @@ describe("Svelte Gallery and Export preview integration", () => {
     expect(gallerySource.match(/createGalleryStore\s*\(/g)).toHaveLength(1);
     expect(exportSource.match(/createExportStore\s*\(/g)).toHaveLength(1);
     expect(galleryModelSource).toContain("galleryVisibleRange");
-    expect(exportModelSource).toContain('phase: "unavailable"');
-    const exportOnly = [exportSource, exportControllerSource, exportModelSource, exportStateSource].join("\n");
-    expect(exportOnly).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|\/api\/|\bsetInterval\s*\(|\bsetTimeout\s*\(|localStorage|sessionStorage|indexedDB|console\.|innerHTML|URL\.createObjectURL|new Blob/);
-    // Gallery 已接入真实后端：传输只经过 service 的 api 客户端，组件与状态层保持零 IO。
+    expect(exportModelSource).toContain("EXPORT_TERMINAL_STATES");
+    // Gallery 与 Export 均已接入真实后端：传输只经过各自 service 的 api 客户端，组件、控制器与状态层保持零 IO。
+    const exportSurfaces = [exportSource, exportControllerSource, exportModelSource, exportStateSource].join("\n");
+    expect(exportSurfaces).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|\/api\/v1\/|\bsetInterval\s*\(|\bsetTimeout\s*\(|localStorage|sessionStorage|indexedDB|console\.|innerHTML|URL\.createObjectURL|new Blob/);
     const gallerySurfaces = [gallerySource, galleryControllerSource, galleryModelSource, galleryStateSource].join("\n");
     expect(gallerySurfaces).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|\bsetInterval\s*\(|localStorage|sessionStorage|indexedDB|console\.|innerHTML|URL\.createObjectURL|new Blob/);
-    // Export 预览仍保持窄窗横向滚动；Gallery 已是响应式正式应用，不再钉最小宽度。
+    // 两个 service 都收敛传输：显式 bounded view 与端点常量。
+    expect(exportServiceSource).toContain("view=desktop");
+    // 窄窗横向滚动约定保留在 Export；Gallery 已是响应式正式应用，不再钉最小宽度。
     for (const css of [galleryCss, exportCss]) {
       expect(css).toContain("@media (forced-colors: active)");
       expect(css).toContain("@media (prefers-contrast: more)");

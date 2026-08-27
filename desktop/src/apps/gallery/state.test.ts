@@ -122,6 +122,32 @@ describe("gallery browse store", () => {
     expect(applied.path.map((segment) => segment.name)).toEqual([]);
     store.destroy();
   });
+  it("re-applying the same directory (search refresh) keeps a duplicate-free path", () => {
+    const store = createGalleryStore();
+    store.setSources([source]);
+    store.openSource("source-1", "dir-root");
+    store.applyDirectoryPage(page());
+
+    // 进入子目录：父级（根）不在路径中（根路径为空），路径退化为 [sub]；
+    // 再次应用同一子目录页（搜索刷新）不得重复压栈，否则 Svelte each 键重复崩溃。
+    expect(
+      store.applyDirectoryPage({
+        ...page(),
+        directory: childDirectory,
+        directories: [],
+        assets: [asset("asset-3", "3.jpg", { directory_id: "dir-1", relative_path: "sub/3.jpg" })],
+      }),
+    ).toBe(true);
+    const entered = store.getState();
+    expect(entered.path.map((segment) => segment.directory_id)).toEqual(["dir-1"]);
+
+    expect(store.applyDirectoryPage({ ...page(), directory: childDirectory, directories: [] })).toBe(true);
+    const refreshed = store.getState();
+    expect(refreshed.path.map((segment) => segment.directory_id)).toEqual(["dir-1"]);
+    expect(new Set(refreshed.path.map((segment) => segment.directory_id)).size).toBe(refreshed.path.length);
+    store.destroy();
+  });
+
 
   it("appends further pages without losing earlier rows", () => {
     const store = createGalleryStore();

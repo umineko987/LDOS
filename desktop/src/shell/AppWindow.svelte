@@ -126,9 +126,9 @@
     {:else if record.appId === "personalization"}
       <Personalization {persistence} registerUnsavedChanges={shellUnsaved ? (reader: () => boolean, discard?: () => void) => shellUnsaved("personalization", reader, discard) : undefined} />
     {:else if record.appId === "gallery"}
-      <Gallery {api} />
+      <Gallery {api} onNavigate={(appId: string) => onNavigate(appId as ApplicationId)} />
     {:else if record.appId === "export"}
-      <Export />
+      <Export {api} {polling} onNavigate={(appId) => onNavigate(appId)} />
     {/if}
   </div>
 

@@ -218,6 +218,15 @@
   font-weight: 700;
 }
 
+.gallery-toolbar-controls select {
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--imageweave-border-button);
+  border-radius: var(--imageweave-radius-control);
+  color: var(--imageweave-text-heading);
+  background: var(--imageweave-fallback-elevated-solid);
+}
+
 .gallery-viewtoggle { display: flex; gap: 4px; }
 .gallery-viewtoggle button[aria-pressed="true"] {
   border-color: var(--imageweave-border-default);
@@ -1137,4 +1146,33 @@
   .gallery-trash-panel {
     transition: none;
   }
+}
+
+/* ---- G6：来源列导入入口与导出入口 ---- */
+.gallery-import {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 4px 2px;
+  border-top: 1px solid var(--imageweave-border-weak);
+  margin-top: 8px;
+}
+
+.gallery-import button {
+  font: inherit;
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-weak);
+  border: 1px solid var(--imageweave-border-default);
+  border-radius: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.gallery-import button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.gallery-toolbar-export {
+  color: var(--imageweave-accent-highlight);
 }

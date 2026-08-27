@@ -26,6 +26,7 @@ export interface GalleryController {
   activate(): void;
   deactivate(): void;
   refreshSources(): Promise<boolean>;
+  importDirectory(rootPath: string): Promise<boolean>;
   openSource(sourceId: string): Promise<boolean>;
   openDirectory(directoryId: string): Promise<boolean>;
   navigateToBreadcrumb(index: number): Promise<boolean>;
@@ -167,6 +168,16 @@ export function createGalleryController({ store, service }: {
     },
     refreshSources() {
       if (!active || destroyed) return Promise.resolve(false);
+      return loadSources();
+    },
+    async importDirectory(rootPath) {
+      if (!active || destroyed) return false;
+      try {
+        await service.importSource(rootPath);
+      } catch (error) {
+        store.patch({ sourcesErrorCode: error instanceof Error ? error.message : "import_failed" });
+        return false;
+      }
       return loadSources();
     },
     async openSource(sourceId) {

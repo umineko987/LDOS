@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import crawlServiceSource from "../src/apps/crawl/service.ts?raw";
 import diagnosticsServiceSource from "../src/apps/diagnostics/service.ts?raw";
+import exportServiceSource from "../src/apps/export/service.ts?raw";
 import exportSource from "../src/apps/export/Export.svelte?raw";
 import galleryServiceSource from "../src/apps/gallery/service.ts?raw";
 import gallerySource from "../src/apps/gallery/Gallery.svelte?raw";
@@ -64,7 +65,8 @@ describe("desktop API response-budget contract", () => {
   });
   it("fails when an application adds an unclassified transport call", () => {
     const inventory = [
-      ["gallery", galleryServiceSource, 11],
+      ["gallery", galleryServiceSource, 12],
+      ["export", exportServiceSource, 8],
       ["crawl", crawlServiceSource, 3],
       ["tasks", tasksServiceSource, 5],
       ["review", reviewServiceSource, 4],
@@ -81,16 +83,17 @@ describe("desktop API response-budget contract", () => {
     expect(count(tasksServiceSource, /view=(?:desktop|tasks)/g)).toBe(5);
     expect(count(reviewServiceSource, /view=desktop/g)).toBe(4);
     expect(count(proxyServiceSource, /view=desktop/g)).toBe(11);
+    expect(count(exportServiceSource, /view=desktop/g)).toBe(4);
   });
 
-  it("keeps Personalization and Export local-only", () => {
+  it("keeps Personalization local-only and view-layer API-free", () => {
     const localOnlySources = [
       personalizationServiceSource,
       personalizationSource,
-      exportSource,
     ];
     for (const source of localOnlySources) expect(source).not.toContain("/api/v1/");
-    // Gallery 组件不内联 API 路径；所有传输与 URL 构建都收敛在 gallery/service.ts。
+    // Gallery 与 Export 组件不内联 API 路径；所有传输与 URL 构建都收敛在各自 service.ts。
     expect(gallerySource).not.toContain("/api/v1/");
+    expect(exportSource).not.toContain("/api/v1/");
   });
 });

@@ -283,21 +283,38 @@ test.describe("可用应用关键旅程", () => {
 
     await launchApp(page, "gallery");
     const gallery = appWindow(page, "gallery");
-    const galleryNavigation = gallery.getByRole("navigation", { name: "图片库分区" });
-    await galleryNavigation.getByRole("button", { name: "收藏", exact: true }).click();
-    await expect(galleryNavigation.getByRole("button", { name: "收藏", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await gallery.getByLabel("安全搜索预览").fill("fixture");
-    await gallery.getByRole("button", { name: "列表" }).click();
-    await expect(gallery.getByRole("button", { name: "列表" })).toHaveAttribute("aria-pressed", "true");
-    await gallery.getByRole("button", { name: "收起检查器" }).click();
-    await expect(gallery.locator("[data-inspector-open=\"false\"]")).toBeVisible();
-    await expect(gallery.getByRole("button", { name: "打开 Quick Look" })).toBeDisabled();
+    await expect(gallery.locator("[data-gallery-app]")).toHaveAttribute("data-preview-availability", "live");
+    await gallery.getByRole("button", { name: "E2E 导入目录" }).click();
+    await expect(gallery.locator("[data-gallery-asset=\"gal-asset-01\"]")).toBeVisible();
+    // 虚拟网格在 ResizeObserver 首次回调前只渲染首行；toHaveCount 自动重试等待窗口稳定。
+    await expect(gallery.locator("[data-gallery-asset]")).toHaveCount(4);
+    const assetIds = await gallery.locator("[data-gallery-asset]").evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.galleryAsset));
+    expect(assetIds).toEqual(["gal-asset-01", "gal-asset-02", "gal-asset-03", "gal-asset-04"]);
+    // 目录树导航：进入 subdir 后只显示其直属图片。
+    await gallery.getByRole("button", { name: "subdir" }).click();
+    await expect(gallery.locator("[data-gallery-asset=\"gal-asset-05\"]")).toBeVisible();
+    await expect(gallery.locator("[data-gallery-asset]")).toHaveCount(2);
+    // 搜索限定当前目录（§2.5）。
+    await gallery.locator("#gallery-search-input").fill("image-05");
+    await gallery.getByRole("button", { name: "搜索", exact: true }).click();
+    await expect(gallery.locator("[data-gallery-asset]")).toHaveCount(1);
+    await gallery.getByRole("button", { name: "清除", exact: true }).click();
+
+    // 沉浸式查看器：双击打开，TXT 面板显示后端标注原文。
+    await gallery.locator("[data-gallery-asset=\"gal-asset-05\"]").dblclick();
+    await expect(gallery.getByRole("dialog", { name: /沉浸式查看器：image-05\.jpg/ })).toBeVisible();
+    await expect(gallery.getByText("e2e 标注文本")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(gallery.getByRole("dialog", { name: /沉浸式查看器：image-05\.jpg/ })).toBeHidden();
 
     await launchApp(page, "export");
     const exportWindow = appWindow(page, "export");
-    await expect(exportWindow.locator("[data-export-app]")).toHaveAttribute("data-preview-availability", "unavailable");
-    await expect(exportWindow.getByRole("button", { name: "开始导出" })).toBeDisabled();
-    await expect(exportWindow.getByRole("status").filter({ hasText: "数据集导出后端能力尚未接入" })).toBeVisible();
+    await expect(exportWindow.locator("[data-export-app]")).toHaveAttribute("data-preview-availability", "live");
+    // 任务列表来自真实后端投影；选择后展示权威计数与来源。
+    await expect(exportWindow.locator(".export-job-id").first()).toHaveText("export-job-0…");
+    await exportWindow.locator(".export-job-list button").first().click();
+    await expect(exportWindow.locator(".export-job-counts").first()).toHaveText("0/4 样本");
+    await expect(exportWindow.getByText("e2e-import")).toBeVisible();
   });
 });
 

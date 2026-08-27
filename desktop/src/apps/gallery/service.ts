@@ -4,6 +4,7 @@ import {
   sanitizeGalleryDirectoryPage,
   sanitizeGalleryFileOperationResult,
   sanitizeGallerySourcePage,
+  sanitizeGallerySourceSummary,
   sanitizeGalleryTrashPage,
   validateGalleryQuery,
   type GalleryAnnotation,
@@ -19,6 +20,7 @@ export const GALLERY_PAGE_LIMITS = [30, 60, 120] as const;
 
 export const GALLERY_ENDPOINTS = Object.freeze({
   sources: "/api/v1/gallery/sources",
+  imports: "/api/v1/gallery/imports",
   directoryEntries: "/api/v1/gallery/directories",
   fileOperations: "/api/v1/gallery/file-operations",
   trash: "/api/v1/gallery/trash",
@@ -35,6 +37,7 @@ export interface GalleryDirectoryRequest {
 
 export interface GalleryService {
   listSources(signal: AbortSignal): Promise<readonly GallerySourceSummary[]>;
+  importSource(rootPath: string, displayName?: string | null): Promise<GallerySourceSummary>;
   listDirectoryEntries(
     request: GalleryDirectoryRequest,
     signal: AbortSignal,
@@ -90,6 +93,21 @@ export function createGalleryService(api: ApiClient): GalleryService {
         await api.get(`${GALLERY_ENDPOINTS.sources}?view=desktop`, { signal }),
       );
       return page.sources;
+    },
+    async importSource(rootPath, displayName) {
+      if (typeof rootPath !== "string" || rootPath.trim().length === 0 || rootPath.length > 4096) {
+        throw new TypeError("invalid_import_root_path");
+      }
+      const body: Record<string, string> = { root_path: rootPath.trim() };
+      if (displayName !== undefined && displayName !== null) {
+        if (typeof displayName !== "string" || displayName.length > 200) {
+          throw new TypeError("invalid_import_display_name");
+        }
+        if (displayName.length > 0) body.display_name = displayName;
+      }
+      return sanitizeGallerySourceSummary(
+        await api.post(GALLERY_ENDPOINTS.imports, body),
+      );
     },
     async listDirectoryEntries(request, signal) {
       return sanitizeGalleryDirectoryPage(await api.get(directoryEntriesPath(request), { signal }));

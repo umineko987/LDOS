@@ -411,6 +411,140 @@ function readiness(): Record<string, unknown> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Gallery（G2+ 正式图库）与 Dataset Export（G6 正式导出）固定数据。
+// 形状必须与 desktop 模型 sanitizer 的键白名单完全一致（strictRecord 会拒绝未知键）。
+// ---------------------------------------------------------------------------
+
+const GALLERY_SOURCE_ID = "gal-src-import";
+const GALLERY_ROOT_DIR = "gal-dir-root";
+const GALLERY_SUB_DIR = "gal-dir-sub";
+
+function gallerySource(): Record<string, unknown> {
+  return {
+    source_id: GALLERY_SOURCE_ID,
+    root_directory_id: GALLERY_ROOT_DIR,
+    kind: "imported",
+    batch_id: null,
+    display_name: "E2E 导入目录",
+    availability: "available",
+    asset_count: 6,
+    crawl_complete: true,
+    dedup_required: false,
+    dedup_state: "not_required",
+    content_version: 3,
+    dedup_applied_version: 0,
+    annotation_version: 1,
+    indexed_version: 3,
+    last_scanned_at: 1_700_000_300,
+    created_at: 1_700_000_100,
+    updated_at: 1_700_000_300,
+  };
+}
+
+function galleryDirectory(directoryId: string, name: string, relativePath: string, parentId: string | null, directAssets: number, recursiveAssets: number, directDirectories: number, coverIds: readonly string[] = []): Record<string, unknown> {
+  return {
+    directory_id: directoryId,
+    source_id: GALLERY_SOURCE_ID,
+    parent_id: parentId,
+    relative_path: relativePath,
+    name,
+    direct_directory_count: directDirectories,
+    direct_asset_count: directAssets,
+    recursive_asset_count: recursiveAssets,
+    cover_asset_ids: coverIds,
+    indexed_version: 3,
+  };
+}
+
+function galleryAsset(index: number): Record<string, unknown> {
+  const padded = String(index + 1).padStart(2, "0");
+  return {
+    asset_id: `gal-asset-${padded}`,
+    source_id: GALLERY_SOURCE_ID,
+    directory_id: GALLERY_ROOT_DIR,
+    relative_path: `image-${padded}.jpg`,
+    name: `image-${padded}.jpg`,
+    extension: ".jpg",
+    size_bytes: 48_000 + index * 100,
+    modified_ns: 1_700_000_000_000_000_000 + index * 1_000_000_000,
+    content_sha256: "e".repeat(64),
+    content_version: 1,
+    format: "jpeg",
+    width: 1200,
+    height: 800,
+    read_state: "ok",
+    error_code: "",
+    txt_relative_path: `image-${padded}.txt`,
+    txt_size_bytes: 64,
+    txt_modified_ns: 1_700_000_000_000_000_000 + index * 1_000_000_000,
+    txt_version: 1,
+    txt_state: "normal",
+    dedup_visibility: "candidate",
+    lifecycle_state: "active",
+    updated_at: 1_700_000_200,
+  };
+}
+
+function galleryDirectoryPage(directoryId: string): Record<string, unknown> {
+  const isRoot = directoryId === GALLERY_ROOT_DIR;
+  return {
+    directory: isRoot
+      ? galleryDirectory(GALLERY_ROOT_DIR, "E2E 导入目录", "", null, 4, 6, 1, ["gal-asset-01", "gal-asset-02", "gal-asset-03", "gal-asset-04"])
+      : galleryDirectory(GALLERY_SUB_DIR, "subdir", "subdir", GALLERY_ROOT_DIR, 2, 2, 0, ["gal-asset-05", "gal-asset-06"]),
+    directories: isRoot ? [galleryDirectory(GALLERY_SUB_DIR, "subdir", "subdir", GALLERY_ROOT_DIR, 2, 2, 0, ["gal-asset-05", "gal-asset-06"])] : [],
+    assets: isRoot
+      ? [galleryAsset(0), galleryAsset(1), galleryAsset(2), galleryAsset(3)]
+      : [galleryAsset(4), galleryAsset(5)],
+    directory_cursor: null,
+    asset_cursor: null,
+    include_descendants: false,
+    limit: 200,
+  };
+}
+
+function galleryTrashPage(): Record<string, unknown> {
+  return {
+    operations: [],
+    next_cursor: null,
+  };
+}
+
+const EXPORT_JOB_ID = "export-job-01";
+
+function exportJob(): Record<string, unknown> {
+  return {
+    export_id: EXPORT_JOB_ID,
+    status: "ready",
+    sample_count: 4,
+    staged_sample_count: 0,
+    committed_sample_count: 0,
+    image_bytes: 192_000,
+    txt_bytes: 256,
+    error_class: null,
+    created_at: 1_700_000_100,
+    updated_at: 1_700_000_200,
+    started_at: null,
+    finished_at: null,
+  };
+}
+
+function exportJobDetail(): Record<string, unknown> {
+  return {
+    ...exportJob(),
+    sources: [
+      {
+        source_id: GALLERY_SOURCE_ID,
+        directory_id: GALLERY_ROOT_DIR,
+        include_descendants: true,
+        output_alias: "e2e-import",
+      },
+    ],
+    blockers: [],
+  };
+}
+
+
 function requestBody(request: Request): unknown {
   const body = request.postData();
   if (!body) return null;
@@ -576,6 +710,79 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       await respond(route, diagnosticsScheduler());
       return;
     }
+    // ---- Gallery（G2+ 正式图库）----
+    if (url.pathname === "/api/v1/gallery/sources" && request.method() === "GET") {
+      await respond(route, { sources: [gallerySource()] });
+      return;
+    }
+    const galleryEntriesMatch = url.pathname.match(/^\/api\/v1\/gallery\/directories\/([^/]+)\/entries$/);
+    if (galleryEntriesMatch && request.method() === "GET") {
+      const directoryId = decodeURIComponent(galleryEntriesMatch[1]);
+      const query = (url.searchParams.get("query") ?? "").trim().toLowerCase();
+      const page = galleryDirectoryPage(directoryId);
+      if (query) {
+        page.assets = (page.assets as Record<string, unknown>[]).filter((asset) => String(asset.name).toLowerCase().includes(query));
+      }
+      await respond(route, page);
+      return;
+    }
+    const galleryAssetMatch = url.pathname.match(/^\/api\/v1\/gallery\/assets\/([^/]+)\/(thumbnail|content)$/);
+    if (galleryAssetMatch && request.method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "image/svg+xml", body: svgImage(decodeURIComponent(galleryAssetMatch[1])) });
+      return;
+    }
+    const galleryAnnotationMatch = url.pathname.match(/^\/api\/v1\/gallery\/assets\/([^/]+)\/annotation$/);
+    if (galleryAnnotationMatch && request.method() === "GET") {
+      await respond(route, { asset_id: decodeURIComponent(galleryAnnotationMatch[1]), txt_state: "normal", content: "e2e 标注文本", txt_version: 1 });
+      return;
+    }
+    if (galleryAnnotationMatch && request.method() === "PUT") {
+      await respond(route, { asset_id: decodeURIComponent(galleryAnnotationMatch[1]), txt_state: "normal", txt_version: 2 });
+      return;
+    }
+    if (url.pathname === "/api/v1/gallery/trash" && request.method() === "GET") {
+      await respond(route, galleryTrashPage());
+      return;
+    }
+    if (url.pathname === "/api/v1/gallery/trash" && request.method() === "DELETE") {
+      await respond(route, { purged_operations: 0 });
+      return;
+    }
+    const galleryFileOperationMatch = url.pathname.match(/^\/api\/v1\/gallery\/file-operations(\/.*)?$/);
+    if (galleryFileOperationMatch) {
+      await respond(route, { operation_id: "gal-op-fixture", status: "committed", item_count: 0, error_count: 0 });
+      return;
+    }
+    if (url.pathname === "/api/v1/gallery/imports" && request.method() === "POST") {
+      await respond(route, gallerySource(), 201);
+      return;
+    }
+
+    // ---- Dataset Export（G6 正式导出）----
+    if (url.pathname === "/api/v1/dataset-exports" && request.method() === "GET") {
+      await respond(route, { jobs: [exportJob()] });
+      return;
+    }
+    if (url.pathname === "/api/v1/dataset-exports" && request.method() === "POST") {
+      await respond(route, { ...exportJobDetail(), status: "blocked", blockers: [{ code: "txt_missing", count: 1 }] }, 201);
+      return;
+    }
+    const exportBlockersMatch = url.pathname.match(/^\/api\/v1\/dataset-exports\/([^/]+)\/blockers$/);
+    if (exportBlockersMatch && request.method() === "GET") {
+      await respond(route, { blockers: [] });
+      return;
+    }
+    const exportActionMatch = url.pathname.match(/^\/api\/v1\/dataset-exports\/([^/]+)\/(start|pause|resume|discard)$/);
+    if (exportActionMatch && request.method() === "POST") {
+      await respond(route, exportJob());
+      return;
+    }
+    const exportDetailMatch = url.pathname.match(/^\/api\/v1\/dataset-exports\/([^/]+)$/);
+    if (exportDetailMatch && request.method() === "GET") {
+      await respond(route, exportJobDetail());
+      return;
+    }
+
 
     unhandled.push(Object.freeze({ method: request.method(), path, body: requestBody(request) }));
     await respond(route, { error: { code: "missing_e2e_mock", message: `No E2E mock for ${request.method()} ${path}`, request_id: "e2e-request" } }, 501);

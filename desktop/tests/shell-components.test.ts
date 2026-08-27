@@ -50,7 +50,7 @@ describe("five-layer Svelte OS shell", () => {
     expect(body).toContain('role="dialog" aria-modal="true"');
     expect(body).toContain("data-application-center-backdrop");
     expect(occurrences(body, "data-application-center-app=")).toBe(10);
-    expect(body).toContain('data-availability="preview"');
+    expect(body).toContain('data-availability="ready"');
   });
 
   it("does not render minimized or closed windows into the DOM", async () => {

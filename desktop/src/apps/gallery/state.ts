@@ -553,6 +553,11 @@ function buildPathFromDirectory(
     directory_id: directory.directory_id,
     name: directory.name,
   };
+  // 同一目录重复应用（搜索刷新、分页重载）时截断到已有位置，避免路径段重复。
+  const existingIndex = current.findIndex((item) => item.directory_id === directory.directory_id);
+  if (existingIndex >= 0) {
+    return Object.freeze(current.slice(0, existingIndex + 1));
+  }
   const parentIndex = current.findIndex((item) => item.directory_id === directory.parent_id);
   const base = parentIndex >= 0 ? current.slice(0, parentIndex + 1) : current;
   return Object.freeze([...base, segment]);

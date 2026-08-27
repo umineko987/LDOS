@@ -123,8 +123,8 @@ const definitions = [
     group: "workflow",
     order: 4,
     description: "配置来源并导出审核后的数据集。",
-    availability: "preview",
-    dockOrder: null,
+    availability: "ready",
+    dockOrder: 4,
     defaultWindow: { rect: DEFAULT_WINDOW_RECT, state: "normal" },
   },
 ] as const;

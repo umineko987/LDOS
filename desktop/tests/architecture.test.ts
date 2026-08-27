@@ -141,7 +141,8 @@ describe("desktop architecture boundaries", () => {
     expect(galleryModel).toContain('readonly phase: "unavailable"');
     expect(exportApp.match(/createExportStore\s*\(/g)).toHaveLength(1);
     expect(exportState.match(/export function createExportStore\s*\(/g)).toHaveLength(1);
-    expect(exportModel).toContain('readonly phase: "unavailable"');
+    expect(exportModel).toContain("EXPORT_TERMINAL_STATES");
+    expect(exportModel).toContain("sanitizeExportJobSummary");
     expect(window).not.toContain("ApplicationPlaceholder");
     expect(window).toContain('record.appId === "crawl"');
     expect(window).toContain('record.appId === "tasks"');

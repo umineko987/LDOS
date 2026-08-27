@@ -216,3 +216,20 @@
 - 合同修订：`test_gallery_export_api_contract.py` 的 view 检查接受单值 Literal 在 OpenAPI 3.1 下的 `const: "desktop"` 表示（比 enum 更严格，同为有界投影语义）；`test_app_routing_contract.py` 路由清单补 8 条 dataset-exports 记录 + domain 所有权映射。
 - 测试：`tests/test_dataset_export_manager.py`（10 tests：缺 TXT/空白 TXT/坏编码阻断、目标冲突阻断、完整导出流+独立 manifest 校验+暂存清理、合并导出不覆盖+双 manifest、状态机守卫 404/409、丢弃、列表/详情投影无绝对路径、blockers 端点）。
 - 阻塞：无。
+
+### [G6] feat(desktop): 数据集导出桌面工作区与图库互通（G6 收尾）
+
+- 状态：✅ 后端 708 全绿；桌面 387/387 全绿（G0 导出目标合同全部转绿）；svelte-check 0 错误；`npm run build` 通过；Playwright e2e 42/42（视觉基线 11/11，gallery/export 基线随真实应用重录）
+- 模型（`desktop/src/apps/export/model.ts`）：12 态导出状态机镜像（`EXPORT_TERMINAL_STATES` 等常量）、8 类 blocker 码、严格 sanitizer 白名单（job 摘要含 `export_id/staged_sample_count/committed_sample_count/error_class/started_at/finished_at`，detail 摘要先剥离 sources/blockers 扩展键再委托摘要 sanitizer）；`validateExportAlias`（≤64 字符、非空、字符白名单）。
+- 服务（`service.ts` 新建）：`EXPORT_ENDPOINTS` 集中 8 条路由；create 兼容 ready（直接返回 job）与 blocked（`{job, blockers}`）双形态；list/detail/blockers 请求 `view=desktop` 有界投影。
+- 状态（`state.ts` 重写）：任务分页列表 / 详情 / 操作三切片冻结状态 + 逐切片相等函数；Svelte store subscribe 协议；操作态 kinds start/pause/resume/discard。
+- 控制器（`controller.ts` 重写）：列表加载、详情、start/pause/resume/discard、轮询非终态任务——使用核心 `PollingService`（键 `exports.active`，1200ms）而非裸 setInterval（架构合同）；abort signal 贯穿。
+- 视图（`Export.svelte` 重写）：左侧任务列表（权威计数 `staged/committed`，无虚构进度条）+ 右侧详情（冻结样本/已暂存/已提交/体积/时间、来源快照含"包含子目录"与"在图库中查看来源"）；新建导出向导：来源选择（复用 gallery service 列来源，跨应用服务复用模式）→ 目录浏览（进入目录/上一级/子目录开关）→ 别名（≤64）→ 目标目录（平台目录选择 adapter `export_target` 用途）→ 创建并预检；blocked 任务展示 blocker 聚合与清单位置。
+- 互通：`desktop/src/apps/export/intent.ts` 跨应用意图模块（`setPendingExportSource`/`consumePendingExportSource`）；Gallery 工具栏"导出此目录…"与目录树"导出整个来源"携带 sourceId+directoryId+includeDescendants 跳转 Export；Export"在图库中查看来源"经 `onNavigate("gallery")` 回跳；AppWindow 为 Gallery/Export 传递 `onNavigate`。
+- Gallery 侧（G6 补充）：来源栏"导入目录…"按钮（平台 `gallery_import` 目录选择 → `POST /gallery/imports` 注册来源并自动扫描）。
+- 后端对齐（b42da08）：create 接受 `directory_id: null` → 解析来源根目录（`get_root_directory`）；blockers 聚合为 `{code, count}`；任务投影 `export_id` + 暂存/提交权威计数；detail 附 blockers。
+- 应用注册：`definitions.ts` 导出转正为 ready 常驻应用（无 preview 应用残留）；dock/应用中心/最小视口合同同步更新。
+- 测试重写：export model/state/controller 测试（21 tests）+ p4 目标合同转绿 + preview-apps-components 重写为 live 集成合同 + api-response-budget 计入 export service（8 分类传输调用）+ 架构合同（PollingService、`phase: "unavailable"` 模型字段）。
+- e2e：mock-api 补 gallery（sources/entries/search/thumbnail/annotation/imports）与 dataset-exports 全套路由 fixture；apps.spec 图库浏览/子目录/搜索/沉浸式查看器 + 导出任务详情旅程；prepareRichState 增 gallery/export 分支；gallery/export 视觉基线重录（先核对 DOM 快照确认真实应用状态）。
+- 缺陷修复（e2e 捕获）：`buildPathFromDirectory` 同一目录重复应用（搜索刷新/分页重载）时路径段重复压栈 → Svelte each 键重复崩溃；修复为截断到已有位置，`state.test.ts` 增回归测试。
+- 阻塞：无。G0–G6 全部阶段完成。

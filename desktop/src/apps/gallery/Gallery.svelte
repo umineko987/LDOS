@@ -2,6 +2,8 @@
   import { onMount, untrack } from "svelte";
 
   import type { ApiClient } from "../../core/api/client";
+  import { createPlatformAdapter } from "../../core/platform/adapter";
+  import { setPendingExportSource } from "../export/intent";
   import { createGalleryController } from "./controller";
   import {
     GALLERY_AVAILABILITY_LABELS,
@@ -19,7 +21,7 @@
   import Viewer from "./Viewer.svelte";
   import "./gallery.css";
 
-  let { api }: { api: ApiClient } = $props();
+  let { api, onNavigate }: { api: ApiClient; onNavigate?: (appId: string) => void } = $props();
 
   const runtime = untrack(() => {
     const store = createGalleryStore();
@@ -197,6 +199,45 @@
     return parts.join(" · ");
   }
 
+  const platform = untrack(() => createPlatformAdapter());
+  let importPhase: "idle" | "picking" | "importing" = $state("idle");
+  let importError: string | null = $state(null);
+
+  const canImportDirectories = $derived(platform.capabilities.selectDirectory);
+
+  async function importDirectoryFlow(): Promise<void> {
+    if (importPhase !== "idle" || !platform.capabilities.selectDirectory) return;
+    importError = null;
+    importPhase = "picking";
+    try {
+      const rootPath = await platform.selectDirectory("gallery_import");
+      if (rootPath === null) {
+        importPhase = "idle";
+        return;
+      }
+      importPhase = "importing";
+      await controller.importDirectory(rootPath);
+    } catch (error) {
+      importError = error instanceof Error ? error.message : "import_failed";
+    } finally {
+      importPhase = "idle";
+    }
+  }
+
+  function exportCurrentDirectory(): void {
+    if (snapshot.activeSourceId === null) return;
+    const source = snapshot.sources.find((item) => item.source_id === snapshot.activeSourceId);
+    if (source === undefined) return;
+    setPendingExportSource({
+      sourceId: source.source_id,
+      sourceLabel: source.display_name,
+      directoryId: snapshot.searchScope === "source" ? null : snapshot.currentDirectory?.directory_id ?? null,
+      includeDescendants: snapshot.includeDescendants,
+      suggestedAlias: source.display_name,
+    });
+    onNavigate?.("export");
+  }
+
   onMount(() => {
     controller.activate();
     return () => controller.destroy();
@@ -262,6 +303,17 @@
           {/each}
         </ul>
       {/if}
+      <div class="gallery-import">
+        <button type="button" onclick={() => void importDirectoryFlow()} disabled={!canImportDirectories || importPhase !== "idle"}>
+          {importPhase === "importing" ? "正在导入目录…" : "导入目录…"}
+        </button>
+        {#if !canImportDirectories}
+          <p class="gallery-hint">目录导入需要桌面环境。</p>
+        {/if}
+        {#if importError}
+          <p class="gallery-hint gallery-hint--error" role="alert">导入失败（{importError}）</p>
+        {/if}
+      </div>
     </aside>
 
     <main class="gallery-content" aria-labelledby="gallery-content-heading">
@@ -341,6 +393,7 @@
                 else controller.closeTrashPanel();
               }}
             >回收区</button>
+            <button type="button" class="gallery-toolbar-export" onclick={exportCurrentDirectory}>导出此目录…</button>
           </div>
         </nav>
 
