@@ -244,6 +244,15 @@ class GalleryRepository:
                 """,
                 (current_version, now, source_id),
             )
+            conn.execute(
+                """
+                UPDATE gallery_assets
+                SET dedup_visibility='kept', updated_at=?
+                WHERE source_id=? AND lifecycle_state='active'
+                  AND dedup_visibility!='excluded'
+                """,
+                (now, source_id),
+            )
             for asset_id in excluded_asset_ids:
                 conn.execute(
                     """
