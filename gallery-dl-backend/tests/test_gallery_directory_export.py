@@ -1,4 +1,4 @@
-"""R0 red-first contract for Gallery-embedded simple directory export."""
+"""Contract tests for Gallery-embedded simple directory export."""
 
 from __future__ import annotations
 
@@ -8,11 +8,14 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable
 
+from gdl_backend._database_gallery_repository import gallery_directory_id
 from gdl_backend.app import ServiceContainer
+from gdl_backend.gallery_safe_paths import SafeSourceRoot, UnsafeSourcePathError
 from tests.helpers import make_settings
 
 
@@ -41,17 +44,20 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
     def _module(self) -> ModuleType:
         self.assertIsNotNone(
             directory_export,
-            "R0 contract: gdl_backend.gallery_directory_export must exist",
+            "gdl_backend.gallery_directory_export must be importable",
         )
         assert directory_export is not None
         return directory_export
 
     def _manager(self, **kwargs: Any) -> Any:
         module = self._module()
+        kwargs.setdefault(
+            "filesystem_locks", self.container.gallery_filesystem_locks
+        )
         manager_type = getattr(module, "GalleryDirectoryExportService", None)
         self.assertTrue(
             callable(manager_type),
-            "R0 contract: GalleryDirectoryExportService must be exported",
+            "GalleryDirectoryExportService must be exported",
         )
         manager = manager_type(self.container.db.gallery, **kwargs)
         self.managers.append(manager)
@@ -122,6 +128,9 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 ".imageweave/copy-tmp/hidden.txt": b"hidden",
             },
         )
+        (source_root / "empty-nested").mkdir()
+        (source_root / "excluded-only").mkdir()
+        (source_root / "excluded-only" / "video.mp4").write_bytes(b"video")
         outside = self.root / "outside.txt"
         outside.write_bytes(b"outside")
         if hasattr(os, "symlink"):
@@ -159,6 +168,47 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         )
         self.assertEqual((output / "orphan.txt").read_bytes(), b"\xff\xfe\x00raw\r\n")
         self.assertEqual((output / "empty.TXT").read_bytes(), b"")
+
+        self.assertFalse((output / "empty-nested").exists())
+        self.assertFalse((output / "excluded-only").exists())
+
+    def test_selected_subdirectory_becomes_one_top_level_and_preserves_its_subtree(
+        self,
+    ) -> None:
+        source, _source_root, _root_id = self._source(
+            "sources",
+            "alpha",
+            {
+                "parent/chosen/one.jpg": b"one",
+                "parent/chosen/one.txt": b"raw\xff",
+                "parent/chosen/nested/two.WEBP": b"two",
+                "parent/outside.jpg": b"outside",
+                "root.txt": b"outside",
+            },
+        )
+        selected_id = gallery_directory_id(
+            source["source_id"], "parent/chosen"
+        )
+        target = self.root / "target"
+        target.mkdir()
+        manager = self._manager()
+        record = self._wait(
+            manager,
+            manager.start(
+                directory_ids=[selected_id], target_path=str(target)
+            )["operation_id"],
+        )
+        self.assertEqual(record["state"], "completed")
+        output = target / "chosen"
+        self.assertEqual(
+            sorted(
+                path.relative_to(output).as_posix()
+                for path in output.rglob("*")
+                if path.is_file()
+            ),
+            ["nested/two.WEBP", "one.jpg", "one.txt"],
+        )
+        self.assertEqual((output / "one.txt").read_bytes(), b"raw\xff")
 
     def test_zero_allowed_files_commits_an_empty_named_directory(self) -> None:
         _source, _root, directory_id = self._source(
@@ -203,7 +253,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
 
     def test_duplicate_selected_directory_names_block_the_whole_operation(self) -> None:
         _a, _a_root, first_id = self._source("one", "same", {"a.jpg": b"a"})
-        _b, _b_root, second_id = self._source("two", "same", {"b.jpg": b"b"})
+        _b, _b_root, second_id = self._source("two", "SAME", {"b.jpg": b"b"})
         target = self.root / "target"
         target.mkdir()
         manager = self._manager()
@@ -214,6 +264,24 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
             ),
         )
         self.assertEqual(list(target.iterdir()), [])
+
+    def test_target_path_validation_is_bounded_and_explicit(self) -> None:
+        _source, _root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"x"}
+        )
+        manager = self._manager()
+        self._assert_error(
+            "target_path_invalid",
+            lambda: manager.start(
+                directory_ids=[directory_id], target_path="bad\x00target"
+            ),
+        )
+        self._assert_error(
+            "target_path_not_absolute",
+            lambda: manager.start(
+                directory_ids=[directory_id], target_path="relative-target"
+            ),
+        )
 
     def test_target_must_not_be_inside_a_selected_directory(self) -> None:
         _source, source_root, directory_id = self._source(
@@ -228,6 +296,483 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 directory_ids=[directory_id], target_path=str(target)
             ),
         )
+
+    def test_target_may_be_elsewhere_in_the_same_source(self) -> None:
+        source, source_root, _root_id = self._source(
+            "sources", "alpha", {"chosen/one.jpg": b"x"}
+        )
+        directory_id = gallery_directory_id(source["source_id"], "chosen")
+        target = source_root / "exports"
+        target.mkdir()
+        manager = self._manager()
+        record = self._wait(
+            manager,
+            manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )["operation_id"],
+        )
+        self.assertEqual(record["state"], "completed")
+        self.assertEqual((target / "chosen" / "one.jpg").read_bytes(), b"x")
+
+    def test_target_may_be_inside_an_unselected_gallery_source(self) -> None:
+        _selected, _selected_root, directory_id = self._source(
+            "selected", "alpha", {"one.jpg": b"x"}
+        )
+        _other, other_root, _other_id = self._source(
+            "other", "beta", {"two.jpg": b"y"}
+        )
+        target = other_root / "exports"
+        target.mkdir()
+        manager = self._manager()
+        record = self._wait(
+            manager,
+            manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )["operation_id"],
+        )
+        self.assertEqual(record["state"], "completed")
+        self.assertEqual((target / "alpha" / "one.jpg").read_bytes(), b"x")
+
+    def test_target_root_replacement_after_preflight_is_rejected(self) -> None:
+        _source, _source_root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"source"}
+        )
+        target = self.root / "target-replaced-after-preflight"
+        target.mkdir()
+        original_target = self.root / "target-before-replacement"
+        original_start = threading.Thread.start
+
+        def replace_then_start(thread: threading.Thread) -> None:
+            target.rename(original_target)
+            target.mkdir()
+            original_start(thread)
+
+        manager = self._manager()
+        with mock.patch.object(threading.Thread, "start", replace_then_start):
+            started = manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )
+        record = self._wait(manager, started["operation_id"])
+        self.assertEqual(record["state"], "failed")
+        self.assertEqual(record["error_code"], "target_root_changed")
+        self.assertEqual(list(target.iterdir()), [])
+        self.assertEqual(list(original_target.iterdir()), [])
+
+    def test_source_root_replacement_after_preflight_is_rejected(self) -> None:
+        _source, source_root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"original"}
+        )
+        target = self.root / "target-source-root-replaced"
+        target.mkdir()
+        original_source = self.root / "source-before-replacement"
+        original_start = threading.Thread.start
+
+        def replace_then_start(thread: threading.Thread) -> None:
+            source_root.rename(original_source)
+            source_root.mkdir()
+            (source_root / "one.jpg").write_bytes(b"replacement")
+            original_start(thread)
+
+        manager = self._manager()
+        with mock.patch.object(threading.Thread, "start", replace_then_start):
+            started = manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )
+        record = self._wait(manager, started["operation_id"])
+        self.assertEqual(record["state"], "failed")
+        self.assertEqual(record["error_code"], "source_changed")
+        self.assertEqual(list(target.iterdir()), [])
+        self.assertEqual((original_source / "one.jpg").read_bytes(), b"original")
+
+    def test_fallback_rejects_a_symlink_in_the_target_parent_chain(self) -> None:
+        if not hasattr(os, "symlink"):
+            self.skipTest("symlinks unavailable")
+        _source, _source_root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"x"}
+        )
+        real_parent = self.root / "real-target-parent"
+        target = real_parent / "target"
+        target.mkdir(parents=True)
+        linked_parent = self.root / "linked-target-parent"
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+        manager = self._manager()
+        with mock.patch.object(self._module(), "_HAS_DIR_FD", False):
+            self._assert_error(
+                "target_path_unsafe",
+                lambda: manager.start(
+                    directory_ids=[directory_id],
+                    target_path=str(linked_parent / "target"),
+                ),
+            )
+
+    def test_fallback_source_root_replacement_is_rejected(self) -> None:
+        source_root = self.root / "fallback-source-root"
+        source_root.mkdir()
+        (source_root / "one.jpg").write_bytes(b"original")
+        moved_root = self.root / "moved-fallback-source-root"
+
+        with mock.patch("gdl_backend.gallery_safe_paths._HAS_DIR_FD", False):
+            with SafeSourceRoot(source_root) as safe_root:
+                source_root.rename(moved_root)
+                source_root.mkdir()
+                (source_root / "one.jpg").write_bytes(b"replacement")
+                with self.assertRaises(UnsafeSourcePathError) as raised:
+                    list(
+                        safe_root.iter_subtree(
+                            "", excluded_directories=frozenset()
+                        )
+                    )
+        self.assertEqual(raised.exception.reason, "source_root_changed")
+
+    def test_fallback_copy_revalidates_each_output_component(self) -> None:
+        _source, _source_root, directory_id = self._source(
+            "sources", "alpha", {"nested/one.jpg": b"source"}
+        )
+        target = self.root / "target"
+        target.mkdir()
+        module = self._module()
+
+        def fallback_rename(
+            *,
+            parent_fd: int,
+            parent_path: Path,
+            source_name: str,
+            target_name: str,
+        ) -> None:
+            del parent_fd
+            destination = parent_path / target_name
+            if destination.exists() or destination.is_symlink():
+                raise FileExistsError(target_name)
+            os.rename(parent_path / source_name, destination)
+
+        manager = self._manager()
+        with (
+            mock.patch.object(module, "_HAS_DIR_FD", False),
+            mock.patch("gdl_backend.gallery_safe_paths._HAS_DIR_FD", False),
+            mock.patch.object(
+                module, "_rename_directory_noreplace", fallback_rename
+            ),
+        ):
+            record = self._wait(
+                manager,
+                manager.start(
+                    directory_ids=[directory_id], target_path=str(target)
+                )["operation_id"],
+            )
+        self.assertEqual(record["state"], "completed")
+        self.assertEqual(
+            (target / "alpha" / "nested" / "one.jpg").read_bytes(),
+            b"source",
+        )
+
+    def test_fallback_rejects_an_injected_link_before_commit(self) -> None:
+        if not hasattr(os, "symlink"):
+            self.skipTest("symlinks unavailable")
+        _source, _source_root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"source"}
+        )
+        outside = self.root / "outside.jpg"
+        outside.write_bytes(b"outside")
+        target = self.root / "target"
+        target.mkdir()
+
+        def inject_link(
+            _operation_id: str,
+            _directory_name: str,
+            temporary_path: Path,
+            _final_path: Path,
+        ) -> None:
+            copied = temporary_path / "one.jpg"
+            copied.unlink()
+            copied.symlink_to(outside)
+
+        manager = self._manager(before_commit=inject_link)
+        with mock.patch.object(self._module(), "_HAS_DIR_FD", False):
+            record = self._wait(
+                manager,
+                manager.start(
+                    directory_ids=[directory_id], target_path=str(target)
+                )["operation_id"],
+            )
+        self.assertEqual(record["state"], "failed")
+        self.assertEqual(record["results"][0]["error_code"], "target_path_unsafe")
+        self.assertEqual(outside.read_bytes(), b"outside")
+        self.assertFalse((target / "alpha").exists())
+        self.assertFalse(
+            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+        )
+
+    def test_descriptor_target_rejects_an_injected_link_before_commit(self) -> None:
+        module = self._module()
+        if not getattr(module, "_HAS_DIR_FD", False) or not hasattr(os, "symlink"):
+            self.skipTest("descriptor-relative symlink checks unavailable")
+        _source, _source_root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"source"}
+        )
+        outside = self.root / "outside-descriptor.jpg"
+        outside.write_bytes(b"outside")
+        target = self.root / "target-descriptor"
+        target.mkdir()
+
+        def inject_link(
+            _operation_id: str,
+            _directory_name: str,
+            temporary_path: Path,
+            _final_path: Path,
+        ) -> None:
+            copied = temporary_path / "one.jpg"
+            copied.unlink()
+            copied.symlink_to(outside)
+
+        manager = self._manager(before_commit=inject_link)
+        record = self._wait(
+            manager,
+            manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )["operation_id"],
+        )
+        self.assertEqual(record["state"], "failed")
+        self.assertEqual(record["results"][0]["error_code"], "target_path_unsafe")
+        self.assertEqual(outside.read_bytes(), b"outside")
+        self.assertFalse((target / "alpha").exists())
+        self.assertFalse(
+            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+        )
+
+    def test_injected_regular_file_is_not_committed(self) -> None:
+        _source, _source_root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"source"}
+        )
+        target = self.root / "target-injected-regular"
+        target.mkdir()
+
+        def inject_regular_file(
+            _operation_id: str,
+            _directory_name: str,
+            temporary_path: Path,
+            _final_path: Path,
+        ) -> None:
+            (temporary_path / "extra.bin").write_bytes(b"external")
+
+        manager = self._manager(before_commit=inject_regular_file)
+        record = self._wait(
+            manager,
+            manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )["operation_id"],
+        )
+
+        self.assertEqual(record["state"], "failed")
+        self.assertEqual(record["results"][0]["error_code"], "target_path_changed")
+        self.assertFalse((target / "alpha").exists())
+        self.assertEqual(list(target.iterdir()), [])
+
+
+    def test_descriptor_output_replacement_during_write_is_rejected(self) -> None:
+        module = self._module()
+        if not getattr(module, "_HAS_DIR_FD", False) or not hasattr(os, "symlink"):
+            self.skipTest("descriptor-relative symlink checks unavailable")
+        _source, _source_root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"source" * 1024}
+        )
+        outside = self.root / "outside-open-output.jpg"
+        outside.write_bytes(b"outside")
+        target = self.root / "target-open-output"
+        target.mkdir()
+        injected = threading.Event()
+
+        def replace_open_output(
+            _operation_id: str, _relative_path: str, _copied: int
+        ) -> None:
+            if injected.is_set():
+                return
+            injected.set()
+            temporary = next(
+                path
+                for path in target.iterdir()
+                if path.name.startswith(".imageweave-copy-")
+            )
+            copied = temporary / "one.jpg"
+            copied.unlink()
+            copied.symlink_to(outside)
+
+        manager = self._manager(copy_chunk_hook=replace_open_output)
+        record = self._wait(
+            manager,
+            manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )["operation_id"],
+        )
+        self.assertEqual(record["state"], "failed")
+        self.assertEqual(
+            record["results"][0]["error_code"], "target_path_changed"
+        )
+        self.assertEqual(outside.read_bytes(), b"outside")
+        self.assertFalse((target / "alpha").exists())
+
+    def test_source_change_during_copy_discards_the_temporary_directory(self) -> None:
+        _source, source_root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"a" * 4096}
+        )
+        target = self.root / "target-source-change"
+        target.mkdir()
+        changed = threading.Event()
+
+        def mutate_source(
+            _operation_id: str, _relative_path: str, _copied: int
+        ) -> None:
+            if not changed.is_set():
+                changed.set()
+                (source_root / "one.jpg").write_bytes(b"b" * 4096)
+
+        manager = self._manager(
+            copy_chunk_size=1024, copy_chunk_hook=mutate_source
+        )
+        record = self._wait(
+            manager,
+            manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )["operation_id"],
+        )
+        self.assertEqual(record["state"], "failed")
+        self.assertEqual(record["results"][0]["error_code"], "source_changed")
+        self.assertFalse((target / "alpha").exists())
+        self.assertFalse(
+            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+        )
+
+    def test_source_replacement_after_copy_does_not_claim_a_frozen_snapshot(self) -> None:
+        _source, source_root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"original"}
+        )
+        target = self.root / "target-source-replacement"
+        target.mkdir()
+
+        def replace_source(
+            _operation_id: str,
+            _directory_name: str,
+            _temporary_path: Path,
+            _final_path: Path,
+        ) -> None:
+            replacement = source_root / "replacement.jpg"
+            replacement.write_bytes(b"changed")
+            os.replace(replacement, source_root / "one.jpg")
+
+        manager = self._manager(before_commit=replace_source)
+        record = self._wait(
+            manager,
+            manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )["operation_id"],
+        )
+        self.assertEqual(record["state"], "completed")
+        self.assertEqual((target / "alpha" / "one.jpg").read_bytes(), b"original")
+        self.assertEqual((source_root / "one.jpg").read_bytes(), b"changed")
+
+    def test_file_added_after_copy_is_not_part_of_the_short_lived_operation(self) -> None:
+        _source, source_root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"original"}
+        )
+        target = self.root / "target-source-addition"
+        target.mkdir()
+
+        def add_source_file(
+            _operation_id: str,
+            _directory_name: str,
+            _temporary_path: Path,
+            _final_path: Path,
+        ) -> None:
+            (source_root / "late.txt").write_bytes(b"late")
+
+        manager = self._manager(before_commit=add_source_file)
+        record = self._wait(
+            manager,
+            manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )["operation_id"],
+        )
+        self.assertEqual(record["state"], "completed")
+        self.assertEqual((target / "alpha" / "one.jpg").read_bytes(), b"original")
+        self.assertFalse((target / "alpha" / "late.txt").exists())
+        self.assertEqual((source_root / "late.txt").read_bytes(), b"late")
+
+    def test_empty_directory_added_after_copy_is_not_exported(self) -> None:
+        _source, source_root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"original"}
+        )
+        target = self.root / "target-source-directory-addition"
+        target.mkdir()
+
+        def add_source_directory(
+            _operation_id: str,
+            _directory_name: str,
+            _temporary_path: Path,
+            _final_path: Path,
+        ) -> None:
+            (source_root / "late-empty").mkdir()
+
+        manager = self._manager(before_commit=add_source_directory)
+        record = self._wait(
+            manager,
+            manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )["operation_id"],
+        )
+        self.assertEqual(record["state"], "completed")
+        self.assertEqual((target / "alpha" / "one.jpg").read_bytes(), b"original")
+        self.assertFalse((target / "alpha" / "late-empty").exists())
+        self.assertTrue((source_root / "late-empty").is_dir())
+
+    def test_preexisting_generated_probe_directory_is_never_deleted(self) -> None:
+        _source, _root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"source"}
+        )
+        target = self.root / "target-preexisting-probe"
+        target.mkdir()
+        probe = target / ".imageweave-copy-probe-deadbeef"
+        probe.mkdir()
+        sentinel = probe / "sentinel.txt"
+        sentinel.write_bytes(b"external")
+        module = self._module()
+        manager = self._manager()
+
+        with mock.patch.object(module.secrets, "token_hex", return_value="deadbeef"):
+            self._assert_error(
+                "target_unavailable",
+                lambda: manager.start(
+                    directory_ids=[directory_id], target_path=str(target)
+                ),
+            )
+        self.assertEqual(sentinel.read_bytes(), b"external")
+
+    def test_preexisting_generated_temporary_directory_is_never_deleted(self) -> None:
+        _source, _root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"source"}
+        )
+        target = self.root / "target-preexisting-temporary"
+        target.mkdir()
+        module = self._module()
+        fixed_uuid = module.uuid.UUID("00000000-0000-4000-8000-000000000001")
+        temporary = (
+            target
+            / ".imageweave-copy-00000000-0000-4000-8000-000000000001-0-deadbeef"
+        )
+        temporary.mkdir()
+        sentinel = temporary / "sentinel.txt"
+        sentinel.write_bytes(b"external")
+
+        manager = self._manager()
+        with (
+            mock.patch.object(module.uuid, "uuid4", return_value=fixed_uuid),
+            mock.patch.object(module.secrets, "token_hex", return_value="deadbeef"),
+        ):
+            started = manager.start(
+                directory_ids=[directory_id], target_path=str(target)
+            )
+            record = self._wait(manager, started["operation_id"])
+        self.assertEqual(record["state"], "failed")
+        self.assertEqual(record["error_code"], "copy_io_error")
+        self.assertEqual(sentinel.read_bytes(), b"external")
 
     def test_no_clobber_commit_survives_a_post_preflight_race(self) -> None:
         _source, _root, directory_id = self._source(
@@ -255,7 +800,85 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         self.assertEqual(record["state"], "failed")
         self.assertEqual(record["results"][0]["error_code"], "target_name_conflict")
         self.assertEqual((target / "alpha" / "sentinel.txt").read_bytes(), b"external")
-        self.assertFalse(any(path.name.startswith(".imageweave-copy-") for path in target.iterdir()))
+        self.assertFalse(
+            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+        )
+
+    def test_unexpected_copy_failure_is_sanitized_and_cleans_temporary_output(
+        self,
+    ) -> None:
+        _source, _root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"source"}
+        )
+        target = self.root / "target"
+        target.mkdir()
+
+        def fail_unexpectedly(
+            _operation_id: str,
+            _directory_name: str,
+            _temporary_path: Path,
+            _final_path: Path,
+        ) -> None:
+            raise RuntimeError("sensitive absolute path must not enter the API")
+
+        manager = self._manager(before_commit=fail_unexpectedly)
+        with self.assertLogs(
+            "gdl_backend.gallery_directory_export", level="ERROR"
+        ) as captured:
+            record = self._wait(
+                manager,
+                manager.start(
+                    directory_ids=[directory_id], target_path=str(target)
+                )["operation_id"],
+            )
+        self.assertEqual(record["state"], "failed")
+        self.assertEqual(record["results"][0]["error_code"], "internal_error")
+        self.assertNotIn(str(self.root), "\n".join(captured.output))
+        self.assertFalse(
+            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+        )
+
+    def test_cleanup_failure_is_reported_instead_of_claiming_cancellation(self) -> None:
+        _source, _root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"source"}
+        )
+        target = self.root / "target-cleanup-failure"
+        target.mkdir()
+        module = self._module()
+        original_remove = module._TargetRoot.remove_owned_directory
+
+        def fail_operation_cleanup(target_root: Any, name: str) -> bool:
+            if "probe-" in name:
+                return bool(original_remove(target_root, name))
+            return False
+
+        def fail_copy(
+            _operation_id: str,
+            _directory_name: str,
+            _temporary_path: Path,
+            _final_path: Path,
+        ) -> None:
+            raise OSError("injected copy failure")
+
+        manager = self._manager(before_commit=fail_copy)
+        with mock.patch.object(
+            module._TargetRoot,
+            "remove_owned_directory",
+            fail_operation_cleanup,
+        ):
+            record = self._wait(
+                manager,
+                manager.start(
+                    directory_ids=[directory_id], target_path=str(target)
+                )["operation_id"],
+            )
+        self.assertEqual(record["state"], "failed")
+        self.assertEqual(
+            record["results"][0]["error_code"], "temporary_cleanup_failed"
+        )
+        self.assertTrue(
+            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+        )
 
     def test_prior_directories_remain_after_a_later_directory_fails(self) -> None:
         _a, _a_root, first_id = self._source("sources", "alpha", {"a.jpg": b"a"})
@@ -287,6 +910,105 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
             ["completed", "failed"],
         )
 
+    def test_second_operation_for_the_same_target_is_rejected_while_copying(
+        self,
+    ) -> None:
+        _source, _root, directory_id = self._source(
+            "sources", "alpha", {"large.jpg": b"x" * (1024 * 256)}
+        )
+        target = self.root / "target"
+        target.mkdir()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def pause_copy(_operation_id: str, _relative_path: str, _copied: int) -> None:
+            if not entered.is_set():
+                entered.set()
+                release.wait(timeout=5.0)
+
+        manager = self._manager(
+            copy_chunk_size=1024, copy_chunk_hook=pause_copy
+        )
+        first = manager.start(
+            directory_ids=[directory_id], target_path=str(target)
+        )
+        self.assertTrue(entered.wait(timeout=5.0))
+        try:
+            self._assert_error(
+                "target_busy",
+                lambda: manager.start(
+                    directory_ids=[directory_id], target_path=str(target)
+                ),
+            )
+            manager.cancel(first["operation_id"])
+        finally:
+            release.set()
+        self.assertEqual(
+            self._wait(manager, first["operation_id"])["state"], "cancelled"
+        )
+
+    def test_active_operation_capacity_is_bounded(self) -> None:
+        _source, _root, directory_id = self._source(
+            "sources", "alpha", {"large.jpg": b"x" * (1024 * 256)}
+        )
+        first_target = self.root / "first-target"
+        second_target = self.root / "second-target"
+        first_target.mkdir()
+        second_target.mkdir()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def pause_copy(_operation_id: str, _relative_path: str, _copied: int) -> None:
+            if not entered.is_set():
+                entered.set()
+                release.wait(timeout=5.0)
+
+        manager = self._manager(
+            copy_chunk_size=1024, copy_chunk_hook=pause_copy
+        )
+        with mock.patch.object(self._module(), "_MAX_ACTIVE_OPERATIONS", 1):
+            first = manager.start(
+                directory_ids=[directory_id], target_path=str(first_target)
+            )
+            self.assertTrue(entered.wait(timeout=5.0))
+            try:
+                self._assert_error(
+                    "operation_capacity_reached",
+                    lambda: manager.start(
+                        directory_ids=[directory_id], target_path=str(second_target)
+                    ),
+                )
+                manager.cancel(first["operation_id"])
+            finally:
+                release.set()
+        self.assertEqual(
+            self._wait(manager, first["operation_id"])["state"], "cancelled"
+        )
+
+    def test_thread_start_failure_releases_operation_and_target_state(self) -> None:
+        _source, _root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"source"}
+        )
+        target = self.root / "target-start-failure"
+        target.mkdir()
+        manager = self._manager()
+        with mock.patch.object(
+            threading.Thread, "start", side_effect=RuntimeError("thread unavailable")
+        ):
+            self._assert_error(
+                "operation_start_failed",
+                lambda: manager.start(
+                    directory_ids=[directory_id], target_path=str(target)
+                ),
+            )
+
+        started = manager.start(
+            directory_ids=[directory_id], target_path=str(target)
+        )
+        self.assertEqual(
+            self._wait(manager, started["operation_id"])["state"], "completed"
+        )
+
     def test_cancel_removes_the_current_temporary_directory(self) -> None:
         _source, _root, directory_id = self._source(
             "sources", "alpha", {"large.jpg": b"x" * (1024 * 256)}
@@ -311,7 +1033,64 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         record = self._wait(manager, started["operation_id"])
         self.assertEqual(record["state"], "cancelled")
         self.assertFalse((target / "alpha").exists())
-        self.assertFalse(any(path.name.startswith(".imageweave-copy-") for path in target.iterdir()))
+        self.assertFalse(
+            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+        )
+
+    def test_shared_source_lock_serializes_copy_with_file_mutation(self) -> None:
+        source, _root, directory_id = self._source(
+            "sources", "alpha", {"one.jpg": b"x" * (1024 * 256)}
+        )
+        root_directory = self.container.db.gallery.get_root_directory(
+            source["source_id"]
+        )
+        assert root_directory is not None
+        asset = self.container.db.gallery.list_directory_entries(
+            directory_id=root_directory["directory_id"]
+        )["assets"][0]
+        target = self.root / "target"
+        target.mkdir()
+        entered = threading.Event()
+        release = threading.Event()
+        renamed = threading.Event()
+        rename_errors: list[Exception] = []
+
+        def pause_copy(_operation_id: str, _relative_path: str, _copied: int) -> None:
+            if not entered.is_set():
+                entered.set()
+                release.wait(timeout=5.0)
+
+        def rename_source() -> None:
+            try:
+                self.container.gallery_file_operations.rename_asset(
+                    asset["asset_id"], "renamed"
+                )
+            except Exception as error:  # pragma: no cover - asserted below
+                rename_errors.append(error)
+            finally:
+                renamed.set()
+
+        manager = self._manager(
+            copy_chunk_size=1024, copy_chunk_hook=pause_copy
+        )
+        started = manager.start(
+            directory_ids=[directory_id], target_path=str(target)
+        )
+        self.assertTrue(entered.wait(timeout=5.0))
+        mutation_thread = threading.Thread(target=rename_source)
+        mutation_thread.start()
+        try:
+            time.sleep(0.05)
+            self.assertFalse(renamed.is_set())
+        finally:
+            release.set()
+        mutation_thread.join(timeout=5.0)
+        self.assertFalse(mutation_thread.is_alive())
+        self.assertEqual(rename_errors, [])
+        record = self._wait(manager, started["operation_id"])
+        self.assertEqual(record["state"], "completed")
+        self.assertTrue((target / "alpha" / "one.jpg").is_file())
+        self.assertTrue((_root / "renamed.jpg").is_file())
 
     def test_directory_export_creates_no_legacy_persistent_rows(self) -> None:
         _source, _root, directory_id = self._source(

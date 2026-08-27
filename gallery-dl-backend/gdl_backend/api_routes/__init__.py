@@ -4,7 +4,6 @@ from .auth import create_auth_router
 from .crawls import create_crawls_router
 from .diagnostics import create_diagnostics_router
 from .discovery import create_discovery_router
-from .dataset_exports import create_dataset_exports_router
 from .gallery import create_gallery_router
 from .policies import create_policies_router
 from .proxy import create_proxy_router
@@ -14,7 +13,6 @@ from .tasks import create_ordered_task_enqueuer, create_tasks_router
 
 __all__ = [
     "create_auth_router",
-    "create_dataset_exports_router",
     "create_crawls_router",
     "create_diagnostics_router",
     "create_discovery_router",

@@ -128,6 +128,11 @@ def _is_reparse_path(path: Path) -> bool:
     return bool(attributes & reparse_flag)
 
 
+def is_reparse_path(path: Path) -> bool:
+    """Return whether a path is a symlink, junction, or Windows reparse point."""
+    return _is_reparse_path(path)
+
+
 def _is_reparse_entry(entry: os.DirEntry[str]) -> bool:
     if entry.is_symlink():
         return True
@@ -187,7 +192,17 @@ class SafeSourceRoot:
         if not stat.S_ISDIR(metadata.st_mode):
             os.close(descriptor)
             raise UnsafeSourcePathError("", "source_root_not_directory")
-        if _is_reparse_path(self.path):
+        try:
+            observed = self.path.lstat()
+        except OSError as error:
+            os.close(descriptor)
+            raise UnsafeSourcePathError("", "source_root_changed") from error
+        if (
+            _is_reparse_path(self.path)
+            or not stat.S_ISDIR(observed.st_mode)
+            or (int(observed.st_dev), int(observed.st_ino))
+            != (int(metadata.st_dev), int(metadata.st_ino))
+        ):
             os.close(descriptor)
             raise UnsafeSourcePathError("", "source_root_changed")
         self._root_fd = descriptor
@@ -243,6 +258,23 @@ class SafeSourceRoot:
         finally:
             os.close(descriptor)
 
+    def _verify_fallback_root(self, relative_path: str) -> None:
+        try:
+            observed_root = self.path.lstat()
+        except OSError as error:
+            raise UnsafeSourcePathError(
+                relative_path, "source_root_changed"
+            ) from error
+        opened_root = os.fstat(self.root_fd)
+        if (
+            _is_reparse_path(self.path)
+            or not stat.S_ISDIR(observed_root.st_mode)
+            or (int(observed_root.st_dev), int(observed_root.st_ino))
+            != (int(opened_root.st_dev), int(opened_root.st_ino))
+        ):
+            raise UnsafeSourcePathError(relative_path, "source_root_changed")
+
+
     def _fallback_path(
         self,
         relative_path: str,
@@ -252,14 +284,20 @@ class SafeSourceRoot:
     ) -> Path:
         parts = validate_relative_path(relative_path)
         current = self.path
-        if _is_reparse_path(current):
-            raise UnsafeSourcePathError(relative_path, "source_root_reparse_point")
+        self._verify_fallback_root(relative_path)
         for component in parts[:-1]:
             current = current / component
             if create_parents and not current.exists():
                 current.mkdir()
             if _is_reparse_path(current) or not current.is_dir():
                 raise UnsafeSourcePathError(relative_path, "unsafe_parent")
+        try:
+            parent_metadata = current.lstat()
+        except OSError as error:
+            raise UnsafeSourcePathError(relative_path, "unsafe_parent") from error
+        if _is_reparse_path(current) or not stat.S_ISDIR(parent_metadata.st_mode):
+            raise UnsafeSourcePathError(relative_path, "unsafe_parent")
+        parent_identity = (int(parent_metadata.st_dev), int(parent_metadata.st_ino))
         target = current / parts[-1]
         if target.exists() or not allow_missing_leaf:
             if _is_reparse_path(target):
@@ -269,7 +307,17 @@ class SafeSourceRoot:
             resolved_parent.relative_to(self._canonical)
         except ValueError as error:
             raise UnsafeSourcePathError(relative_path, "path_escaped_root") from error
-        if _is_reparse_path(self.path) or _is_reparse_path(target.parent):
+        try:
+            observed_parent = target.parent.lstat()
+        except OSError as error:
+            raise UnsafeSourcePathError(relative_path, "path_changed") from error
+        self._verify_fallback_root(relative_path)
+        if (
+            _is_reparse_path(target.parent)
+            or not stat.S_ISDIR(observed_parent.st_mode)
+            or (int(observed_parent.st_dev), int(observed_parent.st_ino))
+            != parent_identity
+        ):
             raise UnsafeSourcePathError(relative_path, "path_changed")
         return target
 
@@ -277,7 +325,20 @@ class SafeSourceRoot:
         if not _HAS_DIR_FD:
             target = self._fallback_path(relative_path)
             handle = target.open("rb")
-            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            metadata = os.fstat(handle.fileno())
+            try:
+                verified_target = self._fallback_path(relative_path)
+                observed = verified_target.lstat()
+            except (OSError, UnsafeSourcePathError):
+                handle.close()
+                raise
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or _is_reparse_path(verified_target)
+                or not stat.S_ISREG(observed.st_mode)
+                or (int(observed.st_dev), int(observed.st_ino))
+                != (int(metadata.st_dev), int(metadata.st_ino))
+            ):
                 handle.close()
                 raise UnsafeSourcePathError(relative_path, "leaf_not_regular")
             return handle
@@ -564,17 +625,75 @@ class SafeSourceRoot:
             os.unlink(name, dir_fd=parent_fd)
             os.fsync(parent_fd)
 
-    def iter_tree(self, *, excluded_directories: frozenset[str]) -> Iterator[SafeDirectoryEntry]:
+    def iter_tree(
+        self,
+        *,
+        excluded_directories: frozenset[str],
+        excluded_directory_prefixes: tuple[str, ...] = (),
+    ) -> Iterator[SafeDirectoryEntry]:
+        yield from self.iter_subtree(
+            "",
+            excluded_directories=excluded_directories,
+            excluded_directory_prefixes=excluded_directory_prefixes,
+        )
+
+    def iter_subtree(
+        self,
+        relative_directory: str,
+        *,
+        excluded_directories: frozenset[str],
+        excluded_directory_prefixes: tuple[str, ...] = (),
+    ) -> Iterator[SafeDirectoryEntry]:
+        parts = validate_relative_path(relative_directory, allow_root=True)
+        normalized = "/".join(parts)
+        name = parts[-1] if parts else ""
         if not _HAS_DIR_FD:
-            yield from self._iter_tree_fallback(excluded_directories)
+            yield from self._iter_tree_fallback(
+                normalized,
+                name,
+                excluded_directories,
+                excluded_directory_prefixes,
+            )
             return
-        stack: list[tuple[str, str, int]] = [("", "", os.dup(self.root_fd))]
+        if parts:
+            marker = f"{normalized}/.imageweave-subtree-anchor"
+            with self._parent_fd(marker) as (directory_fd, _marker_name):
+                start_fd = os.dup(directory_fd)
+        else:
+            start_fd = os.dup(self.root_fd)
+        yield from self._iter_tree_from_descriptor(
+            normalized,
+            name,
+            start_fd,
+            excluded_directories,
+            excluded_directory_prefixes,
+        )
+
+    @staticmethod
+    def _directory_is_excluded(
+        name: str,
+        excluded_directories: frozenset[str],
+        excluded_directory_prefixes: tuple[str, ...],
+    ) -> bool:
+        return name in excluded_directories or any(
+            name.startswith(prefix) for prefix in excluded_directory_prefixes
+        )
+
+    def _iter_tree_from_descriptor(
+        self,
+        relative: str,
+        name: str,
+        descriptor: int,
+        excluded_directories: frozenset[str],
+        excluded_directory_prefixes: tuple[str, ...],
+    ) -> Iterator[SafeDirectoryEntry]:
+        stack: list[tuple[str, str, int]] = [(relative, name, descriptor)]
         while stack:
-            relative, name, descriptor = stack.pop()
+            current_relative, current_name, current_fd = stack.pop()
             children: list[tuple[str, str, int]] = []
             files: list[tuple[str, os.stat_result]] = []
             try:
-                with os.scandir(descriptor) as entries:
+                with os.scandir(current_fd) as entries:
                     for entry in entries:
                         if _is_reparse_entry(entry):
                             continue
@@ -583,10 +702,16 @@ class SafeSourceRoot:
                         except OSError:
                             continue
                         child_relative = (
-                            f"{relative}/{entry.name}" if relative else entry.name
+                            f"{current_relative}/{entry.name}"
+                            if current_relative
+                            else entry.name
                         )
                         if stat.S_ISDIR(metadata.st_mode):
-                            if entry.name in excluded_directories:
+                            if self._directory_is_excluded(
+                                entry.name,
+                                excluded_directories,
+                                excluded_directory_prefixes,
+                            ):
                                 continue
                             try:
                                 child_fd = os.open(
@@ -595,7 +720,7 @@ class SafeSourceRoot:
                                     | _OPEN_DIRECTORY
                                     | _CLOSE_ON_EXEC
                                     | _NO_FOLLOW,
-                                    dir_fd=descriptor,
+                                    dir_fd=current_fd,
                                 )
                             except OSError:
                                 continue
@@ -603,21 +728,30 @@ class SafeSourceRoot:
                         elif stat.S_ISREG(metadata.st_mode):
                             files.append((entry.name, metadata))
                 files.sort(key=lambda item: item[0])
-                yield SafeDirectoryEntry(relative, name, tuple(files))
+                yield SafeDirectoryEntry(
+                    current_relative, current_name, tuple(files)
+                )
                 for child in reversed(sorted(children, key=lambda item: item[1])):
                     stack.append(child)
             finally:
-                os.close(descriptor)
+                os.close(current_fd)
 
     def _iter_tree_fallback(
-        self, excluded_directories: frozenset[str]
+        self,
+        relative: str,
+        name: str,
+        excluded_directories: frozenset[str],
+        excluded_directory_prefixes: tuple[str, ...],
     ) -> Iterator[SafeDirectoryEntry]:
-        stack: list[tuple[str, str]] = [("", "")]
+        stack: list[tuple[str, str]] = [(relative, name)]
         while stack:
-            relative, name = stack.pop()
-            absolute = self.path / relative if relative else self.path
-            if _is_reparse_path(absolute):
-                raise UnsafeSourcePathError(relative, "unsafe_parent")
+            current_relative, current_name = stack.pop()
+            marker = (
+                f"{current_relative}/.imageweave-copy-scan-anchor"
+                if current_relative
+                else ".imageweave-copy-scan-anchor"
+            )
+            absolute = self._fallback_path(marker, allow_missing_leaf=True).parent
             children: list[tuple[str, str]] = []
             files: list[tuple[str, os.stat_result]] = []
             with os.scandir(absolute) as entries:
@@ -625,14 +759,24 @@ class SafeSourceRoot:
                     if _is_reparse_entry(entry):
                         continue
                     metadata = entry.stat(follow_symlinks=False)
-                    child_relative = f"{relative}/{entry.name}" if relative else entry.name
+                    child_relative = (
+                        f"{current_relative}/{entry.name}"
+                        if current_relative
+                        else entry.name
+                    )
                     if stat.S_ISDIR(metadata.st_mode):
-                        if entry.name not in excluded_directories:
+                        if not self._directory_is_excluded(
+                            entry.name,
+                            excluded_directories,
+                            excluded_directory_prefixes,
+                        ):
                             children.append((child_relative, entry.name))
                     elif stat.S_ISREG(metadata.st_mode):
                         files.append((entry.name, metadata))
             files.sort(key=lambda item: item[0])
-            yield SafeDirectoryEntry(relative, name, tuple(files))
+            yield SafeDirectoryEntry(
+                current_relative, current_name, tuple(files)
+            )
             stack.extend(reversed(sorted(children, key=lambda item: item[1])))
 
 
@@ -641,5 +785,6 @@ __all__ = [
     "SafeFileStat",
     "SafeSourceRoot",
     "UnsafeSourcePathError",
+    "is_reparse_path",
     "validate_relative_path",
 ]

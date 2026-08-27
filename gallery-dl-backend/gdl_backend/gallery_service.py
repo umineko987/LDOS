@@ -22,6 +22,8 @@ from ._database_gallery_repository import (
     GalleryVersionConflict,
 )
 from .gallery_catalog import (
+    IMAGEWEAVE_RESERVED_DIR,
+    IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES,
     classify_txt_state,
     decode_txt_bytes,
     is_supported_image_name,
@@ -664,7 +666,8 @@ class GalleryCatalogService:
         skipped = {"temporary": 0, "unsupported": 0}
         try:
             for directory in safe_root.iter_tree(
-                excluded_directories=frozenset({".imageweave"})
+                excluded_directories=frozenset({IMAGEWEAVE_RESERVED_DIR}),
+                excluded_directory_prefixes=IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES,
             ):
                 relative_path = directory.relative_path
                 directories.append(

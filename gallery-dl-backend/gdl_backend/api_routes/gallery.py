@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import FileResponse, StreamingResponse
@@ -31,11 +31,16 @@ from ..gallery_service import (
     GallerySourceNotFound,
     GallerySourceOffline,
 )
+from ..gallery_directory_export import (
+    GalleryDirectoryExportError,
+    GalleryDirectoryExportService,
+    MAX_DIRECTORY_EXPORT_ID_LENGTH,
+    MAX_DIRECTORY_EXPORT_SELECTIONS,
+)
 from ..gallery_file_operations import (
     GalleryFileOperationError,
     GalleryFileOperations,
 )
-
 from ..gallery_thumbnails import SUPPORTED_THUMBNAIL_SIZES, ThumbnailUnavailable
 from .dependencies import get_service
 from .errors import ApiError
@@ -77,6 +82,19 @@ class GalleryRenameRequest(BaseModel):
 
 class GalleryTrashRequest(BaseModel):
     asset_ids: list[str] = Field(min_length=1, max_length=2000)
+
+GalleryDirectoryExportId = Annotated[
+    str,
+    Field(min_length=1, max_length=MAX_DIRECTORY_EXPORT_ID_LENGTH),
+]
+
+
+class GalleryDirectoryExportRequest(BaseModel):
+    directory_ids: list[GalleryDirectoryExportId] = Field(
+        min_length=1, max_length=MAX_DIRECTORY_EXPORT_SELECTIONS
+    )
+    target_path: str = Field(min_length=1, max_length=4096)
+
 
 def _source_not_found(source_id: str) -> ApiError:
     return ApiError(404, "source_not_found", "图库来源不存在")
@@ -123,6 +141,43 @@ def _file_operation_api_error(
     if operation_id is not None:
         details.setdefault("operation_id", operation_id)
     return ApiError(status, error.code, "图库文件操作失败", details=details)
+
+_DIRECTORY_EXPORT_ERROR_STATUS: dict[str, int] = {
+    "operation_not_found": 404,
+    "directory_not_found": 404,
+    "source_not_found": 404,
+    "invalid_directory_ids": 422,
+    "directory_name_invalid": 422,
+    "target_path_not_absolute": 422,
+    "target_path_invalid": 422,
+    "selected_name_conflict": 409,
+    "target_name_conflict": 409,
+    "target_inside_source": 409,
+    "target_busy": 409,
+    "operation_capacity_reached": 429,
+    "target_not_writable": 409,
+    "target_not_directory": 409,
+    "target_unavailable": 409,
+    "target_path_unsafe": 409,
+    "target_path_changed": 409,
+    "target_root_changed": 409,
+    "temporary_cleanup_failed": 409,
+    "source_offline": 409,
+    "source_changed": 409,
+    "unsafe_source_path": 409,
+    "service_stopping": 503,
+    "operation_start_failed": 503,
+    "no_clobber_unsupported": 500,
+}
+
+
+def _directory_export_api_error(error: GalleryDirectoryExportError) -> ApiError:
+    return ApiError(
+        _DIRECTORY_EXPORT_ERROR_STATUS.get(error.code, 500),
+        error.code,
+        "图库目录导出操作失败",
+        details=dict(error.details),
+    )
 
 
 def create_gallery_router() -> APIRouter:
@@ -538,6 +593,51 @@ def create_gallery_router() -> APIRouter:
             return engine.purge_all_trash()
         except GalleryFileOperationError as error:
             raise _file_operation_api_error(error) from None
+
+
+    # ---- Gallery-owned short-lived directory export ----
+
+    @router.post("/gallery/directory-exports", status_code=202)
+    async def start_gallery_directory_export(
+        request: GalleryDirectoryExportRequest,
+        container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        idempotency_key = validate_idempotency_key(idempotency_key)
+        service: GalleryDirectoryExportService = container.gallery_directory_exports
+        try:
+            return service.start(
+                directory_ids=request.directory_ids,
+                target_path=request.target_path,
+                idempotency_key=idempotency_key,
+            )
+        except GalleryDirectoryExportError as error:
+            raise _directory_export_api_error(error) from None
+
+    @router.get("/gallery/directory-exports/{operation_id}")
+    async def get_gallery_directory_export(
+        operation_id: GalleryDirectoryExportId,
+        view: Literal["desktop"] = Query(...),
+        container: Any = Depends(get_service),
+    ) -> Any:
+        service: GalleryDirectoryExportService = container.gallery_directory_exports
+        try:
+            return service.get(operation_id)
+        except GalleryDirectoryExportError as error:
+            raise _directory_export_api_error(error) from None
+
+    @router.delete("/gallery/directory-exports/{operation_id}")
+    async def cancel_gallery_directory_export(
+        operation_id: GalleryDirectoryExportId,
+        container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        validate_idempotency_key(idempotency_key)
+        service: GalleryDirectoryExportService = container.gallery_directory_exports
+        try:
+            return service.cancel(operation_id)
+        except GalleryDirectoryExportError as error:
+            raise _directory_export_api_error(error) from None
 
 
     return router

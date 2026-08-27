@@ -24,7 +24,6 @@ from .api_routes import (
     create_crawls_router,
     create_diagnostics_router,
     create_discovery_router,
-    create_dataset_exports_router,
     create_gallery_router,
     create_ordered_task_enqueuer,
     create_policies_router,
@@ -37,7 +36,7 @@ from .api_routes import (
 # live outside the composition root.
 from .api_routes.errors import ApiError
 from .gallery_service import GalleryCatalogService
-from .dataset_export_manager import DatasetExportManager
+from .gallery_directory_export import GalleryDirectoryExportService
 from .gallery_file_operations import GalleryFileOperations
 from .gallery_safe_paths import GalleryFilesystemLocks
 from .gallery_thumbnails import ThumbnailService
@@ -98,10 +97,8 @@ class ServiceContainer:
         self.gallery_file_operations = GalleryFileOperations(
             self.db.gallery, filesystem_locks=self.gallery_filesystem_locks
         )
-        self.dataset_export_manager = DatasetExportManager(
-            repository=self.db.dataset_exports,
-            gallery_repository=self.db.gallery,
-            gallery_service=self.gallery_catalog,
+        self.gallery_directory_exports = GalleryDirectoryExportService(
+            self.db.gallery, filesystem_locks=self.gallery_filesystem_locks
         )
         self.gallery_thumbnails = ThumbnailService(
             settings.runtime_dir / "gallery-cache"
@@ -280,6 +277,7 @@ class ServiceContainer:
         await self.ordered_crawls.stop()
         await self.scheduler.stop()
         await self.auth.stop()
+        await asyncio.to_thread(self.gallery_directory_exports.stop)
         await asyncio.to_thread(self.gallery_catalog.stop)
         try:
             await asyncio.to_thread(self.proxy.stop, force=True)
@@ -580,7 +578,6 @@ def create_app(
     app.include_router(create_review_router())
     app.include_router(create_policies_router())
     app.include_router(create_gallery_router())
-    app.include_router(create_dataset_exports_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
 

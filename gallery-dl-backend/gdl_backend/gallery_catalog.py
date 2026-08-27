@@ -38,6 +38,7 @@ TXT_STATES: frozenset[str] = frozenset(
 )
 
 IMAGEWEAVE_RESERVED_DIR = ".imageweave"
+IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES = (".imageweave-copy-",)
 TRASH_DIR_NAME = "trash"
 
 _UTF8_BOM = b"\xef\xbb\xbf"

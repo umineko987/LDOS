@@ -8,7 +8,7 @@ from gdl_backend.app import ServiceContainer, create_app
 from tests.helpers import local_test_client, make_settings
 
 
-# docs/图库(含导出).md §7 目标路由契约（red-first：G1/G3/G5 实现前应保持失败）。
+# docs/图库(含导出).md §7 与修正计划 R2 的 Gallery API 所有权合同。
 EXPECTED_GALLERY_OPERATIONS: frozenset[tuple[str, str]] = frozenset(
     {
         # §7.1 图库来源与目录
@@ -34,15 +34,10 @@ EXPECTED_GALLERY_OPERATIONS: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/gallery/trash/{operation_id}/restore"),
         ("DELETE", "/api/v1/gallery/trash/{operation_id}"),
         ("DELETE", "/api/v1/gallery/trash"),
-        # §7.4 导出任务
-        ("POST", "/api/v1/dataset-exports"),
-        ("GET", "/api/v1/dataset-exports"),
-        ("GET", "/api/v1/dataset-exports/{export_id}"),
-        ("GET", "/api/v1/dataset-exports/{export_id}/blockers"),
-        ("POST", "/api/v1/dataset-exports/{export_id}/start"),
-        ("POST", "/api/v1/dataset-exports/{export_id}/pause"),
-        ("POST", "/api/v1/dataset-exports/{export_id}/resume"),
-        ("POST", "/api/v1/dataset-exports/{export_id}/discard"),
+        # 修正计划 §6.2：Gallery 内短生命周期目录导出
+        ("POST", "/api/v1/gallery/directory-exports"),
+        ("GET", "/api/v1/gallery/directory-exports/{operation_id}"),
+        ("DELETE", "/api/v1/gallery/directory-exports/{operation_id}"),
     }
 )
 
@@ -55,9 +50,7 @@ DESKTOP_VIEW_OPERATIONS: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/api/v1/gallery/assets/{asset_id}"),
         ("GET", "/api/v1/gallery/assets/{asset_id}/annotation"),
         ("GET", "/api/v1/gallery/trash"),
-        ("GET", "/api/v1/dataset-exports"),
-        ("GET", "/api/v1/dataset-exports/{export_id}"),
-        ("GET", "/api/v1/dataset-exports/{export_id}/blockers"),
+        ("GET", "/api/v1/gallery/directory-exports/{operation_id}"),
     }
 )
 
@@ -75,11 +68,14 @@ EXPECTED_ERROR_CODES: frozenset[str] = frozenset(
         "operation_not_found",
         "operation_version_mismatch",
         "restore_target_conflict",
-        "export_not_found",
-        "export_state_invalid",
-        "export_target_conflict",
-        "export_disk_space_insufficient",
-        "export_snapshot_stale",
+        "selected_name_conflict",
+        "target_name_conflict",
+        "target_inside_source",
+        "target_busy",
+        "operation_capacity_reached",
+        "temporary_cleanup_failed",
+        "target_not_writable",
+        "unsafe_source_path",
     }
 )
 
@@ -116,8 +112,16 @@ class GalleryExportApiContractTest(unittest.TestCase):
         self.assertEqual(
             missing,
             [],
-            "图库/导出目标路由尚未实现（docs/图库(含导出).md §7；G1/G3/G5 落地）",
+            "图库与目录导出的目标路由所有权合同必须完整",
         )
+
+    def test_legacy_dataset_export_routes_are_not_registered(self) -> None:
+        legacy = [
+            key
+            for key in self._openapi_operations()
+            if key[1].startswith("/api/v1/dataset-exports")
+        ]
+        self.assertEqual(legacy, [])
 
     def test_high_volume_reads_declare_desktop_projection_view(self) -> None:
         operations = self._openapi_operations()
@@ -158,7 +162,12 @@ class GalleryExportApiContractTest(unittest.TestCase):
                 404,
                 "directory_not_found",
             ),
-            ("get", "/api/v1/dataset-exports/missing-export", 404, "export_not_found"),
+            (
+                "get",
+                "/api/v1/gallery/directory-exports/missing-operation?view=desktop",
+                404,
+                "operation_not_found",
+            ),
         )
         served_codes = set()
         for method, path, status, code in cases:
