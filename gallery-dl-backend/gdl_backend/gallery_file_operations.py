@@ -528,6 +528,7 @@ class GalleryFileOperations:
                     (item["asset_id"], row["source_id"], name,
                      item["target_relative_path"]),
                 )
+            self._bump_source_content_version(conn, item["asset_id"], now)
 
     # trash：移入 `.imageweave/trash/<op>/files/…` + lifecycle='trashed'。
 
@@ -602,6 +603,7 @@ class GalleryFileOperations:
                 "DELETE FROM gallery_search_index WHERE asset_id=?",
                 (item["asset_id"],),
             )
+            self._bump_source_content_version(conn, item["asset_id"], now)
 
     # restore（undo 同路径）：移回原路径 + lifecycle='active'。
 
@@ -667,6 +669,20 @@ class GalleryFileOperations:
                     (item["asset_id"], row["source_id"], row["name"],
                      row["relative_path"]),
                 )
+            self._bump_source_content_version(conn, item["asset_id"], now)
+
+    def _bump_source_content_version(
+        self, conn: Any, asset_id: str, now: float
+    ) -> None:
+        """文件操作使来源内容前进（记忆 #37：去重结果过期）。"""
+        conn.execute(
+            """
+            UPDATE gallery_sources
+            SET content_version=content_version+1, updated_at=?
+            WHERE id=(SELECT source_id FROM gallery_assets WHERE id=?)
+            """,
+            (now, asset_id),
+        )
 
     # purge：物理删除回收文件与资产记录（不可撤销）。
 
@@ -684,7 +700,9 @@ class GalleryFileOperations:
 
     def _commit_purge_index(self, item: dict[str, Any]) -> None:
         """清除回收项的资产记录与 FTS 行（永久，不可撤销）。"""
+        now = self._clock()
         with self._repo._transaction() as conn:  # noqa: SLF001
+            self._bump_source_content_version(conn, item["asset_id"], now)
             conn.execute(
                 "DELETE FROM gallery_search_index WHERE asset_id=?",
                 (item["asset_id"],),

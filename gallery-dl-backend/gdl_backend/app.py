@@ -95,6 +95,13 @@ class ServiceContainer:
         )
         # 批次终态 → 图库来源自动注册（无冲突时）；异常绝不阻断爬取收尾。
         self.db.gallery_batch_registrar = self._register_gallery_batch_source
+        # 图库来源投影需要审核状态来推导有效去重状态（§3.8）。
+        self.gallery_catalog.set_review_status_lookup(
+            lambda batch_id: (
+                (review := self.db.get_crawl_review(batch_id))
+                and review.get("status")
+            )
+        )
         self.gallery = GalleryRunner(settings.gallery, settings.project_dir)
         self.log_writer = TaskLogWriter(self.db)
         self.scheduler = TaskScheduler(

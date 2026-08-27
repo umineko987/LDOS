@@ -59,6 +59,7 @@ describe("gallery target model (G2 安全投影消费)", () => {
     crawl_complete: true,
     dedup_required: true,
     dedup_state: "pending_analysis",
+    dedup_applied_version: 0,
     content_version: 3,
     annotation_version: 5,
     indexed_version: 2,
@@ -95,7 +96,7 @@ describe("gallery target model (G2 安全投影消费)", () => {
   it("rejects source drift: root_path, invented states, bad counters", () => {
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, root_path: "/data" })).toThrow(TypeError);
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, error: "OSError" })).toThrow(TypeError);
-    expect(() => sanitizeGallerySourceSummary({ ...backendSource, dedup_state: "applied" })).toThrow(TypeError);
+    expect(() => sanitizeGallerySourceSummary({ ...backendSource, dedup_state: "invented_state" })).toThrow(TypeError);
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, asset_count: -1 })).toThrow(TypeError);
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, asset_count: 1.5 })).toThrow(TypeError);
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, crawl_complete: 1 })).toThrow(TypeError);

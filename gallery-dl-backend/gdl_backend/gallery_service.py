@@ -12,7 +12,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Sequence
 
 from PIL import Image, UnidentifiedImageError
 
@@ -79,11 +79,43 @@ _PROBE_ERROR_CODES: frozenset[str] = frozenset(
 )
 
 
+_DEDUP_REVIEW_PENDING_STATES = frozenset({"pending", "ready"})
+
+
+def _effective_dedup_state(
+    source: dict[str, Any], review_status: str | None
+) -> str:
+    """有效去重状态（§3.8）：存储状态 + 审核状态 + 内容版本推导。
+
+    - not_required：来源未启用去重；
+    - applied：审核已应用且内容版本未再变化；
+    - stale：审核已应用但图库内容版本已前进（需重新分析）；
+    - review_pending：审核已就绪等待人工决策；
+    - pending_analysis：等待去重分析。
+    """
+    stored = str(source["dedup_state"])
+    if not source["dedup_required"]:
+        return "not_required"
+    if stored == "applied":
+        applied_version = int(source.get("dedup_applied_version", 0))
+        content_version = int(source["content_version"])
+        if applied_version < content_version:
+            return "stale"
+        return "applied"
+    if review_status in _DEDUP_REVIEW_PENDING_STATES:
+        return "review_pending"
+    if review_status == "applied":
+        # 审核已应用但图库侧提交尚未落库（应用钩子失败）。
+        return "pending_analysis"
+    return "pending_analysis"
+
+
 def _public_source(
     source: dict[str, Any],
     *,
     asset_count: int | None = None,
     root_directory_id: str | None = None,
+    review_status: str | None = None,
 ) -> dict[str, Any]:
     """公开来源投影：剥离 root_path 与 canonical_root_key（§6.4）。
 
@@ -98,7 +130,8 @@ def _public_source(
         "availability": source["availability"],
         "crawl_complete": source["crawl_complete"],
         "dedup_required": source["dedup_required"],
-        "dedup_state": source["dedup_state"],
+        "dedup_state": _effective_dedup_state(source, review_status),
+        "dedup_applied_version": source.get("dedup_applied_version", 0),
         "content_version": source["content_version"],
         "annotation_version": source["annotation_version"],
         "indexed_version": source["indexed_version"],
@@ -118,6 +151,19 @@ class GalleryCatalogService:
         self._scan_jobs: dict[str, dict[str, Any]] = {}
         self._scan_lock = threading.Lock()
         self._scan_threads: dict[str, threading.Thread] = {}
+        # 审核状态查询回调（由容器注入，避免服务层直接依赖审核仓储）。
+        self._review_status_lookup: Callable[[str], str | None] | None = None
+
+    def set_review_status_lookup(
+        self, lookup: Callable[[str], str | None]
+    ) -> None:
+        self._review_status_lookup = lookup
+
+    def _review_status(self, source: dict[str, Any]) -> str | None:
+        batch_id = source.get("batch_id")
+        if not batch_id or self._review_status_lookup is None:
+            return None
+        return self._review_status_lookup(batch_id)
 
     # ---- 来源生命周期（§3.1） ----
 
@@ -134,7 +180,11 @@ class GalleryCatalogService:
             )
         except GallerySourceConflictError as conflict:
             raise conflict
-        return _public_source(source, asset_count=0)
+        return _public_source(
+            source,
+            asset_count=0,
+            review_status=self._review_status(source),
+        )
 
     def register_batch_source(
         self,
@@ -156,6 +206,34 @@ class GalleryCatalogService:
             raise conflict
         return _public_source(source, asset_count=0)
 
+
+    def on_review_applied(
+        self,
+        batch_id: str,
+        *,
+        excluded_asset_ids: Sequence[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """去重审核应用后的图库侧提交（§3.8）。
+
+        原子地把被排除资产标记为 excluded、目录计数/封面立即修正、
+        来源 dedup_state='applied' 并记录 dedup_applied_version。
+        调用方（review apply 路由）负责在审核事务成功后调用；
+        本方法失败不影响审核结果本身。
+        """
+        source = self._repo.get_source_by_batch_id(batch_id)
+        if source is None:
+            return None
+        ids = list(excluded_asset_ids or [])
+        self._repo.apply_review_result(source["source_id"], excluded_asset_ids=ids)
+        updated = self._repo.get_source(source["source_id"])
+        assert updated is not None
+        # 后台触发一次增量扫描，使 physical 布局与索引对齐。
+        self.start_scan(source["source_id"])
+        return _public_source(
+            updated,
+            asset_count=self._repo.count_source_assets(source["source_id"]),
+            review_status="applied",
+        )
     def auto_register_batch_source(
         self,
         *,
@@ -196,7 +274,11 @@ class GalleryCatalogService:
         self._repo.rename_source(source_id, display_name.strip())
         updated = self._repo.get_source(source_id)
         assert updated is not None
-        return _public_source(updated, asset_count=self._repo.count_source_assets(source_id))
+        return _public_source(
+            updated,
+            asset_count=self._repo.count_source_assets(source_id),
+            review_status=self._review_status(updated),
+        )
 
     def unregister_source(self, source_id: str) -> None:
         source = self._repo.get_source(source_id)
@@ -222,7 +304,9 @@ class GalleryCatalogService:
         except GallerySourceConflictError as conflict:
             raise conflict
         return _public_source(
-            updated, asset_count=self._repo.count_source_assets(source_id)
+            updated,
+            asset_count=self._repo.count_source_assets(source_id),
+            review_status=self._review_status(updated),
         )
 
     def get_source(self, source_id: str) -> dict[str, Any]:
@@ -233,6 +317,7 @@ class GalleryCatalogService:
             source,
             asset_count=self._repo.count_source_assets(source_id),
             root_directory_id=self._root_directory_id(source_id),
+            review_status=self._review_status(source),
         )
 
     def list_sources(self) -> list[dict[str, Any]]:
@@ -241,6 +326,7 @@ class GalleryCatalogService:
                 source,
                 asset_count=self._repo.count_source_assets(source["source_id"]),
                 root_directory_id=self._root_directory_id(source["source_id"]),
+                review_status=self._review_status(source),
             )
             for source in self._repo.list_sources()
         ]

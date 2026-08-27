@@ -333,6 +333,7 @@ def initialize_schema(
             crawl_complete INTEGER NOT NULL DEFAULT 0,
             dedup_required INTEGER NOT NULL DEFAULT 0,
             dedup_state TEXT NOT NULL DEFAULT 'not_required',
+            dedup_applied_version INTEGER NOT NULL DEFAULT 0,
             content_version INTEGER NOT NULL DEFAULT 1,
             annotation_version INTEGER NOT NULL DEFAULT 1,
             indexed_version INTEGER NOT NULL DEFAULT 0,
@@ -546,9 +547,17 @@ def initialize_schema(
                 (str(SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION),),
             )
 
-    if schema_version < GALLERY_EXPORT_SCHEMA_VERSION:
+    if schema_version <= GALLERY_EXPORT_SCHEMA_VERSION:
         # v9 迁移：图库与数据集导出只有新增对象，纯 DDL 已由上方幂等脚本建齐；
         # 版本标记单独提交，失败时下次启动自动重试，不产生半迁移状态。
+        # v9 开发期内补列：早于列加入的 v9 库用防御性 ALTER 对齐。
+        with transaction() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(gallery_sources)")}
+            if "dedup_applied_version" not in columns:
+                conn.execute(
+                    "ALTER TABLE gallery_sources ADD COLUMN dedup_applied_version INTEGER NOT NULL DEFAULT 0"
+                )
+
         with transaction() as conn:
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",

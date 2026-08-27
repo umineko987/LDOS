@@ -105,7 +105,12 @@ export type GalleryTxtState =
   | "io_error";
 export type GalleryDedupVisibility = "candidate" | "kept" | "excluded";
 export type GalleryAssetLifecycleState = "active" | "missing" | "trashed";
-export type GalleryDedupState = "not_required" | "pending_analysis";
+export type GalleryDedupState =
+  | "not_required"
+  | "pending_analysis"
+  | "review_pending"
+  | "applied"
+  | "stale";
 export type GalleryAssetReadState = "pending" | "ok" | "failed";
 
 const SOURCE_KINDS = new Set<GallerySourceKind>(["imported", "crawl_batch"]);
@@ -130,7 +135,13 @@ const ASSET_LIFECYCLE_STATES = new Set<GalleryAssetLifecycleState>([
   "missing",
   "trashed",
 ]);
-const DEDUP_STATES = new Set<GalleryDedupState>(["not_required", "pending_analysis"]);
+const DEDUP_STATES = new Set<GalleryDedupState>([
+  "not_required",
+  "pending_analysis",
+  "review_pending",
+  "applied",
+  "stale",
+]);
 const ASSET_READ_STATES = new Set<GalleryAssetReadState>(["pending", "ok", "failed"]);
 // 镜像 _probe_image 的固定错误码；后续阶段新增后端码时同步扩展。
 const ASSET_ERROR_CODES = new Set(["", "unidentified", "decode_failed", "probe_error"]);
@@ -147,6 +158,7 @@ const SOURCE_SUMMARY_KEYS = new Set([
   "dedup_required",
   "dedup_state",
   "content_version",
+  "dedup_applied_version",
   "annotation_version",
   "indexed_version",
   "last_scanned_at",
@@ -203,6 +215,7 @@ export interface GallerySourceSummary {
   readonly crawl_complete: boolean;
   readonly dedup_required: boolean;
   readonly dedup_state: GalleryDedupState;
+  readonly dedup_applied_version: number;
   readonly content_version: number;
   readonly annotation_version: number;
   readonly indexed_version: number;
@@ -289,6 +302,14 @@ function positiveVersion(value: unknown, label: string, fallback: number): numbe
   }
   return value;
 }
+function nonnegativeVersion(value: unknown, label: string, fallback: number): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`invalid_${label}`);
+  }
+  return value;
+}
+
 
 function epochValue(value: unknown, label: string, fallback: number): number {
   if (value === undefined) return fallback;
@@ -369,6 +390,11 @@ export function sanitizeGallerySourceSummary(raw: unknown): GallerySourceSummary
         ? "not_required"
         : vocabularyValue(value.dedup_state, DEDUP_STATES, "gallery_dedup_state"),
     content_version: positiveVersion(value.content_version, "gallery_content_version", 1),
+    dedup_applied_version: nonnegativeVersion(
+      value.dedup_applied_version,
+      "gallery_dedup_applied_version",
+      0,
+    ),
     annotation_version: positiveVersion(
       value.annotation_version,
       "gallery_annotation_version",
@@ -566,6 +592,9 @@ export const GALLERY_AVAILABILITY_LABELS: Readonly<Record<GallerySourceAvailabil
 export const GALLERY_DEDUP_STATE_LABELS: Readonly<Record<GalleryDedupState, string>> = Object.freeze({
   not_required: "无需去重",
   pending_analysis: "待去重分析",
+  review_pending: "等待去重审核",
+  applied: "去重已应用",
+  stale: "去重结果已过期",
 });
 
 export const GALLERY_SOURCE_KIND_LABELS: Readonly<Record<GallerySourceKind, string>> = Object.freeze({

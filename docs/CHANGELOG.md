@@ -187,3 +187,16 @@
 - `Gallery.svelte`：工具栏选择操作（重命名 F2、删除、回收区入口）；删除确认对话框显示图片/同名 TXT/TXT 异常计数（记忆 #62 前半：先确认后成组可撤销执行）；重命名对话框（stem 输入 + 冲突错误码）；撤销 toast；回收区面板（操作级恢复/彻底删除/清空入口、磁盘占用与项目数、不自动清理提示——记忆 #58）；应用级快捷键 `svelte:window`（Delete/Ctrl+A/F2/Escape，查看器打开时让位，表单控件不被劫持）；`gallery.css` 对话框/toast/面板 + TXT 编辑样式，forced-colors/reduced-motion 适配；backdrop 按项目约定不使用 backdrop-filter。
 - 测试：`controller.test.ts` +7（TXT 保存契约与推进、冲突保草稿、重命名对话框流、本地 stem 校验、确认回收→撤销、回收失败保码、回收区面板恢复/清除）；`model.test.ts` 此前已覆盖新清洗器。
 - 阻塞：无。
+
+### [G4] feat(gallery): 去重对账——审核应用同步、有效状态推导与内容过期
+
+- 状态：✅ 后端 691/694（3 红为 G5 预期红）；桌面 363/366（3 红为 G6 预期红）；新增 8 个去重对账测试全绿
+- Schema（v9 内演进，未发布）：`gallery_sources.dedup_applied_version`（INTEGER NOT NULL DEFAULT 0）+ 防御性 ALTER 补列（早于列加入的开发库自动对齐）。
+- 有效去重状态（§3.8）：`_effective_dedup_state` 由 存储状态 + `crawl_reviews.status` + `content_version` 对比推导出 `not_required / pending_analysis / review_pending / applied / stale`；`ServiceContainer` 注入 `set_review_status_lookup` 回调，服务层不直接依赖审核仓储。
+- 审核应用→图库原子提交：`GalleryRepository.apply_review_result` 单事务置被淘汰资产 `dedup_visibility='excluded'`、来源 `dedup_state='applied'` + `dedup_applied_version=content_version`、`indexed_version+1`；目录 `direct/recursive_asset_count` 与封面 SQL 内联重算（记忆 #36：应用后立即从列表/搜索/计数剔除）。
+- `GalleryCatalogService.on_review_applied(batch_id, excluded_asset_ids)`：按批次找来源→原子提交→后台增量扫描；`api_routes/review.py` apply 路由在审核事务成功后内联调用（失败不影响审核结果本身）。
+- 候选过滤：`_page_assets`/`search_assets`/`count_source_assets` 增加 `dedup_visibility!='excluded'` 过滤；扫描 upsert 不回写 `dedup_visibility`（排除永久）。
+- 内容过期（记忆 #37）：rename/trash/restore/purge 的索引提交统一 `_bump_source_content_version`（来源 `content_version+1`）；`applied` 来源在 `content_version > dedup_applied_version` 时投影为 `stale`。
+- 桌面：`GalleryDedupState` 扩展为五态并新增 `dedup_applied_version` 白名单字段（非负安全整数）；`GALLERY_DEDUP_STATE_LABELS` 补全中文标签。
+- 测试：`tests/test_gallery_dedup_reconciliation.py`（8 tests：立即排除+列表/搜索剔除、applied_version 记录、目录计数重算、not_required、pending→review_pending 状态机、applied→内容变化→stale、trash 递增 content_version、无来源批次返回 None）；`model.test.ts` fixture 同步新字段并以 invented state 覆盖拒绝分支。
+- 阻塞：无。

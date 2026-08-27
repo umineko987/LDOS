@@ -178,6 +178,23 @@ class GalleryRepository:
             ).fetchone()
         return None if row is None else self._project_source_row(row)
 
+    def get_asset_ids_by_relative_paths(
+        self, source_id: str, relative_paths: Sequence[str]
+    ) -> list[str]:
+        """按相对路径解析来源内的资产 ID（审核排除提交用）。"""
+        if not relative_paths:
+            return []
+        with self._read() as conn:
+            placeholders = ",".join("?" for _ in relative_paths)
+            rows = conn.execute(
+                f"""
+                SELECT id FROM gallery_assets
+                WHERE source_id=? AND relative_path IN ({placeholders})
+                """,
+                (source_id, *relative_paths),
+            ).fetchall()
+        return [str(row["id"]) for row in rows]
+
     def get_source(self, source_id: str) -> dict[str, Any] | None:
         row = self._source_row_by_id(None, source_id)
         return None if row is None else self._project_source_row(row)
@@ -199,6 +216,103 @@ class GalleryRepository:
             )
             conn.execute("DELETE FROM gallery_sources WHERE id=?", (source_id,))
         return True
+
+    def apply_review_result(
+        self,
+        source_id: str,
+        *,
+        excluded_asset_ids: Sequence[str],
+    ) -> bool:
+        """审核应用后的图库侧原子提交（§3.8）。
+
+        - 被排除资产置 dedup_visibility='excluded'（列表/搜索/计数立即剔除）；
+        - 来源 dedup_state='applied'，dedup_applied_version=当前 content_version；
+        - indexed_version 递增驱动前端刷新。
+        """
+        now = self._clock()
+        with self._transaction() as conn:
+            row = self._source_row_by_id(conn, source_id)
+            if row is None:
+                return False
+            current_version = int(row["content_version"])
+            conn.execute(
+                """
+                UPDATE gallery_sources
+                SET dedup_state='applied', dedup_applied_version=?,
+                    indexed_version=indexed_version+1, updated_at=?
+                WHERE id=?
+                """,
+                (current_version, now, source_id),
+            )
+            for asset_id in excluded_asset_ids:
+                conn.execute(
+                    """
+                    UPDATE gallery_assets
+                    SET dedup_visibility='excluded', updated_at=?
+                    WHERE id=? AND source_id=?
+                    """,
+                    (now, asset_id, source_id),
+                )
+                conn.execute(
+                    "DELETE FROM gallery_search_index WHERE asset_id=?",
+                    (asset_id,),
+                )
+            # 立即修正目录计数与封面（被排除项不再进入目录计数/封面）。
+            if excluded_asset_ids:
+                placeholders = ",".join("?" for _ in excluded_asset_ids)
+                affected = conn.execute(
+                    f"""
+                    SELECT DISTINCT directory_id FROM gallery_assets
+                    WHERE source_id=? AND id IN ({placeholders})
+                    """,
+                    (source_id, *excluded_asset_ids),
+                ).fetchall()
+                for directory_row in affected:
+                    directory_id = str(directory_row["directory_id"])
+                    self._recount_directory(conn, source_id, directory_id, now)
+        return True
+
+    def _recount_directory(
+        self, conn: Any, source_id: str, directory_id: str, now: Any
+    ) -> None:
+        row = conn.execute(
+            """
+            SELECT relative_path FROM gallery_directories
+            WHERE source_id=? AND id=?
+            """,
+            (source_id, directory_id),
+        ).fetchone()
+        if row is None:
+            return
+        relative_path = str(row["relative_path"])
+        prefix = f"{relative_path}/" if relative_path else ""
+        conn.execute(
+            """
+            UPDATE gallery_directories SET
+                direct_asset_count=(
+                    SELECT COUNT(*) FROM gallery_assets
+                    WHERE directory_id=? AND lifecycle_state='active'
+                      AND dedup_visibility!='excluded'),
+                recursive_asset_count=(
+                    SELECT COUNT(*) FROM gallery_assets
+                    WHERE source_id=? AND lifecycle_state='active'
+                      AND dedup_visibility!='excluded'
+                      AND (relative_path=? OR relative_path LIKE ?)),
+                cover_asset_ids_json=(
+                    SELECT COALESCE(json_group_array(id), '[]') FROM (
+                        SELECT id FROM gallery_assets
+                        WHERE source_id=? AND lifecycle_state='active'
+                          AND dedup_visibility!='excluded'
+                          AND (relative_path=? OR relative_path LIKE ?)
+                        ORDER BY sort_key LIMIT 4)),
+                updated_at=?
+            WHERE source_id=? AND id=?
+            """,
+            (directory_id, source_id, relative_path, f"{prefix}%",
+             source_id, relative_path, f"{prefix}%",
+             now, source_id, directory_id),
+        )
+
 
     def relink_source(self, source_id: str, new_root_path: str) -> dict[str, Any]:
         canonical = canonical_root_key(new_root_path)
@@ -254,6 +368,7 @@ class GalleryRepository:
             "crawl_complete": bool(row["crawl_complete"]),
             "dedup_required": bool(row["dedup_required"]),
             "dedup_state": row["dedup_state"],
+            "dedup_applied_version": row["dedup_applied_version"],
             "content_version": row["content_version"],
             "annotation_version": row["annotation_version"],
             "indexed_version": row["indexed_version"],
@@ -707,7 +822,10 @@ class GalleryRepository:
         cursor: str | None,
         limit: int,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        restrictions: list[str] = ["lifecycle_state='active'"]
+        restrictions: list[str] = [
+            "lifecycle_state='active'",
+            "dedup_visibility!='excluded'",
+        ]
         params: list[Any] = []
         if txt_state is not None:
             restrictions.append("txt_state=?")
@@ -900,7 +1018,8 @@ class GalleryRepository:
         with self._read() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) AS total FROM gallery_assets"
-                " WHERE source_id=? AND lifecycle_state='active'",
+                " WHERE source_id=? AND lifecycle_state='active'"
+                "   AND dedup_visibility!='excluded'",
                 (source_id,),
             ).fetchone()
         return int(row["total"])

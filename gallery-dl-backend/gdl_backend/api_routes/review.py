@@ -148,6 +148,26 @@ def _empty_review_groups(*, limit: int, offset: int) -> dict[str, Any]:
     }
 
 
+
+
+def _sync_gallery_after_apply(container: Any, batch_id: str) -> None:
+    """审核应用后的图库提交（§3.8；路由内联调用，异常由调用方吞掉）。"""
+    gallery = getattr(container, "gallery_catalog", None)
+    if gallery is None:
+        return
+    source = container.db.gallery.get_source_by_batch_id(batch_id)
+    if source is None:
+        gallery.on_review_applied(batch_id)
+        return
+    rejected = [
+        str(image["relative_path"])
+        for image in container.db.crawl_review_apply_images(batch_id)
+        if image.get("disposition") == "rejected"
+    ]
+    excluded = container.db.gallery.get_asset_ids_by_relative_paths(
+        source["source_id"], rejected
+    )
+    gallery.on_review_applied(batch_id, excluded_asset_ids=excluded)
 def create_review_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
@@ -271,6 +291,14 @@ def create_review_router() -> APIRouter:
             raise ApiError(404, "crawl_not_found", "爬取批次不存在")
         try:
             result = await asyncio.to_thread(container.reviews.apply, batch_id)
+            # 图库侧同步（§3.8）：被淘汰资产立即从列表/搜索/计数剔除，
+            # 来源进入 applied 状态；失败不影响已成功的审核结果。
+            try:
+                await asyncio.to_thread(
+                    _sync_gallery_after_apply, container, batch_id
+                )
+            except Exception:  # noqa: BLE001 - 审核结果已落库，仅记录
+                pass
             return _desktop_review_operation(result) if view == "desktop" else result
         except KeyError as exc:
             raise ApiError(404, "review_not_found", "审核批次不存在") from exc
