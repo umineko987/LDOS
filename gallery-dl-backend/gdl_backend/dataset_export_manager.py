@@ -116,8 +116,22 @@ class DatasetExportManager:
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """创建 draft 任务并记录来源选择；预检由 start/preflight 异步执行。"""
+        resolved: list[dict[str, Any]] = []
         for selection in selections:
             validate_export_alias(selection["output_alias"])
+            directory_id = selection.get("directory_id")
+            if directory_id is None:
+                # 目录为 null 表示整个来源：解析到来源根目录。
+                root = self._gallery.get_root_directory(selection["source_id"])
+                if root is None:
+                    raise DatasetExportError(
+                        "source_not_found",
+                        "来源尚未扫描，无法定位根目录",
+                        detail={"source_id": selection["source_id"]},
+                    )
+                directory_id = root["directory_id"]
+            resolved.append({**selection, "directory_id": directory_id})
+        selections = resolved
         digest = hashlib.sha256(
             "|".join(
                 f"{s['source_id']}:{s['directory_id']}:{s['output_alias']}"
@@ -350,6 +364,9 @@ class DatasetExportManager:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         return self._repo.list_jobs(status=status, limit=limit, offset=offset)
+
+    def count_item_states(self, job_ids: list[str]) -> dict[str, dict[str, int]]:
+        return self._repo.count_item_states(job_ids)
 
     def list_sources(self, job_id: str) -> list[dict[str, Any]]:
         return self._repo.list_source_snapshots(job_id)

@@ -21,7 +21,7 @@ from .validation import validate_idempotency_key
 
 class ExportSelection(BaseModel):
     source_id: str = Field(min_length=1, max_length=128)
-    directory_id: str = Field(min_length=1, max_length=128)
+    directory_id: str | None = Field(default=None, max_length=128)
     include_descendants: bool = False
     output_alias: str = Field(min_length=1, max_length=200)
 
@@ -54,22 +54,44 @@ def _export_api_error(error: DatasetExportError) -> ApiError:
     )
 
 
-def _public_job(job: dict[str, Any]) -> dict[str, Any]:
-    """desktop 投影：剥离 target_path 绝对路径，只保留任务摘要。"""
+def _public_job(
+    job: dict[str, Any],
+    item_counts: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """desktop 投影（G0 合同）：无绝对路径，无模拟进度百分比。"""
+    counts = item_counts or {}
     return {
-        "job_id": job["job_id"],
+        "export_id": job["job_id"],
         "status": job["status"],
         "sample_count": job["sample_count"],
+        "staged_sample_count": counts.get("staged", 0) + counts.get("committed", 0),
+        "committed_sample_count": counts.get("committed", 0),
         "image_bytes": job["image_bytes"],
         "txt_bytes": job["txt_bytes"],
-        "snapshot_digest": job["snapshot_digest"],
-        "error_class": job["error_class"],
+        "error_class": job["error_class"] or None,
         "created_at": job["created_at"],
         "updated_at": job["updated_at"],
         "started_at": job["started_at"],
         "finished_at": job["finished_at"],
     }
 
+
+def _public_source(source: dict[str, Any]) -> dict[str, Any]:
+    """desktop 来源投影：剥内部版本号（staleness 由后端判定）。"""
+    return {
+        "source_id": source["source_id"],
+        "directory_id": source["directory_id"],
+        "include_descendants": bool(source["include_descendants"]),
+        "output_alias": source["output_alias"],
+    }
+
+
+def _aggregate_blockers(blockers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """desktop 阻断投影（G0 合同）：稳定码 + 聚合计数，无原始异常。"""
+    counts: dict[str, int] = {}
+    for blocker in blockers:
+        counts[blocker["code"]] = counts.get(blocker["code"], 0) + 1
+    return [{"code": code, "count": count} for code, count in sorted(counts.items())]
 
 def create_dataset_exports_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
@@ -101,7 +123,10 @@ def create_dataset_exports_router() -> APIRouter:
             raise _export_api_error(error) from None
         if result.get("status") == "blocked":
             blocked_job = manager.get_job(job["job_id"]) or {}
-            return {"job": _public_job(blocked_job), "blockers": result["blockers"]}
+            return {
+                "job": _public_job(blocked_job),
+                "blockers": _aggregate_blockers(result["blockers"]),
+            }
         ready_job = manager.get_job(job["job_id"]) or {}
         return _public_job(ready_job)
 
@@ -115,7 +140,8 @@ def create_dataset_exports_router() -> APIRouter:
     ) -> Any:
         manager: DatasetExportManager = container.dataset_export_manager
         jobs = manager.list_jobs(status=status, limit=limit, offset=offset)
-        return {"jobs": [_public_job(j) for j in jobs]}
+        counts = manager.count_item_states([j["job_id"] for j in jobs])
+        return {"jobs": [_public_job(j, counts.get(j["job_id"])) for j in jobs]}
 
     @router.get("/dataset-exports/{export_id}")
     async def get_dataset_export(
@@ -127,8 +153,12 @@ def create_dataset_exports_router() -> APIRouter:
         job = manager.get_job(export_id)
         if job is None:
             raise ApiError(404, "export_not_found", "导出任务不存在")
-        result = _public_job(job)
-        result["sources"] = manager.list_sources(export_id)
+        counts = manager.count_item_states([export_id]).get(export_id)
+        result = _public_job(job, counts)
+        result["sources"] = [
+            _public_source(s) for s in manager.list_sources(export_id)
+        ]
+        result["blockers"] = _aggregate_blockers(manager.list_blockers(export_id)["blockers"])
         return result
 
     @router.get("/dataset-exports/{export_id}/blockers")
@@ -139,7 +169,12 @@ def create_dataset_exports_router() -> APIRouter:
     ) -> Any:
         manager: DatasetExportManager = container.dataset_export_manager
         try:
-            return manager.list_blockers(export_id)
+            result = manager.list_blockers(export_id)
+            return {
+                "export_id": export_id,
+                "status": result["status"],
+                "blockers": _aggregate_blockers(result["blockers"]),
+            }
         except DatasetExportError as error:
             raise _export_api_error(error) from None
 

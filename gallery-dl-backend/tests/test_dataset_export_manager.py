@@ -194,7 +194,7 @@ class DatasetExportManagerTest(unittest.TestCase):
 
     def test_full_export_flow_with_manifest(self):
         result = self._create_export()
-        job_id = result.get("job_id", result.get("job", {}).get("job_id"))
+        job_id = result.get("export_id", result.get("job", {}).get("export_id"))
         self.assertNotIn("blockers", result)
         job = self.client.get(f"/api/v1/dataset-exports/{job_id}").json()
         self.assertEqual(job["status"], "ready")
@@ -229,12 +229,12 @@ class DatasetExportManagerTest(unittest.TestCase):
     def test_export_merge_keeps_existing_files(self):
         # 第一次导出。
         first = self._create_export(alias="batch1")
-        job_id = first.get("job_id", first.get("job", {}).get("job_id"))
+        job_id = first.get("export_id", first.get("job", {}).get("export_id"))
         self.client.post(f"/api/v1/dataset-exports/{job_id}/start")
         self._wait_terminal(job_id)
         # 第二次导出（不同别名）合并不覆盖已有文件。
         second = self._create_export(alias="batch2")
-        job_id2 = second.get("job_id", second.get("job", {}).get("job_id"))
+        job_id2 = second.get("export_id", second.get("job", {}).get("export_id"))
         self.client.post(f"/api/v1/dataset-exports/{job_id2}/start")
         self._wait_terminal(job_id2)
         self.assertTrue((self.target_dir / "batch1" / "a.jpg").exists())
@@ -248,7 +248,7 @@ class DatasetExportManagerTest(unittest.TestCase):
 
     def test_state_machine_guards(self):
         result = self._create_export()
-        job_id = result.get("job_id", result.get("job", {}).get("job_id"))
+        job_id = result.get("export_id", result.get("job", {}).get("export_id"))
         # draft/ready 状态下 pause → export_state_invalid。
         paused = self.client.post(f"/api/v1/dataset-exports/{job_id}/pause")
         self.assertEqual(paused.status_code, 409)
@@ -260,7 +260,7 @@ class DatasetExportManagerTest(unittest.TestCase):
 
     def test_discard_removes_staging(self):
         result = self._create_export()
-        job_id = result.get("job_id", result.get("job", {}).get("job_id"))
+        job_id = result.get("export_id", result.get("job", {}).get("export_id"))
         discarded = self.client.post(f"/api/v1/dataset-exports/{job_id}/discard")
         assert discarded.status_code == 200, discarded.text
         self.assertEqual(discarded.json()["status"], "discarded")
@@ -270,9 +270,9 @@ class DatasetExportManagerTest(unittest.TestCase):
 
     def test_list_and_detail_projections(self):
         result = self._create_export()
-        job_id = result.get("job_id", result.get("job", {}).get("job_id"))
+        job_id = result.get("export_id", result.get("job", {}).get("export_id"))
         listing = self.client.get("/api/v1/dataset-exports?view=desktop").json()
-        self.assertTrue(any(j["job_id"] == job_id for j in listing["jobs"]))
+        self.assertTrue(any(j["export_id"] == job_id for j in listing["jobs"]))
         # 投影不包含绝对目标路径。
         for job in listing["jobs"]:
             self.assertNotIn("target_path", job)
@@ -293,7 +293,7 @@ class DatasetExportManagerTest(unittest.TestCase):
             time.sleep(0.05)
         result = self._create_export()
         job_id = (
-            result.get("job_id") or result.get("job", {}).get("job_id")
+            result.get("export_id") or result.get("job", {}).get("export_id")
         )
         blockers = self.client.get(
             f"/api/v1/dataset-exports/{job_id}/blockers?view=desktop"

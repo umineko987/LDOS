@@ -111,6 +111,26 @@ class DatasetExportRepository:
             ).fetchall()
         return [self._project_job(row) for row in rows]
 
+    def count_item_states(self, job_ids: list[str]) -> dict[str, dict[str, int]]:
+        """按任务统计条目复制状态计数（staged 含 committed）。"""
+        if not job_ids:
+            return {}
+        placeholders = ",".join("?" for _ in job_ids)
+        with self._read() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT job_id, copy_state, COUNT(*) AS n
+                FROM dataset_export_items
+                WHERE job_id IN ({placeholders})
+                GROUP BY job_id, copy_state
+                """,
+                job_ids,
+            ).fetchall()
+        counts: dict[str, dict[str, int]] = {job_id: {} for job_id in job_ids}
+        for row in rows:
+            counts.setdefault(str(row["job_id"]), {})[str(row["copy_state"])] = int(row["n"])
+        return counts
+
     def update_job_status(
         self,
         job_id: str,
