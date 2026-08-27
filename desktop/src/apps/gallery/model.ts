@@ -861,3 +861,99 @@ export function gallerySelectAll(ids: readonly string[]): GallerySelectionPatch 
 export function galleryClearSelection(): GallerySelectionPatch {
   return Object.freeze({ anchorIndex: null, selectedIds: Object.freeze([]) });
 }
+
+// ---- G3 文件事务模型（rename / trash / undo / restore / purge）----
+
+export interface GalleryFileOperationResult {
+  readonly operation_id: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly item_count: number;
+  readonly has_txt_count: number;
+}
+
+const FILE_OPERATION_RESULT_KEYS = new Set([
+  "operation_id",
+  "kind",
+  "status",
+  "item_count",
+  "has_txt_count",
+]);
+
+export function sanitizeGalleryFileOperationResult(
+  raw: unknown,
+): GalleryFileOperationResult {
+  const value = strictRecord(raw, FILE_OPERATION_RESULT_KEYS, "gallery_file_operation");
+  return Object.freeze({
+    operation_id: idText(value.operation_id, "gallery_operation_id"),
+    kind: boundedText(value.kind, "gallery_operation_kind", 32),
+    status: boundedText(value.status, "gallery_operation_status", 32),
+    item_count: countValue(value.item_count, "gallery_operation_item_count", 0),
+    has_txt_count: countValue(value.has_txt_count, "gallery_operation_txt_count", 0),
+  });
+}
+
+export interface GalleryTrashOperation {
+  readonly operation_id: string;
+  readonly created_at: number;
+  readonly item_count: number;
+  readonly has_txt_count: number;
+  readonly item_error_count: number;
+  readonly disk_usage_bytes: number;
+}
+
+export interface GalleryTrashPage {
+  readonly operations: readonly GalleryTrashOperation[];
+  readonly next_cursor: string | null;
+}
+
+const TRASH_OPERATION_KEYS = new Set([
+  "operation_id",
+  "created_at",
+  "item_count",
+  "has_txt_count",
+  "item_error_count",
+  "disk_usage_bytes",
+]);
+
+const TRASH_PAGE_KEYS = new Set(["operations", "next_cursor"]);
+
+export function sanitizeGalleryTrashPage(raw: unknown): GalleryTrashPage {
+  const value = strictRecord(raw, TRASH_PAGE_KEYS, "gallery_trash_page");
+  const operations = Array.isArray(value.operations) ? value.operations : [];
+  if (operations.length > 200) {
+    throw new TypeError("gallery_trash_page: operations too large");
+  }
+  return Object.freeze({
+    operations: Object.freeze(
+      operations.map((item) => {
+        const record = strictRecord(item, TRASH_OPERATION_KEYS, "gallery_trash_operation");
+        return Object.freeze({
+          operation_id: idText(record.operation_id, "gallery_trash_operation_id"),
+          created_at: epochValue(record.created_at, "gallery_trash_created_at", 0),
+          item_count: countValue(record.item_count, "gallery_trash_item_count", 0),
+          has_txt_count: countValue(record.has_txt_count, "gallery_trash_txt_count", 0),
+          item_error_count: countValue(record.item_error_count, "gallery_trash_error_count", 0),
+          disk_usage_bytes: epochValue(record.disk_usage_bytes, "gallery_trash_disk_usage", 0),
+        });
+      }),
+    ),
+    next_cursor: optionalText(value.next_cursor, "gallery_trash_cursor", 128),
+  });
+}
+
+/**
+ * 重命名目标 stem 校验：非空、不含路径分隔符、不含保留字符、
+ * 不得以点结尾或含首尾空白（后端 invalid_rename_target 同口径）。
+ */
+export function validateGalleryRenameStem(stem: string): string | null {
+  if (typeof stem !== "string") return "invalid_type";
+  const trimmed = stem.trim();
+  if (trimmed.length === 0 || trimmed.length > 255) return "invalid_length";
+  if (stem !== trimmed) return "leading_or_trailing_whitespace";
+  if (stem.startsWith(".")) return "leading_dot";
+  if (stem.endsWith(".")) return "trailing_dot";
+  if (/[\\/:*?"<>|\u0000-\u001f]/.test(stem)) return "invalid_characters";
+  if (stem === "." || stem === "..") return "reserved_name";
+  return null;
+}

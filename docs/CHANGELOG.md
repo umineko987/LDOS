@@ -171,3 +171,19 @@
 - 测试：`tests/test_gallery_file_operations.py`（新增 14 tests：重命名五态、回收成对移动+清单+索引、批量原子回滚、撤销、恢复冲突、永久清除、分页、来源锁、崩溃恢复 applying/rolling_back 两分支）；`tests/test_gallery_api_routes.py` +6 HTTP 层。
 - `tests/test_app_routing_contract.py`：OpenAPI 固定契约同步 8 个新操作（PUT annotation、rename、file-operations×2、trash×4）。
 - 阻塞：无。
+
+### [G3-3] feat(gallery): 桌面文件操作 UI——TXT 编辑、重命名、回收与回收区面板
+
+- 状态：✅ 桌面 363/366（3 红为 G6 预期红）；`npm run check` 0 错误 0 警告；图库 44/44
+- `model.ts`：`GalleryFileOperationResult`/`GalleryTrashOperation`/`GalleryTrashPage` 清洗白名单；`validateGalleryRenameStem`（非空 stem、无路径分隔符/保留名）；`galleryApplyClickSelection` 等选择助手（G2-3 遗留）。
+- `service.ts`：`saveAnnotation`（PUT）、`renameAsset`、`trashAssets`、`undoTrash`、`restoreTrash`、`purgeTrash`、`purgeAllTrash`、`listTrash`（view=desktop 有界响应）。
+- `state.ts`：TXT 编辑器状态机（`txtDraft`/`txtSavePhase`/`txtSaveErrorCode`：idle→saving→saved|conflict|error，冲突时草稿保留）；重命名对话框、删除确认、撤销 toast、回收区面板（加载/游标分页/按操作恢复与清除/忙碌互斥）。
+- `controller.ts`：
+  - `saveTxtAnnotation({advance})`：Ctrl+S 保存 / Ctrl+Enter 保存并下一张；冲突（`txt_version_conflict`）保留草稿并落稳定码；换图自动清理上一张编辑态。
+  - `openRenameDialog`/`submitRename`/`cancelRename`：本地 stem 校验先行，失败不出网。
+  - `requestTrashSelection`/`confirmTrashSelection`/`cancelTrashConfirm`/`undoLastTrash`/`dismissUndoToast`：确认后整组回收，失败保留确认数据与错误码。
+  - `openTrashPanel`/`loadMoreTrash`/`restoreTrashOperation`/`purgeTrashOperation`/`closeTrashPanel`。
+- `Viewer.svelte`：右侧 TXT 面板进入编辑态（Enter 或“编辑”按钮）；Ctrl/Cmd+S、Ctrl/Cmd+Enter 保存契约；Escape 编辑态有未保存内容时弹“保存/放弃/取消”三选一（记忆 #34：不自动写入原文件）；←/→ 与关闭同样经过未保存守卫；保存横幅（saving/saved/conflict/error）；标签视图保持只读解析（记忆 #35）。
+- `Gallery.svelte`：工具栏选择操作（重命名 F2、删除、回收区入口）；删除确认对话框显示图片/同名 TXT/TXT 异常计数（记忆 #62 前半：先确认后成组可撤销执行）；重命名对话框（stem 输入 + 冲突错误码）；撤销 toast；回收区面板（操作级恢复/彻底删除/清空入口、磁盘占用与项目数、不自动清理提示——记忆 #58）；应用级快捷键 `svelte:window`（Delete/Ctrl+A/F2/Escape，查看器打开时让位，表单控件不被劫持）；`gallery.css` 对话框/toast/面板 + TXT 编辑样式，forced-colors/reduced-motion 适配；backdrop 按项目约定不使用 backdrop-filter。
+- 测试：`controller.test.ts` +7（TXT 保存契约与推进、冲突保草稿、重命名对话框流、本地 stem 校验、确认回收→撤销、回收失败保码、回收区面板恢复/清除）；`model.test.ts` 此前已覆盖新清洗器。
+- 阻塞：无。

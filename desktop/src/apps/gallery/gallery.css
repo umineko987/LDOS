@@ -748,3 +748,393 @@
 
 :root[data-motion="off"] .gallery-viewer,
 :root[data-motion="off"] .gallery-viewer * { animation: none; transition: none; }
+
+/* ---- G3-3 TXT 编辑（查看器） ---- */
+
+.gallery-viewer__txt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.gallery-viewer__txt-actions button {
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--surface-default);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.gallery-viewer__txt-actions button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.gallery-viewer__txt-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gallery-viewer__txt-actions .gallery-viewer__txt-save {
+  border-color: var(--state-info-border);
+  color: var(--state-info-text);
+}
+
+.gallery-viewer__txt-editor {
+  flex: 1;
+  min-height: 120px;
+  margin: 8px;
+  padding: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid var(--state-info-border);
+  border-radius: 4px;
+  background: var(--surface-default);
+  color: var(--text-primary);
+  resize: vertical;
+}
+
+.gallery-viewer__txt-editor:focus-visible {
+  outline: 2px solid var(--state-info-border);
+  outline-offset: 1px;
+}
+
+.gallery-viewer__txt-banner {
+  margin: 0 8px 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  background: var(--surface-information);
+  color: var(--text-primary);
+}
+
+.gallery-viewer__txt-banner--error {
+  background: var(--surface-critical);
+  color: var(--text-primary);
+}
+
+.gallery-viewer__txt-guard {
+  margin: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--surface-raised);
+}
+
+.gallery-viewer__txt-guard p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.gallery-viewer__txt-guard-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.gallery-viewer__txt-guard-actions button {
+  font-size: 12px;
+  padding: 4px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--surface-default);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.gallery-viewer__txt-guard-actions button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.gallery-viewer__txt-raw {
+  cursor: text;
+}
+
+/* ---- G3-3 对话框 / toast / 回收区面板 ---- */
+
+.gallery-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 72%);
+}
+
+.gallery-dialog {
+  width: min(440px, calc(100vw - 48px));
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 40%);
+}
+
+.gallery-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.gallery-dialog p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.gallery-dialog__error {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: var(--surface-critical);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.gallery-dialog__input {
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--surface-default);
+  color: var(--text-primary);
+}
+
+.gallery-dialog__input:focus-visible {
+  outline: 2px solid var(--state-info-border);
+  outline-offset: 1px;
+}
+
+.gallery-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.gallery-dialog__actions button {
+  font-size: 13px;
+  padding: 6px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--surface-default);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.gallery-dialog__actions button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.gallery-dialog__actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gallery-dialog__actions .gallery-dialog__primary {
+  border-color: var(--state-info-border);
+  color: var(--state-info-text);
+}
+
+.gallery-dialog__actions .gallery-dialog__danger {
+  border-color: var(--state-critical-border);
+  color: var(--state-critical-text);
+}
+
+.gallery-undo-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 140;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  transform: translateX(-50%);
+}
+
+.gallery-undo-toast p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.gallery-undo-toast button {
+  font-size: 13px;
+  padding: 4px 12px;
+  border: 1px solid var(--state-info-border);
+  border-radius: 6px;
+  background: var(--surface-default);
+  color: var(--state-info-text);
+  cursor: pointer;
+}
+
+.gallery-undo-toast button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gallery-trash-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, calc(100vw - 64px));
+  border-left: 1px solid var(--border-default);
+  background: var(--surface-raised);
+  box-shadow: -12px 0 32px rgb(0 0 0 / 30%);
+}
+
+.gallery-trash-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.gallery-trash-panel__head h2 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.gallery-trash-panel__summary {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.gallery-trash-panel__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px;
+}
+
+.gallery-trash-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.gallery-trash-item__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gallery-trash-item__title {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gallery-trash-item__detail {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.gallery-trash-item__actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.gallery-trash-item__actions button {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--surface-default);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.gallery-trash-item__actions button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.gallery-trash-item__actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.gallery-trash-panel__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.gallery-trash-panel__foot button {
+  font-size: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--surface-default);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.gallery-trash-panel__foot button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gallery-trash-panel__empty,
+.gallery-trash-panel__hint {
+  padding: 24px 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+@media (forced-colors: active) {
+  .gallery-dialog-backdrop {
+    background: CanvasText;
+  }
+
+  .gallery-dialog,
+  .gallery-undo-toast,
+  .gallery-trash-panel {
+    border: 1px solid CanvasText;
+  }
+
+  .gallery-dialog__actions button,
+  .gallery-undo-toast button,
+  .gallery-trash-item__actions button,
+  .gallery-trash-panel__foot button {
+    border: 1px solid CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gallery-undo-toast,
+  .gallery-trash-panel {
+    transition: none;
+  }
+}

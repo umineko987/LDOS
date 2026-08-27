@@ -7,6 +7,7 @@ import {
   type GalleryPathSegment,
   type GallerySearchScope,
   type GallerySourceSummary,
+  type GalleryTrashOperation,
   type GalleryTxtState,
 } from "./model";
 
@@ -14,6 +15,9 @@ export type GalleryLoadPhase = "idle" | "loading" | "ready" | "error";
 export type GalleryViewMode = "grid" | "list";
 export type GalleryViewerPhase = "idle" | "loading" | "ready" | "error";
 export type GalleryTxtViewMode = "raw" | "tags";
+export type GallerySavePhase = "idle" | "saving" | "saved" | "conflict" | "error";
+export type GalleryDialogPhase = "closed" | "open" | "busy";
+export type GalleryTrashPanelPhase = "closed" | "loading" | "ready" | "error";
 export interface GalleryBrowseState {
   /** 来源列表加载阶段。 */
   readonly sourcesPhase: GalleryLoadPhase;
@@ -51,6 +55,33 @@ export interface GalleryBrowseState {
   readonly txtViewMode: GalleryTxtViewMode;
   /** 返回网格时要恢复的滚动位置。 */
   readonly pendingGridScrollTop: number;
+  // ---- TXT 编辑（G3-3） ----
+  /** TXT 编辑草稿；null 表示未进入编辑态（与已保存内容一致）。 */
+  readonly txtDraft: string | null;
+  /** TXT 保存阶段。 */
+  readonly txtSavePhase: GallerySavePhase;
+  /** TXT 保存的错误码（conflict/error 时）。 */
+  readonly txtSaveErrorCode: string | null;
+  // ---- 重命名对话框（G3-3） ----
+  readonly renameDialogPhase: GalleryDialogPhase;
+  readonly renameAssetId: string | null;
+  readonly renameDialogError: string | null;
+  // ---- 删除确认（G3-3） ----
+  readonly trashConfirmPhase: GalleryDialogPhase;
+  /** 待删除的资产 ID 列表（含关联 TXT 计数由资产数据推导）。 */
+  readonly trashConfirmAssetIds: readonly string[];
+  readonly trashConfirmError: string | null;
+  // ---- 撤销 toast（G3-3） ----
+  /** 最近一次回收操作（供撤销）。 */
+  readonly undoableOperationId: string | null;
+  readonly undoToastVisible: boolean;
+  readonly undoBusy: boolean;
+  // ---- 回收区面板（G3-3） ----
+  readonly trashPanelPhase: GalleryTrashPanelPhase;
+  readonly trashOperations: readonly GalleryTrashOperation[];
+  readonly trashNextCursor: string | null;
+  readonly trashPanelError: string | null;
+  readonly trashPanelBusyOperationId: string | null;
 }
 
 export const GALLERY_BROWSE_DEFAULTS: GalleryBrowseState = Object.freeze({
@@ -82,6 +113,23 @@ export const GALLERY_BROWSE_DEFAULTS: GalleryBrowseState = Object.freeze({
   viewerAnnotation: null,
   txtViewMode: "raw" as const,
   pendingGridScrollTop: 0,
+  txtDraft: null,
+  txtSavePhase: "idle" as const,
+  txtSaveErrorCode: null,
+  renameDialogPhase: "closed" as const,
+  renameAssetId: null,
+  renameDialogError: null,
+  trashConfirmPhase: "closed" as const,
+  trashConfirmAssetIds: Object.freeze([]),
+  trashConfirmError: null,
+  undoableOperationId: null,
+  undoToastVisible: false,
+  undoBusy: false,
+  trashPanelPhase: "closed" as const,
+  trashOperations: Object.freeze([]),
+  trashNextCursor: null,
+  trashPanelError: null,
+  trashPanelBusyOperationId: null,
 }) as GalleryBrowseState;
 
 type BrowsePatch = Partial<Omit<GalleryBrowseState, "treeChildren">>;
@@ -119,6 +167,31 @@ export interface GalleryStore {
   moveViewer(index: number): boolean;
   closeViewer(): boolean;
   setTxtViewMode(mode: GalleryTxtViewMode): boolean;
+  // ---- G3-3 TXT 编辑 ----
+  setTxtDraft(draft: string | null): boolean;
+  setTxtSavePhase(phase: GallerySavePhase, errorCode: string | null): boolean;
+  resetTxtEditor(): boolean;
+  // ---- G3-3 重命名对话框 ----
+  openRenameDialog(assetId: string): boolean;
+  setRenameDialog(phase: GalleryDialogPhase, error: string | null): boolean;
+  closeRenameDialog(): boolean;
+  // ---- G3-3 删除确认 ----
+  openTrashConfirm(assetIds: readonly string[]): boolean;
+  setTrashConfirm(phase: GalleryDialogPhase, error: string | null): boolean;
+  closeTrashConfirm(): boolean;
+  // ---- G3-3 撤销 toast ----
+  showUndoToast(operationId: string): boolean;
+  setUndoBusy(busy: boolean): boolean;
+  hideUndoToast(): boolean;
+  // ---- G3-3 回收区面板 ----
+  setTrashPanelLoading(): boolean;
+  applyTrashPage(
+    operations: readonly GalleryTrashOperation[],
+    nextCursor: string | null,
+  ): boolean;
+  setTrashPanelError(errorCode: string): boolean;
+  setTrashPanelBusy(operationId: string | null): boolean;
+  closeTrashPanel(): boolean;
   destroy(): void;
 }
 
@@ -151,7 +224,24 @@ function statesEqual(left: GalleryBrowseState, right: GalleryBrowseState): boole
     left.viewerErrorCode === right.viewerErrorCode &&
     left.viewerAnnotation === right.viewerAnnotation &&
     left.txtViewMode === right.txtViewMode &&
-    left.pendingGridScrollTop === right.pendingGridScrollTop
+    left.pendingGridScrollTop === right.pendingGridScrollTop &&
+    left.txtDraft === right.txtDraft &&
+    left.txtSavePhase === right.txtSavePhase &&
+    left.txtSaveErrorCode === right.txtSaveErrorCode &&
+    left.renameDialogPhase === right.renameDialogPhase &&
+    left.renameAssetId === right.renameAssetId &&
+    left.renameDialogError === right.renameDialogError &&
+    left.trashConfirmPhase === right.trashConfirmPhase &&
+    left.trashConfirmAssetIds === right.trashConfirmAssetIds &&
+    left.trashConfirmError === right.trashConfirmError &&
+    left.undoableOperationId === right.undoableOperationId &&
+    left.undoToastVisible === right.undoToastVisible &&
+    left.undoBusy === right.undoBusy &&
+    left.trashPanelPhase === right.trashPanelPhase &&
+    left.trashOperations === right.trashOperations &&
+    left.trashNextCursor === right.trashNextCursor &&
+    left.trashPanelError === right.trashPanelError &&
+    left.trashPanelBusyOperationId === right.trashPanelBusyOperationId
   );
 }
 
@@ -344,6 +434,106 @@ export function createGalleryStore(): GalleryStore {
     },
     setTxtViewMode(mode) {
       return publish({ ...state, txtViewMode: mode });
+    },
+    setTxtDraft(draft) {
+      return publish({ ...state, txtDraft: draft, txtSavePhase: "idle", txtSaveErrorCode: null });
+    },
+    setTxtSavePhase(phase, errorCode) {
+      return publish({ ...state, txtSavePhase: phase, txtSaveErrorCode: errorCode });
+    },
+    resetTxtEditor() {
+      return publish({
+        ...state,
+        txtDraft: null,
+        txtSavePhase: "idle",
+        txtSaveErrorCode: null,
+      });
+    },
+    openRenameDialog(assetId) {
+      return publish({
+        ...state,
+        renameDialogPhase: "open",
+        renameAssetId: assetId,
+        renameDialogError: null,
+      });
+    },
+    setRenameDialog(phase, error) {
+      return publish({ ...state, renameDialogPhase: phase, renameDialogError: error });
+    },
+    closeRenameDialog() {
+      return publish({
+        ...state,
+        renameDialogPhase: "closed",
+        renameAssetId: null,
+        renameDialogError: null,
+      });
+    },
+    openTrashConfirm(assetIds) {
+      return publish({
+        ...state,
+        trashConfirmPhase: "open",
+        trashConfirmAssetIds: Object.freeze([...assetIds]),
+        trashConfirmError: null,
+      });
+    },
+    setTrashConfirm(phase, error) {
+      return publish({ ...state, trashConfirmPhase: phase, trashConfirmError: error });
+    },
+    closeTrashConfirm() {
+      return publish({
+        ...state,
+        trashConfirmPhase: "closed",
+        trashConfirmAssetIds: Object.freeze([]),
+        trashConfirmError: null,
+      });
+    },
+    showUndoToast(operationId) {
+      return publish({
+        ...state,
+        undoableOperationId: operationId,
+        undoToastVisible: true,
+        undoBusy: false,
+      });
+    },
+    setUndoBusy(busy) {
+      return publish({ ...state, undoBusy: busy });
+    },
+    hideUndoToast() {
+      return publish({ ...state, undoToastVisible: false, undoBusy: false });
+    },
+    setTrashPanelLoading() {
+      return publish({
+        ...state,
+        trashPanelPhase: "loading",
+        trashPanelError: null,
+        trashOperations: Object.freeze([]),
+        trashNextCursor: null,
+      });
+    },
+    applyTrashPage(operations, nextCursor) {
+      return publish({
+        ...state,
+        trashPanelPhase: "ready",
+        trashPanelError: null,
+        trashOperations: Object.freeze([...operations]),
+        trashNextCursor: nextCursor,
+      });
+    },
+    setTrashPanelError(errorCode) {
+      return publish({ ...state, trashPanelPhase: "error", trashPanelError: errorCode });
+    },
+    setTrashPanelBusy(operationId) {
+      return publish({ ...state, trashPanelBusyOperationId: operationId });
+    },
+    closeTrashPanel() {
+      return publish({
+        ...state,
+        trashPanelPhase: "closed",
+        trashOperations: Object.freeze([]),
+        trashNextCursor: null,
+        trashPanelError: null,
+        trashPanelBusyOperationId: null,
+      });
     },
     destroy() {
       destroyed = true;

@@ -27,7 +27,7 @@ describe("desktop API response-budget contract", () => {
 
   it("routes every high-volume workspace read through a bounded backend projection", () => {
     const contracts: readonly [string, string, readonly string[]][] = [
-      ["gallery", galleryServiceSource, ["sources}?view=desktop", "/entries?", "annotation?view=desktop"]],
+      ["gallery", galleryServiceSource, ["sources}?view=desktop", "/entries?", "annotation?view=desktop", "const parameters = [\"view=desktop\"]"]],
       ["crawl", crawlServiceSource, ["search}?view=desktop", "crawls}?view=desktop"]],
       ["tasks", tasksServiceSource, [
         "?limit=30&view=desktop",
@@ -64,7 +64,7 @@ describe("desktop API response-budget contract", () => {
   });
   it("fails when an application adds an unclassified transport call", () => {
     const inventory = [
-      ["gallery", galleryServiceSource, 3],
+      ["gallery", galleryServiceSource, 11],
       ["crawl", crawlServiceSource, 3],
       ["tasks", tasksServiceSource, 5],
       ["review", reviewServiceSource, 4],
@@ -76,7 +76,7 @@ describe("desktop API response-budget contract", () => {
     for (const [application, source, expectedCalls] of inventory) {
       expect(count(source, /api\.(?:get|post|put|delete)\(/g), application).toBe(expectedCalls);
     }
-    expect(count(galleryServiceSource, /view=desktop/g)).toBe(3);
+    expect(count(galleryServiceSource, /view=desktop/g)).toBe(4);
     expect(count(crawlServiceSource, /view=desktop/g)).toBe(2);
     expect(count(tasksServiceSource, /view=(?:desktop|tasks)/g)).toBe(5);
     expect(count(reviewServiceSource, /view=desktop/g)).toBe(4);

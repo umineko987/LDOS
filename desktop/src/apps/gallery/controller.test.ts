@@ -354,3 +354,223 @@ describe("gallery selection controller (G2-3 多选)", () => {
     expect(controller.clickAsset("missing", { additive: false, range: false })).toBe(false);
   });
 });
+
+describe("gallery file operations controller (G3-3 TXT 编辑/重命名/回收)", () => {
+  const assetA = {
+    asset_id: "asset-1",
+    source_id: "source-1",
+    directory_id: "dir-root",
+    relative_path: "a.jpg",
+    name: "a.jpg",
+    extension: ".jpg",
+    size_bytes: 100,
+    modified_ns: 1,
+    content_sha256: "x",
+    content_version: 1,
+    format: "jpeg",
+    width: 100,
+    height: 50,
+    read_state: "ok",
+    error_code: "",
+    txt_relative_path: "a.txt",
+    txt_size_bytes: 10,
+    txt_modified_ns: 1,
+    txt_version: 1,
+    txt_state: "normal",
+    dedup_visibility: "candidate",
+    lifecycle_state: "active",
+    updated_at: 1,
+  } as GalleryAssetEntry;
+
+  const assetB = { ...assetA, asset_id: "asset-2", relative_path: "b.jpg", name: "b.jpg" } as GalleryAssetEntry;
+
+  const operationResult = {
+    operation_id: "op-1",
+    kind: "trash",
+    status: "committed",
+    item_count: 2,
+    has_txt_count: 1,
+  };
+
+  function makeOpsService() {
+    return {
+      listSources: vi.fn(async () => [source]),
+      listDirectoryEntries: vi.fn(async () => ({
+        directory: rootDirectory,
+        directories: [],
+        assets: [assetA, assetB],
+        directory_cursor: null,
+        asset_cursor: null,
+      })),
+      getAnnotation: vi.fn(async (assetId: string) => ({
+        asset_id: assetId,
+        txt_state: "normal",
+        content: `content of ${assetId}`,
+        txt_version: 1,
+      })),
+      saveAnnotation: vi.fn(async (assetId: string, content: string) => ({
+        asset_id: assetId,
+        txt_state: "normal",
+        content,
+        txt_version: 2,
+      })),
+      renameAsset: vi.fn(async () => ({ ...operationResult, kind: "rename" })),
+      trashAssets: vi.fn(async () => ({ ...operationResult })),
+      undoTrash: vi.fn(async () => ({ ...operationResult, kind: "restore" })),
+      restoreTrash: vi.fn(async () => ({ ...operationResult, kind: "restore" })),
+      purgeTrash: vi.fn(async () => ({ ...operationResult, kind: "purge" })),
+      purgeAllTrash: vi.fn(async () => ({ ...operationResult, kind: "purge" })),
+      listTrash: vi.fn(async () => ({
+        operations: [
+          {
+            operation_id: "op-1",
+            created_at: 1700000000000,
+            item_count: 2,
+            has_txt_count: 1,
+            item_error_count: 0,
+            disk_usage_bytes: 2048,
+          },
+        ],
+        next_cursor: null,
+      })),
+      thumbnailUrl: (assetId: string) => `thumb:${assetId}`,
+      contentUrl: (assetId: string) => `content:${assetId}`,
+    } as unknown as GalleryService;
+  }
+
+  async function openReady(overrides: Partial<Record<string, ReturnType<typeof vi.fn>>> = {}) {
+    const service = makeOpsService();
+    for (const [key, value] of Object.entries(overrides)) {
+      (service as unknown as Record<string, unknown>)[key] = value;
+    }
+    const store = createGalleryStore();
+    const controller = createGalleryController({ store, service });
+    controller.activate();
+    await controller.refreshSources();
+    await controller.openSource("source-1");
+    return { store, controller, service: service as unknown as Record<string, ReturnType<typeof vi.fn>> };
+  }
+
+  it("edits and saves TXT with the version contract, then advances on demand", async () => {
+    const { store, controller, service } = await openReady();
+    controller.openViewer("asset-1");
+    await vi.waitFor(() => expect(store.getState().viewerPhase).toBe("ready"));
+
+    expect(controller.setTxtDraft("first draft")).toBe(true);
+    expect(store.getState().txtDraft).toBe("first draft");
+
+    const saved = await controller.saveTxtAnnotation({ advance: false });
+    expect(saved).toBe(true);
+    expect(service.saveAnnotation).toHaveBeenCalledWith("asset-1", "first draft", 1);
+    expect(store.getState().txtSavePhase).toBe("saved");
+    // 保存成功后编辑器关闭，重新进入编辑态用新的已保存内容。
+    expect(store.getState().txtDraft).toBe(null);
+    expect(store.getState().viewerAnnotation?.txt_version).toBe(2);
+
+    controller.setTxtDraft("next");
+    const advanced = await controller.saveTxtAnnotation({ advance: true });
+    expect(advanced).toBe(true);
+    expect(store.getState().viewerIndex).toBe(1);
+  });
+
+  it("keeps the draft and surfaces the code when saving hits a version conflict", async () => {
+    const conflictError = Object.assign(new Error("conflict"), { code: "txt_version_conflict" });
+    const { store, controller } = await openReady({
+      saveAnnotation: vi.fn(async () => {
+        throw conflictError;
+      }),
+    });
+    controller.openViewer("asset-1");
+    await vi.waitFor(() => expect(store.getState().viewerPhase).toBe("ready"));
+    controller.setTxtDraft("draft");
+
+    const ok = await controller.saveTxtAnnotation({ advance: false });
+    expect(ok).toBe(false);
+    expect(store.getState().txtSavePhase).toBe("conflict");
+    expect(store.getState().txtSaveErrorCode).toBe("txt_version_conflict");
+    // 冲突时草稿保留，供用户处理后重试。
+    expect(store.getState().txtDraft).toBe("draft");
+  });
+
+  it("renames a single selected pair through the dialog contract", async () => {
+    const { store, controller, service } = await openReady();
+    controller.clickAsset("asset-1", { additive: false, range: false });
+
+    expect(controller.openRenameDialog("asset-1")).toBe(true);
+    expect(store.getState().renameDialogPhase).toBe("open");
+    expect(store.getState().renameAssetId).toBe("asset-1");
+
+    const ok = await controller.submitRename("renamed");
+    expect(ok).toBe(true);
+    expect(service.renameAsset).toHaveBeenCalledWith("asset-1", "renamed");
+    expect(store.getState().renameDialogPhase).toBe("closed");
+  });
+
+  it("rejects empty rename stems locally before any request", async () => {
+    const { store, controller, service } = await openReady();
+    controller.clickAsset("asset-1", { additive: false, range: false });
+    controller.openRenameDialog("asset-1");
+
+    const ok = await controller.submitRename("   ");
+    expect(ok).toBe(false);
+    expect(service.renameAsset).not.toHaveBeenCalled();
+    expect(store.getState().renameDialogPhase).not.toBe("closed");
+    expect(store.getState().renameDialogError).toBeTruthy();
+  });
+
+  it("trashes the selection after confirmation, shows undo, and undo restores", async () => {
+    const { store, controller, service } = await openReady();
+    controller.selectAllAssets();
+    expect(controller.requestTrashSelection()).toBe(true);
+    expect(store.getState().trashConfirmPhase).toBe("open");
+    expect(store.getState().trashConfirmAssetIds).toEqual(["asset-1", "asset-2"]);
+
+    const ok = await controller.confirmTrashSelection();
+    expect(ok).toBe(true);
+    expect(service.trashAssets).toHaveBeenCalledWith(["asset-1", "asset-2"]);
+    expect(store.getState().trashConfirmPhase).toBe("closed");
+    expect(store.getState().undoToastVisible).toBe(true);
+    expect(store.getState().undoableOperationId).toBe("op-1");
+
+    const undone = await controller.undoLastTrash();
+    expect(undone).toBe(true);
+    expect(service.undoTrash).toHaveBeenCalledWith("op-1");
+    expect(store.getState().undoToastVisible).toBe(false);
+  });
+
+  it("keeps confirm data but records the code when trashing fails", async () => {
+    const failure = Object.assign(new Error("target conflict"), { code: "target_conflict" });
+    const { store, controller } = await openReady({
+      trashAssets: vi.fn(async () => {
+        throw failure;
+      }),
+    });
+    controller.clickAsset("asset-1", { additive: false, range: false });
+    controller.requestTrashSelection();
+
+    const ok = await controller.confirmTrashSelection();
+    expect(ok).toBe(false);
+    expect(store.getState().trashConfirmPhase).toBe("open");
+    expect(store.getState().trashConfirmError).toBe("target_conflict");
+    controller.cancelTrashConfirm();
+    expect(store.getState().trashConfirmPhase).toBe("closed");
+  });
+
+  it("loads the trash panel, restores, purges, and reloads on demand", async () => {
+    const { store, controller, service } = await openReady();
+    const ok = await controller.openTrashPanel();
+    expect(ok).toBe(true);
+    expect(store.getState().trashPanelPhase).toBe("ready");
+    expect(store.getState().trashOperations).toHaveLength(1);
+
+    expect(await controller.restoreTrashOperation("op-1")).toBe(true);
+    expect(service.restoreTrash).toHaveBeenCalledWith("op-1");
+
+    expect(await controller.purgeTrashOperation("op-1")).toBe(true);
+    expect(service.purgeTrash).toHaveBeenCalledWith("op-1");
+    expect(service.listTrash).toHaveBeenCalled();
+
+    controller.closeTrashPanel();
+    expect(store.getState().trashPanelPhase).toBe("closed");
+  });
+});

@@ -105,6 +105,45 @@
     controller.openViewer(asset.asset_id);
   }
 
+  // ---- G3-3 文件操作 ----
+  let renameDraft = $state("");
+
+  const singleSelectedAsset = $derived(
+    snapshot.selectedAssetIds.length === 1 ? snapshot.assets.find((item) => item.asset_id === snapshot.selectedAssetIds[0]) ?? null : null,
+  );
+
+  function requestDeleteSelection(): void {
+    if (snapshot.selectedAssetIds.length === 0) return;
+    controller.requestTrashSelection();
+  }
+
+  function requestRenameSelection(): void {
+    if (singleSelectedAsset === null) return;
+    const dot = singleSelectedAsset.name.lastIndexOf(".");
+    renameDraft = dot > 0 ? singleSelectedAsset.name.slice(0, dot) : singleSelectedAsset.name;
+    controller.openRenameDialog(singleSelectedAsset.asset_id);
+  }
+
+  function onGridKeydown(event: KeyboardEvent): void {
+    if (event.target instanceof HTMLElement && (event.target.isContentEditable || event.target.closest("input, textarea, select"))) return;
+    if (event.key === "Delete") {
+      event.preventDefault();
+      requestDeleteSelection();
+    } else if ((event.ctrlKey || event.metaKey) && (event.key === "a" || event.key === "A")) {
+      event.preventDefault();
+      controller.selectAllAssets();
+    } else if (event.key === "F2") {
+      event.preventDefault();
+      requestRenameSelection();
+    }
+  }
+
+
+  function formatTrashTimestamp(epochMs: number): string {
+    const parsed = new Date(epochMs);
+    return Number.isNaN(parsed.getTime()) ? "" : parsed.toLocaleString("zh-Hans-CN");
+  }
+
   let lastFocusedAssetId = "";
 
   function onCardKeydown(event: KeyboardEvent, asset: GalleryAssetEntry): void {
@@ -162,8 +201,25 @@
     controller.activate();
     return () => controller.destroy();
   });
+
+  /** 应用级快捷键：对话框/面板 Escape + 网格 Delete/Ctrl+A/F2（查看器打开时让位）。 */
+  function onAppKeydown(event: KeyboardEvent): void {
+    if (snapshot.viewerIndex >= 0) return;
+    if (snapshot.renameDialogPhase !== "closed" || snapshot.trashConfirmPhase !== "closed" || snapshot.trashPanelPhase !== "closed") {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (snapshot.renameDialogPhase !== "closed") controller.cancelRename();
+        else if (snapshot.trashConfirmPhase !== "closed") controller.cancelTrashConfirm();
+        else controller.closeTrashPanel();
+      }
+      return;
+    }
+    onGridKeydown(event);
+  }
 </script>
 
+
+<svelte:window onkeydown={onAppKeydown} />
 
 <section class="gallery-app" data-gallery-app data-domain-owner="gallery" data-preview-availability="live" aria-labelledby="gallery-heading">
   <header class="gallery-header">
@@ -272,6 +328,19 @@
               <button type="button" aria-pressed={snapshot.viewMode === "grid"} onclick={() => controller.setViewMode("grid")}>网格</button>
               <button type="button" aria-pressed={snapshot.viewMode === "list"} onclick={() => controller.setViewMode("list")}>列表</button>
             </div>
+            {#if snapshot.selectedAssetIds.length > 0}
+              <span class="gallery-toolbar-selection">已选 {formatCount(snapshot.selectedAssetIds.length)} 张</span>
+              <button type="button" onclick={requestRenameSelection} disabled={singleSelectedAsset === null}>重命名…</button>
+              <button type="button" class="gallery-toolbar-danger" onclick={requestDeleteSelection}>删除…</button>
+            {/if}
+            <button
+              type="button"
+              aria-pressed={snapshot.trashPanelPhase !== "closed"}
+              onclick={() => {
+                if (snapshot.trashPanelPhase === "closed") void controller.openTrashPanel();
+                else controller.closeTrashPanel();
+              }}
+            >回收区</button>
           </div>
         </nav>
 
@@ -393,13 +462,143 @@
 </section>
 
 {#if snapshot.viewerIndex >= 0 && snapshot.viewerAssets.length > 0}
-  <Viewer
-    {store}
-    {service}
-    viewerNext={controller.viewerNext}
-    viewerPrevious={controller.viewerPrevious}
-    onClose={closeViewer}
-  />
+  <Viewer {store} {service} controller={controller} onClose={closeViewer} />
+{/if}
+
+{#if snapshot.trashConfirmPhase !== "closed"}
+  {@const imageCount = snapshot.trashConfirmAssetIds.length}
+  {@const txtCount = snapshot.assets.filter((item) => snapshot.trashConfirmAssetIds.includes(item.asset_id) && item.txt_relative_path !== null).length}
+  {@const abnormalCount = snapshot.assets.filter((item) => snapshot.trashConfirmAssetIds.includes(item.asset_id) && item.txt_state !== "normal" && item.txt_state !== "missing").length}
+  <div class="gallery-dialog-backdrop">
+    <div
+      class="gallery-dialog"
+      role="alertdialog"
+      tabindex="-1"
+      aria-modal="true"
+      aria-labelledby="gallery-trash-confirm-title"
+    >
+      <h2 id="gallery-trash-confirm-title">移入回收区</h2>
+      <p>
+        将删除 <strong>{formatCount(imageCount)}</strong> 张图片、
+        <strong>{formatCount(txtCount)}</strong> 个同名 TXT、
+        <strong>{formatCount(abnormalCount)}</strong> 项 TXT 异常。
+        整组操作可撤销；任何单项失败都会回滚整组。
+      </p>
+      {#if snapshot.trashConfirmError !== null}
+        <p class="gallery-dialog__error">{snapshot.trashConfirmError}</p>
+      {/if}
+      <div class="gallery-dialog__actions">
+        <button type="button" onclick={controller.cancelTrashConfirm}>取消</button>
+        <button
+          type="button"
+          class="gallery-dialog__danger"
+          disabled={snapshot.trashConfirmPhase === "busy"}
+          onclick={() => void controller.confirmTrashSelection()}
+        >移入回收区</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if snapshot.renameDialogPhase !== "closed"}
+  {@const renameAsset = snapshot.assets.find((item) => item.asset_id === snapshot.renameAssetId) ?? null}
+  {@const renameBusy = snapshot.renameDialogPhase === "busy"}
+  <div class="gallery-dialog-backdrop">
+    <form
+      class="gallery-dialog"
+      aria-labelledby="gallery-rename-title"
+      onsubmit={(event) => {
+        event.preventDefault();
+        const input = event.currentTarget.querySelector<HTMLInputElement>("input[type=text]");
+        void controller.submitRename(input?.value ?? "");
+      }}
+    >
+      <h2 id="gallery-rename-title">成对重命名</h2>
+      {#if renameAsset !== null}
+        <p>{renameAsset.relative_path} → 同目录内新文件名（图片与同名 TXT 成对重命名）。</p>
+      {/if}
+      <input
+        class="gallery-dialog__input"
+        type="text"
+        value={renameDraft}
+        maxlength="255"
+        autocomplete="off"
+        aria-label="新文件名（不含扩展名）"
+        oninput={(event) => (renameDraft = (event.currentTarget as HTMLInputElement).value)}
+      />
+      {#if snapshot.renameDialogError !== null}
+        <p class="gallery-dialog__error">{snapshot.renameDialogError}</p>
+      {/if}
+      <div class="gallery-dialog__actions">
+        <button type="button" onclick={controller.cancelRename}>取消</button>
+        <button type="submit" class="gallery-dialog__primary" disabled={renameBusy}>重命名</button>
+      </div>
+    </form>
+  </div>
+{/if}
+
+{#if snapshot.undoToastVisible}
+  <div class="gallery-undo-toast" role="status">
+    <p>已移入回收区 {formatCount(snapshot.trashConfirmAssetIds.length)} 项。</p>
+    <button
+      type="button"
+      disabled={snapshot.undoBusy}
+      onclick={() => void controller.undoLastTrash()}
+    >撤销</button>
+  </div>
+{/if}
+
+{#if snapshot.trashPanelPhase !== "closed"}
+  <aside class="gallery-trash-panel" aria-label="图库回收区">
+    <div class="gallery-trash-panel__head">
+      <h2>回收区</h2>
+      <button type="button" onclick={() => controller.closeTrashPanel()}>关闭</button>
+    </div>
+    <div class="gallery-trash-panel__list">
+      {#if snapshot.trashPanelPhase === "loading"}
+        <p class="gallery-trash-panel__hint" role="status">正在加载回收区…</p>
+      {:else if snapshot.trashPanelPhase === "error"}
+        <p class="gallery-trash-panel__hint" role="alert">回收区加载失败（{snapshot.trashPanelError ?? "unknown"}）。</p>
+      {:else if snapshot.trashOperations.length === 0}
+        <p class="gallery-trash-panel__empty">回收区为空。文件将保留至手动恢复或彻底删除。</p>
+      {:else}
+        {#each snapshot.trashOperations as operation (operation.operation_id)}
+          <div class="gallery-trash-item">
+            <div class="gallery-trash-item__meta">
+              <span class="gallery-trash-item__title">{formatTrashTimestamp(operation.created_at)} · {formatCount(operation.item_count)} 项</span>
+              <span class="gallery-trash-item__detail">
+                {formatCount(operation.disk_usage_bytes)} B
+                {#if operation.has_txt_count > 0} · 含 TXT {formatCount(operation.has_txt_count)}{/if}
+                {#if operation.item_error_count > 0} · 异常 {formatCount(operation.item_error_count)}{/if}
+              </span>
+            </div>
+            <div class="gallery-trash-item__actions">
+              <button
+                type="button"
+                disabled={snapshot.trashPanelBusyOperationId === operation.operation_id}
+                onclick={() => void controller.restoreTrashOperation(operation.operation_id)}
+              >全部恢复</button>
+              <button
+                type="button"
+                disabled={snapshot.trashPanelBusyOperationId === operation.operation_id}
+                onclick={() => void controller.purgeTrashOperation(operation.operation_id)}
+              >彻底删除</button>
+            </div>
+          </div>
+        {/each}
+      {/if}
+    </div>
+    <div class="gallery-trash-panel__foot">
+      <span class="gallery-trash-panel__summary">
+        {#if snapshot.trashNextCursor !== null}
+          <button type="button" onclick={() => void controller.loadMoreTrash()}>加载更多</button>
+        {:else}
+          回收区不自动清理；文件保留至手动恢复或彻底删除。
+        {/if}
+      </span>
+      <button type="button" onclick={() => void controller.refreshDirectory()}>重新扫描</button>
+    </div>
+  </aside>
 {/if}
 
 <script module lang="ts">

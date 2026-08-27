@@ -14,12 +14,28 @@
   interface ViewerProps {
     readonly store: GalleryStore;
     readonly service: GalleryService;
-    readonly viewerNext: () => Promise<boolean>;
-    readonly viewerPrevious: () => Promise<boolean>;
-    readonly onClose: () => void;
+    readonly controller: {
+      readonly setTxtDraft: (draft: string) => boolean;
+      readonly saveTxtAnnotation: (options: { advance: boolean }) => Promise<boolean>;
+      readonly discardTxtDraft: () => boolean;
+      readonly viewerNext: () => Promise<boolean>;
+      readonly viewerPrevious: () => Promise<boolean>;
+      readonly closeViewer: () => boolean;
+    };
+    readonly onClose?: () => void;
   }
 
-  let { store, service, viewerNext, viewerPrevious, onClose }: ViewerProps = $props();
+  let { store, service, controller, onClose: onCloseProp }: ViewerProps = $props();
+  const viewerNext = () => controller.viewerNext();
+  const viewerPrevious = () => controller.viewerPrevious();
+  const onClose = () => {
+    if (isDirty) {
+      unsavedGuardVisible = true;
+      return;
+    }
+    if (onCloseProp) onCloseProp();
+    else controller.closeViewer();
+  };
 
   const snapshot = $derived($store);
 
@@ -141,23 +157,86 @@
     );
   }
 
+  // ---- TXT 编辑（G3-3；记忆 #34 明确保存契约） ----
+  let textareaElement = $state<HTMLTextAreaElement | null>(null);
+  let unsavedGuardVisible = $state(false);
+
+  const isEditing = $derived(snapshot.txtDraft !== null);
+  const savedContent = $derived(annotation?.content ?? "");
+  const displayContent = $derived(isEditing ? (snapshot.txtDraft ?? "") : savedContent);
+  const isDirty = $derived(isEditing && snapshot.txtDraft !== savedContent);
+
+  function enterEditMode() {
+    if (annotation === null || snapshot.viewerPhase !== "ready") return;
+    controller.setTxtDraft(savedContent);
+  }
+
+  function onDraftInput(event: Event) {
+    const target = event.currentTarget as HTMLTextAreaElement;
+    controller.setTxtDraft(target.value);
+  }
+
+  async function saveTxt(advance: boolean) {
+    unsavedGuardVisible = false;
+    const ok = await controller.saveTxtAnnotation({ advance });
+    if (ok) textareaElement?.focus();
+    return ok;
+  }
+
+  function discardDraft() {
+    unsavedGuardVisible = false;
+    controller.discardTxtDraft();
+  }
+
+  /** 有未保存内容时阻止离开（导航/关闭），弹出三选一。 */
+  function guardUnsaved(action: () => void): boolean {
+    if (!isDirty) {
+      action();
+      return true;
+    }
+    unsavedGuardVisible = true;
+    return false;
+  }
+
   function onViewerKeydown(event: KeyboardEvent) {
-    if (isEditableTarget(event.target)) return;
+    if (isEditableTarget(event.target)) {
+      // Ctrl/Cmd+S / Ctrl/Cmd+Enter 在编辑态中仍然生效（保存契约）。
+      if ((event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "S")) {
+        event.preventDefault();
+        void saveTxt(false);
+      } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        void saveTxt(true);
+      } else if (event.key === "Escape" && isEditing) {
+        event.preventDefault();
+        if (isDirty) unsavedGuardVisible = true;
+        else controller.discardTxtDraft();
+      }
+      return;
+    }
     if (event.key === "ArrowRight") {
       event.preventDefault();
-      if (snapshot.viewerIndex < assetCount - 1) void viewerNext();
+      if (snapshot.viewerIndex < assetCount - 1) {
+        guardUnsaved(() => void viewerNext());
+      }
     } else if (event.key === "ArrowLeft") {
       event.preventDefault();
-      if (snapshot.viewerIndex > 0) void viewerPrevious();
+      if (snapshot.viewerIndex > 0) {
+        guardUnsaved(() => void viewerPrevious());
+      }
     } else if (event.key === "Escape") {
       event.preventDefault();
-      onClose();
+      guardUnsaved(() => onClose());
     } else if (event.key === "0") {
       event.preventDefault();
       resetToFit();
     } else if (event.key === "1") {
       event.preventDefault();
       resetToOneToOne();
+    } else if (event.key === "Enter" || event.key === " ") {
+      // 网格卡片语义延续：Enter/Space 在查看器中进入 TXT 编辑。
+      event.preventDefault();
+      enterEditMode();
     }
   }
 
@@ -244,6 +323,58 @@
               onclick={() => store.setTxtViewMode("tags")}
             >标签</button>
           </span>
+        {#if isEditing}
+          <div class="gallery-viewer__txt-actions">
+            <button
+              type="button"
+              class="gallery-viewer__txt-save"
+              disabled={snapshot.txtSavePhase === "saving" || !isDirty}
+              onclick={() => void saveTxt(false)}
+            >保存（Ctrl+S）</button>
+            <button
+              type="button"
+              class="gallery-viewer__txt-save-next"
+              disabled={snapshot.txtSavePhase === "saving"}
+              onclick={() => void saveTxt(true)}
+            >保存并下一张（Ctrl+Enter）</button>
+            <button
+              type="button"
+              disabled={snapshot.txtSavePhase === "saving"}
+              onclick={discardDraft}
+            >放弃修改</button>
+          </div>
+        {:else}
+          <div class="gallery-viewer__txt-actions">
+            <button
+              type="button"
+              disabled={annotation === null || snapshot.viewerPhase !== "ready"}
+              onclick={enterEditMode}
+            >编辑（Enter）</button>
+          </div>
+        {/if}
+        {#if snapshot.txtSavePhase === "saving"}
+          <p class="gallery-viewer__txt-banner" role="status">正在保存…</p>
+        {:else if snapshot.txtSavePhase === "saved"}
+          <p class="gallery-viewer__txt-banner" role="status">已保存。</p>
+        {:else if snapshot.txtSavePhase === "conflict"}
+          <p class="gallery-viewer__txt-banner gallery-viewer__txt-banner--error" role="alert">
+            TXT 已被外部修改（{snapshot.txtSaveErrorCode ?? "txt_version_conflict"}），请重新加载后再试。
+          </p>
+        {:else if snapshot.txtSavePhase === "error"}
+          <p class="gallery-viewer__txt-banner gallery-viewer__txt-banner--error" role="alert">
+            保存失败（{snapshot.txtSaveErrorCode ?? "unknown"}）。草稿已保留。
+          </p>
+        {/if}
+        {#if unsavedGuardVisible}
+          <div class="gallery-viewer__txt-guard" role="alertdialog" aria-label="有未保存的 TXT 修改">
+            <p>TXT 有未保存的修改。</p>
+            <div class="gallery-viewer__txt-guard-actions">
+              <button type="button" disabled={snapshot.txtSavePhase === "saving"} onclick={() => void saveTxt(false)}>保存</button>
+              <button type="button" onclick={discardDraft}>放弃</button>
+              <button type="button" onclick={() => (unsavedGuardVisible = false)}>取消</button>
+            </div>
+          </div>
+        {/if}
         </div>
         {#if snapshot.viewerPhase === "loading"}
           <p class="gallery-viewer__txt-hint">正在读取 TXT…</p>
@@ -256,7 +387,18 @@
         {:else if annotation.content === null}
           <p class="gallery-viewer__txt-hint">该图片没有可显示的 TXT 内容。</p>
         {:else if snapshot.txtViewMode === "raw"}
-          <pre class="gallery-viewer__txt-raw">{annotation.content}</pre>
+          {#if isEditing}
+            <textarea
+              class="gallery-viewer__txt-editor"
+              bind:this={textareaElement}
+              value={displayContent}
+              oninput={onDraftInput}
+              spellcheck="false"
+              aria-label="TXT 标注原文编辑"
+            ></textarea>
+          {:else}
+            <pre class="gallery-viewer__txt-raw" ondblclick={enterEditMode}>{annotation.content}</pre>
+          {/if}
         {:else}
           <ul class="gallery-viewer__txt-tags">
             {#each tags as tag (tag)}
