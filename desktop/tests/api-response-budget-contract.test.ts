@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import crawlServiceSource from "../src/apps/crawl/service.ts?raw";
 import diagnosticsServiceSource from "../src/apps/diagnostics/service.ts?raw";
-import exportServiceSource from "../src/apps/export/service.ts?raw";
-import exportSource from "../src/apps/export/Export.svelte?raw";
 import galleryServiceSource from "../src/apps/gallery/service.ts?raw";
 import gallerySource from "../src/apps/gallery/Gallery.svelte?raw";
 import personalizationServiceSource from "../src/apps/personalization/service.ts?raw";
@@ -28,7 +26,7 @@ describe("desktop API response-budget contract", () => {
 
   it("routes every high-volume workspace read through a bounded backend projection", () => {
     const contracts: readonly [string, string, readonly string[]][] = [
-      ["gallery", galleryServiceSource, ["sources}?view=desktop", "/entries?", "annotation?view=desktop", "const parameters = [\"view=desktop\"]"]],
+      ["gallery", galleryServiceSource, ["sources}?view=desktop", "/entries?", "annotation?view=desktop", "directoryExports}/${endpointId(operationId)}?view=desktop", "const parameters = [\"view=desktop\"]"]],
       ["crawl", crawlServiceSource, ["search}?view=desktop", "crawls}?view=desktop"]],
       ["tasks", tasksServiceSource, [
         "?limit=30&view=desktop",
@@ -65,8 +63,7 @@ describe("desktop API response-budget contract", () => {
   });
   it("fails when an application adds an unclassified transport call", () => {
     const inventory = [
-      ["gallery", galleryServiceSource, 12],
-      ["export", exportServiceSource, 8],
+      ["gallery", galleryServiceSource, 15],
       ["crawl", crawlServiceSource, 3],
       ["tasks", tasksServiceSource, 5],
       ["review", reviewServiceSource, 4],
@@ -78,12 +75,11 @@ describe("desktop API response-budget contract", () => {
     for (const [application, source, expectedCalls] of inventory) {
       expect(count(source, /api\.(?:get|post|put|delete)\(/g), application).toBe(expectedCalls);
     }
-    expect(count(galleryServiceSource, /view=desktop/g)).toBe(4);
+    expect(count(galleryServiceSource, /view=desktop/g)).toBe(5);
     expect(count(crawlServiceSource, /view=desktop/g)).toBe(2);
     expect(count(tasksServiceSource, /view=(?:desktop|tasks)/g)).toBe(5);
     expect(count(reviewServiceSource, /view=desktop/g)).toBe(4);
     expect(count(proxyServiceSource, /view=desktop/g)).toBe(11);
-    expect(count(exportServiceSource, /view=desktop/g)).toBe(4);
   });
 
   it("keeps Personalization local-only and view-layer API-free", () => {
@@ -92,8 +88,7 @@ describe("desktop API response-budget contract", () => {
       personalizationSource,
     ];
     for (const source of localOnlySources) expect(source).not.toContain("/api/v1/");
-    // Gallery 与 Export 组件不内联 API 路径；所有传输与 URL 构建都收敛在各自 service.ts。
+    // Gallery 组件不内联 API 路径；所有传输与 URL 构建都收敛在 service.ts。
     expect(gallerySource).not.toContain("/api/v1/");
-    expect(exportSource).not.toContain("/api/v1/");
   });
 });

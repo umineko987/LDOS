@@ -108,9 +108,6 @@ describe("desktop architecture boundaries", () => {
     const gallery = sourceEnding("/apps/gallery/Gallery.svelte");
     const galleryState = sourceEnding("/apps/gallery/state.ts");
     const galleryModel = sourceEnding("/apps/gallery/model.ts");
-    const exportApp = sourceEnding("/apps/export/Export.svelte");
-    const exportState = sourceEnding("/apps/export/state.ts");
-    const exportModel = sourceEnding("/apps/export/model.ts");
     const window = sourceEnding("/shell/AppWindow.svelte");
     expect(crawl.match(/createCrawlStore\s*\(/g)).toHaveLength(1);
     expect(crawlState.match(/export function createCrawlStore\s*\(/g)).toHaveLength(1);
@@ -139,10 +136,6 @@ describe("desktop architecture boundaries", () => {
     expect(gallery.match(/createGalleryStore\s*\(/g)).toHaveLength(1);
     expect(galleryState.match(/export function createGalleryStore\s*\(/g)).toHaveLength(1);
     expect(galleryModel).toContain('readonly phase: "unavailable"');
-    expect(exportApp.match(/createExportStore\s*\(/g)).toHaveLength(1);
-    expect(exportState.match(/export function createExportStore\s*\(/g)).toHaveLength(1);
-    expect(exportModel).toContain("EXPORT_TERMINAL_STATES");
-    expect(exportModel).toContain("sanitizeExportJobSummary");
     expect(window).not.toContain("ApplicationPlaceholder");
     expect(window).toContain('record.appId === "crawl"');
     expect(window).toContain('record.appId === "tasks"');
@@ -153,7 +146,7 @@ describe("desktop architecture boundaries", () => {
     expect(window).toContain('record.appId === "diagnostics"');
     expect(window).toContain('record.appId === "personalization"');
     expect(window).toContain('record.appId === "gallery"');
-    expect(window).toContain('record.appId === "export"');
+    expect(window).not.toContain('record.appId === "export"');
     expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/CrawlState|TasksState|BatchSummary|TaskEntity|ProxyState|ProxyStatus|VaultState|PolicyState|DiagnosticsState|PersonalizationState|ReviewState|GalleryState|ExportState/);
     for (const [path, source] of Object.entries(productionSources)) {
       if (!path.includes("/core/")) continue;

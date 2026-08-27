@@ -41,8 +41,6 @@
     <path d="M3 12h4l2-7 4 14 2-7h6"/>
   {:else if name === "folder"}
     <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM7 16l3-3 2 2 3-4 3 5"/>
-  {:else if name === "archive"}
-    <path d="M3 6h18M5 6v14h14V6M9 10h6"/><rect x="2" y="3" width="20" height="3" rx="1"/>
   {:else if name === "grid"}
     <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
   {:else}

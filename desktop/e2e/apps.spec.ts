@@ -11,6 +11,20 @@ function appWindow(page: Parameters<typeof bootDesktop>[0], appId: string) {
   return page.locator(`[data-app-window][data-app-id="${appId}"]`);
 }
 
+async function openCurrentGalleryDirectoryExport(
+  page: Parameters<typeof bootDesktop>[0],
+) {
+  await launchApp(page, "gallery");
+  const gallery = appWindow(page, "gallery");
+  await gallery.getByRole("button", { name: "E2E 导入目录" }).click();
+  await gallery.getByRole("button", { name: "导出目录…" }).click();
+  const directoryExport = gallery.getByRole("dialog", { name: "导出完整目录" });
+  await expect(directoryExport).toBeVisible();
+  await expect(directoryExport).toBeFocused();
+  await directoryExport.getByLabel("目标路径").fill("/tmp/imageweave-e2e-output");
+  return directoryExport;
+}
+
 test.describe("可用应用关键旅程", () => {
   test("图片采集：自动补全、搜索、选择和创建批次", async ({ page }) => {
     const api = await bootDesktop(page);
@@ -270,8 +284,8 @@ test.describe("可用应用关键旅程", () => {
     expect(api.unhandled).toEqual([]);
   });
 
-  test("外观设置及两个 Preview 应用保持确定状态且无伪能力", async ({ page }) => {
-    await bootDesktop(page);
+  test("外观设置与图库目录导出保持确定状态且无伪能力", async ({ page }) => {
+    const api = await bootDesktop(page);
     await launchApp(page, "personalization");
     const personalization = appWindow(page, "personalization");
     const scene = personalization.locator("[data-personalization-scene]:not([data-personalization-selected=\"true\"])").first();
@@ -307,14 +321,72 @@ test.describe("可用应用关键旅程", () => {
     await page.keyboard.press("Escape");
     await expect(gallery.getByRole("dialog", { name: /沉浸式查看器：image-05\.jpg/ })).toBeHidden();
 
-    await launchApp(page, "export");
-    const exportWindow = appWindow(page, "export");
-    await expect(exportWindow.locator("[data-export-app]")).toHaveAttribute("data-preview-availability", "live");
-    // 任务列表来自真实后端投影；选择后展示权威计数与来源。
-    await expect(exportWindow.locator(".export-job-id").first()).toHaveText("export-job-0…");
-    await exportWindow.locator(".export-job-list button").first().click();
-    await expect(exportWindow.locator(".export-job-counts").first()).toHaveText("0/4 样本");
-    await expect(exportWindow.getByText("e2e-import")).toBeVisible();
+    await gallery.getByRole("button", { name: "导出目录…" }).click();
+    const directoryExport = gallery.getByRole("dialog", { name: "导出完整目录" });
+    await expect(directoryExport).toBeVisible();
+    await expect(directoryExport).toBeFocused();
+    await expect(directoryExport.getByText("subdir", { exact: true }).first()).toBeVisible();
+    await directoryExport.getByRole("button", { name: "添加目录…" }).click();
+    await directoryExport.getByRole("button", { name: /E2E 导入目录/ }).first().click();
+    await directoryExport.getByRole("button", { name: "添加此完整目录" }).click();
+    await directoryExport.getByRole("button", { name: "返回导出设置" }).click();
+    await expect(directoryExport.locator(".gallery-export-selection-list li")).toHaveCount(2);
+    await directoryExport.getByLabel("目标路径").fill("/tmp/imageweave-e2e-output");
+    await directoryExport.getByRole("button", { name: "开始复制" }).click();
+    await expect(directoryExport.getByText("正在复制")).toBeVisible();
+    await expect(directoryExport.getByText("复制完成")).toBeVisible();
+    const request = api.requests.find(
+      (entry) => entry.method === "POST" && entry.path === "/api/v1/gallery/directory-exports",
+    );
+    expect(request?.body).toEqual({
+      directory_ids: ["gal-dir-sub", "gal-dir-root"],
+      target_path: "/tmp/imageweave-e2e-output",
+    });
+    expect(api.count("GET", "/api/v1/gallery/directory-exports/gallery-export-op-01")).toBeGreaterThan(0);
+    expect(api.unhandled).toEqual([]);
+  });
+
+  test("图库目录导出在顶层同名冲突时列出名称且不进入复制轮询", async ({ page }) => {
+    const api = await bootDesktop(page, { directoryExportScenario: "conflict" });
+    const directoryExport = await openCurrentGalleryDirectoryExport(page);
+    await directoryExport.getByRole("button", { name: "开始复制" }).click();
+
+    const alert = directoryExport.getByRole("alert");
+    await expect(alert).toContainText("target_top_level_conflict");
+    await expect(alert).toContainText("subdir");
+    expect(api.count("GET", "/api/v1/gallery/directory-exports/gallery-export-op-01")).toBe(0);
+    expect(api.unhandled).toEqual([]);
+  });
+
+  test("图库目录导出明确呈现部分成功后的失败结果", async ({ page }) => {
+    const api = await bootDesktop(page, { directoryExportScenario: "failed" });
+    const directoryExport = await openCurrentGalleryDirectoryExport(page);
+    await directoryExport.getByRole("button", { name: "开始复制" }).click();
+
+    await expect(directoryExport.getByText("复制失败")).toBeVisible();
+    await expect(
+      directoryExport.locator(".gallery-export-results li").filter({ hasText: "subdir" }),
+    ).toContainText("已完成");
+    await expect(
+      directoryExport.locator(".gallery-export-results li").filter({ hasText: "E2E 导入目录" }),
+    ).toContainText("失败（source_read_failed）");
+    expect(api.unhandled).toEqual([]);
+  });
+
+  test("图库目录导出可取消正在复制的短生命周期操作", async ({ page }) => {
+    const api = await bootDesktop(page, { directoryExportScenario: "copying" });
+    const directoryExport = await openCurrentGalleryDirectoryExport(page);
+    await directoryExport.getByRole("button", { name: "开始复制" }).click();
+    await directoryExport.getByRole("button", { name: "取消复制" }).click();
+
+    await expect(directoryExport.getByText("复制已取消")).toBeVisible();
+    expect(
+      api.count(
+        "POST",
+        "/api/v1/gallery/directory-exports/gallery-export-op-01/cancel",
+      ),
+    ).toBe(1);
+    expect(api.unhandled).toEqual([]);
   });
 });
 

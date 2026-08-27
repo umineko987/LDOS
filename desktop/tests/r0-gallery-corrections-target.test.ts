@@ -78,7 +78,7 @@ function runtimeFunction(object: unknown, name: string): (...args: never[]) => u
 
 describe("R0 single Gallery product contract", () => {
   it("removes the independent Export application and runtime mount", () => {
-    expect(APPLICATION_DEFINITIONS.some((definition) => definition.id === "export")).toBe(false);
+    expect(APPLICATION_DEFINITIONS.map((definition) => definition.id)).not.toContain("export");
 
     const appWindowPath = fileURLToPath(new URL("../src/shell/AppWindow.svelte", import.meta.url));
     const sourceText = readFileSync(appWindowPath, "utf8");

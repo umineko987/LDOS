@@ -15,7 +15,7 @@ describe("single-source shell projections", () => {
       title: group.title,
       applications: group.applications.map(({ id }) => id),
     }))).toEqual([
-      { id: "workflow", title: "工作流", applications: ["crawl", "tasks", "gallery", "review", "export"] },
+      { id: "workflow", title: "工作流", applications: ["crawl", "tasks", "gallery", "review"] },
       { id: "connections", title: "连接与策略", applications: ["proxy", "vault", "policy"] },
       { id: "system", title: "系统", applications: ["diagnostics", "personalization"] },
     ]);
@@ -35,14 +35,13 @@ describe("single-source shell projections", () => {
       ["app:tasks", "background", "focus"],
       ["app:gallery", "closed", "open"],
       ["app:review", "focused", "minimize"],
-      ["app:export", "closed", "open"],
       ["app:proxy", "minimized", "restore"],
       ["app:vault", "background", "focus"],
     ]);
     expect(model.visible).toHaveLength(6);
-    expect(model.overflow.map(({ key }) => key)).toEqual(["app:proxy", "app:vault"]);
+    expect(model.overflow.map(({ key }) => key)).toEqual(["app:vault"]);
     expect(model.items[4].ariaLabel).toContain("当前聚焦；最小化窗口");
-    expect(model.items[6].ariaLabel).toContain("已最小化；恢复窗口");
+    expect(model.items[5].ariaLabel).toContain("已最小化；恢复窗口");
     expect(() => deriveDockProjection(shell.getState(), 0)).toThrow("invalid_dock_limit");
     expect(() => deriveDockProjection(shell.getState(), 1.5)).toThrow("invalid_dock_limit");
   });

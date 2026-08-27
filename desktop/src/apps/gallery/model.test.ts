@@ -13,6 +13,7 @@ import {
   galleryZoomAtPointer,
   parseGalleryTxtTags,
   sanitizeGalleryAnnotation,
+  sanitizeGalleryDirectoryExportOperation,
   sanitizeGalleryAssetEntry,
   sanitizeGalleryDirectoryEntry,
   sanitizeGalleryPreviewState,
@@ -394,5 +395,55 @@ describe("gallery grid selection (G2-3 多选)", () => {
     expect(gallerySelectAll(ids).selectedIds).toEqual(ids);
     expect(gallerySelectAll([]).anchorIndex).toBeNull();
     expect(galleryClearSelection().selectedIds).toEqual([]);
+  });
+});
+
+describe("gallery directory export projection", () => {
+  const operation = {
+    operation_id: "gallery-directory-export-1",
+    state: "copying",
+    current_directory_name: "alpha",
+    directory_count: 2,
+    completed_directory_count: 1,
+    failed_directory_count: 0,
+    discovered_file_count: 3,
+    copied_file_count: 2,
+    discovered_byte_count: 30,
+    copied_byte_count: 20,
+    error_code: null,
+    successful_directory_names: ["beta"],
+    results: [
+      {
+        directory_name: "beta",
+        status: "completed",
+        copied_file_count: 2,
+        copied_byte_count: 20,
+        error_code: null,
+      },
+    ],
+  };
+
+  it("accepts and freezes the bounded in-memory operation projection", () => {
+    const projected = sanitizeGalleryDirectoryExportOperation(operation);
+    expect(projected).toEqual(operation);
+    expect(Object.isFrozen(projected)).toBe(true);
+    expect(Object.isFrozen(projected.results)).toBe(true);
+    expect(Object.isFrozen(projected.results[0])).toBe(true);
+  });
+
+  it("rejects unknown fields, impossible counters and invented states", () => {
+    expect(() =>
+      sanitizeGalleryDirectoryExportOperation({ ...operation, target_path: "/private/output" }),
+    ).toThrow(TypeError);
+    expect(() =>
+      sanitizeGalleryDirectoryExportOperation({
+        ...operation,
+        completed_directory_count: 2,
+        failed_directory_count: 1,
+      }),
+    ).toThrow(TypeError);
+    expect(() =>
+      sanitizeGalleryDirectoryExportOperation({ ...operation, state: "paused" }),
+    ).toThrow(TypeError);
   });
 });

@@ -197,7 +197,6 @@ describe("persistence service", () => {
     );
     expect(adapter.removeLocal).toHaveBeenCalledWith(PERSISTENCE_KEYS.windowLayout);
     expect(service.readWindowPlacement("review")).toEqual(placements[1]);
-    expect(service.readWindowPlacement("export")).toBeNull();
 
     const canonical = new RecordingAdapter();
     canonical.local.set(PERSISTENCE_KEYS.windowPlacements, serializeWindowPlacements(placements));

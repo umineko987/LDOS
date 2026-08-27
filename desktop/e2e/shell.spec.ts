@@ -20,7 +20,6 @@ const APPLICATIONS = [
   "diagnostics",
   "personalization",
   "gallery",
-  "export",
 ] as const;
 
 test.describe("桌面壳层", () => {
@@ -54,7 +53,7 @@ test.describe("桌面壳层", () => {
     await expect(page.getByText("请求失败（HTTP 503）")).toBeVisible();
   });
 
-  test("应用中心列出并能真实挂载全部十个应用", async ({ page }) => {
+  test("应用中心列出并能真实挂载全部九个应用", async ({ page }) => {
     const api = await bootDesktop(page);
     await page.keyboard.press("Control+o");
     const center = page.locator("[data-application-center]");

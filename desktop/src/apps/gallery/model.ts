@@ -899,6 +899,184 @@ export function galleryClearSelection(): GallerySelectionPatch {
   return Object.freeze({ anchorIndex: null, selectedIds: Object.freeze([]) });
 }
 
+// ---- Gallery 内短生命周期目录导出 ----
+
+export type GalleryDirectoryExportState = "copying" | "completed" | "failed" | "cancelled";
+export type GalleryDirectoryExportResultState = "completed" | "failed" | "cancelled";
+
+export interface GalleryDirectoryExportResult {
+  readonly directory_name: string;
+  readonly status: GalleryDirectoryExportResultState;
+  readonly copied_file_count: number;
+  readonly copied_byte_count: number;
+  readonly error_code: string | null;
+}
+
+export interface GalleryDirectoryExportOperation {
+  readonly operation_id: string;
+  readonly state: GalleryDirectoryExportState;
+  readonly current_directory_name: string | null;
+  readonly directory_count: number;
+  readonly completed_directory_count: number;
+  readonly failed_directory_count: number;
+  readonly discovered_file_count: number;
+  readonly copied_file_count: number;
+  readonly discovered_byte_count: number;
+  readonly copied_byte_count: number;
+  readonly error_code: string | null;
+  readonly successful_directory_names: readonly string[];
+  readonly results: readonly GalleryDirectoryExportResult[];
+}
+
+const DIRECTORY_EXPORT_STATES = new Set<GalleryDirectoryExportState>([
+  "copying",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+const DIRECTORY_EXPORT_RESULT_STATES = new Set<GalleryDirectoryExportResultState>([
+  "completed",
+  "failed",
+  "cancelled",
+]);
+const DIRECTORY_EXPORT_OPERATION_KEYS = new Set([
+  "operation_id",
+  "state",
+  "current_directory_name",
+  "directory_count",
+  "completed_directory_count",
+  "failed_directory_count",
+  "discovered_file_count",
+  "copied_file_count",
+  "discovered_byte_count",
+  "copied_byte_count",
+  "error_code",
+  "successful_directory_names",
+  "results",
+]);
+const DIRECTORY_EXPORT_RESULT_KEYS = new Set([
+  "directory_name",
+  "status",
+  "copied_file_count",
+  "copied_byte_count",
+  "error_code",
+]);
+
+export function sanitizeGalleryDirectoryExportOperation(
+  raw: unknown,
+): GalleryDirectoryExportOperation {
+  const value = strictRecord(
+    raw,
+    DIRECTORY_EXPORT_OPERATION_KEYS,
+    "gallery_directory_export_operation",
+  );
+  if (!Array.isArray(value.successful_directory_names) || value.successful_directory_names.length > 500) {
+    throw new TypeError("invalid_gallery_directory_export_operation");
+  }
+  if (!Array.isArray(value.results) || value.results.length > 500) {
+    throw new TypeError("invalid_gallery_directory_export_operation");
+  }
+  const directoryCount = countValue(
+    value.directory_count,
+    "gallery_directory_export_directory_count",
+    1,
+  );
+  const completedDirectoryCount = countValue(
+    value.completed_directory_count,
+    "gallery_directory_export_completed_count",
+    0,
+  );
+  const failedDirectoryCount = countValue(
+    value.failed_directory_count,
+    "gallery_directory_export_failed_count",
+    0,
+  );
+  if (completedDirectoryCount + failedDirectoryCount > directoryCount) {
+    throw new TypeError("invalid_gallery_directory_export_operation");
+  }
+  const results = value.results.map((item) => {
+    const result = strictRecord(
+      item,
+      DIRECTORY_EXPORT_RESULT_KEYS,
+      "gallery_directory_export_result",
+    );
+    return Object.freeze({
+      directory_name: boundedText(
+        result.directory_name,
+        "gallery_directory_export_directory_name",
+        255,
+      ),
+      status: vocabularyValue(
+        result.status,
+        DIRECTORY_EXPORT_RESULT_STATES,
+        "gallery_directory_export_result_state",
+      ),
+      copied_file_count: countValue(
+        result.copied_file_count,
+        "gallery_directory_export_result_file_count",
+        0,
+      ),
+      copied_byte_count: countValue(
+        result.copied_byte_count,
+        "gallery_directory_export_result_byte_count",
+        0,
+      ),
+      error_code: optionalText(
+        result.error_code,
+        "gallery_directory_export_result_error_code",
+        128,
+      ),
+    });
+  });
+  return Object.freeze({
+    operation_id: idText(value.operation_id, "gallery_directory_export_operation_id"),
+    state: vocabularyValue(
+      value.state,
+      DIRECTORY_EXPORT_STATES,
+      "gallery_directory_export_state",
+    ),
+    current_directory_name: optionalText(
+      value.current_directory_name,
+      "gallery_directory_export_current_directory",
+      255,
+    ),
+    directory_count: directoryCount,
+    completed_directory_count: completedDirectoryCount,
+    failed_directory_count: failedDirectoryCount,
+    discovered_file_count: countValue(
+      value.discovered_file_count,
+      "gallery_directory_export_discovered_file_count",
+      0,
+    ),
+    copied_file_count: countValue(
+      value.copied_file_count,
+      "gallery_directory_export_copied_file_count",
+      0,
+    ),
+    discovered_byte_count: countValue(
+      value.discovered_byte_count,
+      "gallery_directory_export_discovered_byte_count",
+      0,
+    ),
+    copied_byte_count: countValue(
+      value.copied_byte_count,
+      "gallery_directory_export_copied_byte_count",
+      0,
+    ),
+    error_code: optionalText(
+      value.error_code,
+      "gallery_directory_export_error_code",
+      128,
+    ),
+    successful_directory_names: Object.freeze(
+      value.successful_directory_names.map((name) =>
+        boundedText(name, "gallery_directory_export_successful_name", 255),
+      ),
+    ),
+    results: Object.freeze(results),
+  });
+}
+
 // ---- G3 文件事务模型（rename / trash / undo / restore / purge）----
 
 export interface GalleryFileOperationResult {

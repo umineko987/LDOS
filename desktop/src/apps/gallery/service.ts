@@ -3,12 +3,14 @@ import {
   sanitizeGalleryAnnotation,
   sanitizeGalleryDirectoryPage,
   sanitizeGalleryFileOperationResult,
-  sanitizeGallerySourcePage,
+  sanitizeGalleryDirectoryExportOperation,
   sanitizeGallerySourceSummary,
+  sanitizeGallerySourcePage,
   sanitizeGalleryTrashPage,
   validateGalleryQuery,
   type GalleryAnnotation,
   type GalleryDirectoryPage,
+  type GalleryDirectoryExportOperation,
   type GalleryFileOperationResult,
   type GallerySourceSummary,
   type GalleryTrashPage,
@@ -22,6 +24,7 @@ export const GALLERY_ENDPOINTS = Object.freeze({
   sources: "/api/v1/gallery/sources",
   imports: "/api/v1/gallery/imports",
   directoryEntries: "/api/v1/gallery/directories",
+  directoryExports: "/api/v1/gallery/directory-exports",
   fileOperations: "/api/v1/gallery/file-operations",
   trash: "/api/v1/gallery/trash",
 } as const);
@@ -42,6 +45,15 @@ export interface GalleryService {
     request: GalleryDirectoryRequest,
     signal: AbortSignal,
   ): Promise<GalleryDirectoryPage>;
+  startDirectoryExport(
+    directoryIds: readonly string[],
+    targetPath: string,
+  ): Promise<GalleryDirectoryExportOperation>;
+  getDirectoryExport(
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<GalleryDirectoryExportOperation>;
+  cancelDirectoryExport(operationId: string): Promise<GalleryDirectoryExportOperation>;
   thumbnailUrl(assetId: string): string;
   contentUrl(assetId: string): string;
   getAnnotation(assetId: string, signal: AbortSignal): Promise<GalleryAnnotation>;
@@ -112,6 +124,47 @@ export function createGalleryService(api: ApiClient): GalleryService {
     },
     async listDirectoryEntries(request, signal) {
       return sanitizeGalleryDirectoryPage(await api.get(directoryEntriesPath(request), { signal }));
+    },
+    async startDirectoryExport(directoryIds, targetPath) {
+      if (
+        !Array.isArray(directoryIds) ||
+        directoryIds.length === 0 ||
+        directoryIds.length > 500 ||
+        new Set(directoryIds).size !== directoryIds.length
+      ) {
+        throw new TypeError("invalid_gallery_directory_export_selection");
+      }
+      for (const directoryId of directoryIds) endpointId(directoryId);
+      if (
+        typeof targetPath !== "string" ||
+        targetPath.trim().length === 0 ||
+        targetPath.length > 4096 ||
+        /[\u0000-\u001f]/.test(targetPath)
+      ) {
+        throw new TypeError("invalid_gallery_directory_export_target");
+      }
+      return sanitizeGalleryDirectoryExportOperation(
+        await api.post(
+          GALLERY_ENDPOINTS.directoryExports,
+          { directory_ids: [...directoryIds], target_path: targetPath },
+          { idempotencyKey: true },
+        ),
+      );
+    },
+    async getDirectoryExport(operationId, signal) {
+      return sanitizeGalleryDirectoryExportOperation(
+        await api.get(
+          `${GALLERY_ENDPOINTS.directoryExports}/${endpointId(operationId)}?view=desktop`,
+          signal === undefined ? undefined : { signal },
+        ),
+      );
+    },
+    async cancelDirectoryExport(operationId) {
+      return sanitizeGalleryDirectoryExportOperation(
+        await api.post(
+          `${GALLERY_ENDPOINTS.directoryExports}/${endpointId(operationId)}/cancel`,
+        ),
+      );
     },
     thumbnailUrl(assetId) {
       // 后端只支持 256/512 两档（SUPPORTED_THUMBNAIL_SIZES）。

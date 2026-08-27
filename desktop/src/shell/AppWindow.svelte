@@ -1,7 +1,6 @@
 <script lang="ts">
   import Crawl from "../apps/crawl/Crawl.svelte";
   import Diagnostics from "../apps/diagnostics/Diagnostics.svelte";
-  import Export from "../apps/export/Export.svelte";
   import Gallery from "../apps/gallery/Gallery.svelte";
   import Policy from "../apps/policy/Policy.svelte";
   import Vault from "../apps/vault/Vault.svelte";
@@ -126,9 +125,7 @@
     {:else if record.appId === "personalization"}
       <Personalization {persistence} registerUnsavedChanges={shellUnsaved ? (reader: () => boolean, discard?: () => void) => shellUnsaved("personalization", reader, discard) : undefined} />
     {:else if record.appId === "gallery"}
-      <Gallery {api} onNavigate={(appId: string) => onNavigate(appId as ApplicationId)} />
-    {:else if record.appId === "export"}
-      <Export {api} {polling} onNavigate={(appId) => onNavigate(appId)} />
+      <Gallery {api} />
     {/if}
   </div>
 

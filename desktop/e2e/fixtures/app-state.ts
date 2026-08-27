@@ -9,7 +9,6 @@ export const APPLICATIONS = [
   "proxy",
   "policy",
   "diagnostics",
-  "export",
   "personalization",
 ] as const;
 
@@ -40,10 +39,6 @@ export async function prepareRichState(page: Page, appId: AppId): Promise<void> 
   } else if (appId === "gallery") {
     await window.getByRole("button", { name: "E2E 导入目录" }).click();
     await expect(window.locator("[data-gallery-asset=\"gal-asset-01\"]")).toBeVisible();
-  } else if (appId === "export") {
-    await expect(window.locator(".export-job-id").first()).toHaveText("export-job-0…");
-    await window.locator(".export-job-list button").first().click();
-    await expect(window.getByRole("heading", { name: "任务 export-job-0…" })).toBeVisible();
   } else {
     const busy = window.locator("[aria-busy]").first();
     if (await busy.count()) await expect(busy).toHaveAttribute("aria-busy", "false");

@@ -49,7 +49,7 @@ describe("five-layer Svelte OS shell", () => {
     expect(body).toContain('data-product-contract="nocturne-glass-desktop"');
     expect(body).toContain('role="dialog" aria-modal="true"');
     expect(body).toContain("data-application-center-backdrop");
-    expect(occurrences(body, "data-application-center-app=")).toBe(10);
+    expect(occurrences(body, "data-application-center-app=")).toBe(9);
     expect(body).toContain('data-availability="ready"');
   });
 
@@ -128,6 +128,6 @@ describe("five-layer Svelte OS shell", () => {
     expect(joined).not.toMatch(/\b(?:localStorage|sessionStorage|fetch|XMLHttpRequest)\b/);
     expect(joined).not.toContain("/api/v1");
     expect(joined).toContain('record.appId === "gallery"');
-    expect(joined).toContain('record.appId === "export"');
+    expect(joined).not.toContain('record.appId === "export"');
   });
 });

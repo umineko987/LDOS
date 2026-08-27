@@ -10,6 +10,7 @@ export interface MockApiOptions {
   readonly health?: "ok" | "failed" | "invalid";
   readonly emptyRecent?: boolean;
   readonly failPaths?: readonly string[];
+  readonly directoryExportScenario?: "completed" | "copying" | "failed" | "conflict";
   readonly delayMs?: number;
 }
 
@@ -412,7 +413,7 @@ function readiness(): Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
-// Gallery（G2+ 正式图库）与 Dataset Export（G6 正式导出）固定数据。
+// Gallery 与内嵌目录导出固定数据。
 // 形状必须与 desktop 模型 sanitizer 的键白名单完全一致（strictRecord 会拒绝未知键）。
 // ---------------------------------------------------------------------------
 
@@ -510,37 +511,77 @@ function galleryTrashPage(): Record<string, unknown> {
   };
 }
 
-const EXPORT_JOB_ID = "export-job-01";
+const DIRECTORY_EXPORT_OPERATION_ID = "gallery-export-op-01";
 
-function exportJob(): Record<string, unknown> {
+function directoryExportOperation(
+  state: "copying" | "completed" | "failed" | "cancelled" = "copying",
+): Record<string, unknown> {
+  const completed = state === "completed";
+  const failed = state === "failed";
+  const cancelled = state === "cancelled";
+  const results = completed
+    ? [
+        {
+          directory_name: "subdir",
+          status: "completed",
+          copied_file_count: 4,
+          copied_byte_count: 128_000,
+          error_code: null,
+        },
+        {
+          directory_name: "E2E 导入目录",
+          status: "completed",
+          copied_file_count: 6,
+          copied_byte_count: 192_000,
+          error_code: null,
+        },
+      ]
+    : failed
+      ? [
+          {
+            directory_name: "subdir",
+            status: "completed",
+            copied_file_count: 4,
+            copied_byte_count: 128_000,
+            error_code: null,
+          },
+          {
+            directory_name: "E2E 导入目录",
+            status: "failed",
+            copied_file_count: 0,
+            copied_byte_count: 0,
+            error_code: "source_read_failed",
+          },
+        ]
+      : cancelled
+        ? [
+            {
+              directory_name: "subdir",
+              status: "cancelled",
+              copied_file_count: 1,
+              copied_byte_count: 32_000,
+              error_code: null,
+            },
+          ]
+        : [];
   return {
-    export_id: EXPORT_JOB_ID,
-    status: "ready",
-    sample_count: 4,
-    staged_sample_count: 0,
-    committed_sample_count: 0,
-    image_bytes: 192_000,
-    txt_bytes: 256,
-    error_class: null,
-    created_at: 1_700_000_100,
-    updated_at: 1_700_000_200,
-    started_at: null,
-    finished_at: null,
-  };
-}
-
-function exportJobDetail(): Record<string, unknown> {
-  return {
-    ...exportJob(),
-    sources: [
-      {
-        source_id: GALLERY_SOURCE_ID,
-        directory_id: GALLERY_ROOT_DIR,
-        include_descendants: true,
-        output_alias: "e2e-import",
-      },
-    ],
-    blockers: [],
+    operation_id: DIRECTORY_EXPORT_OPERATION_ID,
+    state,
+    current_directory_name: state === "copying" ? "subdir" : null,
+    directory_count: 2,
+    completed_directory_count: completed ? 2 : failed ? 1 : 0,
+    failed_directory_count: failed ? 1 : 0,
+    discovered_file_count: 10,
+    copied_file_count: completed ? 10 : failed ? 4 : 1,
+    discovered_byte_count: 320_000,
+    copied_byte_count: completed ? 320_000 : failed ? 128_000 : 32_000,
+    error_code: failed ? "directory_copy_failed" : null,
+    successful_directory_names: completed
+      ? ["subdir", "E2E 导入目录"]
+      : failed
+        ? ["subdir"]
+        : [],
+    results,
   };
 }
 
@@ -770,28 +811,47 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       return;
     }
 
-    // ---- Dataset Export（G6 正式导出）----
-    if (url.pathname === "/api/v1/dataset-exports" && request.method() === "GET") {
-      await respond(route, { jobs: [exportJob()] });
+    // ---- Gallery 内短生命周期目录导出 ----
+    if (url.pathname === "/api/v1/gallery/directory-exports" && request.method() === "POST") {
+      if (options.directoryExportScenario === "conflict") {
+        await respond(
+          route,
+          {
+            error: {
+              code: "target_top_level_conflict",
+              message: "目标目录存在同名条目",
+              request_id: "e2e-request",
+              details: { names: ["subdir"] },
+            },
+          },
+          409,
+        );
+        return;
+      }
+      await respond(route, directoryExportOperation("copying"), 202);
       return;
     }
-    if (url.pathname === "/api/v1/dataset-exports" && request.method() === "POST") {
-      await respond(route, { ...exportJobDetail(), status: "blocked", blockers: [{ code: "txt_missing", count: 1 }] }, 201);
+    const directoryExportCancelMatch = url.pathname.match(
+      /^\/api\/v1\/gallery\/directory-exports\/([^/]+)\/cancel$/,
+    );
+    if (directoryExportCancelMatch && request.method() === "POST") {
+      await respond(route, directoryExportOperation("cancelled"));
       return;
     }
-    const exportBlockersMatch = url.pathname.match(/^\/api\/v1\/dataset-exports\/([^/]+)\/blockers$/);
-    if (exportBlockersMatch && request.method() === "GET") {
-      await respond(route, { blockers: [] });
-      return;
-    }
-    const exportActionMatch = url.pathname.match(/^\/api\/v1\/dataset-exports\/([^/]+)\/(start|pause|resume|discard)$/);
-    if (exportActionMatch && request.method() === "POST") {
-      await respond(route, exportJob());
-      return;
-    }
-    const exportDetailMatch = url.pathname.match(/^\/api\/v1\/dataset-exports\/([^/]+)$/);
-    if (exportDetailMatch && request.method() === "GET") {
-      await respond(route, exportJobDetail());
+    const directoryExportMatch = url.pathname.match(
+      /^\/api\/v1\/gallery\/directory-exports\/([^/]+)$/,
+    );
+    if (directoryExportMatch && request.method() === "GET") {
+      await respond(
+        route,
+        directoryExportOperation(
+          options.directoryExportScenario === "failed"
+            ? "failed"
+            : options.directoryExportScenario === "copying"
+              ? "copying"
+              : "completed",
+        ),
+      );
       return;
     }
 
