@@ -24,6 +24,7 @@ from .api_routes import (
     create_crawls_router,
     create_diagnostics_router,
     create_discovery_router,
+    create_dataset_exports_router,
     create_gallery_router,
     create_ordered_task_enqueuer,
     create_policies_router,
@@ -36,6 +37,7 @@ from .api_routes import (
 # live outside the composition root.
 from .api_routes.errors import ApiError
 from .gallery_service import GalleryCatalogService
+from .dataset_export_manager import DatasetExportManager
 from .gallery_file_operations import GalleryFileOperations
 from .gallery_thumbnails import ThumbnailService
 from .api_routes.validation import (
@@ -90,6 +92,11 @@ class ServiceContainer:
         self.auth = AuthManager(settings)
         self.gallery_catalog = GalleryCatalogService(self.db.gallery)
         self.gallery_file_operations = GalleryFileOperations(self.db.gallery)
+        self.dataset_export_manager = DatasetExportManager(
+            repository=self.db.dataset_exports,
+            gallery_repository=self.db.gallery,
+            gallery_service=self.gallery_catalog,
+        )
         self.gallery_thumbnails = ThumbnailService(
             settings.runtime_dir / "gallery-cache"
         )
@@ -567,6 +574,7 @@ def create_app(
     app.include_router(create_review_router())
     app.include_router(create_policies_router())
     app.include_router(create_gallery_router())
+    app.include_router(create_dataset_exports_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
 

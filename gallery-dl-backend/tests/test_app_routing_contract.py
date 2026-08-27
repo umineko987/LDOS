@@ -56,6 +56,14 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("POST", "/api/v1/gallery/trash/{operation_id}/restore"): ("restore_trash_api_v1_gallery_trash__operation_id__restore_post", ("200", "422")),
     ("DELETE", "/api/v1/gallery/trash/{operation_id}"): ("purge_trash_api_v1_gallery_trash__operation_id__delete", ("200", "422")),
     ("DELETE", "/api/v1/gallery/trash"): ("purge_all_trash_api_v1_gallery_trash_delete", ("200", "422")),
+    ("POST", "/api/v1/dataset-exports"): ("create_dataset_export_api_v1_dataset_exports_post", ("201", "422")),
+    ("GET", "/api/v1/dataset-exports"): ("list_dataset_exports_api_v1_dataset_exports_get", ("200", "422")),
+    ("GET", "/api/v1/dataset-exports/{export_id}"): ("get_dataset_export_api_v1_dataset_exports__export_id__get", ("200", "422")),
+    ("GET", "/api/v1/dataset-exports/{export_id}/blockers"): ("list_dataset_export_blockers_api_v1_dataset_exports__export_id__blockers_get", ("200", "422")),
+    ("POST", "/api/v1/dataset-exports/{export_id}/start"): ("start_dataset_export_api_v1_dataset_exports__export_id__start_post", ("200", "422")),
+    ("POST", "/api/v1/dataset-exports/{export_id}/pause"): ("pause_dataset_export_api_v1_dataset_exports__export_id__pause_post", ("200", "422")),
+    ("POST", "/api/v1/dataset-exports/{export_id}/resume"): ("resume_dataset_export_api_v1_dataset_exports__export_id__resume_post", ("200", "422")),
+    ("POST", "/api/v1/dataset-exports/{export_id}/discard"): ("discard_dataset_export_api_v1_dataset_exports__export_id__discard_post", ("200", "422")),
     ("POST", "/api/v1/tasks"): ("create_task_api_v1_tasks_post", ("200", "422")),
     ("GET", "/api/v1/tasks"): ("list_tasks_api_v1_tasks_get", ("200", "422")),
     ("GET", "/api/v1/tasks/{task_id}"): ("get_task_api_v1_tasks__task_id__get", ("200", "422")),
@@ -201,6 +209,7 @@ class AppRoutingContractTests(unittest.TestCase):
             "crawls": "gdl_backend.api_routes.crawls",
             "review": "gdl_backend.api_routes.review",
             "gallery": "gdl_backend.api_routes.gallery",
+            "dataset_exports": "gdl_backend.api_routes.dataset_exports",
             "policies": "gdl_backend.api_routes.policies",
             "proxy": "gdl_backend.api_routes.proxy",
             "scheduler": "gdl_backend.api_routes.scheduler",
@@ -222,6 +231,8 @@ class AppRoutingContractTests(unittest.TestCase):
                 domain = "crawls"
             elif path.startswith("/api/v1/gallery"):
                 domain = "gallery"
+            elif path.startswith("/api/v1/dataset-exports"):
+                domain = "dataset_exports"
             elif path.startswith("/api/v1/sites/policies"):
                 domain = "policies"
             elif path.startswith("/api/v1/proxy"):

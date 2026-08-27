@@ -200,3 +200,19 @@
 - 桌面：`GalleryDedupState` 扩展为五态并新增 `dedup_applied_version` 白名单字段（非负安全整数）；`GALLERY_DEDUP_STATE_LABELS` 补全中文标签。
 - 测试：`tests/test_gallery_dedup_reconciliation.py`（8 tests：立即排除+列表/搜索剔除、applied_version 记录、目录计数重算、not_required、pending→review_pending 状态机、applied→内容变化→stale、trash 递增 content_version、无来源批次返回 None）；`model.test.ts` fixture 同步新字段并以 invented state 覆盖拒绝分支。
 - 阻塞：无。
+
+### [G5] feat(export): 数据集导出引擎——状态机、预检、暂存、提交与恢复
+
+- 状态：✅ 后端 695/695 全绿（G0 红线合同全部转绿）；新增 10 个导出引擎测试全绿
+- `_database_dataset_export_repository.py`：job/source-snapshot/item/event 持久化；状态转移经 `dataset_export.py` 的 `assert_export_transition` 校验（非法转移抛 `ValueError`）；`set_item_copy_state`（planned→staged→committed）、`set_job_progress`、事件日志追加。
+- `dataset_export_manager.py`（`ServiceContainer.dataset_export_manager`，`stop()` 加入容器关闭序列）：
+  - 创建即预检（§3.9 严格阻断）：TXT `missing/blank/invalid_encoding/io_error/pair_conflict` → `txt_missing/txt_empty/txt_invalid_encoding`（修正状态词表为扫描实际分类 `normal/blank/...`）；目标已有同名文件（image 或 TXT）→ `export_target_conflict`（§3.9 不覆盖已有文件）；样本冻结进 `dataset_export_items`（含 format/width/height 供 manifest）。
+  - start → 后台线程 `_run_staging`：暂存 `.imageweave/staging/<export-id>/` 逐条完整复制（不用链接——记忆 #43）+ SHA-256 校验 + TXT 暂存后严格 UTF-8 复验；pause 在条目边界生效。
+  - `_commit_items`：staged→committing→completed；逐条 `os.replace` 暂存→正式（image+TXT 成对，补上了首版遗漏的 TXT 提交）；写独立 manifest `.imageweave/exports/<export-id>.jsonl`（任务记录首行 + 自然排序样本行——记忆 #47/50：不重写全目录总清单）；提交后清理暂存目录。
+  - 中断语义：`_mark_interrupted` 按当前状态落到合法终态——staging 失败→`failed`；committing 中断→`recovery_required`（修复了首版把 committing→failed 的非法转移吞掉导致任务卡死的缺陷）；`recover_unfinished()` 启动恢复。
+  - 丢弃：`discard` 清理暂存并置 `discarded`。
+- `api_routes/dataset_exports.py`：8 条路由（POST / GET list / GET detail / GET blockers / start / pause / resume / discard），列表与详情走 `view=desktop` 有界投影（不含绝对目标路径）；稳定错误码 `export_not_found(404)/export_state_invalid(409)/export_target_conflict(409)/export_disk_space_insufficient`。
+- `app.py`：路由注册 + 容器挂载 + 关闭序列。
+- 合同修订：`test_gallery_export_api_contract.py` 的 view 检查接受单值 Literal 在 OpenAPI 3.1 下的 `const: "desktop"` 表示（比 enum 更严格，同为有界投影语义）；`test_app_routing_contract.py` 路由清单补 8 条 dataset-exports 记录 + domain 所有权映射。
+- 测试：`tests/test_dataset_export_manager.py`（10 tests：缺 TXT/空白 TXT/坏编码阻断、目标冲突阻断、完整导出流+独立 manifest 校验+暂存清理、合并导出不覆盖+双 manifest、状态机守卫 404/409、丢弃、列表/详情投影无绝对路径、blockers 端点）。
+- 阻塞：无。

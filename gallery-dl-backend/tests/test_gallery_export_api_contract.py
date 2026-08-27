@@ -128,13 +128,19 @@ class GalleryExportApiContractTest(unittest.TestCase):
                 missing_view.append(key)
                 continue
             parameters = operation.get("parameters", [])
-            view_values = [
-                parameter.get("schema", {}).get("enum")
+            view_schemas = [
+                parameter.get("schema", {})
                 for parameter in parameters
                 if parameter.get("name") == "view"
                 and parameter.get("in") == "query"
             ]
-            if not any("desktop" in (values or []) for values in view_values):
+            # 单值 Literal 在 OpenAPI 3.1 下生成 const（比 enum 更严格），
+            # 两者都满足“只接受 desktop 投影”的合同意图。
+            if not any(
+                "desktop" in (schema.get("enum") or [])
+                or schema.get("const") == "desktop"
+                for schema in view_schemas
+            ):
                 missing_view.append(key)
         self.assertEqual(
             missing_view,

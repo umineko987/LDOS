@@ -16,6 +16,7 @@ from ._database_crawl_repository import (
     refresh_crawl_batch_counts,
 )
 from ._database_gallery_repository import GalleryRepository
+from ._database_dataset_export_repository import DatasetExportRepository
 from ._database_policy_repository import SitePolicyRepository
 from ._database_proxy_repository import ProxyProbeRepository
 from ._database_repository import (
@@ -113,6 +114,11 @@ class Database:
             clock=lambda: time.time(),
         )
         self._gallery_repository = GalleryRepository(
+            read=self._read,
+            transaction=self._transaction,
+            clock=lambda: time.time(),
+        )
+        self._dataset_export_repository = DatasetExportRepository(
             read=self._read,
             transaction=self._transaction,
             clock=lambda: time.time(),
@@ -742,6 +748,10 @@ class Database:
     @property
     def gallery(self) -> GalleryRepository:
         return self._gallery_repository
+
+    @property
+    def dataset_exports(self) -> DatasetExportRepository:
+        return self._dataset_export_repository
 
     def incomplete_processes(self) -> list[dict[str, Any]]:
         return self._task_repository.incomplete_processes()
