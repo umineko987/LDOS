@@ -26,7 +26,13 @@ export interface GalleryController {
   activate(): void;
   deactivate(): void;
   refreshSources(): Promise<boolean>;
+  reconcileOnFocus(): Promise<boolean>;
+  rescanActiveSource(): Promise<boolean>;
+  retryActiveReconciliation(): Promise<boolean>;
   importDirectory(rootPath: string): Promise<boolean>;
+  renameActiveSource(displayName: string): Promise<boolean>;
+  relinkActiveSource(rootPath: string): Promise<boolean>;
+  unmountActiveSource(): Promise<boolean>;
   openSource(sourceId: string): Promise<boolean>;
   openDirectory(directoryId: string): Promise<boolean>;
   navigateToBreadcrumb(index: number): Promise<boolean>;
@@ -80,6 +86,9 @@ export function createGalleryController({ store, service }: {
   let pageVersion = 0;
   let annotationController: AbortController | null = null;
 
+  let scanController: AbortController | null = null;
+  let scanTimer: ReturnType<typeof setTimeout> | null = null;
+  let scanVersion = 0;
   const run = (operation: () => boolean): boolean => active && !destroyed && operation();
 
   async function loadSources(): Promise<boolean> {
@@ -98,6 +107,107 @@ export function createGalleryController({ store, service }: {
       store.setSourcesError(errorCode(error));
       return false;
     }
+  }
+
+  function clearScanPolling(): void {
+    if (scanTimer !== null) clearTimeout(scanTimer);
+    scanTimer = null;
+    scanController?.abort();
+    scanController = null;
+  }
+
+  async function refreshAfterTerminalScan(sourceId: string, version: number): Promise<void> {
+    const refreshed = await loadSources();
+    if (!refreshed || destroyed || version !== scanVersion) return;
+    const state = store.getState();
+    if (state.activeSourceId !== sourceId || state.rootDirectoryId === null) return;
+    const loaded = await loadPage(false);
+    if (loaded || destroyed || version !== scanVersion) return;
+    const latest = store.getState();
+    if (
+      latest.activeSourceId === sourceId &&
+      latest.rootDirectoryId !== null &&
+      latest.currentDirectory !== null &&
+      latest.currentDirectory?.directory_id !== latest.rootDirectoryId &&
+      latest.pageErrorCode === "directory_not_found"
+    ) {
+      await loadPageForDirectory(latest.rootDirectoryId);
+    }
+  }
+
+  function scheduleScanPoll(sourceId: string, version: number): void {
+    if (destroyed || !active || version !== scanVersion) return;
+    if (scanTimer !== null) clearTimeout(scanTimer);
+    scanTimer = setTimeout(() => {
+      scanTimer = null;
+      void pollSourceScan(sourceId, version);
+    }, 400);
+  }
+
+  async function pollSourceScan(sourceId: string, version: number): Promise<boolean> {
+    if (!active || destroyed || version !== scanVersion) return false;
+    scanController?.abort();
+    const request = new AbortController();
+    scanController = request;
+    try {
+      const operation = await service.getSourceScan(sourceId, request.signal);
+      if (
+        destroyed ||
+        !active ||
+        request !== scanController ||
+        version !== scanVersion
+      ) {
+        return false;
+      }
+      store.patch({ scanOperation: operation, scanRequestErrorCode: null });
+      if (operation.state === "running") {
+        scheduleScanPoll(sourceId, version);
+      } else {
+        await refreshAfterTerminalScan(sourceId, version);
+      }
+      return true;
+    } catch (error) {
+      if (isAbortError(error) || destroyed || request !== scanController || version !== scanVersion) {
+        return false;
+      }
+      store.patch({ scanRequestErrorCode: errorCode(error) });
+      return false;
+    }
+  }
+
+  async function startSourceScan(sourceId: string): Promise<boolean> {
+    if (!active || destroyed || store.getState().activeSourceId !== sourceId) return false;
+    clearScanPolling();
+    const version = ++scanVersion;
+    store.patch({ scanRequestErrorCode: null });
+    try {
+      const operation = await service.startSourceScan(sourceId);
+      if (destroyed || !active || version !== scanVersion) return false;
+      store.patch({ scanOperation: operation, scanRequestErrorCode: null });
+      if (operation.state === "running") {
+        scheduleScanPoll(sourceId, version);
+      } else {
+        await refreshAfterTerminalScan(sourceId, version);
+      }
+      return true;
+    } catch (error) {
+      if (destroyed || !active || version !== scanVersion) return false;
+      if (errorCode(error) === "source_scan_in_progress") {
+        return pollSourceScan(sourceId, version);
+      }
+      store.patch({ scanRequestErrorCode: errorCode(error) });
+      return false;
+    }
+  }
+
+  function followSourceScan(sourceId: string): Promise<boolean> {
+    if (!active || destroyed || store.getState().activeSourceId !== sourceId) {
+      return Promise.resolve(false);
+    }
+    clearScanPolling();
+    const version = ++scanVersion;
+    store.patch({ scanRequestErrorCode: null });
+    return pollSourceScan(sourceId, version);
   }
 
   function targetDirectoryId(state: ReturnType<GalleryStore["getState"]>): string | null {
@@ -165,54 +275,136 @@ export function createGalleryController({ store, service }: {
       sourcesController = null;
       pageController?.abort();
       pageController = null;
+      clearScanPolling();
+      scanVersion += 1;
     },
     refreshSources() {
       if (!active || destroyed) return Promise.resolve(false);
       return loadSources();
     },
+    async reconcileOnFocus() {
+      if (!active || destroyed) return false;
+      const refreshed = await loadSources();
+      if (!refreshed || destroyed || !active) return false;
+      const state = store.getState();
+      if (state.activeSourceId === null) return true;
+      if (state.rootDirectoryId !== null) await loadPage(false);
+      return startSourceScan(state.activeSourceId);
+    },
+    rescanActiveSource() {
+      const sourceId = store.getState().activeSourceId;
+      return sourceId === null ? Promise.resolve(false) : startSourceScan(sourceId);
+    },
+    async retryActiveReconciliation() {
+      const sourceId = store.getState().activeSourceId;
+      if (!active || destroyed || sourceId === null) return false;
+      store.patch({ reconciliationRetrySourceId: sourceId, scanRequestErrorCode: null });
+      try {
+        await service.retrySourceReconciliation(sourceId);
+        if (destroyed || !active || store.getState().activeSourceId !== sourceId) return false;
+        if (!(await loadSources())) return false;
+        if (store.getState().rootDirectoryId !== null) await loadPage(false);
+        return followSourceScan(sourceId);
+      } catch (error) {
+        if (!destroyed && store.getState().activeSourceId === sourceId) {
+          store.patch({ scanRequestErrorCode: errorCode(error) });
+        }
+        return false;
+      } finally {
+        if (!destroyed && store.getState().reconciliationRetrySourceId === sourceId) {
+          store.patch({ reconciliationRetrySourceId: null });
+        }
+      }
+    },
     async importDirectory(rootPath) {
       if (!active || destroyed) return false;
       try {
-        await service.importSource(rootPath);
+        const imported = await service.importSource(rootPath);
+        if (!(await loadSources()) || destroyed || !active) return false;
+        const source = store
+          .getState()
+          .sources.find((candidate) => candidate.source_id === imported.source_id);
+        if (!source) return false;
+        store.openSource(source.source_id, source.root_directory_id);
+        return followSourceScan(source.source_id);
       } catch (error) {
-        store.patch({ sourcesErrorCode: error instanceof Error ? error.message : "import_failed" });
+        store.patch({ sourcesErrorCode: errorCode(error) });
         return false;
       }
-      return loadSources();
+    },
+    async renameActiveSource(displayName) {
+      const sourceId = store.getState().activeSourceId;
+      if (!active || destroyed || sourceId === null) return false;
+      try {
+        await service.renameSource(sourceId, displayName);
+        if (destroyed || store.getState().activeSourceId !== sourceId) return false;
+        return loadSources();
+      } catch (error) {
+        store.patch({ scanRequestErrorCode: errorCode(error) });
+        return false;
+      }
+    },
+    async relinkActiveSource(rootPath) {
+      const sourceId = store.getState().activeSourceId;
+      if (!active || destroyed || sourceId === null) return false;
+      try {
+        await service.relinkSource(sourceId, rootPath);
+        if (destroyed || store.getState().activeSourceId !== sourceId) return false;
+        if (!(await loadSources())) return false;
+        const relinked = store.getState().sources.find((source) => source.source_id === sourceId);
+        if (!relinked) return false;
+        store.openSource(sourceId, relinked.root_directory_id);
+        return followSourceScan(sourceId);
+      } catch (error) {
+        store.patch({ scanRequestErrorCode: errorCode(error) });
+        return false;
+      }
+    },
+    async unmountActiveSource() {
+      const sourceId = store.getState().activeSourceId;
+      if (!active || destroyed || sourceId === null) return false;
+      try {
+        await service.unmountSource(sourceId);
+        if (destroyed) return false;
+        clearScanPolling();
+        scanVersion += 1;
+        return loadSources();
+      } catch (error) {
+        store.patch({ scanRequestErrorCode: errorCode(error) });
+        return false;
+      }
     },
     async openSource(sourceId) {
       if (!active || destroyed) return false;
-      const state = store.getState();
-      const source = state.sources.find((item) => item.source_id === sourceId);
-      if (!source || source.root_directory_id === null) {
-        // 未扫描或正在扫描的来源：清空内容区（重扫描写入流程随 G3 接入）。
-        store.patch({
-          activeSourceId: source ? source.source_id : null,
-          rootDirectoryId: null,
-          path: [],
-          currentDirectory: null,
-          directories: [],
-          assets: [],
-          directoryCursor: null,
-          assetCursor: null,
-        });
-        return false;
+      const source = store.getState().sources.find((item) => item.source_id === sourceId);
+      if (!source) return false;
+      if (source.root_directory_id === null) {
+        store.openSource(source.source_id, null);
+        return startSourceScan(sourceId);
       }
       store.openSource(sourceId, source.root_directory_id);
+      void startSourceScan(sourceId);
       return loadPage(false);
     },
     async openDirectory(directoryId) {
       if (!active || destroyed) return false;
-      return loadPageForDirectory(directoryId);
+      const loaded = await loadPageForDirectory(directoryId);
+      const sourceId = store.getState().activeSourceId;
+      if (sourceId !== null) void startSourceScan(sourceId);
+      return loaded;
     },
     async navigateToBreadcrumb(index) {
       if (!active || destroyed) return false;
       const state = store.getState();
       if (state.rootDirectoryId === null) return false;
-      if (index < 0 || index >= state.path.length) {
-        return loadPageForDirectory(state.rootDirectoryId);
-      }
-      return loadPageForDirectory(state.path[index].directory_id);
+      const directoryId =
+        index < 0 || index >= state.path.length
+          ? state.rootDirectoryId
+          : state.path[index].directory_id;
+      const loaded = await loadPageForDirectory(directoryId);
+      const sourceId = store.getState().activeSourceId;
+      if (sourceId !== null) void startSourceScan(sourceId);
+      return loaded;
     },
     async setIncludeDescendants(value) {
       if (!active || destroyed) return false;
@@ -299,9 +491,8 @@ export function createGalleryController({ store, service }: {
       return run(() => store.setTxtViewMode(mode));
     },
     refreshDirectory() {
-      // 有界增量检查：重新拉取当前目录（后端按需增量扫描），不重置筛选与选择之外的本地状态。
-      if (!active || destroyed) return Promise.resolve(false);
-      return loadPage(false);
+      const sourceId = store.getState().activeSourceId;
+      return sourceId === null ? Promise.resolve(false) : startSourceScan(sourceId);
     },
     setTxtDraft(draft) {
       const state = store.getState();

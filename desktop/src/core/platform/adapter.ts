@@ -8,7 +8,7 @@ import {
   type RuntimeMetadata,
 } from "../runtime/sanitize";
 
-export type PlatformDirectoryPurpose = "gallery_import" | "export_target";
+export type PlatformDirectoryPurpose = "gallery_import" | "gallery_relink" | "export_target";
 
 export class PlatformCapabilityError extends Error {
   constructor(readonly code: "capability_unavailable") {
@@ -32,7 +32,7 @@ interface PlatformDependencies {
 }
 
 export interface PlatformCapabilities {
-  /** 本机目录选择（图库导入/导出目标），仅桌面模式可用。 */
+  /** 本机目录选择（图库导入/重关联/导出目标），仅桌面模式可用。 */
   readonly selectDirectory: boolean;
   /** 在系统文件管理器中定位结果，仅桌面模式可用。 */
   readonly revealInFileManager: boolean;

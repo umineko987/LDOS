@@ -149,7 +149,87 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 14px 20px 0;
+}
+
+.gallery-source-status {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: var(--imageweave-border-width) solid var(--imageweave-border-weak);
+  border-radius: 12px;
+  background: var(--imageweave-glass-surface-weak);
+}
+.gallery-source-status__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.gallery-source-status__heading > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.gallery-source-status__heading strong { overflow-wrap: anywhere; }
+.gallery-source-status__heading span,
+.gallery-source-progress {
+  color: var(--imageweave-text-secondary);
+  font-size: 0.75rem;
+}
+.gallery-source-status__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+.gallery-source-warning,
+.gallery-source-progress {
+  margin: 0;
+}
+.gallery-source-warning {
+  padding: 8px 10px;
+  border-left: 3px solid var(--imageweave-state-warning);
+  color: var(--imageweave-text-primary);
+  background: var(--imageweave-glass-surface-secondary);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.gallery-source-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+.gallery-source-stats div {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--imageweave-glass-surface-secondary);
+}
+.gallery-source-stats dt {
+  color: var(--imageweave-text-secondary);
+  font-size: 0.6875rem;
+}
+.gallery-source-stats dd {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.gallery-source-reconciliation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: var(--imageweave-border-width) solid var(--imageweave-state-danger);
+  border-radius: 8px;
+  color: var(--imageweave-state-danger);
+  font-size: 0.75rem;
 }
 
 .gallery-toolbar {
@@ -318,7 +398,7 @@
 .gallery-grid-scroll,
 .gallery-list-scroll {
   flex: 1;
-  min-height: 0;
+  min-height: 180px;
   margin: 8px -8px 0;
   padding: 0 8px 16px;
   overflow-y: auto;
@@ -884,6 +964,83 @@
   border-radius: 12px;
   background: var(--surface-raised);
   box-shadow: 0 16px 48px rgb(0 0 0 / 40%);
+}
+
+.gallery-source-dialog {
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 72px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--border-default);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 40%);
+}
+.gallery-source-dialog h2 {
+  margin: 0 0 12px;
+  color: var(--text-primary);
+  font-size: 18px;
+}
+.gallery-source-dialog h3 {
+  margin: 0 0 6px;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.gallery-source-dialog p {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.gallery-source-dialog__eyebrow {
+  color: var(--imageweave-accent-highlight) !important;
+  font-family: var(--imageweave-font-mono);
+  font-size: 11px !important;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.gallery-source-dialog form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+.gallery-source-dialog label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+.gallery-source-dialog input {
+  width: 100%;
+  min-width: 0;
+}
+.gallery-source-dialog__section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+.gallery-source-dialog__section--danger {
+  border-top-color: var(--state-critical-border);
+}
+.gallery-source-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+.gallery-source-dialog button {
+  min-height: 36px;
+}
+.gallery-source-dialog button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.gallery-source-dialog .gallery-dialog-primary {
+  border-color: var(--state-info-border);
+  color: var(--state-info-text);
 }
 
 .gallery-dialog h2 {

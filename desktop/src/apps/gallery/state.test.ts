@@ -187,6 +187,27 @@ describe("gallery browse store", () => {
     store.destroy();
   });
 
+  it("clears stale directory rows when an active source gains a new root projection", () => {
+    const store = createGalleryStore();
+    store.setSources([{ ...source, root_directory_id: null }]);
+    store.openSource("source-1", null);
+    store.patch({
+      currentDirectory: rootDirectory,
+      directories: Object.freeze([childDirectory]),
+      assets: Object.freeze([asset("asset-1", "1.jpg")]),
+      pagePhase: "ready",
+    });
+
+    store.setSources([source]);
+
+    expect(store.getState().activeSourceId).toBe("source-1");
+    expect(store.getState().rootDirectoryId).toBe("dir-root");
+    expect(store.getState().currentDirectory).toBeNull();
+    expect(store.getState().assets).toEqual([]);
+    expect(store.getState().pagePhase).toBe("idle");
+    store.destroy();
+  });
+
   it("drives view mode and filters through guarded patches", () => {
     const store = createGalleryStore();
     expect(store.patch({ viewMode: "list" })).toBe(true);

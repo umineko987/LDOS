@@ -8,7 +8,6 @@ from pathlib import Path
 
 from gdl_backend._database_schema import (
     CURRENT_SCHEMA_VERSION,
-    GALLERY_EXPORT_SCHEMA_VERSION,
     initialize_schema,
 )
 from gdl_backend.database import Database
@@ -28,6 +27,13 @@ GALLERY_V9_TABLES = frozenset(
         "dataset_export_events",
     }
 )
+GALLERY_V10_TABLES = frozenset(
+    {
+        "gallery_reconciliation_events",
+        "gallery_reconciliation_items",
+    }
+)
+
 
 # 契约列子集：图库/导出所有权边界（docs/图库(含导出).md §5）必须由这些列承载，
 # 后续 repository 不得改用无边界 JSON 大表。
@@ -115,15 +121,16 @@ class GalleryExportSchemaMigrationTest(unittest.TestCase):
     def _columns(self, conn: sqlite3.Connection, table: str) -> set[str]:
         return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
-    def test_fresh_database_creates_v9_gallery_and_export_objects(self) -> None:
+    def test_fresh_database_creates_current_gallery_objects(self) -> None:
         db = Database(self.root / "fresh.sqlite3")
         try:
             version = db._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_version'"
             ).fetchone()[0]
-            self.assertEqual(version, str(GALLERY_EXPORT_SCHEMA_VERSION))
+            self.assertEqual(version, str(CURRENT_SCHEMA_VERSION))
             tables = self._table_names(db._conn)
             self.assertTrue(GALLERY_V9_TABLES.issubset(tables))
+            self.assertTrue(GALLERY_V10_TABLES.issubset(tables))
             self.assertTrue(
                 GALLERY_SOURCE_COLUMNS.issubset(self._columns(db._conn, "gallery_sources"))
             )
@@ -154,6 +161,8 @@ class GalleryExportSchemaMigrationTest(unittest.TestCase):
                 "UPDATE meta SET value='8' WHERE key='schema_version'"
             )
             # 模拟真实的 v8 数据库：v9 对象不存在。
+            for table in sorted(GALLERY_V10_TABLES):
+                conn.execute(f"DROP TABLE IF EXISTS {table}")
             for table in sorted(GALLERY_V9_TABLES):
                 conn.execute(f"DROP TABLE IF EXISTS {table}")
         legacy.close()
@@ -166,6 +175,7 @@ class GalleryExportSchemaMigrationTest(unittest.TestCase):
             self.assertEqual(version, str(CURRENT_SCHEMA_VERSION))
             tables = self._table_names(upgraded._conn)
             self.assertTrue(GALLERY_V9_TABLES.issubset(tables))
+            self.assertTrue(GALLERY_V10_TABLES.issubset(tables))
             batch = upgraded._conn.execute(
                 "SELECT id, status FROM crawl_batches WHERE id='batch-keep'"
             ).fetchone()
@@ -173,7 +183,7 @@ class GalleryExportSchemaMigrationTest(unittest.TestCase):
         finally:
             upgraded.close()
 
-    def test_repeated_startup_is_idempotent_and_keeps_version_9(self) -> None:
+    def test_repeated_startup_is_idempotent_and_keeps_current_version(self) -> None:
         path = self.root / "twice.sqlite3"
         first = Database(path)
         first.close()
@@ -182,8 +192,10 @@ class GalleryExportSchemaMigrationTest(unittest.TestCase):
             version = second._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_version'"
             ).fetchone()[0]
-            self.assertEqual(version, str(GALLERY_EXPORT_SCHEMA_VERSION))
-            self.assertTrue(GALLERY_V9_TABLES.issubset(self._table_names(second._conn)))
+            self.assertEqual(version, str(CURRENT_SCHEMA_VERSION))
+            tables = self._table_names(second._conn)
+            self.assertTrue(GALLERY_V9_TABLES.issubset(tables))
+            self.assertTrue(GALLERY_V10_TABLES.issubset(tables))
         finally:
             second.close()
 
@@ -218,7 +230,7 @@ class GalleryExportSchemaMigrationTest(unittest.TestCase):
             version = recovered._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_version'"
             ).fetchone()[0]
-            self.assertEqual(version, str(GALLERY_EXPORT_SCHEMA_VERSION))
+            self.assertEqual(version, str(CURRENT_SCHEMA_VERSION))
         finally:
             recovered.close()
 

@@ -166,6 +166,43 @@ class GallerySourceRoutesTest(GalleryApiTestBase):
         missing = self.client.delete(f"/api/v1/gallery/sources/{source_id}")
         self.assertEqual(missing.status_code, 404)
 
+    def test_source_lifecycle_validates_optional_idempotency_keys(self) -> None:
+        source = self.import_source({"a.jpg": _png_bytes()})
+        source_id = source["source_id"]
+        requests = [
+            ("PATCH", f"/api/v1/gallery/sources/{source_id}", {"display_name": "新名字"}),
+            ("POST", f"/api/v1/gallery/sources/{source_id}/scan", None),
+            (
+                "POST",
+                f"/api/v1/gallery/sources/{source_id}/relink",
+                {"root_path": str(self.root)},
+            ),
+            ("DELETE", f"/api/v1/gallery/sources/{source_id}", None),
+        ]
+        for method, path, body in requests:
+            with self.subTest(method=method, path=path):
+                response = self.client.request(
+                    method,
+                    path,
+                    json=body,
+                    headers={"Idempotency-Key": "   "},
+                )
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(
+                    response.json()["error"]["code"], "invalid_idempotency_key"
+                )
+
+    def test_reconciliation_retry_rejects_sources_without_a_retryable_event(self) -> None:
+        source = self.import_source({"a.jpg": _png_bytes()})
+        response = self.client.post(
+            f"/api/v1/gallery/sources/{source['source_id']}/reconciliation/retry"
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(
+            response.json()["error"]["code"],
+            "gallery_reconciliation_not_retryable",
+        )
+
     def test_view_must_be_desktop(self) -> None:
         # Literal["desktop"] 在校验层拒绝其他取值，走全局 validation_error 封套
         #（与 policies view 处理一致）。

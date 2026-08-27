@@ -7,6 +7,7 @@ import {
   type GalleryPathSegment,
   type GallerySearchScope,
   type GallerySourceSummary,
+  type GalleryScanOperation,
   type GalleryTrashOperation,
   type GalleryTxtState,
 } from "./model";
@@ -24,6 +25,9 @@ export interface GalleryBrowseState {
   readonly sourcesErrorCode: string | null;
   readonly sources: readonly GallerySourceSummary[];
   readonly activeSourceId: string | null;
+  readonly scanOperation: GalleryScanOperation | null;
+  readonly scanRequestErrorCode: string | null;
+  readonly reconciliationRetrySourceId: string | null;
   /** 活动来源的根目录 ID（进入来源首页面后获得）。 */
   readonly rootDirectoryId: string | null;
   /** 从根到当前目录的导航路径（不含根）。 */
@@ -90,6 +94,9 @@ export const GALLERY_BROWSE_DEFAULTS: GalleryBrowseState = Object.freeze({
   sourcesErrorCode: null,
   sources: Object.freeze([]),
   activeSourceId: null,
+  scanOperation: null,
+  scanRequestErrorCode: null,
+  reconciliationRetrySourceId: null,
   rootDirectoryId: null,
   path: Object.freeze([]),
   currentDirectory: null,
@@ -142,7 +149,7 @@ export interface GalleryStore {
   patch(partial: BrowsePatch): boolean;
   setSourcesError(errorCode: string): boolean;
   setSources(sources: readonly GallerySourceSummary[]): boolean;
-  openSource(sourceId: string, rootDirectoryId: string): boolean;
+  openSource(sourceId: string, rootDirectoryId: string | null): boolean;
   applyDirectoryPage(page: {
     directory: GalleryDirectoryEntry;
     directories: readonly GalleryDirectoryEntry[];
@@ -203,6 +210,9 @@ function statesEqual(left: GalleryBrowseState, right: GalleryBrowseState): boole
     left.sourcesErrorCode === right.sourcesErrorCode &&
     left.sources === right.sources &&
     left.activeSourceId === right.activeSourceId &&
+    left.scanOperation === right.scanOperation &&
+    left.scanRequestErrorCode === right.scanRequestErrorCode &&
+    left.reconciliationRetrySourceId === right.reconciliationRetrySourceId &&
     left.rootDirectoryId === right.rootDirectoryId &&
     left.path === right.path &&
     left.currentDirectory === right.currentDirectory &&
@@ -288,30 +298,39 @@ export function createGalleryStore(): GalleryStore {
     },
     setSources(sources) {
       const previous = state.activeSourceId;
-      const stillActive =
-        previous !== null && sources.some((source) => source.source_id === previous);
+      const activeSource =
+        previous === null ? undefined : sources.find((source) => source.source_id === previous);
+      const stillActive = activeSource !== undefined;
+      const preservePage =
+        activeSource !== undefined && activeSource.root_directory_id === state.rootDirectoryId;
       return publish({
         ...state,
         sourcesPhase: "ready",
         sourcesErrorCode: null,
         sources: Object.freeze([...sources]),
         activeSourceId: stillActive ? previous : null,
-        rootDirectoryId: stillActive ? state.rootDirectoryId : null,
-        path: stillActive ? state.path : Object.freeze([]),
-        currentDirectory: stillActive ? state.currentDirectory : null,
-        treeChildren: stillActive ? state.treeChildren : new Map(),
-        directories: stillActive ? state.directories : Object.freeze([]),
-        assets: stillActive ? state.assets : Object.freeze([]),
-        directoryCursor: stillActive ? state.directoryCursor : null,
-        assetCursor: stillActive ? state.assetCursor : null,
-        pagePhase: stillActive ? state.pagePhase : ("idle" as const),
-        pageErrorCode: stillActive ? state.pageErrorCode : null,
+        rootDirectoryId: activeSource?.root_directory_id ?? null,
+        scanOperation: stillActive ? state.scanOperation : null,
+        scanRequestErrorCode: stillActive ? state.scanRequestErrorCode : null,
+        reconciliationRetrySourceId: stillActive ? state.reconciliationRetrySourceId : null,
+        path: preservePage ? state.path : Object.freeze([]),
+        currentDirectory: preservePage ? state.currentDirectory : null,
+        treeChildren: preservePage ? state.treeChildren : new Map(),
+        directories: preservePage ? state.directories : Object.freeze([]),
+        assets: preservePage ? state.assets : Object.freeze([]),
+        directoryCursor: preservePage ? state.directoryCursor : null,
+        assetCursor: preservePage ? state.assetCursor : null,
+        pagePhase: preservePage ? state.pagePhase : ("idle" as const),
+        pageErrorCode: preservePage ? state.pageErrorCode : null,
       });
     },
     openSource(sourceId, rootDirectoryId) {
       return publish({
         ...state,
         activeSourceId: sourceId,
+        scanOperation: null,
+        scanRequestErrorCode: null,
+        reconciliationRetrySourceId: null,
         rootDirectoryId,
         path: Object.freeze([]),
         currentDirectory: null,
@@ -320,6 +339,7 @@ export function createGalleryStore(): GalleryStore {
         assets: Object.freeze([]),
         directoryCursor: null,
         assetCursor: null,
+        pagePhase: "idle",
         pageErrorCode: null,
       });
     },

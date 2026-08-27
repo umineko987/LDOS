@@ -5,7 +5,7 @@ import {
   type RuntimeMetadata,
 } from "../runtime/sanitize";
 
-const METHODS = ["GET", "POST", "PUT", "DELETE"] as const;
+const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 export const API_MAX_RESPONSE_CHARS = 16 * 1024 * 1024;
 
 type HttpMethod = typeof METHODS[number];

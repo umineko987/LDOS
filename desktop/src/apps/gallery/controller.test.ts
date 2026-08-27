@@ -36,8 +36,48 @@ const rootDirectory: GalleryDirectoryEntry = {
   indexed_version: 3,
 } as GalleryDirectoryEntry;
 
+const runningScan = {
+  operation_id: "scan-1",
+  source_id: "source-1",
+  state: "running",
+  started_at: 2000,
+  finished_at: null,
+  error_code: "",
+  stats: null,
+} as const;
+
+const successfulScan = {
+  ...runningScan,
+  state: "succeeded",
+  finished_at: 2001,
+  stats: {
+    asset_count: 1,
+    candidate_count: 0,
+    kept_count: 1,
+    removed_count: 0,
+    directory_count: 1,
+    content_changed: false,
+    annotation_changed: false,
+    indexed_version: 3,
+    offline: false,
+    skipped_temporary: 0,
+    skipped_unsupported: 0,
+  },
+} as const;
+
 function makeService(
-  overrides: Partial<Record<"listSources" | "listDirectoryEntries", ReturnType<typeof vi.fn>>> = {},
+  overrides: Partial<Record<
+    | "listSources"
+    | "listDirectoryEntries"
+    | "startSourceScan"
+    | "getSourceScan"
+    | "retrySourceReconciliation"
+    | "renameSource"
+    | "relinkSource"
+    | "importSource"
+    | "unmountSource",
+    ReturnType<typeof vi.fn>
+  >> = {},
 ) {
   return {
     listSources: overrides.listSources ?? vi.fn(async () => [source]),
@@ -50,6 +90,16 @@ function makeService(
         directory_cursor: null,
         asset_cursor: null,
       })),
+    startSourceScan:
+      overrides.startSourceScan ?? vi.fn(() => new Promise(() => undefined)),
+    getSourceScan:
+      overrides.getSourceScan ?? vi.fn(() => new Promise(() => undefined)),
+    retrySourceReconciliation:
+      overrides.retrySourceReconciliation ?? vi.fn(async () => source),
+    renameSource: overrides.renameSource ?? vi.fn(async () => source),
+    relinkSource: overrides.relinkSource ?? vi.fn(async () => source),
+    importSource: overrides.importSource ?? vi.fn(async () => source),
+    unmountSource: overrides.unmountSource ?? vi.fn(async () => undefined),
     thumbnailUrl: (assetId: string) => `thumb:${assetId}`,
     contentUrl: (assetId: string) => `content:${assetId}`,
   } as unknown as GalleryService;
@@ -72,6 +122,93 @@ describe("gallery browse controller", () => {
     controller.destroy();
     await expect(controller.refreshSources()).resolves.toBe(false);
     expect(controller.setViewMode("list")).toBe(false);
+  });
+
+  it("imports referenced directories and preserves stable backend errors", async () => {
+    const store = createGalleryStore();
+    const importSource = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("overlap"), { code: "source_path_conflict" }))
+      .mockResolvedValueOnce(source);
+    const getSourceScan = vi.fn(async () => successfulScan);
+    const service = makeService({ importSource, getSourceScan });
+    const controller = createGalleryController({ store, service });
+    controller.activate();
+    await vi.waitFor(() => expect(store.getState().sourcesPhase).toBe("ready"));
+
+    await expect(controller.importDirectory("/data/import")).resolves.toBe(false);
+    expect(importSource).toHaveBeenLastCalledWith("/data/import");
+    expect(store.getState().sourcesErrorCode).toBe("source_path_conflict");
+
+    await expect(controller.importDirectory("/data/import")).resolves.toBe(true);
+    expect(store.getState().sourcesErrorCode).toBeNull();
+    controller.destroy();
+  });
+
+  it("selects a newly imported source and follows its backend-started scan", async () => {
+    const pendingSource = {
+      ...source,
+      source_id: "source-2",
+      root_directory_id: null,
+      display_name: "新导入目录",
+      asset_count: 0,
+      indexed_version: 0,
+      last_scanned_at: null,
+    } as GallerySourceSummary;
+    const readySource = {
+      ...pendingSource,
+      root_directory_id: "dir-imported",
+      asset_count: 1,
+      indexed_version: 1,
+      last_scanned_at: 3000,
+    } as GallerySourceSummary;
+    const importedRoot = {
+      ...rootDirectory,
+      directory_id: "dir-imported",
+      source_id: "source-2",
+      indexed_version: 1,
+    };
+    const listSources = vi
+      .fn()
+      .mockResolvedValueOnce([source])
+      .mockResolvedValueOnce([source, pendingSource])
+      .mockResolvedValue([source, readySource]);
+    const startSourceScan = vi.fn().mockRejectedValue(
+      Object.assign(new Error("already running"), { code: "source_scan_in_progress" }),
+    );
+    const getSourceScan = vi.fn(async () => ({
+      ...successfulScan,
+      operation_id: "scan-import",
+      source_id: "source-2",
+      indexed_version: 1,
+    }));
+    const listDirectoryEntries = vi.fn(async () => ({
+      directory: importedRoot,
+      directories: [],
+      assets: [],
+      directory_cursor: null,
+      asset_cursor: null,
+    }));
+    const service = makeService({
+      listSources,
+      importSource: vi.fn(async () => pendingSource),
+      startSourceScan,
+      getSourceScan,
+      listDirectoryEntries,
+    });
+    const store = createGalleryStore();
+    const controller = createGalleryController({ store, service });
+    controller.activate();
+    await vi.waitFor(() => expect(store.getState().sourcesPhase).toBe("ready"));
+
+    await expect(controller.importDirectory("/data/new")).resolves.toBe(true);
+
+    expect(startSourceScan).not.toHaveBeenCalled();
+    expect(getSourceScan).toHaveBeenCalledWith("source-2", expect.any(AbortSignal));
+    expect(store.getState().activeSourceId).toBe("source-2");
+    expect(store.getState().rootDirectoryId).toBe("dir-imported");
+    expect(listDirectoryEntries).toHaveBeenCalled();
+    controller.destroy();
   });
 
   it("opens a source root and applies fetched pages with bounded requests", async () => {
@@ -100,6 +237,84 @@ describe("gallery browse controller", () => {
 
     expect(store.getState().currentDirectory?.directory_id).toBe("dir-root");
     expect(store.getState().pagePhase).toBe("ready");
+  });
+
+  it("polls a source scan and refreshes source and page projections after success", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = createGalleryStore();
+      const startSourceScan = vi.fn(async () => runningScan);
+      const getSourceScan = vi.fn(async () => successfulScan);
+      const service = makeService({ startSourceScan, getSourceScan });
+      const controller = createGalleryController({ store, service });
+      store.setSources([source]);
+      store.openSource(source.source_id, source.root_directory_id!);
+      controller.activate();
+
+      await expect(controller.rescanActiveSource()).resolves.toBe(true);
+      expect(store.getState().scanOperation?.state).toBe("running");
+      await vi.advanceTimersByTimeAsync(400);
+      expect(store.getState().scanOperation?.state).toBe("succeeded");
+      expect(getSourceScan).toHaveBeenCalledOnce();
+      expect(service.listSources).toHaveBeenCalledOnce();
+      expect(service.listDirectoryEntries).toHaveBeenCalledOnce();
+      controller.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries failed reconciliation and exposes source lifecycle writes through the controller", async () => {
+    const failedSource = {
+      ...source,
+      reconciliation_state: "failed",
+      reconciliation_error_code: "review_reconciliation_apply_failed",
+      reconciliation_attempt_count: 1,
+    } as GallerySourceSummary;
+    const store = createGalleryStore();
+    const retrySourceReconciliation = vi.fn(async () => ({
+      ...failedSource,
+      reconciliation_state: "pending",
+      reconciliation_error_code: "",
+    }));
+    const renameSource = vi.fn(async () => ({ ...failedSource, display_name: "新名称" }));
+    const relinkSource = vi.fn(async () => failedSource);
+    const unmountSource = vi.fn(async () => undefined);
+    const startSourceScan = vi.fn(async () => runningScan);
+    const getSourceScan = vi.fn(async () => runningScan);
+    const listSources = vi
+      .fn()
+      .mockResolvedValueOnce([failedSource])
+      .mockResolvedValueOnce([{ ...failedSource, display_name: "新名称" }])
+      .mockResolvedValueOnce([failedSource])
+      .mockResolvedValueOnce([]);
+    const service = makeService({
+      retrySourceReconciliation,
+      renameSource,
+      relinkSource,
+      unmountSource,
+      startSourceScan,
+      getSourceScan,
+      listSources,
+    });
+    const controller = createGalleryController({ store, service });
+    store.setSources([failedSource]);
+    store.openSource(failedSource.source_id, failedSource.root_directory_id!);
+    controller.activate();
+
+    await expect(controller.retryActiveReconciliation()).resolves.toBe(true);
+    expect(retrySourceReconciliation).toHaveBeenCalledWith("source-1");
+    expect(store.getState().reconciliationRetrySourceId).toBeNull();
+    await expect(controller.renameActiveSource("新名称")).resolves.toBe(true);
+    expect(renameSource).toHaveBeenCalledWith("source-1", "新名称");
+    await expect(controller.relinkActiveSource("/moved")).resolves.toBe(true);
+    expect(relinkSource).toHaveBeenCalledWith("source-1", "/moved");
+    expect(startSourceScan).not.toHaveBeenCalled();
+    expect(getSourceScan).toHaveBeenCalledTimes(2);
+    await expect(controller.unmountActiveSource()).resolves.toBe(true);
+    expect(unmountSource).toHaveBeenCalledWith("source-1");
+    expect(store.getState().activeSourceId).toBeNull();
+    controller.destroy();
   });
 
   it("records stable error codes and recovers on retry", async () => {

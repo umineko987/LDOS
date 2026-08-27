@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
@@ -9,10 +10,13 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 
 from ..database import CrawlReviewGroupLimitExceeded, MAX_CRAWL_REVIEW_GROUPS
+from ..redaction import safe_exception_category
 from ..review import resolve_review_file
 from ..schemas import ReviewDecisions
 from .dependencies import get_service
 from .errors import ApiError
+
+logger = logging.getLogger(__name__)
 
 ReviewResponseView = Literal["legacy", "desktop"]
 REVIEW_RESPONSE_PROFILE = "desktop-review-v1"
@@ -148,26 +152,15 @@ def _empty_review_groups(*, limit: int, offset: int) -> dict[str, Any]:
     }
 
 
-
-
 def _sync_gallery_after_apply(container: Any, batch_id: str) -> None:
-    """审核应用后的图库提交（§3.8；路由内联调用，异常由调用方吞掉）。"""
+    """Persist and apply the completed review result to Gallery visibility."""
     gallery = getattr(container, "gallery_catalog", None)
     if gallery is None:
         return
-    source = container.db.gallery.get_source_by_batch_id(batch_id)
-    if source is None:
-        gallery.on_review_applied(batch_id)
-        return
-    rejected = [
-        str(image["relative_path"])
-        for image in container.db.crawl_review_apply_images(batch_id)
-        if image.get("disposition") == "rejected"
-    ]
-    excluded = container.db.gallery.get_asset_ids_by_relative_paths(
-        source["source_id"], rejected
-    )
-    gallery.on_review_applied(batch_id, excluded_asset_ids=excluded)
+    images = container.db.crawl_review_apply_images(batch_id)
+    gallery.reconcile_review_images(batch_id, images)
+
+
 def create_review_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
@@ -297,8 +290,11 @@ def create_review_router() -> APIRouter:
                 await asyncio.to_thread(
                     _sync_gallery_after_apply, container, batch_id
                 )
-            except Exception:  # noqa: BLE001 - 审核结果已落库，仅记录
-                pass
+            except Exception as exc:  # noqa: BLE001 - 审核结果已落库，记录安全类别。
+                logger.warning(
+                    "gallery review reconciliation failed; category=%s",
+                    safe_exception_category(exc),
+                )
             return _desktop_review_operation(result) if view == "desktop" else result
         except KeyError as exc:
             raise ApiError(404, "review_not_found", "审核批次不存在") from exc

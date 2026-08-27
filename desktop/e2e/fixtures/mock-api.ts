@@ -11,6 +11,7 @@ export interface MockApiOptions {
   readonly emptyRecent?: boolean;
   readonly failPaths?: readonly string[];
   readonly directoryExportScenario?: "completed" | "copying" | "failed" | "conflict";
+  readonly galleryScenario?: "ready" | "reconciliation_failed" | "scan_failed";
   readonly delayMs?: number;
 }
 
@@ -421,7 +422,7 @@ const GALLERY_SOURCE_ID = "gal-src-import";
 const GALLERY_ROOT_DIR = "gal-dir-root";
 const GALLERY_SUB_DIR = "gal-dir-sub";
 
-function gallerySource(): Record<string, unknown> {
+function gallerySource(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     source_id: GALLERY_SOURCE_ID,
     root_directory_id: GALLERY_ROOT_DIR,
@@ -430,16 +431,50 @@ function gallerySource(): Record<string, unknown> {
     display_name: "E2E 导入目录",
     availability: "available",
     asset_count: 6,
+    candidate_count: 0,
+    kept_count: 6,
+    removed_count: 0,
     crawl_complete: true,
     dedup_required: false,
     dedup_state: "not_required",
     content_version: 3,
     dedup_applied_version: 0,
+    reconciliation_state: "none",
+    reconciliation_error_code: "",
+    reconciliation_attempt_count: 0,
+    reconciliation_updated_at: null,
     annotation_version: 1,
     indexed_version: 3,
     last_scanned_at: 1_700_000_300,
     created_at: 1_700_000_100,
     updated_at: 1_700_000_300,
+    ...overrides,
+  };
+}
+
+function galleryScanOperation(state: "running" | "succeeded" | "failed"): Record<string, unknown> {
+  return {
+    operation_id: "gal-scan-1",
+    source_id: GALLERY_SOURCE_ID,
+    state,
+    started_at: 1_700_000_400,
+    finished_at: state === "running" ? null : 1_700_000_401,
+    error_code: state === "failed" ? "scan_failed" : "",
+    stats: state === "succeeded"
+      ? {
+          asset_count: 6,
+          candidate_count: 0,
+          kept_count: 6,
+          removed_count: 0,
+          directory_count: 2,
+          content_changed: false,
+          annotation_changed: false,
+          indexed_version: 3,
+          offline: false,
+          skipped_temporary: 1,
+          skipped_unsupported: 2,
+        }
+      : null,
   };
 }
 
@@ -610,6 +645,9 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
   const requests: RecordedRequest[] = [];
   const unhandled: RecordedRequest[] = [];
   const decisions = new Map<string, readonly string[]>();
+  let gallerySourceMounted = true;
+  let galleryDisplayName = "E2E 导入目录";
+  let galleryReconciliationRetried = false;
 
   await page.route("**/*", async (route) => {
     const request = route.request();
@@ -753,7 +791,78 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
     }
     // ---- Gallery（G2+ 正式图库）----
     if (url.pathname === "/api/v1/gallery/sources" && request.method() === "GET") {
-      await respond(route, { sources: [gallerySource()] });
+      const reconciliationFailed =
+        options.galleryScenario === "reconciliation_failed" && !galleryReconciliationRetried;
+      const projection = gallerySource({
+        display_name: galleryDisplayName,
+        ...(options.galleryScenario === "reconciliation_failed"
+          ? {
+              asset_count: 4,
+              candidate_count: 0,
+              kept_count: 4,
+              removed_count: 2,
+              dedup_required: true,
+              dedup_state: "applied",
+              reconciliation_state: reconciliationFailed ? "failed" : "applied",
+              reconciliation_error_code: reconciliationFailed
+                ? "review_reconciliation_apply_failed"
+                : "",
+              reconciliation_attempt_count: reconciliationFailed ? 1 : 2,
+            }
+          : {}),
+      });
+      await respond(route, { sources: gallerySourceMounted ? [projection] : [] });
+      return;
+    }
+    const galleryScanMatch = url.pathname.match(/^\/api\/v1\/gallery\/sources\/([^/]+)\/scan$/);
+    if (galleryScanMatch && request.method() === "POST") {
+      await respond(route, galleryScanOperation("running"), 202);
+      return;
+    }
+    if (galleryScanMatch && request.method() === "GET") {
+      await respond(
+        route,
+        galleryScanOperation(options.galleryScenario === "scan_failed" ? "failed" : "succeeded"),
+      );
+      return;
+    }
+    const galleryReconciliationMatch = url.pathname.match(
+      /^\/api\/v1\/gallery\/sources\/([^/]+)\/reconciliation\/retry$/,
+    );
+    if (galleryReconciliationMatch && request.method() === "POST") {
+      galleryReconciliationRetried = true;
+      await respond(route, gallerySource({
+        asset_count: 4,
+        candidate_count: 0,
+        kept_count: 4,
+        removed_count: 2,
+        dedup_required: true,
+        dedup_state: "applied",
+        reconciliation_state: "applied",
+        reconciliation_error_code: "",
+        reconciliation_attempt_count: 2,
+      }));
+      return;
+    }
+    const galleryRelinkMatch = url.pathname.match(/^\/api\/v1\/gallery\/sources\/([^/]+)\/relink$/);
+    if (galleryRelinkMatch && request.method() === "POST") {
+      gallerySourceMounted = true;
+      await respond(route, gallerySource({ display_name: galleryDisplayName }));
+      return;
+    }
+    const gallerySourceMatch = url.pathname.match(/^\/api\/v1\/gallery\/sources\/([^/]+)$/);
+    if (gallerySourceMatch && request.method() === "PATCH") {
+      const body = requestBody(request);
+      if (typeof body === "object" && body !== null && "display_name" in body) {
+        const displayName = (body as { display_name?: unknown }).display_name;
+        if (typeof displayName === "string") galleryDisplayName = displayName;
+      }
+      await respond(route, gallerySource({ display_name: galleryDisplayName }));
+      return;
+    }
+    if (gallerySourceMatch && request.method() === "DELETE") {
+      gallerySourceMounted = false;
+      await respond(route, { source_id: GALLERY_SOURCE_ID, removed: true });
       return;
     }
     const galleryEntriesMatch = url.pathname.match(/^\/api\/v1\/gallery\/directories\/([^/]+)\/entries$/);

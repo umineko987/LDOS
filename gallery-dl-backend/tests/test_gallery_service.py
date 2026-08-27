@@ -7,6 +7,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from PIL import Image
@@ -441,6 +442,46 @@ class GalleryBatchReconcileTest(unittest.TestCase):
         self.assertEqual(registered, 1)
         again = self.container.reconcile_gallery_batch_sources()
         self.assertEqual(again, 0)
+
+    def test_reconcile_recovers_applied_review_without_a_handoff_event(self) -> None:
+        output_dir = self.root / "batch-c"
+        output_dir.mkdir()
+        (output_dir / "keep.jpg").write_bytes(_png_bytes())
+        (output_dir / "reject.jpg").write_bytes(_png_bytes())
+        self._create_terminal_batch("batch-c", output_dir)
+        source = self.container.gallery_catalog.register_batch_source(
+            batch_id="batch-c",
+            root_path=str(output_dir),
+            display_name="批次 C",
+            dedup_required=True,
+        )
+        self.container.gallery_catalog.scan_source(source["source_id"])
+        rejected_root = output_dir / "duplicates"
+        rejected_root.mkdir()
+        (output_dir / "reject.jpg").rename(rejected_root / "reject.jpg")
+
+        images = [
+            {"relative_path": "keep.jpg", "final_relative_path": "keep.jpg", "disposition": "kept"},
+            {
+                "relative_path": "reject.jpg",
+                "final_relative_path": "duplicates/reject.jpg",
+                "disposition": "rejected",
+            },
+        ]
+        with (
+            mock.patch.object(
+                self.container.db, "get_crawl_review", return_value={"status": "applied"}
+            ),
+            mock.patch.object(
+                self.container.db, "crawl_review_apply_images", return_value=images
+            ),
+        ):
+            self.assertEqual(self.container.reconcile_applied_gallery_reviews(), 1)
+
+        event = self.container.db.gallery.get_review_reconciliation(source["source_id"])
+        assert event is not None
+        self.assertEqual(event["state"], "applied")
+        self.assertEqual(self.container.reconcile_applied_gallery_reviews(), 0)
 
 
 class GallerySearchIntegrationTest(GalleryServiceTestBase):

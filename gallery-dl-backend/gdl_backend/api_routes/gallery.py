@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from typing import Annotated, Any, Literal
 
@@ -236,7 +237,9 @@ def create_gallery_router() -> APIRouter:
         source_id: str,
         request: GallerySourcePatchRequest,
         container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> Any:
+        validate_idempotency_key(idempotency_key)
         catalog: GalleryCatalogService = container.gallery_catalog
         try:
             return catalog.update_source(source_id, display_name=request.display_name)
@@ -249,7 +252,9 @@ def create_gallery_router() -> APIRouter:
     async def delete_gallery_source(
         source_id: str,
         container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> Any:
+        validate_idempotency_key(idempotency_key)
         catalog: GalleryCatalogService = container.gallery_catalog
         try:
             catalog.unregister_source(source_id)
@@ -278,6 +283,10 @@ def create_gallery_router() -> APIRouter:
             raise ApiError(
                 404, "source_path_not_found", "目标目录不存在或不是普通目录"
             ) from None
+        except GalleryScanInProgress:
+            raise ApiError(
+                409, "source_scan_in_progress", "来源正在扫描，稍后再重新关联"
+            ) from None
         except GallerySourceConflictError as conflict:
             raise ApiError(
                 409,
@@ -285,14 +294,19 @@ def create_gallery_router() -> APIRouter:
                 "该目录与现有图库来源重叠",
                 details={"relation": conflict.relation},
             ) from None
-        catalog.start_scan(source_id)
+        try:
+            catalog.start_scan(source_id)
+        except GalleryScanInProgress:
+            pass
         return source
 
     @router.post("/gallery/sources/{source_id}/scan", status_code=202)
     async def start_gallery_scan(
         source_id: str,
         container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> Any:
+        validate_idempotency_key(idempotency_key)
         catalog: GalleryCatalogService = container.gallery_catalog
         try:
             return catalog.start_scan(source_id)
@@ -314,6 +328,36 @@ def create_gallery_router() -> APIRouter:
             return catalog.get_scan(source_id)
         except GallerySourceNotFound:
             raise _source_not_found(source_id) from None
+
+
+    @router.post(
+        "/gallery/sources/{source_id}/reconciliation/retry", status_code=202
+    )
+    async def retry_gallery_reconciliation(
+        source_id: str,
+        container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        validate_idempotency_key(idempotency_key)
+        catalog: GalleryCatalogService = container.gallery_catalog
+        try:
+            return await asyncio.to_thread(
+                catalog.retry_review_reconciliation, source_id
+            )
+        except GallerySourceNotFound:
+            raise _source_not_found(source_id) from None
+        except ValueError:
+            raise ApiError(
+                409,
+                "gallery_reconciliation_not_retryable",
+                "该来源没有可重试的去重对账",
+            ) from None
+        except Exception:
+            raise ApiError(
+                409,
+                "gallery_reconciliation_retry_failed",
+                "去重对账重试失败，请稍后重试",
+            ) from None
 
     @router.get("/gallery/directories/{directory_id}/entries")
     async def list_gallery_directory_entries(

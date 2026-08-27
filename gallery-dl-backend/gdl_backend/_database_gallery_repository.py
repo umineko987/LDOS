@@ -44,6 +44,11 @@ class GalleryVersionConflict(Exception):
         self.code = code
         self.details = dict(details)
 
+
+class GalleryScanSnapshotConflict(RuntimeError):
+    """A scan attempted to commit over a newer Gallery index projection."""
+
+
 class GalleryCursorError(ValueError):
     """游标格式或取值非法。"""
 
@@ -55,6 +60,11 @@ def gallery_directory_id(source_id: str, relative_path: str) -> str:
 def gallery_asset_id(source_id: str, relative_path: str) -> str:
     return str(uuid.uuid5(GALLERY_NAMESPACE, f"asset:{source_id}:{relative_path}"))
 
+
+def gallery_reconciliation_id(source_id: str, batch_id: str) -> str:
+    return str(
+        uuid.uuid5(GALLERY_NAMESPACE, f"review-reconciliation:{source_id}:{batch_id}")
+    )
 
 def _encode_cursor(kind: str, payload: Mapping[str, Any]) -> str:
     raw = json.dumps({"kind": kind, **payload}, ensure_ascii=True, separators=(",", ":"))
@@ -281,6 +291,261 @@ class GalleryRepository:
                     self._recount_directory(conn, source_id, directory_id, now)
         return True
 
+    def queue_review_reconciliation(
+        self,
+        *,
+        source_id: str,
+        batch_id: str,
+        retained_relative_paths: Sequence[str],
+        excluded_relative_paths: Sequence[str],
+        rejected_relative_paths: Sequence[str],
+    ) -> dict[str, Any]:
+        """Persist the review/Gallery handoff before visibility changes are attempted."""
+        groups = (
+            ("kept", retained_relative_paths),
+            ("excluded_original", excluded_relative_paths),
+            ("excluded", rejected_relative_paths),
+        )
+        normalized: list[tuple[str, str]] = []
+        for disposition, paths in groups:
+            for relative_path in sorted(set(paths)):
+                path = str(relative_path)
+                if not is_safe_relative_path(path):
+                    raise ValueError("invalid_reconciliation_relative_path")
+                normalized.append((path, disposition))
+        event_id = gallery_reconciliation_id(source_id, batch_id)
+        now = self._clock()
+        with self._transaction() as conn:
+            source = self._source_row_by_id(conn, source_id)
+            if source is None:
+                raise ValueError("gallery_source_not_found")
+            if str(source["batch_id"] or "") != batch_id:
+                raise ValueError("gallery_reconciliation_batch_mismatch")
+            conn.execute(
+                """
+                INSERT INTO gallery_reconciliation_events(
+                    id, source_id, batch_id, status, attempt_count, error_code,
+                    created_at, updated_at, applied_at
+                ) VALUES (?, ?, ?, 'pending', 0, '', ?, ?, NULL)
+                ON CONFLICT(source_id, batch_id) DO UPDATE SET
+                    status='pending', error_code='', updated_at=excluded.updated_at,
+                    applied_at=NULL
+                """,
+                (event_id, source_id, batch_id, now, now),
+            )
+            conn.execute(
+                "DELETE FROM gallery_reconciliation_items WHERE event_id=?",
+                (event_id,),
+            )
+            for relative_path, disposition in normalized:
+                conn.execute(
+                    """
+                    INSERT INTO gallery_reconciliation_items(
+                        event_id, relative_path, disposition
+                    ) VALUES (?, ?, ?)
+                    ON CONFLICT(event_id, relative_path) DO UPDATE SET
+                        disposition=excluded.disposition
+                    """,
+                    (event_id, relative_path, disposition),
+                )
+        event = self.get_review_reconciliation(source_id)
+        if event is None:
+            raise RuntimeError("gallery_reconciliation_queue_failed")
+        return event
+
+    def apply_review_reconciliation(self, event_id: str) -> dict[str, Any]:
+        """Atomically apply one durable reconciliation and mark it completed."""
+        now = self._clock()
+        with self._transaction() as conn:
+            event = conn.execute(
+                "SELECT * FROM gallery_reconciliation_events WHERE id=?",
+                (event_id,),
+            ).fetchone()
+            if event is None:
+                raise ValueError("gallery_reconciliation_not_found")
+            source_id = str(event["source_id"])
+            source = self._source_row_by_id(conn, source_id)
+            if source is None:
+                raise ValueError("gallery_source_not_found")
+            if event["status"] == "applied":
+                return self._project_reconciliation_row(event)
+            conn.execute(
+                """
+                UPDATE gallery_assets SET dedup_visibility='kept', updated_at=?
+                WHERE source_id=? AND lifecycle_state='active'
+                """,
+                (now, source_id),
+            )
+            conn.execute(
+                """
+                UPDATE gallery_assets SET dedup_visibility='excluded', updated_at=?
+                WHERE source_id=? AND relative_path IN (
+                    SELECT relative_path FROM gallery_reconciliation_items
+                    WHERE event_id=? AND disposition IN ('excluded_original', 'excluded')
+                )
+                """,
+                (now, source_id, event_id),
+            )
+            # Final rejected destinations from every persisted event remain excluded
+            # after later scans or retries; original paths are not permanently reserved.
+            conn.execute(
+                """
+                UPDATE gallery_assets SET dedup_visibility='excluded', updated_at=?
+                WHERE source_id=? AND relative_path IN (
+                    SELECT item.relative_path
+                    FROM gallery_reconciliation_items AS item
+                    JOIN gallery_reconciliation_events AS queued
+                      ON queued.id=item.event_id
+                    WHERE queued.source_id=? AND item.disposition='excluded'
+                )
+                """,
+                (now, source_id, source_id),
+            )
+            conn.execute(
+                """
+                DELETE FROM gallery_search_index WHERE asset_id IN (
+                    SELECT id FROM gallery_assets
+                    WHERE source_id=? AND dedup_visibility='excluded'
+                )
+                """,
+                (source_id,),
+            )
+            current_version = int(source["content_version"])
+            conn.execute(
+                """
+                UPDATE gallery_sources
+                SET dedup_state='applied', dedup_applied_version=?,
+                    indexed_version=indexed_version+1, updated_at=?
+                WHERE id=?
+                """,
+                (current_version, now, source_id),
+            )
+            directory_rows = conn.execute(
+                "SELECT id FROM gallery_directories WHERE source_id=?",
+                (source_id,),
+            ).fetchall()
+            for directory in directory_rows:
+                self._recount_directory(conn, source_id, str(directory["id"]), now)
+            conn.execute(
+                """
+                UPDATE gallery_reconciliation_events
+                SET status='applied', attempt_count=attempt_count+1,
+                    error_code='', updated_at=?, applied_at=?
+                WHERE id=?
+                """,
+                (now, now, event_id),
+            )
+            applied = conn.execute(
+                "SELECT * FROM gallery_reconciliation_events WHERE id=?",
+                (event_id,),
+            ).fetchone()
+        return self._project_reconciliation_row(applied)
+
+    def mark_review_reconciliation_failed(
+        self, event_id: str, error_code: str
+    ) -> dict[str, Any]:
+        now = self._clock()
+        with self._transaction() as conn:
+            updated = conn.execute(
+                """
+                UPDATE gallery_reconciliation_events
+                SET status='failed', attempt_count=attempt_count+1,
+                    error_code=?, updated_at=?, applied_at=NULL
+                WHERE id=? AND status!='applied'
+                """,
+                (error_code, now, event_id),
+            ).rowcount
+            if not updated:
+                row = conn.execute(
+                    "SELECT * FROM gallery_reconciliation_events WHERE id=?",
+                    (event_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("gallery_reconciliation_not_found")
+            row = conn.execute(
+                "SELECT * FROM gallery_reconciliation_events WHERE id=?",
+                (event_id,),
+            ).fetchone()
+            if updated:
+                source_id = str(row["source_id"])
+                conn.execute(
+                    """
+                    UPDATE gallery_assets SET dedup_visibility='excluded', updated_at=?
+                    WHERE source_id=? AND lifecycle_state='active'
+                      AND relative_path IN (
+                        SELECT relative_path FROM gallery_reconciliation_items
+                        WHERE event_id=?
+                          AND disposition IN ('excluded_original', 'excluded')
+                      )
+                    """,
+                    (now, source_id, event_id),
+                )
+                conn.execute(
+                    """
+                    DELETE FROM gallery_search_index WHERE asset_id IN (
+                        SELECT id FROM gallery_assets
+                        WHERE source_id=? AND dedup_visibility='excluded'
+                    )
+                    """,
+                    (source_id,),
+                )
+                directories = conn.execute(
+                    "SELECT id FROM gallery_directories WHERE source_id=?",
+                    (source_id,),
+                ).fetchall()
+                for directory in directories:
+                    self._recount_directory(
+                        conn, source_id, str(directory["id"]), now
+                    )
+                conn.execute(
+                    """
+                    UPDATE gallery_sources
+                    SET indexed_version=indexed_version+1, updated_at=?
+                    WHERE id=?
+                    """,
+                    (now, source_id),
+                )
+        return self._project_reconciliation_row(row)
+
+    def get_review_reconciliation(self, source_id: str) -> dict[str, Any] | None:
+        with self._read() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM gallery_reconciliation_events
+                WHERE source_id=? ORDER BY updated_at DESC, id DESC LIMIT 1
+                """,
+                (source_id,),
+            ).fetchone()
+        return None if row is None else self._project_reconciliation_row(row)
+
+    def list_retryable_review_reconciliations(self) -> list[dict[str, Any]]:
+        with self._read() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM gallery_reconciliation_events
+                WHERE status IN ('pending', 'failed')
+                ORDER BY updated_at, id
+                """
+            ).fetchall()
+        return [self._project_reconciliation_row(row) for row in rows]
+
+
+    @staticmethod
+    def _project_reconciliation_row(row: Any) -> dict[str, Any]:
+        return {
+            "event_id": str(row["id"]),
+            "source_id": str(row["source_id"]),
+            "batch_id": str(row["batch_id"]),
+            "state": str(row["status"]),
+            "attempt_count": int(row["attempt_count"]),
+            "error_code": str(row["error_code"]),
+            "created_at": float(row["created_at"]),
+            "updated_at": float(row["updated_at"]),
+            "applied_at": (
+                None if row["applied_at"] is None else float(row["applied_at"])
+            ),
+        }
+
     def _recount_directory(
         self, conn: Any, source_id: str, directory_id: str, now: Any
     ) -> None:
@@ -394,6 +659,7 @@ class GalleryRepository:
         *,
         directories: Sequence[Mapping[str, Any]],
         assets: Sequence[Mapping[str, Any]],
+        expected_indexed_version: int | None = None,
         availability: str = "available",
         scan_error: str = "",
     ) -> dict[str, Any]:
@@ -410,26 +676,53 @@ class GalleryRepository:
             source_row = self._source_row_by_id(conn, source_id)
             if source_row is None:
                 raise ValueError("gallery_source_not_found")
+            if (
+                expected_indexed_version is not None
+                and int(source_row["indexed_version"]) != expected_indexed_version
+            ):
+                raise GalleryScanSnapshotConflict(source_id)
             existing_assets = {
                 row["relative_path"]: row
                 for row in conn.execute(
                     """
                     SELECT relative_path, size_bytes, modified_ns,
                            txt_size_bytes, txt_modified_ns, txt_state,
-                           lifecycle_state
+                           lifecycle_state, dedup_visibility
                     FROM gallery_assets WHERE source_id=?
                     """,
                     (source_id,),
                 ).fetchall()
             }
             new_assets = {str(asset["relative_path"]): asset for asset in assets}
+            reconciliation_rows = conn.execute(
+                """
+                SELECT item.relative_path, item.disposition
+                FROM gallery_reconciliation_items AS item
+                JOIN gallery_reconciliation_events AS event ON event.id=item.event_id
+                WHERE event.source_id=?
+                  AND event.status IN ('pending', 'failed', 'applied')
+                  AND item.disposition IN ('excluded_original', 'excluded')
+                """,
+                (source_id,),
+            ).fetchall()
+            expected_removed_paths = {
+                str(row["relative_path"])
+                for row in reconciliation_rows
+                if row["disposition"] == "excluded_original"
+            }
+            expected_rejected_destinations = {
+                str(row["relative_path"])
+                for row in reconciliation_rows
+                if row["disposition"] == "excluded"
+            }
 
             content_changed = False
             annotation_changed = False
             for relative_path, asset in new_assets.items():
                 previous = existing_assets.get(relative_path)
                 if previous is None:
-                    content_changed = True
+                    if relative_path not in expected_rejected_destinations:
+                        content_changed = True
                     continue
                 if (
                     previous["lifecycle_state"] == "missing"
@@ -443,7 +736,14 @@ class GalleryRepository:
                 ):
                     annotation_changed = True
             for relative_path, previous in existing_assets.items():
-                if relative_path not in new_assets and previous["lifecycle_state"] == "active":
+                if (
+                    relative_path not in new_assets
+                    and previous["lifecycle_state"] == "active"
+                    and not (
+                        relative_path in expected_removed_paths
+                        and previous["dedup_visibility"] == "excluded"
+                    )
+                ):
                     content_changed = True
 
             counts = self._directory_counts(source_id, directories, new_assets)
@@ -629,6 +929,57 @@ class GalleryRepository:
                     """,
                     (now, source_id),
                 )
+
+
+            # Rejected originals are not path tombstones. If a new file later
+            # appears at the old path, it is a fresh candidate and makes the
+            # previously applied dedup result stale through content_changed.
+            conn.execute(
+                """
+                UPDATE gallery_assets SET dedup_visibility='candidate', updated_at=?
+                WHERE source_id=? AND lifecycle_state='active'
+                  AND relative_path IN (
+                    SELECT item.relative_path
+                    FROM gallery_reconciliation_items AS item
+                    JOIN gallery_reconciliation_events AS event
+                      ON event.id=item.event_id
+                    WHERE event.source_id=? AND item.disposition='excluded_original'
+                  )
+                  AND relative_path NOT IN (
+                    SELECT item.relative_path
+                    FROM gallery_reconciliation_items AS item
+                    JOIN gallery_reconciliation_events AS event
+                      ON event.id=item.event_id
+                    WHERE event.source_id=? AND item.disposition='excluded'
+                  )
+                """,
+                (now, source_id, source_id, source_id),
+            )
+            # A review rejection is tied to its final on-disk destination. New rows
+            # discovered there inherit exclusion before this scan becomes visible.
+            conn.execute(
+                """
+                UPDATE gallery_assets SET dedup_visibility='excluded', updated_at=?
+                WHERE source_id=? AND lifecycle_state='active'
+                  AND relative_path IN (
+                    SELECT item.relative_path
+                    FROM gallery_reconciliation_items AS item
+                    JOIN gallery_reconciliation_events AS event
+                      ON event.id=item.event_id
+                    WHERE event.source_id=? AND item.disposition='excluded'
+                  )
+                """,
+                (now, source_id, source_id),
+            )
+            conn.execute(
+                """
+                DELETE FROM gallery_search_index WHERE asset_id IN (
+                    SELECT id FROM gallery_assets
+                    WHERE source_id=? AND dedup_visibility='excluded'
+                )
+                """,
+                (source_id,),
+            )
             if seen_directory_ids:
                 directory_placeholders = ",".join("?" for _ in seen_directory_ids)
                 conn.execute(
@@ -642,6 +993,26 @@ class GalleryRepository:
                 conn.execute(
                     "DELETE FROM gallery_directories WHERE source_id=?", (source_id,)
                 )
+
+            for directory_id in seen_directory_ids:
+                self._recount_directory(conn, source_id, directory_id, now)
+
+            visibility_counts = conn.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN lifecycle_state='active'
+                              AND dedup_visibility='candidate' THEN 1 ELSE 0 END) AS candidate_count,
+                    SUM(CASE WHEN lifecycle_state='active'
+                              AND dedup_visibility='kept' THEN 1 ELSE 0 END) AS kept_count,
+                    SUM(CASE WHEN lifecycle_state='active'
+                              AND dedup_visibility='excluded' THEN 1 ELSE 0 END) AS removed_count
+                FROM gallery_assets WHERE source_id=?
+                """,
+                (source_id,),
+            ).fetchone()
+            candidate_count = int(visibility_counts["candidate_count"] or 0)
+            kept_count = int(visibility_counts["kept_count"] or 0)
+            removed_count = int(visibility_counts["removed_count"] or 0)
 
             if scan_error:
                 conn.execute(
@@ -659,7 +1030,10 @@ class GalleryRepository:
                 "annotation_version": next_annotation,
                 "content_changed": content_changed,
                 "annotation_changed": annotation_changed,
-                "asset_count": len(new_assets),
+                "asset_count": candidate_count + kept_count,
+                "candidate_count": candidate_count,
+                "kept_count": kept_count,
+                "removed_count": removed_count,
                 "directory_count": len(directories),
             }
 
@@ -1023,15 +1397,36 @@ class GalleryRepository:
         if not updated:
             raise ValueError("gallery_source_not_found")
 
-    def count_source_assets(self, source_id: str) -> int:
+    def get_source_asset_counts(self, source_id: str) -> dict[str, int]:
         with self._read() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS total FROM gallery_assets"
-                " WHERE source_id=? AND lifecycle_state='active'"
-                "   AND dedup_visibility!='excluded'",
+                """
+                SELECT
+                    SUM(CASE WHEN lifecycle_state='active'
+                              AND dedup_visibility='candidate' THEN 1 ELSE 0 END)
+                        AS candidate_count,
+                    SUM(CASE WHEN lifecycle_state='active'
+                              AND dedup_visibility='kept' THEN 1 ELSE 0 END)
+                        AS kept_count,
+                    SUM(CASE WHEN lifecycle_state='active'
+                              AND dedup_visibility='excluded' THEN 1 ELSE 0 END)
+                        AS removed_count
+                FROM gallery_assets WHERE source_id=?
+                """,
                 (source_id,),
             ).fetchone()
-        return int(row["total"])
+        candidate = int(row["candidate_count"] or 0)
+        kept = int(row["kept_count"] or 0)
+        removed = int(row["removed_count"] or 0)
+        return {
+            "asset_count": candidate + kept,
+            "candidate_count": candidate,
+            "kept_count": kept,
+            "removed_count": removed,
+        }
+
+    def count_source_assets(self, source_id: str) -> int:
+        return self.get_source_asset_counts(source_id)["asset_count"]
 
     # ---- TXT 注解写路径（§7.2 PUT annotation；G3-1） ----
 

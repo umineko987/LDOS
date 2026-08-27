@@ -18,6 +18,7 @@ import {
   sanitizeGalleryDirectoryEntry,
   sanitizeGalleryPreviewState,
   sanitizeGallerySourceSummary,
+  sanitizeGalleryScanOperation,
   updateGalleryPreviewState,
 } from "./model";
 
@@ -57,10 +58,17 @@ describe("gallery target model (G2 安全投影消费)", () => {
     display_name: "Danbooru 批次",
     availability: "available",
     asset_count: 128,
+    candidate_count: 128,
+    kept_count: 0,
+    removed_count: 0,
     crawl_complete: true,
     dedup_required: true,
     dedup_state: "pending_analysis",
     dedup_applied_version: 0,
+    reconciliation_state: "none",
+    reconciliation_error_code: "",
+    reconciliation_attempt_count: 0,
+    reconciliation_updated_at: null,
     content_version: 3,
     annotation_version: 5,
     indexed_version: 2,
@@ -85,9 +93,15 @@ describe("gallery target model (G2 安全投影消费)", () => {
     expect(source).toMatchObject({
       batch_id: null,
       asset_count: 0,
+      candidate_count: 0,
+      kept_count: 0,
+      removed_count: 0,
       crawl_complete: false,
       dedup_required: false,
       dedup_state: "not_required",
+      reconciliation_state: "none",
+      reconciliation_error_code: "",
+      reconciliation_attempt_count: 0,
       content_version: 1,
       indexed_version: 1,
       last_scanned_at: null,
@@ -100,10 +114,53 @@ describe("gallery target model (G2 安全投影消费)", () => {
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, dedup_state: "invented_state" })).toThrow(TypeError);
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, asset_count: -1 })).toThrow(TypeError);
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, asset_count: 1.5 })).toThrow(TypeError);
+    expect(() => sanitizeGallerySourceSummary({ ...backendSource, candidate_count: 129 })).toThrow(TypeError);
+    expect(() => sanitizeGallerySourceSummary({ ...backendSource, reconciliation_state: "failed" })).toThrow(TypeError);
+    expect(() => sanitizeGallerySourceSummary({ ...backendSource, reconciliation_error_code: "review_reconciliation_apply_failed" })).toThrow(TypeError);
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, crawl_complete: 1 })).toThrow(TypeError);
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, display_name: "a\u0000b" })).toThrow(TypeError);
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, indexed_version: 0 })).toThrow(TypeError);
   });
+
+  it("sanitizes bounded scan progress and rejects lifecycle drift", () => {
+    const operation = sanitizeGalleryScanOperation({
+      operation_id: "scan-1",
+      source_id: "src-1",
+      state: "succeeded",
+      started_at: 1770000000,
+      finished_at: 1770000001,
+      error_code: "",
+      stats: {
+        asset_count: 12,
+        candidate_count: 8,
+        kept_count: 4,
+        removed_count: 3,
+        directory_count: 2,
+        content_changed: true,
+        annotation_changed: false,
+        indexed_version: 7,
+        offline: false,
+        skipped_temporary: 1,
+        skipped_unsupported: 5,
+      },
+    });
+    expect(operation.stats).toMatchObject({ asset_count: 12, candidate_count: 8, kept_count: 4 });
+    expect(Object.isFrozen(operation)).toBe(true);
+    expect(Object.isFrozen(operation.stats)).toBe(true);
+    expect(() => sanitizeGalleryScanOperation({ ...operation, state: "failed" })).toThrow(TypeError);
+    expect(() => sanitizeGalleryScanOperation({ ...operation, debug_path: "/secret" })).toThrow(TypeError);
+    expect(() => sanitizeGalleryScanOperation({ ...operation, stats: { ...operation.stats, candidate_count: 13 } })).toThrow(TypeError);
+    expect(() => sanitizeGalleryScanOperation({ ...operation, state: "running" })).toThrow(TypeError);
+    expect(() => sanitizeGalleryScanOperation({ ...operation, stats: null })).toThrow(TypeError);
+    expect(() => sanitizeGalleryScanOperation({ ...operation, finished_at: 1769999999 })).toThrow(TypeError);
+    expect(() => sanitizeGalleryScanOperation({
+      ...operation,
+      state: "failed",
+      error_code: "scan_failed",
+      stats: null,
+    })).not.toThrow();
+  });
+
 
   it("sanitizes directory entries including the empty root path", () => {
     const directory = sanitizeGalleryDirectoryEntry({

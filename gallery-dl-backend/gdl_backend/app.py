@@ -229,6 +229,33 @@ class ServiceContainer:
             offset += 50
         return registered
 
+    def reconcile_applied_gallery_reviews(self) -> int:
+        """Recover the crash gap between a committed review and its Gallery handoff."""
+        recovered = 0
+        for source in self.db.gallery.list_sources():
+            batch_id = source.get("batch_id")
+            if not batch_id:
+                continue
+            if self.db.gallery.get_review_reconciliation(source["source_id"]) is not None:
+                continue
+            review = self.db.get_crawl_review(str(batch_id))
+            if review is None or review.get("status") != "applied":
+                continue
+            try:
+                images = self.db.crawl_review_apply_images(str(batch_id))
+                projected = self.gallery_catalog.reconcile_review_images(
+                    str(batch_id), images
+                )
+            except Exception as exc:
+                logger.warning(
+                    "gallery review recovery failed; category=%s",
+                    safe_exception_category(exc),
+                )
+                continue
+            if projected is not None:
+                recovered += 1
+        return recovered
+
     async def start(self, *, background: bool = True) -> None:
         if self._started:
             return
@@ -265,6 +292,10 @@ class ServiceContainer:
             await self.ordered_crawls.start()
             await self.reviews.start()
             await asyncio.to_thread(self.reconcile_gallery_batch_sources)
+            await asyncio.to_thread(self.reconcile_applied_gallery_reviews)
+            await asyncio.to_thread(
+                self.gallery_catalog.retry_pending_review_reconciliations
+            )
             self._health_task = asyncio.create_task(self._proxy_health_loop(), name="proxy-health-monitor")
 
     async def stop(self) -> None:

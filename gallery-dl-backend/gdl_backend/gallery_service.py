@@ -11,13 +11,15 @@ from __future__ import annotations
 import os
 import threading
 import time
+import uuid
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from PIL import Image, UnidentifiedImageError
 
 from ._database_gallery_repository import (
     GalleryRepository,
+    GalleryScanSnapshotConflict,
     GallerySourceConflictError,
     GalleryVersionConflict,
 )
@@ -97,7 +99,9 @@ _DEDUP_REVIEW_PENDING_STATES = frozenset({"pending", "ready"})
 
 
 def _effective_dedup_state(
-    source: dict[str, Any], review_status: str | None
+    source: dict[str, Any],
+    review_status: str | None,
+    reconciliation_state: str = "none",
 ) -> str:
     """有效去重状态（§3.8）：存储状态 + 审核状态 + 内容版本推导。
 
@@ -105,11 +109,14 @@ def _effective_dedup_state(
     - applied：审核已应用且内容版本未再变化；
     - stale：审核已应用但图库内容版本已前进（需重新分析）；
     - review_pending：审核已就绪等待人工决策；
+    - reconciliation_pending：审核已完成但图库对账仍待重试；
     - pending_analysis：等待去重分析。
     """
     stored = str(source["dedup_state"])
     if not source["dedup_required"]:
         return "not_required"
+    if reconciliation_state in {"pending", "failed"}:
+        return "reconciliation_pending"
     if stored == "applied":
         applied_version = int(source.get("dedup_applied_version", 0))
         content_version = int(source["content_version"])
@@ -127,25 +134,49 @@ def _effective_dedup_state(
 def _public_source(
     source: dict[str, Any],
     *,
-    asset_count: int | None = None,
+    asset_counts: dict[str, int] | None = None,
     root_directory_id: str | None = None,
     review_status: str | None = None,
+    reconciliation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """公开来源投影：剥离 root_path 与 canonical_root_key（§6.4）。
 
     root_directory_id 是进入来源首页所需的稳定目录 ID；首次扫描前为 None。
     """
-    projected = {
+    counts = asset_counts or {
+        "asset_count": 0,
+        "candidate_count": 0,
+        "kept_count": 0,
+        "removed_count": 0,
+    }
+    reconciliation_state = "none" if reconciliation is None else reconciliation["state"]
+    return {
         "source_id": source["source_id"],
         "root_directory_id": root_directory_id,
         "kind": source["kind"],
         "batch_id": source["batch_id"],
         "display_name": source["display_name"],
         "availability": source["availability"],
+        "asset_count": int(counts["asset_count"]),
+        "candidate_count": int(counts["candidate_count"]),
+        "kept_count": int(counts["kept_count"]),
+        "removed_count": int(counts["removed_count"]),
         "crawl_complete": source["crawl_complete"],
         "dedup_required": source["dedup_required"],
-        "dedup_state": _effective_dedup_state(source, review_status),
+        "dedup_state": _effective_dedup_state(
+            source, review_status, reconciliation_state
+        ),
         "dedup_applied_version": source.get("dedup_applied_version", 0),
+        "reconciliation_state": reconciliation_state,
+        "reconciliation_error_code": (
+            "" if reconciliation is None else reconciliation["error_code"]
+        ),
+        "reconciliation_attempt_count": (
+            0 if reconciliation is None else reconciliation["attempt_count"]
+        ),
+        "reconciliation_updated_at": (
+            None if reconciliation is None else reconciliation["updated_at"]
+        ),
         "content_version": source["content_version"],
         "annotation_version": source["annotation_version"],
         "indexed_version": source["indexed_version"],
@@ -153,9 +184,6 @@ def _public_source(
         "created_at": source["created_at"],
         "updated_at": source["updated_at"],
     }
-    if asset_count is not None:
-        projected["asset_count"] = asset_count
-    return projected
 
 
 class GalleryCatalogService:
@@ -186,6 +214,19 @@ class GalleryCatalogService:
             return None
         return self._review_status_lookup(batch_id)
 
+    def _project_source(
+        self, source: dict[str, Any], *, review_status: str | None = None
+    ) -> dict[str, Any]:
+        source_id = str(source["source_id"])
+        return _public_source(
+            source,
+            asset_counts=self._repo.get_source_asset_counts(source_id),
+            root_directory_id=self._root_directory_id(source_id),
+            review_status=(
+                self._review_status(source) if review_status is None else review_status
+            ),
+            reconciliation=self._repo.get_review_reconciliation(source_id),
+        )
     # ---- 来源生命周期（§3.1） ----
 
     def import_source(
@@ -201,11 +242,7 @@ class GalleryCatalogService:
             )
         except GallerySourceConflictError as conflict:
             raise conflict
-        return _public_source(
-            source,
-            asset_count=0,
-            review_status=self._review_status(source),
-        )
+        return self._project_source(source)
 
     def register_batch_source(
         self,
@@ -225,8 +262,7 @@ class GalleryCatalogService:
             )
         except GallerySourceConflictError as conflict:
             raise conflict
-        return _public_source(source, asset_count=0)
-
+        return self._project_source(source)
 
     def on_review_applied(
         self,
@@ -250,11 +286,107 @@ class GalleryCatalogService:
         assert updated is not None
         # 后台触发一次增量扫描，使 physical 布局与索引对齐。
         self.start_scan(source["source_id"])
-        return _public_source(
-            updated,
-            asset_count=self._repo.count_source_assets(source["source_id"]),
-            review_status="applied",
+        return self._project_source(updated, review_status="applied")
+
+    def reconcile_review_images(
+        self, batch_id: str, images: Sequence[Mapping[str, Any]]
+    ) -> dict[str, Any] | None:
+        """Translate one committed review manifest into the durable Gallery handoff."""
+        retained = [
+            str(image["relative_path"])
+            for image in images
+            if image.get("disposition") == "kept"
+        ]
+        excluded = [
+            str(image["relative_path"])
+            for image in images
+            if image.get("disposition") == "rejected"
+        ]
+        rejected_destinations = [
+            str(image["final_relative_path"])
+            for image in images
+            if image.get("disposition") == "rejected"
+            and str(image.get("final_relative_path") or "")
+        ]
+        return self.reconcile_review_result(
+            batch_id,
+            retained_relative_paths=retained,
+            excluded_relative_paths=excluded,
+            rejected_relative_paths=rejected_destinations,
         )
+
+    def reconcile_review_result(
+        self,
+        batch_id: str,
+        *,
+        retained_relative_paths: Sequence[str],
+        excluded_relative_paths: Sequence[str],
+        rejected_relative_paths: Sequence[str],
+    ) -> dict[str, Any] | None:
+        """Persist and apply the filesystem review result to Gallery visibility."""
+        source = self._repo.get_source_by_batch_id(batch_id)
+        if source is None:
+            return None
+        event = self._repo.queue_review_reconciliation(
+            source_id=source["source_id"],
+            batch_id=batch_id,
+            retained_relative_paths=retained_relative_paths,
+            excluded_relative_paths=excluded_relative_paths,
+            rejected_relative_paths=rejected_relative_paths,
+        )
+        try:
+            self._repo.apply_review_reconciliation(event["event_id"])
+        except Exception:
+            self._repo.mark_review_reconciliation_failed(
+                event["event_id"], "review_reconciliation_apply_failed"
+            )
+            current = self._repo.get_source(source["source_id"])
+            assert current is not None
+            return self._project_source(current, review_status="applied")
+        current = self._repo.get_source(source["source_id"])
+        assert current is not None
+        self._start_scan_if_idle(source["source_id"])
+        return self._project_source(current, review_status="applied")
+
+    def retry_review_reconciliation(self, source_id: str) -> dict[str, Any]:
+        source = self._repo.get_source(source_id)
+        if source is None:
+            raise GallerySourceNotFound(source_id)
+        event = self._repo.get_review_reconciliation(source_id)
+        if event is None or event["state"] not in {"pending", "failed"}:
+            raise ValueError("gallery_reconciliation_not_retryable")
+        try:
+            self._repo.apply_review_reconciliation(event["event_id"])
+        except Exception:
+            self._repo.mark_review_reconciliation_failed(
+                event["event_id"], "review_reconciliation_apply_failed"
+            )
+            raise
+        current = self._repo.get_source(source_id)
+        assert current is not None
+        self._start_scan_if_idle(source_id)
+        return self._project_source(current, review_status="applied")
+
+    def retry_pending_review_reconciliations(self) -> int:
+        applied = 0
+        for event in self._repo.list_retryable_review_reconciliations():
+            try:
+                self._repo.apply_review_reconciliation(event["event_id"])
+            except Exception:
+                self._repo.mark_review_reconciliation_failed(
+                    event["event_id"], "review_reconciliation_apply_failed"
+                )
+                continue
+            applied += 1
+            self._start_scan_if_idle(event["source_id"])
+        return applied
+
+    def _start_scan_if_idle(self, source_id: str) -> None:
+        try:
+            self.start_scan(source_id)
+        except GalleryScanInProgress:
+            pass
+
     def auto_register_batch_source(
         self,
         *,
@@ -286,71 +418,57 @@ class GalleryCatalogService:
         return source
 
     def update_source(self, source_id: str, *, display_name: str) -> dict[str, Any]:
-        source = self._repo.get_source(source_id)
-        if source is None:
-            raise GallerySourceNotFound(source_id)
         if not display_name or not display_name.strip():
             raise ValueError("invalid_gallery_source_display_name")
-        # 显示名只改元数据：经 repository 的唯一写入口。
-        self._repo.rename_source(source_id, display_name.strip())
-        updated = self._repo.get_source(source_id)
-        assert updated is not None
-        return _public_source(
-            updated,
-            asset_count=self._repo.count_source_assets(source_id),
-            review_status=self._review_status(updated),
-        )
+        with self._scan_lock:
+            source = self._repo.get_source(source_id)
+            if source is None:
+                raise GallerySourceNotFound(source_id)
+            # 显示名只改元数据：经 repository 的唯一写入口。
+            self._repo.rename_source(source_id, display_name.strip())
+            updated = self._repo.get_source(source_id)
+            assert updated is not None
+        return self._project_source(updated)
 
     def unregister_source(self, source_id: str) -> None:
-        source = self._repo.get_source(source_id)
-        if source is None:
-            raise GallerySourceNotFound(source_id)
         with self._scan_lock:
+            source = self._repo.get_source(source_id)
+            if source is None:
+                raise GallerySourceNotFound(source_id)
             job = self._scan_jobs.get(source_id)
             if job is not None and job["state"] == "running":
                 raise GalleryScanInProgress(source_id)
-        self._repo.unregister_source(source_id)
+            self._repo.unregister_source(source_id)
+            self._scan_jobs.pop(source_id, None)
+            self._scan_threads.pop(source_id, None)
 
     def relink_source(self, source_id: str, new_root_path: str) -> dict[str, Any]:
-        source = self._repo.get_source(source_id)
-        if source is None:
-            raise GallerySourceNotFound(source_id)
         root = Path(new_root_path).expanduser()
         if not root.exists():
             raise GalleryRootMissing(str(root))
         if not root.is_dir() or root.is_symlink():
             raise GalleryRootMissing(str(root))
-        try:
-            updated = self._repo.relink_source(source_id, str(root.resolve()))
-        except GallerySourceConflictError as conflict:
-            raise conflict
-        return _public_source(
-            updated,
-            asset_count=self._repo.count_source_assets(source_id),
-            review_status=self._review_status(updated),
-        )
+        with self._scan_lock:
+            source = self._repo.get_source(source_id)
+            if source is None:
+                raise GallerySourceNotFound(source_id)
+            job = self._scan_jobs.get(source_id)
+            if job is not None and job["state"] == "running":
+                raise GalleryScanInProgress(source_id)
+            try:
+                updated = self._repo.relink_source(source_id, str(root.resolve()))
+            except GallerySourceConflictError as conflict:
+                raise conflict
+        return self._project_source(updated)
 
     def get_source(self, source_id: str) -> dict[str, Any]:
         source = self._repo.get_source(source_id)
         if source is None:
             raise GallerySourceNotFound(source_id)
-        return _public_source(
-            source,
-            asset_count=self._repo.count_source_assets(source_id),
-            root_directory_id=self._root_directory_id(source_id),
-            review_status=self._review_status(source),
-        )
+        return self._project_source(source)
 
     def list_sources(self) -> list[dict[str, Any]]:
-        return [
-            _public_source(
-                source,
-                asset_count=self._repo.count_source_assets(source["source_id"]),
-                root_directory_id=self._root_directory_id(source["source_id"]),
-                review_status=self._review_status(source),
-            )
-            for source in self._repo.list_sources()
-        ]
+        return [self._project_source(source) for source in self._repo.list_sources()]
 
     def _root_directory_id(self, source_id: str) -> str | None:
         root = self._repo.get_root_directory(source_id)
@@ -564,14 +682,16 @@ class GalleryCatalogService:
     # ---- 扫描（§6.1） ----
 
     def start_scan(self, source_id: str) -> dict[str, Any]:
-        source = self._repo.get_source(source_id)
-        if source is None:
-            raise GallerySourceNotFound(source_id)
         with self._scan_lock:
+            source = self._repo.get_source(source_id)
+            if source is None:
+                raise GallerySourceNotFound(source_id)
             job = self._scan_jobs.get(source_id)
             if job is not None and job["state"] == "running":
                 raise GalleryScanInProgress(source_id)
+            operation_id = uuid.uuid4().hex
             record = {
+                "operation_id": operation_id,
                 "source_id": source_id,
                 "state": "running",
                 "started_at": self._clock(),
@@ -580,15 +700,14 @@ class GalleryCatalogService:
                 "stats": None,
             }
             self._scan_jobs[source_id] = record
-        thread = threading.Thread(
-            target=self._run_scan,
-            args=(source_id,),
-            name=f"gallery-scan-{source_id[:8]}",
-            daemon=True,
-        )
-        with self._scan_lock:
+            thread = threading.Thread(
+                target=self._run_scan,
+                args=(source_id, operation_id),
+                name=f"gallery-scan-{source_id[:8]}",
+                daemon=True,
+            )
             self._scan_threads[source_id] = thread
-        thread.start()
+            thread.start()
         return self.get_scan(source_id)
 
     def stop(self, timeout: float = 30.0) -> None:
@@ -599,13 +718,14 @@ class GalleryCatalogService:
             thread.join(timeout=timeout)
 
     def get_scan(self, source_id: str) -> dict[str, Any]:
-        source = self._repo.get_source(source_id)
-        if source is None:
-            raise GallerySourceNotFound(source_id)
         with self._scan_lock:
+            source = self._repo.get_source(source_id)
+            if source is None:
+                raise GallerySourceNotFound(source_id)
             job = self._scan_jobs.get(source_id)
             if job is None:
                 return {
+                    "operation_id": None,
                     "source_id": source_id,
                     "state": "idle",
                     "started_at": None,
@@ -615,12 +735,12 @@ class GalleryCatalogService:
                 }
             return dict(job)
 
-    def _run_scan(self, source_id: str) -> None:
+    def _run_scan(self, source_id: str, operation_id: str) -> None:
         try:
             stats = self.scan_source(source_id)
             with self._scan_lock:
                 job = self._scan_jobs.get(source_id)
-                if job is not None:
+                if job is not None and job["operation_id"] == operation_id:
                     job["state"] = "succeeded"
                     job["finished_at"] = self._clock()
                     job["stats"] = stats
@@ -634,23 +754,33 @@ class GalleryCatalogService:
                 code = "io_error"
             with self._scan_lock:
                 job = self._scan_jobs.get(source_id)
-                if job is not None:
+                if job is not None and job["operation_id"] == operation_id:
                     job["state"] = "failed"
                     job["finished_at"] = self._clock()
                     job["error_code"] = code
         finally:
             with self._scan_lock:
                 job = self._scan_jobs.get(source_id)
-                if job is not None and job["state"] == "running":
+                if (
+                    job is not None
+                    and job["operation_id"] == operation_id
+                    and job["state"] == "running"
+                ):
                     job["state"] = "failed"
+                    job["finished_at"] = self._clock()
                     job["error_code"] = "scan_interrupted"
+                if self._scan_threads.get(source_id) is threading.current_thread():
+                    self._scan_threads.pop(source_id, None)
 
-    def scan_source(self, source_id: str) -> dict[str, Any]:
+    def scan_source(
+        self, source_id: str, *, _snapshot_retries: int = 1
+    ) -> dict[str, Any]:
         """同步全量扫描：walk + 有界解码 + 单事务提交。"""
         source = self._repo.get_source(source_id)
         if source is None:
             raise GallerySourceNotFound(source_id)
         root = Path(source["root_path"])
+        expected_indexed_version = int(source["indexed_version"])
         try:
             safe_root = SafeSourceRoot(root)
             safe_root.open()
@@ -703,9 +833,24 @@ class GalleryCatalogService:
                     )
         finally:
             safe_root.close()
-        commit = self._repo.commit_scan(source_id, directories=directories, assets=assets)
+        try:
+            commit = self._repo.commit_scan(
+                source_id,
+                directories=directories,
+                assets=assets,
+                expected_indexed_version=expected_indexed_version,
+            )
+        except GalleryScanSnapshotConflict:
+            if _snapshot_retries < 1:
+                raise
+            return self.scan_source(
+                source_id, _snapshot_retries=_snapshot_retries - 1
+            )
         return {
             "asset_count": commit["asset_count"],
+            "candidate_count": commit["candidate_count"],
+            "kept_count": commit["kept_count"],
+            "removed_count": commit["removed_count"],
             "directory_count": commit["directory_count"],
             "content_changed": commit["content_changed"],
             "annotation_changed": commit["annotation_changed"],

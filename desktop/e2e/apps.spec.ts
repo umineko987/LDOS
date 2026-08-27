@@ -346,6 +346,66 @@ test.describe("可用应用关键旅程", () => {
     expect(api.unhandled).toEqual([]);
   });
 
+  test("图库呈现扫描失败、原目录管理警告与来源生命周期操作", async ({ page }) => {
+    const api = await bootDesktop(page, { galleryScenario: "scan_failed" });
+    await launchApp(page, "gallery");
+    const gallery = appWindow(page, "gallery");
+    await gallery.getByRole("button", { name: /E2E 导入目录/ }).click();
+
+    const sourceStatus = gallery.locator(".gallery-source-status");
+    await expect(sourceStatus.getByText(/直接管理原目录/)).toBeVisible();
+    await expect(sourceStatus.getByRole("alert")).toContainText("scan_failed");
+    expect(api.count("POST", "/api/v1/gallery/sources/gal-src-import/scan")).toBeGreaterThan(0);
+
+    await sourceStatus.getByRole("button", { name: "重新扫描" }).click();
+    await expect.poll(() => api.count("POST", "/api/v1/gallery/sources/gal-src-import/scan")).toBeGreaterThan(1);
+    await expect(sourceStatus.getByRole("button", { name: "重新扫描" })).toBeEnabled();
+    await expect(sourceStatus.getByRole("alert")).toContainText("scan_failed");
+
+    await sourceStatus.getByRole("button", { name: "来源设置…" }).click();
+    let manager = gallery.getByRole("dialog", { name: /管理“E2E 导入目录”/ });
+    await expect(manager.getByLabel("显示名称")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(manager).toBeHidden();
+    await expect(sourceStatus.getByRole("button", { name: "来源设置…" })).toBeFocused();
+    await sourceStatus.getByRole("button", { name: "来源设置…" }).click();
+    manager = gallery.getByRole("dialog", { name: /管理“E2E 导入目录”/ });
+    await manager.getByLabel("显示名称").fill("已重命名来源");
+    await manager.getByRole("button", { name: "保存名称" }).click();
+    await expect(gallery.getByRole("button", { name: /已重命名来源/ })).toBeVisible();
+    expect(api.count("PATCH", "/api/v1/gallery/sources/gal-src-import")).toBe(1);
+
+    await gallery.locator(".gallery-source-status").getByRole("button", { name: "来源设置…" }).click();
+    manager = gallery.getByRole("dialog", { name: /管理“已重命名来源”/ });
+    await manager.getByRole("button", { name: "解除挂载（保留原文件）" }).click();
+    await expect(gallery.getByText("暂无图库来源")).toBeVisible();
+    expect(api.count("DELETE", "/api/v1/gallery/sources/gal-src-import")).toBe(1);
+    expect(api.unhandled).toEqual([]);
+  });
+
+  test("图库显示候选保留移除统计并可重试去重对账", async ({ page }) => {
+    const api = await bootDesktop(page, { galleryScenario: "reconciliation_failed" });
+    await launchApp(page, "gallery");
+    const gallery = appWindow(page, "gallery");
+    await gallery.getByRole("button", { name: /E2E 导入目录/ }).click();
+    const sourceStatus = gallery.locator(".gallery-source-status");
+
+    await expect(sourceStatus.getByText("候选")).toBeVisible();
+    await expect(sourceStatus.getByText("保留")).toBeVisible();
+    await expect(sourceStatus.getByText("已移除")).toBeVisible();
+    const alert = sourceStatus.getByRole("alert");
+    await expect(alert).toContainText("图库去重对账失败");
+    await alert.getByRole("button", { name: "重试对账" }).click();
+    await expect(alert).toBeHidden();
+    expect(
+      api.count(
+        "POST",
+        "/api/v1/gallery/sources/gal-src-import/reconciliation/retry",
+      ),
+    ).toBe(1);
+    expect(api.unhandled).toEqual([]);
+  });
+
   test("图库目录导出在顶层同名冲突时列出名称且不进入复制轮询", async ({ page }) => {
     const api = await bootDesktop(page, { directoryExportScenario: "conflict" });
     const directoryExport = await openCurrentGalleryDirectoryExport(page);

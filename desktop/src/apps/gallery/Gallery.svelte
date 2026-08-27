@@ -3,7 +3,10 @@
 
   import { ApiError, type ApiClient } from "../../core/api/client";
   import { restoreFocus, trappedTabIndex, type FocusTarget } from "../../core/a11y/focus";
-  import { createPlatformAdapter } from "../../core/platform/adapter";
+  import {
+    createPlatformAdapter,
+    type PlatformDirectoryPurpose,
+  } from "../../core/platform/adapter";
   import { createGalleryController } from "./controller";
   import {
     GALLERY_AVAILABILITY_LABELS,
@@ -66,6 +69,12 @@
       : [],
   );
 
+  const activeSource = $derived(
+    snapshot.sources.find((item) => item.source_id === snapshot.activeSourceId) ?? null,
+  );
+  const activeScan = $derived(
+    snapshot.scanOperation?.source_id === snapshot.activeSourceId ? snapshot.scanOperation : null,
+  );
   const txtStateOptions: readonly { value: string; label: string }[] = [
     { value: "", label: "全部 TXT 状态" },
     ...(Object.keys(GALLERY_TXT_STATE_LABELS) as GalleryTxtState[]).map((state) => ({
@@ -201,27 +210,172 @@
   }
 
   const platform = untrack(() => createPlatformAdapter());
+  let platformDirectoryPickerActive = false;
+  let platformDirectoryPickerReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function selectPlatformDirectory(
+    purpose: PlatformDirectoryPurpose,
+  ): Promise<string | null> {
+    if (platformDirectoryPickerReleaseTimer !== null) {
+      clearTimeout(platformDirectoryPickerReleaseTimer);
+      platformDirectoryPickerReleaseTimer = null;
+    }
+    platformDirectoryPickerActive = true;
+    try {
+      return await platform.selectDirectory(purpose);
+    } finally {
+      platformDirectoryPickerReleaseTimer = setTimeout(() => {
+        platformDirectoryPickerActive = false;
+        platformDirectoryPickerReleaseTimer = null;
+      }, 0);
+    }
+  }
   let importPhase: "idle" | "picking" | "importing" = $state("idle");
   let importError: string | null = $state(null);
 
   const canImportDirectories = $derived(platform.capabilities.selectDirectory);
 
+  let importWarningOpen = $state(false);
+  let sourceManagerOpen = $state(false);
+  let sourceManagerName = $state("");
+  let sourceManagerPhase: "idle" | "saving" | "relinking" | "unmounting" = $state("idle");
+  let sourceManagerError = $state<string | null>(null);
+  let importWarningPanel = $state<HTMLElement>();
+  let importWarningReturnFocus: FocusTarget | null = null;
+  let sourceManagerPanel = $state<HTMLElement>();
+  let sourceManagerReturnFocus: FocusTarget | null = null;
+
+  function modalFocusable(panel: HTMLElement | undefined): HTMLElement[] {
+    return [
+      ...(panel?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) ?? []),
+    ];
+  }
+
+  function focusModal(panel: () => HTMLElement | undefined): void {
+    void tick().then(() => {
+      const element = panel();
+      restoreFocus(modalFocusable(element)[0] ?? element);
+    });
+  }
+
+  function onModalKeydown(event: KeyboardEvent, panel: HTMLElement | undefined): void {
+    if (event.key !== "Tab") return;
+    const items = modalFocusable(panel);
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    const next = trappedTabIndex(current, items.length, event.shiftKey);
+    if (next !== null) {
+      event.preventDefault();
+      restoreFocus(items[next]);
+    }
+  }
+
+  function restoreDialogFocus(target: FocusTarget | null): void {
+    queueMicrotask(() => {
+      if (restoreFocus(target)) return;
+      restoreFocus(document.querySelector<HTMLElement>("[data-gallery-import]"));
+    });
+  }
+
+  function closeImportWarning(): void {
+    const target = importWarningReturnFocus;
+    importWarningOpen = false;
+    importWarningReturnFocus = null;
+    restoreDialogFocus(target);
+  }
+
+  function closeSourceManager(): void {
+    if (sourceManagerPhase !== "idle") return;
+    const target = sourceManagerReturnFocus;
+    sourceManagerOpen = false;
+    sourceManagerReturnFocus = null;
+    restoreDialogFocus(target);
+  }
+
+  function requestImportDirectory(): void {
+    if (!canImportDirectories || importPhase !== "idle") return;
+    importWarningReturnFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    importWarningOpen = true;
+    focusModal(() => importWarningPanel);
+  }
+
+  function openSourceManager(): void {
+    if (activeSource === null) return;
+    sourceManagerReturnFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    sourceManagerName = activeSource.display_name;
+    sourceManagerError = null;
+    sourceManagerPhase = "idle";
+    sourceManagerOpen = true;
+    focusModal(() => sourceManagerPanel);
+  }
+
+  async function saveSourceName(): Promise<void> {
+    if (sourceManagerPhase !== "idle") return;
+    sourceManagerPhase = "saving";
+    sourceManagerError = null;
+    const succeeded = await controller.renameActiveSource(sourceManagerName);
+    sourceManagerPhase = "idle";
+    if (succeeded) closeSourceManager();
+    else sourceManagerError = snapshot.scanRequestErrorCode ?? "source_rename_failed";
+  }
+
+  async function relinkActiveSource(): Promise<void> {
+    if (
+      sourceManagerPhase !== "idle" ||
+      !canImportDirectories ||
+      activeScan?.state === "running"
+    ) return;
+    sourceManagerPhase = "relinking";
+    sourceManagerError = null;
+    let succeeded = false;
+    try {
+      const rootPath = await selectPlatformDirectory("gallery_relink");
+      if (rootPath === null) return;
+      succeeded = await controller.relinkActiveSource(rootPath);
+      if (!succeeded) {
+        sourceManagerError = snapshot.scanRequestErrorCode ?? "source_relink_failed";
+      }
+    } catch {
+      sourceManagerError = "source_relink_failed";
+    } finally {
+      sourceManagerPhase = "idle";
+      if (succeeded) closeSourceManager();
+    }
+  }
+
+  async function unmountActiveSource(): Promise<void> {
+    if (sourceManagerPhase !== "idle" || activeScan?.state === "running") return;
+    sourceManagerPhase = "unmounting";
+    sourceManagerError = null;
+    const succeeded = await controller.unmountActiveSource();
+    sourceManagerPhase = "idle";
+    if (succeeded) closeSourceManager();
+    else sourceManagerError = snapshot.scanRequestErrorCode ?? "source_unmount_failed";
+  }
   async function importDirectoryFlow(): Promise<void> {
     if (importPhase !== "idle" || !platform.capabilities.selectDirectory) return;
+    const returnFocus = importWarningReturnFocus;
+    importWarningOpen = false;
     importError = null;
     importPhase = "picking";
     try {
-      const rootPath = await platform.selectDirectory("gallery_import");
+      const rootPath = await selectPlatformDirectory("gallery_import");
       if (rootPath === null) {
         importPhase = "idle";
         return;
       }
       importPhase = "importing";
-      await controller.importDirectory(rootPath);
+      const imported = await controller.importDirectory(rootPath);
+      if (!imported) importError = snapshot.sourcesErrorCode ?? "import_failed";
     } catch (error) {
       importError = error instanceof Error ? error.message : "import_failed";
     } finally {
       importPhase = "idle";
+      importWarningReturnFocus = null;
+      restoreDialogFocus(returnFocus);
     }
   }
 
@@ -536,7 +690,7 @@
     directoryExportTargetPicking = true;
     directoryExportTargetError = null;
     try {
-      const picked = await platform.selectDirectory("export_target");
+      const picked = await selectPlatformDirectory("export_target");
       if (picked !== null) directoryExportTargetPath = picked;
     } catch {
       directoryExportTargetError = "target_picker_unavailable";
@@ -682,6 +836,11 @@
       const activeExport = directoryExportOperation;
       clearDirectoryExportPolling();
       directoryExportPickerAbort?.abort();
+      if (platformDirectoryPickerReleaseTimer !== null) {
+        clearTimeout(platformDirectoryPickerReleaseTimer);
+        platformDirectoryPickerReleaseTimer = null;
+      }
+      platformDirectoryPickerActive = false;
       if (activeExport?.state === "copying") {
         void service.cancelDirectoryExport(activeExport.operation_id);
       }
@@ -689,9 +848,36 @@
     };
   });
 
+  function onWindowFocus(): void {
+    if (
+      platformDirectoryPickerActive ||
+      importWarningOpen ||
+      sourceManagerOpen ||
+      directoryExportOpen ||
+      snapshot.renameDialogPhase !== "closed" ||
+      snapshot.trashConfirmPhase !== "closed" ||
+      snapshot.trashPanelPhase !== "closed"
+    ) return;
+    void controller.reconcileOnFocus();
+  }
+
   /** 应用级快捷键：对话框/面板 Escape + 网格 Delete/Ctrl+A/F2（查看器打开时让位）。 */
   function onAppKeydown(event: KeyboardEvent): void {
     if (snapshot.viewerIndex >= 0) return;
+    if (importWarningOpen) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeImportWarning();
+      }
+      return;
+    }
+    if (sourceManagerOpen) {
+      if (event.key === "Escape" && sourceManagerPhase === "idle") {
+        event.preventDefault();
+        closeSourceManager();
+      }
+      return;
+    }
     if (directoryExportOpen) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -714,7 +900,10 @@
 </script>
 
 
-<svelte:window onkeydown={onAppKeydown} />
+<svelte:window
+  onkeydown={onAppKeydown}
+  onfocus={onWindowFocus}
+/>
 
 <section class="gallery-app" data-gallery-app data-domain-owner="gallery" data-preview-availability="live" aria-labelledby="gallery-heading">
   <header class="gallery-header">
@@ -744,7 +933,14 @@
               >
                 <span class="gallery-source__name">{source.display_name}</span>
                 <span class="gallery-source__meta">{sourceSubtitle(source)}</span>
-                <span class="gallery-source__count">{formatCount(source.asset_count)} 张图片{source.root_directory_id === null ? " · 待扫描" : ""}</span>
+                <span class="gallery-source__count">
+                  {#if source.dedup_required}
+                    候选 {formatCount(source.candidate_count)} · 保留 {formatCount(source.kept_count)} · 已移除 {formatCount(source.removed_count)}
+                  {:else}
+                    {formatCount(source.asset_count)} 张图片
+                  {/if}
+                  {source.root_directory_id === null ? " · 待扫描" : ""}
+                </span>
               </button>
               {#if snapshot.activeSourceId === source.source_id && snapshot.path.length > 0}
                 <ul class="gallery-pathlist" aria-label="当前目录路径">
@@ -758,7 +954,7 @@
         </ul>
       {/if}
       <div class="gallery-import">
-        <button type="button" onclick={() => void importDirectoryFlow()} disabled={!canImportDirectories || importPhase !== "idle"}>
+        <button data-gallery-import type="button" onclick={requestImportDirectory} disabled={!canImportDirectories || importPhase !== "idle"}>
           {importPhase === "importing" ? "正在导入目录…" : "导入目录…"}
         </button>
         {#if !canImportDirectories}
@@ -778,6 +974,62 @@
           <p>左侧选择下载批次或导入目录；这里会显示目录树和图片网格。</p>
         </div>
       {:else}
+        {#if activeSource !== null}
+          <section class="gallery-source-status" aria-label="当前来源状态">
+            <div class="gallery-source-status__heading">
+              <div>
+                <strong>{activeSource.display_name}</strong>
+                <span>{sourceSubtitle(activeSource)}</span>
+              </div>
+              <div class="gallery-source-status__actions">
+                <button
+                  type="button"
+                  disabled={activeScan?.state === "running"}
+                  onclick={() => void controller.rescanActiveSource()}
+                >{activeScan?.state === "running" ? "正在扫描…" : "重新扫描"}</button>
+                <button type="button" onclick={openSourceManager}>来源设置…</button>
+              </div>
+            </div>
+            {#if activeSource.kind === "imported"}
+              <p class="gallery-source-warning">
+                此来源直接管理原目录。重命名、保存 TXT 和移入回收区都会修改磁盘上的原文件。
+              </p>
+            {/if}
+            {#if activeSource.dedup_required}
+              <dl class="gallery-source-stats" aria-label="去重统计">
+                <div><dt>候选</dt><dd>{formatCount(activeSource.candidate_count)}</dd></div>
+                <div><dt>保留</dt><dd>{formatCount(activeSource.kept_count)}</dd></div>
+                <div><dt>已移除</dt><dd>{formatCount(activeSource.removed_count)}</dd></div>
+              </dl>
+            {/if}
+            {#if activeScan?.state === "running"}
+              <p class="gallery-source-progress" role="status">正在增量检查；当前索引仍可浏览。</p>
+            {:else if activeScan?.state === "failed"}
+              <p class="gallery-hint gallery-hint--error" role="alert">扫描失败（{activeScan.error_code}）；原有索引已保留。</p>
+            {:else if activeScan?.state === "succeeded" && activeScan.stats !== null}
+              {#if activeScan.stats.offline}
+                <p class="gallery-source-progress" role="status">来源目录当前不可用；已有索引已保留，请在来源设置中重新关联目录。</p>
+              {:else}
+                <p class="gallery-source-progress" role="status">
+                  扫描完成：{formatCount(activeScan.stats.asset_count)} 张可见图片，跳过 {formatCount(activeScan.stats.skipped_unsupported + activeScan.stats.skipped_temporary)} 个文件。
+                </p>
+              {/if}
+            {/if}
+            {#if activeSource.reconciliation_state === "failed"}
+              <div class="gallery-source-reconciliation" role="alert">
+                <span>审核结果已保存，但图库去重对账失败；被排除文件会继续保持隐藏。</span>
+                <button
+                  type="button"
+                  disabled={snapshot.reconciliationRetrySourceId === activeSource.source_id}
+                  onclick={() => void controller.retryActiveReconciliation()}
+                >{snapshot.reconciliationRetrySourceId === activeSource.source_id ? "正在重试…" : "重试对账"}</button>
+              </div>
+            {/if}
+            {#if snapshot.scanRequestErrorCode !== null}
+              <p class="gallery-hint gallery-hint--error" role="alert">来源操作失败（{snapshot.scanRequestErrorCode}）</p>
+            {/if}
+          </section>
+        {/if}
         <nav class="gallery-toolbar" aria-label="目录浏览工具">
           <ol class="gallery-breadcrumb" aria-label="目录路径">
             {#each breadcrumb as segment, index (index)}
@@ -972,6 +1224,75 @@
     </main>
   </div>
 </section>
+
+{#if importWarningOpen}
+  <div class="gallery-dialog-backdrop">
+    <div
+      class="gallery-source-dialog"
+      tabindex="-1"
+      bind:this={importWarningPanel}
+      onkeydown={(event) => onModalKeydown(event, importWarningPanel)}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="gallery-import-warning-title"
+    >
+      <p class="gallery-source-dialog__eyebrow">原地导入</p>
+      <h2 id="gallery-import-warning-title">导入后会管理原目录文件</h2>
+      <p>ImageWeave 不会复制所选目录。之后的 TXT 保存、重命名和删除会直接修改该目录；删除会移入目录内的 ImageWeave 回收区。</p>
+      <p>解除挂载只移除图库索引，不会删除任何源文件。</p>
+      <div class="gallery-source-dialog__actions">
+        <button type="button" onclick={closeImportWarning}>取消</button>
+        <button type="button" class="gallery-dialog-primary" onclick={() => void importDirectoryFlow()}>理解并选择目录</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if sourceManagerOpen && activeSource !== null}
+  <div class="gallery-dialog-backdrop">
+    <div
+      class="gallery-source-dialog"
+      tabindex="-1"
+      bind:this={sourceManagerPanel}
+      onkeydown={(event) => onModalKeydown(event, sourceManagerPanel)}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="gallery-source-manager-title"
+    >
+      <p class="gallery-source-dialog__eyebrow">来源生命周期</p>
+      <h2 id="gallery-source-manager-title">管理“{activeSource.display_name}”</h2>
+      <form onsubmit={(event) => { event.preventDefault(); void saveSourceName(); }}>
+        <label>
+          <span>显示名称</span>
+          <input maxlength="256" bind:value={sourceManagerName} disabled={sourceManagerPhase !== "idle"} />
+        </label>
+        <button type="submit" disabled={sourceManagerPhase !== "idle" || sourceManagerName.trim().length === 0}>
+          {sourceManagerPhase === "saving" ? "正在保存…" : "保存名称"}
+        </button>
+      </form>
+      <div class="gallery-source-dialog__section">
+        <h3>目录位置</h3>
+        <p>来源移动、离线或路径变更后，可重新选择其当前目录。已有索引会保留到重新关联成功。</p>
+        <button type="button" disabled={!canImportDirectories || sourceManagerPhase !== "idle" || activeScan?.state === "running"} onclick={() => void relinkActiveSource()}>
+          {sourceManagerPhase === "relinking" ? "正在关联…" : "重新关联目录…"}
+        </button>
+      </div>
+      <div class="gallery-source-dialog__section gallery-source-dialog__section--danger">
+        <h3>解除挂载</h3>
+        <p>只删除 ImageWeave 的来源索引；绝不删除目录中的图片、TXT 或回收区文件。</p>
+        <button type="button" disabled={sourceManagerPhase !== "idle" || activeScan?.state === "running"} onclick={() => void unmountActiveSource()}>
+          {sourceManagerPhase === "unmounting" ? "正在解除…" : "解除挂载（保留原文件）"}
+        </button>
+      </div>
+      {#if sourceManagerError !== null}
+        <p class="gallery-hint gallery-hint--error" role="alert">来源操作失败（{sourceManagerError}）</p>
+      {/if}
+      <div class="gallery-source-dialog__actions">
+        <button type="button" disabled={sourceManagerPhase !== "idle"} onclick={closeSourceManager}>关闭</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if directoryExportOpen}
   <div class="gallery-dialog-backdrop gallery-export-backdrop">

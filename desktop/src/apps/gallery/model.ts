@@ -111,6 +111,16 @@ export type GalleryDedupState =
   | "review_pending"
   | "applied"
   | "stale";
+export type GalleryReconciliationState = "none" | "pending" | "failed" | "applied";
+export type GalleryReconciliationErrorCode = "" | "review_reconciliation_apply_failed";
+export type GalleryScanErrorCode =
+  | ""
+  | "scan_failed"
+  | "source_not_found"
+  | "source_offline"
+  | "io_error"
+  | "scan_interrupted";
+export type GalleryScanState = "idle" | "running" | "succeeded" | "failed";
 export type GalleryAssetReadState = "pending" | "ok" | "failed";
 
 const SOURCE_KINDS = new Set<GallerySourceKind>(["imported", "crawl_batch"]);
@@ -142,6 +152,25 @@ const DEDUP_STATES = new Set<GalleryDedupState>([
   "applied",
   "stale",
 ]);
+const RECONCILIATION_STATES = new Set<GalleryReconciliationState>([
+  "none",
+  "pending",
+  "failed",
+  "applied",
+]);
+const RECONCILIATION_ERROR_CODES = new Set<GalleryReconciliationErrorCode>([
+  "",
+  "review_reconciliation_apply_failed",
+]);
+const SCAN_STATES = new Set<GalleryScanState>(["idle", "running", "succeeded", "failed"]);
+const SCAN_ERROR_CODES = new Set<GalleryScanErrorCode>([
+  "",
+  "scan_failed",
+  "source_not_found",
+  "source_offline",
+  "io_error",
+  "scan_interrupted",
+]);
 const ASSET_READ_STATES = new Set<GalleryAssetReadState>(["pending", "ok", "failed"]);
 // 镜像 _probe_image 的固定错误码；后续阶段新增后端码时同步扩展。
 const ASSET_ERROR_CODES = new Set(["", "unidentified", "decode_failed", "probe_error"]);
@@ -154,16 +183,45 @@ const SOURCE_SUMMARY_KEYS = new Set([
   "display_name",
   "availability",
   "asset_count",
+  "candidate_count",
+  "kept_count",
+  "removed_count",
   "crawl_complete",
   "dedup_required",
   "dedup_state",
   "content_version",
   "dedup_applied_version",
+  "reconciliation_state",
+  "reconciliation_error_code",
+  "reconciliation_attempt_count",
+  "reconciliation_updated_at",
   "annotation_version",
   "indexed_version",
   "last_scanned_at",
   "created_at",
   "updated_at",
+]);
+const SCAN_OPERATION_KEYS = new Set([
+  "operation_id",
+  "source_id",
+  "state",
+  "started_at",
+  "finished_at",
+  "error_code",
+  "stats",
+]);
+const SCAN_STATS_KEYS = new Set([
+  "asset_count",
+  "candidate_count",
+  "kept_count",
+  "removed_count",
+  "directory_count",
+  "content_changed",
+  "annotation_changed",
+  "indexed_version",
+  "offline",
+  "skipped_temporary",
+  "skipped_unsupported",
 ]);
 const DIRECTORY_ENTRY_KEYS = new Set([
   "directory_id",
@@ -212,16 +270,47 @@ export interface GallerySourceSummary {
   readonly display_name: string;
   readonly availability: GallerySourceAvailability;
   readonly asset_count: number;
+  readonly candidate_count: number;
+  readonly kept_count: number;
+  readonly removed_count: number;
   readonly crawl_complete: boolean;
   readonly dedup_required: boolean;
   readonly dedup_state: GalleryDedupState;
   readonly dedup_applied_version: number;
+  readonly reconciliation_state: GalleryReconciliationState;
+  readonly reconciliation_error_code: GalleryReconciliationErrorCode;
+  readonly reconciliation_attempt_count: number;
+  readonly reconciliation_updated_at: number | null;
   readonly content_version: number;
   readonly annotation_version: number;
   readonly indexed_version: number;
   readonly last_scanned_at: number | null;
   readonly created_at: number;
   readonly updated_at: number;
+}
+
+export interface GalleryScanStats {
+  readonly asset_count: number;
+  readonly candidate_count: number;
+  readonly kept_count: number;
+  readonly removed_count: number;
+  readonly directory_count: number;
+  readonly content_changed: boolean;
+  readonly annotation_changed: boolean;
+  readonly indexed_version: number;
+  readonly offline: boolean;
+  readonly skipped_temporary: number;
+  readonly skipped_unsupported: number;
+}
+
+export interface GalleryScanOperation {
+  readonly operation_id: string | null;
+  readonly source_id: string;
+  readonly state: GalleryScanState;
+  readonly started_at: number | null;
+  readonly finished_at: number | null;
+  readonly error_code: GalleryScanErrorCode;
+  readonly stats: GalleryScanStats | null;
 }
 
 export interface GalleryDirectoryEntry {
@@ -371,6 +460,35 @@ function vocabularyValue<T extends string>(value: unknown, choices: ReadonlySet<
 
 export function sanitizeGallerySourceSummary(raw: unknown): GallerySourceSummary {
   const value = strictRecord(raw, SOURCE_SUMMARY_KEYS, "gallery_source_summary");
+  const assetCount = countValue(value.asset_count, "gallery_asset_count", 0);
+  const candidateCount = countValue(value.candidate_count, "gallery_candidate_count", 0);
+  const keptCount =
+    value.kept_count === undefined
+      ? assetCount - candidateCount
+      : countValue(value.kept_count, "gallery_kept_count", 0);
+  const removedCount = countValue(value.removed_count, "gallery_removed_count", 0);
+  if (candidateCount + keptCount !== assetCount || keptCount < 0) {
+    throw new TypeError("invalid_gallery_source_counts");
+  }
+  const reconciliationState =
+    value.reconciliation_state === undefined
+      ? "none"
+      : vocabularyValue(
+          value.reconciliation_state,
+          RECONCILIATION_STATES,
+          "gallery_reconciliation_state",
+        );
+  const reconciliationErrorCode =
+    value.reconciliation_error_code === undefined
+      ? ""
+      : vocabularyValue(
+          value.reconciliation_error_code,
+          RECONCILIATION_ERROR_CODES,
+          "gallery_reconciliation_error_code",
+        );
+  if ((reconciliationState === "failed") !== (reconciliationErrorCode !== "")) {
+    throw new TypeError("invalid_gallery_reconciliation_status");
+  }
   return Object.freeze({
     source_id: idText(value.source_id, "gallery_source_id"),
     root_directory_id: optionalText(value.root_directory_id, "gallery_root_directory_id", 128),
@@ -382,7 +500,10 @@ export function sanitizeGallerySourceSummary(raw: unknown): GallerySourceSummary
       SOURCE_AVAILABILITIES,
       "gallery_source_availability",
     ),
-    asset_count: countValue(value.asset_count, "gallery_asset_count", 0),
+    asset_count: assetCount,
+    candidate_count: candidateCount,
+    kept_count: keptCount,
+    removed_count: removedCount,
     crawl_complete: booleanValue(value.crawl_complete, "gallery_crawl_complete", false),
     dedup_required: booleanValue(value.dedup_required, "gallery_dedup_required", false),
     dedup_state:
@@ -395,6 +516,17 @@ export function sanitizeGallerySourceSummary(raw: unknown): GallerySourceSummary
       "gallery_dedup_applied_version",
       0,
     ),
+    reconciliation_state: reconciliationState,
+    reconciliation_error_code: reconciliationErrorCode,
+    reconciliation_attempt_count: countValue(
+      value.reconciliation_attempt_count,
+      "gallery_reconciliation_attempt_count",
+      0,
+    ),
+    reconciliation_updated_at: optionalEpoch(
+      value.reconciliation_updated_at,
+      "gallery_reconciliation_updated_at",
+    ),
     annotation_version: positiveVersion(
       value.annotation_version,
       "gallery_annotation_version",
@@ -404,6 +536,79 @@ export function sanitizeGallerySourceSummary(raw: unknown): GallerySourceSummary
     last_scanned_at: optionalEpoch(value.last_scanned_at, "gallery_last_scanned_at"),
     created_at: epochValue(value.created_at, "gallery_created_at", 0),
     updated_at: epochValue(value.updated_at, "gallery_updated_at", 0),
+  });
+}
+
+function sanitizeGalleryScanStats(raw: unknown): GalleryScanStats {
+  const value = strictRecord(raw, SCAN_STATS_KEYS, "gallery_scan_stats");
+  const assetCount = countValue(value.asset_count, "gallery_scan_asset_count", 0);
+  const candidateCount = countValue(value.candidate_count, "gallery_scan_candidate_count", 0);
+  const keptCount =
+    value.kept_count === undefined
+      ? assetCount - candidateCount
+      : countValue(value.kept_count, "gallery_scan_kept_count", 0);
+  if (candidateCount + keptCount !== assetCount || keptCount < 0) {
+    throw new TypeError("invalid_gallery_scan_counts");
+  }
+  return Object.freeze({
+    asset_count: assetCount,
+    candidate_count: candidateCount,
+    kept_count: keptCount,
+    removed_count: countValue(value.removed_count, "gallery_scan_removed_count", 0),
+    directory_count: countValue(value.directory_count, "gallery_scan_directory_count", 0),
+    content_changed: booleanValue(value.content_changed, "gallery_scan_content_changed", false),
+    annotation_changed: booleanValue(
+      value.annotation_changed,
+      "gallery_scan_annotation_changed",
+      false,
+    ),
+    indexed_version: nonnegativeVersion(value.indexed_version, "gallery_scan_indexed_version", 0),
+    offline: booleanValue(value.offline, "gallery_scan_offline", false),
+    skipped_temporary: countValue(
+      value.skipped_temporary,
+      "gallery_scan_skipped_temporary",
+      0,
+    ),
+    skipped_unsupported: countValue(
+      value.skipped_unsupported,
+      "gallery_scan_skipped_unsupported",
+      0,
+    ),
+  });
+}
+
+export function sanitizeGalleryScanOperation(raw: unknown): GalleryScanOperation {
+  const value = strictRecord(raw, SCAN_OPERATION_KEYS, "gallery_scan_operation");
+  const state = vocabularyValue(value.state, SCAN_STATES, "gallery_scan_state");
+  const operationId = optionalText(value.operation_id, "gallery_scan_operation_id", 128);
+  const error = vocabularyValue(value.error_code, SCAN_ERROR_CODES, "gallery_scan_error_code");
+  const startedAt = optionalEpoch(value.started_at, "gallery_scan_started_at");
+  const finishedAt = optionalEpoch(value.finished_at, "gallery_scan_finished_at");
+  const stats =
+    value.stats === null || value.stats === undefined ? null : sanitizeGalleryScanStats(value.stats);
+  if ((state === "idle") !== (operationId === null)) {
+    throw new TypeError("invalid_gallery_scan_operation_id");
+  }
+  if ((state === "failed") !== (error !== "")) {
+    throw new TypeError("invalid_gallery_scan_status");
+  }
+  if (
+    (state === "idle" && (startedAt !== null || finishedAt !== null || stats !== null)) ||
+    (state === "running" && (startedAt === null || finishedAt !== null || stats !== null)) ||
+    (state === "succeeded" && (startedAt === null || finishedAt === null || stats === null)) ||
+    (state === "failed" && (startedAt === null || finishedAt === null || stats !== null)) ||
+    (startedAt !== null && finishedAt !== null && finishedAt < startedAt)
+  ) {
+    throw new TypeError("invalid_gallery_scan_lifecycle");
+  }
+  return Object.freeze({
+    operation_id: operationId,
+    source_id: idText(value.source_id, "gallery_source_id"),
+    state,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    error_code: error,
+    stats,
   });
 }
 

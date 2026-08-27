@@ -99,3 +99,91 @@ describe("Gallery directory export service", () => {
     expect(mock.post).not.toHaveBeenCalled();
   });
 });
+
+describe("Gallery source lifecycle service", () => {
+  const sourceProjection = {
+    source_id: "source-1",
+    root_directory_id: "dir-root",
+    kind: "imported",
+    batch_id: null,
+    display_name: "素材",
+    availability: "available",
+    asset_count: 0,
+    candidate_count: 0,
+    kept_count: 0,
+    removed_count: 0,
+    crawl_complete: true,
+    dedup_required: false,
+    dedup_state: "not_required",
+    dedup_applied_version: 0,
+    reconciliation_state: "none",
+    reconciliation_error_code: "",
+    reconciliation_attempt_count: 0,
+    reconciliation_updated_at: null,
+    content_version: 1,
+    annotation_version: 1,
+    indexed_version: 1,
+    last_scanned_at: null,
+    created_at: 1,
+    updated_at: 1,
+  };
+  const scanProjection = {
+    operation_id: "scan-1",
+    source_id: "source-1",
+    state: "running",
+    started_at: 2,
+    finished_at: null,
+    error_code: "",
+    stats: null,
+  };
+
+  it("renames, relinks and unmounts through source-scoped endpoints", async () => {
+    const request = vi.fn(async () => sourceProjection);
+    const post = vi.fn(async () => sourceProjection);
+    const remove = vi.fn(async () => ({ source_id: "source-1", removed: true }));
+    const service = createGalleryService({ request, post, delete: remove } as unknown as ApiClient);
+
+    await expect(service.renameSource("source-1", " 新名称 ")).resolves.toMatchObject({ display_name: "素材" });
+    expect(request).toHaveBeenCalledWith("/api/v1/gallery/sources/source-1", "PATCH", {
+      body: { display_name: "新名称" },
+    });
+    await service.relinkSource("source-1", "/new/root");
+    expect(post).toHaveBeenCalledWith(
+      "/api/v1/gallery/sources/source-1/relink",
+      { root_path: "/new/root" },
+      { idempotencyKey: true },
+    );
+    await service.unmountSource("source-1");
+    expect(remove).toHaveBeenCalledWith("/api/v1/gallery/sources/source-1");
+  });
+
+  it("starts and polls bounded scans and retries reconciliation", async () => {
+    const post = vi.fn(async (path: string) =>
+      path.endsWith("/scan") ? scanProjection : sourceProjection,
+    );
+    const get = vi.fn(async () => scanProjection);
+    const service = createGalleryService({ post, get } as unknown as ApiClient);
+    const abort = new AbortController();
+
+    await expect(service.startSourceScan("source-1")).resolves.toMatchObject({ state: "running" });
+    expect(post).toHaveBeenCalledWith("/api/v1/gallery/sources/source-1/scan");
+    await expect(service.getSourceScan("source-1", abort.signal)).resolves.toMatchObject({ operation_id: "scan-1" });
+    expect(get).toHaveBeenCalledWith("/api/v1/gallery/sources/source-1/scan?view=desktop", { signal: abort.signal });
+    await service.retrySourceReconciliation("source-1");
+    expect(post).toHaveBeenLastCalledWith(
+      "/api/v1/gallery/sources/source-1/reconciliation/retry",
+      undefined,
+      { idempotencyKey: true },
+    );
+  });
+
+  it("rejects malformed lifecycle drafts before transport", async () => {
+    const request = vi.fn();
+    const post = vi.fn();
+    const service = createGalleryService({ request, post } as unknown as ApiClient);
+    await expect(service.renameSource("source-1", "\n")).rejects.toThrow(TypeError);
+    await expect(service.relinkSource("source-1", "bad\npath")).rejects.toThrow(TypeError);
+    expect(request).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+});

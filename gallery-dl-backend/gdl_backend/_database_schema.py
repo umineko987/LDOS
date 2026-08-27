@@ -5,9 +5,10 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION = 8
 GALLERY_EXPORT_SCHEMA_VERSION = 9
+GALLERY_RECONCILIATION_SCHEMA_VERSION = 10
 
 TransactionFactory = Callable[[], AbstractContextManager[sqlite3.Connection]]
 
@@ -398,6 +399,30 @@ def initialize_schema(
         CREATE INDEX IF NOT EXISTS idx_gallery_assets_lifecycle
             ON gallery_assets(source_id, lifecycle_state, dedup_visibility);
 
+        CREATE TABLE IF NOT EXISTS gallery_reconciliation_events (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES gallery_sources(id) ON DELETE CASCADE,
+            batch_id TEXT NOT NULL REFERENCES crawl_batches(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            error_code TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            applied_at REAL,
+            UNIQUE(source_id, batch_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_gallery_reconciliation_events_status
+            ON gallery_reconciliation_events(status, updated_at);
+
+        CREATE TABLE IF NOT EXISTS gallery_reconciliation_items (
+            event_id TEXT NOT NULL REFERENCES gallery_reconciliation_events(id) ON DELETE CASCADE,
+            relative_path TEXT NOT NULL,
+            disposition TEXT NOT NULL,
+            PRIMARY KEY(event_id, relative_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_gallery_reconciliation_items_lookup
+            ON gallery_reconciliation_items(disposition, relative_path);
+
         CREATE TABLE IF NOT EXISTS gallery_file_operations (
             id TEXT PRIMARY KEY,
             kind TEXT NOT NULL,
@@ -561,5 +586,14 @@ def initialize_schema(
         with transaction() as conn:
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
-                (str(CURRENT_SCHEMA_VERSION),),
+                (str(GALLERY_EXPORT_SCHEMA_VERSION),),
+            )
+
+    if schema_version < GALLERY_RECONCILIATION_SCHEMA_VERSION:
+        # v10 迁移：审核结果与 Gallery 可见性之间增加可重试的持久对账事件。
+        # 表已由上方幂等 DDL 建齐；本块只提交自己的明确目标版本。
+        with transaction() as conn:
+            conn.execute(
+                "UPDATE meta SET value=? WHERE key='schema_version'",
+                (str(GALLERY_RECONCILIATION_SCHEMA_VERSION),),
             )

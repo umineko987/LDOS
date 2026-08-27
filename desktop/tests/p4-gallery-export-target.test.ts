@@ -26,7 +26,7 @@ describe("P4 single Gallery directory-export target", () => {
     expect(gallerySource).toContain("startDirectoryExport");
     expect(gallerySource).toContain("getDirectoryExport");
     expect(gallerySource).toContain("cancelDirectoryExport");
-    expect(gallerySource).toContain('selectDirectory("export_target")');
+    expect(gallerySource).toContain('selectPlatformDirectory("export_target")');
     expect(gallerySource).toContain("revealInFileManager");
     expect(gallerySource).not.toContain("setPendingExportSource");
     expect(gallerySource).not.toContain("consumePendingExportSource");
@@ -38,7 +38,7 @@ describe("P4 single Gallery directory-export target", () => {
     expect(galleryServiceSource).toContain("view=desktop");
     expect(galleryServiceSource).toContain("idempotencyKey: true");
     expect(galleryServiceSource).not.toContain("/api/v1/dataset-exports");
-    expect(platformAdapterSource).toContain('"gallery_import" | "export_target"');
+    expect(platformAdapterSource).toContain('"gallery_import" | "gallery_relink" | "export_target"');
   });
 
   it("has no legacy Export source tree or pending-intent bridge", () => {

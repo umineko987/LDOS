@@ -5,6 +5,7 @@ import {
   sanitizeGalleryFileOperationResult,
   sanitizeGalleryDirectoryExportOperation,
   sanitizeGallerySourceSummary,
+  sanitizeGalleryScanOperation,
   sanitizeGallerySourcePage,
   sanitizeGalleryTrashPage,
   validateGalleryQuery,
@@ -13,6 +14,7 @@ import {
   type GalleryDirectoryExportOperation,
   type GalleryFileOperationResult,
   type GallerySourceSummary,
+  type GalleryScanOperation,
   type GalleryTrashPage,
   type GalleryTxtState,
 } from "./model";
@@ -41,6 +43,12 @@ export interface GalleryDirectoryRequest {
 export interface GalleryService {
   listSources(signal: AbortSignal): Promise<readonly GallerySourceSummary[]>;
   importSource(rootPath: string, displayName?: string | null): Promise<GallerySourceSummary>;
+  renameSource(sourceId: string, displayName: string): Promise<GallerySourceSummary>;
+  relinkSource(sourceId: string, rootPath: string): Promise<GallerySourceSummary>;
+  unmountSource(sourceId: string): Promise<void>;
+  startSourceScan(sourceId: string): Promise<GalleryScanOperation>;
+  getSourceScan(sourceId: string, signal?: AbortSignal): Promise<GalleryScanOperation>;
+  retrySourceReconciliation(sourceId: string): Promise<GallerySourceSummary>;
   listDirectoryEntries(
     request: GalleryDirectoryRequest,
     signal: AbortSignal,
@@ -120,6 +128,59 @@ export function createGalleryService(api: ApiClient): GalleryService {
       }
       return sanitizeGallerySourceSummary(
         await api.post(GALLERY_ENDPOINTS.imports, body),
+      );
+    },
+    async renameSource(sourceId, displayName) {
+      const normalized = displayName.trim();
+      if (normalized.length === 0 || normalized.length > 256 || /[\u0000-\u001f]/.test(normalized)) {
+        throw new TypeError("invalid_gallery_source_display_name");
+      }
+      return sanitizeGallerySourceSummary(
+        await api.request(`/api/v1/gallery/sources/${endpointId(sourceId)}`, "PATCH", {
+          body: { display_name: normalized },
+        }),
+      );
+    },
+    async relinkSource(sourceId, rootPath) {
+      if (
+        typeof rootPath !== "string" ||
+        rootPath.trim().length === 0 ||
+        rootPath.length > 4096 ||
+        /[\u0000-\u001f]/.test(rootPath)
+      ) {
+        throw new TypeError("invalid_gallery_relink_root_path");
+      }
+      return sanitizeGallerySourceSummary(
+        await api.post(
+          `/api/v1/gallery/sources/${endpointId(sourceId)}/relink`,
+          { root_path: rootPath.trim() },
+          { idempotencyKey: true },
+        ),
+      );
+    },
+    async unmountSource(sourceId) {
+      await api.delete(`/api/v1/gallery/sources/${endpointId(sourceId)}`);
+    },
+    async startSourceScan(sourceId) {
+      return sanitizeGalleryScanOperation(
+        await api.post(`/api/v1/gallery/sources/${endpointId(sourceId)}/scan`),
+      );
+    },
+    async getSourceScan(sourceId, signal) {
+      return sanitizeGalleryScanOperation(
+        await api.get(
+          `/api/v1/gallery/sources/${endpointId(sourceId)}/scan?view=desktop`,
+          signal === undefined ? undefined : { signal },
+        ),
+      );
+    },
+    async retrySourceReconciliation(sourceId) {
+      return sanitizeGallerySourceSummary(
+        await api.post(
+          `/api/v1/gallery/sources/${endpointId(sourceId)}/reconciliation/retry`,
+          undefined,
+          { idempotencyKey: true },
+        ),
       );
     },
     async listDirectoryEntries(request, signal) {

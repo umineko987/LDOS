@@ -185,7 +185,7 @@ describe("API client", () => {
     for (const path of ["", "healthz", "//evil.example/x", "/\\evil.example/x", "/healthz#secret"]) {
       await expect(client.get(path, { requestId: "valid-id" })).rejects.toThrow("invalid_api_path");
     }
-    expect(() => buildRequestOptions("PATCH" as never)).toThrow("unsupported_http_method");
+    expect(() => buildRequestOptions("TRACE" as never)).toThrow("unsupported_http_method");
     expect(() => buildRequestOptions("GET", { body: {} })).toThrow("get_body_not_allowed");
     expect(() => buildRequestOptions("GET", [] as never)).toThrow("invalid_request_options");
     expect(() => buildRequestOptions("GET", { requestId: "bad id" })).toThrow("invalid_request_id");
