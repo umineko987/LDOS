@@ -7,6 +7,7 @@ TXT 标注读取，以及稳定错误码与 view=desktop 投影约束。
 from __future__ import annotations
 
 import io
+import re
 import tempfile
 import time
 import unittest
@@ -14,8 +15,26 @@ from pathlib import Path
 
 from PIL import Image
 from fastapi.testclient import TestClient
+from fastapi.routing import APIRoute
 
 from gdl_backend.app import ServiceContainer, create_app
+from gdl_backend.api_routes.gallery import (
+    GalleryAnnotationResponse,
+    GalleryAssetEntryResponse,
+    GalleryDirectoryEntryResponse,
+    GalleryDirectoryExportOperationResponse,
+    GalleryDirectoryExportResultResponse,
+    GalleryDirectoryPageResponse,
+    GalleryFileOperationResponse,
+    GalleryPurgeAllTrashResponse,
+    GalleryScanOperationResponse,
+    GalleryScanStatsResponse,
+    GallerySearchPageResponse,
+    GallerySourcePageResponse,
+    GallerySourceResponse,
+    GalleryTrashOperationResponse,
+    GalleryTrashPageResponse,
+)
 from tests.helpers import local_test_client, make_settings
 
 
@@ -24,6 +43,33 @@ def _png_bytes(width: int = 4, height: int = 3) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _included_api_routes(router):
+    for route in router.routes:
+        if isinstance(route, APIRoute):
+            yield route
+            continue
+        original = getattr(route, "original_router", None)
+        if original is not None:
+            yield from _included_api_routes(original)
+
+
+_DESKTOP_GALLERY_MODEL = (
+    Path(__file__).resolve().parents[2] / "desktop/src/apps/gallery/model.ts"
+)
+
+
+def _typescript_key_set(name: str) -> set[str]:
+    source = _DESKTOP_GALLERY_MODEL.read_text(encoding="utf-8")
+    match = re.search(
+        rf"const {re.escape(name)} = new Set(?:<[^>]+>)?\(\[(.*?)\]\);",
+        source,
+        flags=re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError(f"missing desktop Gallery key set: {name}")
+    return set(re.findall(r'"([^"]+)"', match.group(1)))
 
 
 class GalleryApiTestBase(unittest.TestCase):
@@ -627,6 +673,117 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
             },
         )
 
+    def test_gallery_json_routes_use_bounded_response_models(self) -> None:
+        source_keys = {
+            "source_id", "root_directory_id", "kind", "batch_id",
+            "display_name", "availability", "asset_count", "candidate_count",
+            "kept_count", "removed_count", "crawl_complete", "dedup_required",
+            "dedup_state", "content_version", "dedup_applied_version",
+            "reconciliation_state", "reconciliation_error_code",
+            "reconciliation_attempt_count", "reconciliation_updated_at",
+            "annotation_version", "indexed_version", "last_scanned_at",
+            "created_at", "updated_at",
+        }
+        scan_keys = {
+            "operation_id", "source_id", "state", "started_at", "finished_at",
+            "error_code", "stats",
+        }
+        operation_keys = {
+            "operation_id", "kind", "status", "item_count", "has_txt_count",
+        }
+        export_keys = {
+            "operation_id", "state", "current_directory_name",
+            "directory_count", "completed_directory_count",
+            "failed_directory_count", "discovered_file_count",
+            "copied_file_count", "discovered_byte_count", "copied_byte_count",
+            "error_code", "successful_directory_names", "results",
+        }
+        expected = {
+            ("GET", "/api/v1/gallery/sources"): {"sources"},
+            ("GET", "/api/v1/gallery/sources/{source_id}"): source_keys,
+            ("POST", "/api/v1/gallery/imports"): source_keys,
+            ("PATCH", "/api/v1/gallery/sources/{source_id}"): source_keys,
+            ("DELETE", "/api/v1/gallery/sources/{source_id}"): {
+                "source_id", "removed",
+            },
+            ("POST", "/api/v1/gallery/sources/{source_id}/relink"): source_keys,
+            ("POST", "/api/v1/gallery/sources/{source_id}/scan"): scan_keys,
+            ("GET", "/api/v1/gallery/sources/{source_id}/scan"): scan_keys,
+            (
+                "POST",
+                "/api/v1/gallery/sources/{source_id}/reconciliation/retry",
+            ): source_keys,
+            ("GET", "/api/v1/gallery/directories/{directory_id}/entries"): {
+                "directory", "directories", "assets", "directory_cursor",
+                "asset_cursor", "include_descendants", "limit",
+            },
+            ("GET", "/api/v1/gallery/search"): {
+                "scope", "assets", "asset_cursor", "limit",
+            },
+            ("GET", "/api/v1/gallery/assets/{asset_id}"): {"asset"},
+            ("GET", "/api/v1/gallery/assets/{asset_id}/annotation"): {
+                "asset_id", "content", "txt_state", "txt_version",
+                "disk_version",
+            },
+            ("PUT", "/api/v1/gallery/assets/{asset_id}/annotation"): {
+                "asset_id", "content", "txt_state", "txt_version",
+                "disk_version",
+            },
+            ("POST", "/api/v1/gallery/assets/{asset_id}/rename"): operation_keys,
+            ("POST", "/api/v1/gallery/file-operations/trash"): operation_keys,
+            ("POST", "/api/v1/gallery/file-operations/{operation_id}/undo"): operation_keys,
+            ("POST", "/api/v1/gallery/trash/{operation_id}/restore"): operation_keys,
+            ("DELETE", "/api/v1/gallery/trash/{operation_id}"): operation_keys,
+            ("GET", "/api/v1/gallery/trash"): {"operations", "next_cursor"},
+            ("DELETE", "/api/v1/gallery/trash"): {
+                "purged_operations", "purged_items",
+            },
+            ("POST", "/api/v1/gallery/directory-exports"): export_keys,
+            ("GET", "/api/v1/gallery/directory-exports/{operation_id}"): export_keys,
+            ("DELETE", "/api/v1/gallery/directory-exports/{operation_id}"): export_keys,
+        }
+        routes = {
+            (method, route.path): route
+            for route in _included_api_routes(self.app.router)
+            for method in route.methods
+            if route.path.startswith("/api/v1/gallery")
+            and not route.path.endswith("/content")
+            and not route.path.endswith("/thumbnail")
+        }
+        self.assertEqual(set(routes), set(expected))
+        for key, expected_keys in expected.items():
+            with self.subTest(method=key[0], path=key[1]):
+                response_model = routes[key].response_model
+                self.assertIsNotNone(response_model)
+                self.assertEqual(set(response_model.model_fields), expected_keys)
+
+    def test_backend_models_match_desktop_strict_key_contracts(self) -> None:
+        contracts = {
+            "SOURCE_SUMMARY_KEYS": GallerySourceResponse,
+            "SCAN_OPERATION_KEYS": GalleryScanOperationResponse,
+            "SCAN_STATS_KEYS": GalleryScanStatsResponse,
+            "DIRECTORY_ENTRY_KEYS": GalleryDirectoryEntryResponse,
+            "ASSET_ENTRY_KEYS": GalleryAssetEntryResponse,
+            "SOURCE_PAGE_KEYS": GallerySourcePageResponse,
+            "DIRECTORY_PAGE_KEYS": GalleryDirectoryPageResponse,
+            "SEARCH_PAGE_KEYS": GallerySearchPageResponse,
+            "ANNOTATION_KEYS": GalleryAnnotationResponse,
+            "DIRECTORY_EXPORT_OPERATION_KEYS": (
+                GalleryDirectoryExportOperationResponse
+            ),
+            "DIRECTORY_EXPORT_RESULT_KEYS": GalleryDirectoryExportResultResponse,
+            "FILE_OPERATION_RESULT_KEYS": GalleryFileOperationResponse,
+            "PURGE_ALL_TRASH_RESULT_KEYS": GalleryPurgeAllTrashResponse,
+            "TRASH_OPERATION_KEYS": GalleryTrashOperationResponse,
+            "TRASH_PAGE_KEYS": GalleryTrashPageResponse,
+        }
+        for key_set_name, response_model in contracts.items():
+            with self.subTest(key_set=key_set_name):
+                self.assertEqual(
+                    set(response_model.model_fields),
+                    _typescript_key_set(key_set_name),
+                )
+
     def test_rename_route(self) -> None:
         asset_id = self.assets["pic.jpg"]["asset_id"]
         response = self.client.post(
@@ -678,6 +835,9 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
         self.assertEqual(undo.status_code, 200, undo.text)
         self._assert_file_operation_projection(undo.json())
         self.assertTrue((self.root / "src-a" / "pic.jpg").exists())
+        listing = self.client.get("/api/v1/gallery/trash?view=desktop")
+        self.assertEqual(listing.status_code, 200, listing.text)
+        self.assertEqual(listing.json()["operations"], [])
 
     def test_trash_list_and_purge(self) -> None:
         asset_id = self.assets["pic.jpg"]["asset_id"]
@@ -689,6 +849,25 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
         listing = self.client.get("/api/v1/gallery/trash?view=desktop")
         self.assertEqual(listing.status_code, 200, listing.text)
         self.assertEqual(len(listing.json()["operations"]), 1)
+        trash_item = listing.json()["operations"][0]
+        self.assertEqual(
+            set(trash_item),
+            {
+                "operation_id",
+                "created_at",
+                "item_count",
+                "has_txt_count",
+                "item_error_count",
+                "disk_usage_bytes",
+            },
+        )
+        self.assertGreaterEqual(trash_item["created_at"], 1_000_000_000_000)
+        self.assertEqual(trash_item["item_count"], 1)
+        self.assertEqual(trash_item["has_txt_count"], 1)
+        self.assertEqual(trash_item["item_error_count"], 0)
+        self.assertEqual(
+            trash_item["disk_usage_bytes"], len(_png_bytes()) + len(b"tag_a")
+        )
         purge = self.client.delete(
             f"/api/v1/gallery/trash/{operation['operation_id']}"
         )
@@ -697,6 +876,32 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
         self.assertIsNone(
             self.container.db.gallery.get_asset(asset_id)
         )
+        after_purge = self.client.get("/api/v1/gallery/trash?view=desktop")
+        self.assertEqual(after_purge.status_code, 200, after_purge.text)
+        self.assertEqual(after_purge.json()["operations"], [])
+
+    def test_trash_list_reports_missing_managed_files(self) -> None:
+        asset_id = self.assets["pic.jpg"]["asset_id"]
+        trashed = self.client.post(
+            "/api/v1/gallery/file-operations/trash",
+            json={"asset_ids": [asset_id]},
+        ).json()
+        trash_image = (
+            self.root
+            / "src-a"
+            / ".imageweave"
+            / "trash"
+            / trashed["operation_id"]
+            / "files"
+            / "pic.jpg"
+        )
+        trash_image.unlink()
+
+        listing = self.client.get("/api/v1/gallery/trash?view=desktop")
+        self.assertEqual(listing.status_code, 200, listing.text)
+        trash_item = listing.json()["operations"][0]
+        self.assertEqual(trash_item["item_error_count"], 1)
+        self.assertEqual(trash_item["disk_usage_bytes"], len(b"tag_a"))
 
     def test_purge_all_projection(self) -> None:
         asset_id = self.assets["pic.jpg"]["asset_id"]
@@ -710,6 +915,12 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
         self.assertEqual(
             purged.json(),
             {"purged_operations": 1, "purged_items": 1},
+        )
+        repeated = self.client.delete("/api/v1/gallery/trash")
+        self.assertEqual(repeated.status_code, 200, repeated.text)
+        self.assertEqual(
+            repeated.json(),
+            {"purged_operations": 0, "purged_items": 0},
         )
 
     def test_restore_conflict_409(self) -> None:

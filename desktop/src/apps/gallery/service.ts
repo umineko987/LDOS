@@ -270,8 +270,9 @@ export function createGalleryService(api: ApiClient): GalleryService {
     },
     async cancelDirectoryExport(operationId) {
       return sanitizeGalleryDirectoryExportOperation(
-        await api.post(
-          `${GALLERY_ENDPOINTS.directoryExports}/${endpointId(operationId)}/cancel`,
+        await api.delete(
+          `${GALLERY_ENDPOINTS.directoryExports}/${endpointId(operationId)}`,
+          { idempotencyKey: true },
         ),
       );
     },

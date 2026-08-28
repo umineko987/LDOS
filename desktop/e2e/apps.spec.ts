@@ -584,8 +584,8 @@ test.describe("可用应用关键旅程", () => {
     await expect(directoryExport.getByText("复制已取消")).toBeVisible();
     expect(
       api.count(
-        "POST",
-        "/api/v1/gallery/directory-exports/gallery-export-op-01/cancel",
+        "DELETE",
+        "/api/v1/gallery/directory-exports/gallery-export-op-01",
       ),
     ).toBe(1);
     expect(api.unhandled).toEqual([]);

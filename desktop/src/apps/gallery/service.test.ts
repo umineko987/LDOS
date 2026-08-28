@@ -40,13 +40,13 @@ function operation(state: "copying" | "completed" | "failed" | "cancelled" = "co
 
 function api() {
   const get = vi.fn(async () => operation("completed"));
-  const post = vi.fn(async (path: string) =>
-    path.endsWith("/cancel") ? operation("cancelled") : operation(),
-  );
+  const post = vi.fn(async () => operation());
+  const remove = vi.fn(async () => operation("cancelled"));
   return {
-    client: { get, post } as unknown as ApiClient,
+    client: { get, post, delete: remove } as unknown as ApiClient,
     get,
     post,
+    remove,
   };
 }
 
@@ -81,8 +81,9 @@ describe("Gallery directory export service", () => {
     await expect(
       service.cancelDirectoryExport("gallery-directory-export-1"),
     ).resolves.toMatchObject({ state: "cancelled" });
-    expect(mock.post).toHaveBeenLastCalledWith(
-      `${GALLERY_ENDPOINTS.directoryExports}/gallery-directory-export-1/cancel`,
+    expect(mock.remove).toHaveBeenLastCalledWith(
+      `${GALLERY_ENDPOINTS.directoryExports}/gallery-directory-export-1`,
+      { idempotencyKey: true },
     );
   });
 
@@ -120,6 +121,30 @@ describe("Gallery file operation service", () => {
       purged_items: 3,
     });
     expect(remove).toHaveBeenCalledWith(GALLERY_ENDPOINTS.trash);
+  });
+
+  it("loads the bounded trash projection with the desktop view", async () => {
+    const page = {
+      operations: [
+        {
+          operation_id: "trash-1",
+          created_at: 1_700_000_000_000,
+          item_count: 1,
+          has_txt_count: 0,
+          item_error_count: 0,
+          disk_usage_bytes: 1024,
+        },
+      ],
+      next_cursor: null,
+    };
+    const get = vi.fn(async () => page);
+    const service = createGalleryService({ get } as unknown as ApiClient);
+    const controller = new AbortController();
+
+    await expect(service.listTrash(null, controller.signal)).resolves.toEqual(page);
+    expect(get).toHaveBeenCalledWith(`${GALLERY_ENDPOINTS.trash}?view=desktop`, {
+      signal: controller.signal,
+    });
   });
 
   it("rejects internal backend fields leaked by a mutation response", async () => {

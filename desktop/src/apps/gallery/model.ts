@@ -532,7 +532,7 @@ export function sanitizeGallerySourceSummary(raw: unknown): GallerySourceSummary
       "gallery_annotation_version",
       1,
     ),
-    indexed_version: positiveVersion(value.indexed_version, "gallery_indexed_version", 1),
+    indexed_version: nonnegativeVersion(value.indexed_version, "gallery_indexed_version", 0),
     last_scanned_at: optionalEpoch(value.last_scanned_at, "gallery_last_scanned_at"),
     created_at: epochValue(value.created_at, "gallery_created_at", 0),
     updated_at: epochValue(value.updated_at, "gallery_updated_at", 0),

@@ -20,6 +20,7 @@ import {
   sanitizeGalleryPreviewState,
   sanitizeGallerySourceSummary,
   sanitizeGalleryScanOperation,
+  sanitizeGalleryTrashPage,
   updateGalleryPreviewState,
 } from "./model";
 
@@ -104,7 +105,7 @@ describe("gallery target model (G2 安全投影消费)", () => {
       reconciliation_error_code: "",
       reconciliation_attempt_count: 0,
       content_version: 1,
-      indexed_version: 1,
+      indexed_version: 0,
       last_scanned_at: null,
     });
   });
@@ -120,7 +121,7 @@ describe("gallery target model (G2 安全投影消费)", () => {
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, reconciliation_error_code: "review_reconciliation_apply_failed" })).toThrow(TypeError);
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, crawl_complete: 1 })).toThrow(TypeError);
     expect(() => sanitizeGallerySourceSummary({ ...backendSource, display_name: "a\u0000b" })).toThrow(TypeError);
-    expect(() => sanitizeGallerySourceSummary({ ...backendSource, indexed_version: 0 })).toThrow(TypeError);
+    expect(() => sanitizeGallerySourceSummary({ ...backendSource, indexed_version: -1 })).toThrow(TypeError);
   });
 
   it("sanitizes bounded scan progress and rejects lifecycle drift", () => {
@@ -512,6 +513,45 @@ describe("gallery directory export projection", () => {
     ).toThrow(TypeError);
     expect(() =>
       sanitizeGalleryDirectoryExportOperation({ ...operation, state: "paused" }),
+    ).toThrow(TypeError);
+  });
+});
+
+describe("gallery trash projection", () => {
+  const page = {
+    operations: [
+      {
+        operation_id: "trash-1",
+        created_at: 1_700_000_000_000,
+        item_count: 1,
+        has_txt_count: 1,
+        item_error_count: 0,
+        disk_usage_bytes: 4096,
+      },
+    ],
+    next_cursor: null,
+  };
+
+  it("accepts backend epoch timestamps and freezes the public projection", () => {
+    const projected = sanitizeGalleryTrashPage(page);
+    expect(projected).toEqual(page);
+    expect(Object.isFrozen(projected)).toBe(true);
+    expect(Object.isFrozen(projected.operations)).toBe(true);
+    expect(Object.isFrozen(projected.operations[0])).toBe(true);
+  });
+
+  it("rejects leaked internal trash fields and invalid counters", () => {
+    expect(() =>
+      sanitizeGalleryTrashPage({
+        ...page,
+        operations: [{ ...page.operations[0], source_ids: ["source-1"] }],
+      }),
+    ).toThrow(TypeError);
+    expect(() =>
+      sanitizeGalleryTrashPage({
+        ...page,
+        operations: [{ ...page.operations[0], item_error_count: -1 }],
+      }),
     ).toThrow(TypeError);
   });
 });

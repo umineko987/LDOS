@@ -1092,9 +1092,9 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       return;
     }
     const directoryExportCancelMatch = url.pathname.match(
-      /^\/api\/v1\/gallery\/directory-exports\/([^/]+)\/cancel$/,
+      /^\/api\/v1\/gallery\/directory-exports\/([^/]+)$/,
     );
-    if (directoryExportCancelMatch && request.method() === "POST") {
+    if (directoryExportCancelMatch && request.method() === "DELETE") {
       await respond(route, directoryExportOperation("cancelled"));
       return;
     }

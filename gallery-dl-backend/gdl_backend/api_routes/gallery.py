@@ -98,6 +98,184 @@ class GalleryPurgeAllTrashResponse(BaseModel):
     purged_items: int = Field(ge=0)
 
 
+class GalleryTrashOperationResponse(BaseModel):
+    operation_id: str = Field(min_length=1, max_length=128)
+    created_at: int = Field(ge=0)
+    item_count: int = Field(ge=0)
+    has_txt_count: int = Field(ge=0)
+    item_error_count: int = Field(ge=0)
+    disk_usage_bytes: int = Field(ge=0)
+
+
+class GalleryTrashPageResponse(BaseModel):
+    operations: list[GalleryTrashOperationResponse] = Field(max_length=200)
+    next_cursor: str | None = Field(default=None, max_length=128)
+
+
+class GallerySourceResponse(BaseModel):
+    source_id: str = Field(min_length=1, max_length=128)
+    root_directory_id: str | None = Field(default=None, max_length=128)
+    kind: Literal["imported", "crawl_batch"]
+    batch_id: str | None = Field(default=None, max_length=128)
+    display_name: str = Field(max_length=256)
+    availability: Literal["available", "offline", "conflict", "scanning", "error"]
+    asset_count: int = Field(ge=0)
+    candidate_count: int = Field(ge=0)
+    kept_count: int = Field(ge=0)
+    removed_count: int = Field(ge=0)
+    crawl_complete: bool
+    dedup_required: bool
+    dedup_state: Literal[
+        "not_required", "pending_analysis", "review_pending", "applied", "stale"
+    ]
+    content_version: int = Field(ge=1)
+    dedup_applied_version: int = Field(ge=0)
+    reconciliation_state: Literal["none", "pending", "failed", "applied"]
+    reconciliation_error_code: Literal["", "review_reconciliation_apply_failed"]
+    reconciliation_attempt_count: int = Field(ge=0)
+    reconciliation_updated_at: float | None = Field(default=None, ge=0)
+    annotation_version: int = Field(ge=1)
+    indexed_version: int = Field(ge=0)
+    last_scanned_at: float | None = Field(default=None, ge=0)
+    created_at: float = Field(ge=0)
+    updated_at: float = Field(ge=0)
+
+
+class GallerySourcePageResponse(BaseModel):
+    sources: list[GallerySourceResponse]
+
+
+class GallerySourceRemovedResponse(BaseModel):
+    source_id: str = Field(min_length=1, max_length=128)
+    removed: Literal[True]
+
+
+class GalleryScanStatsResponse(BaseModel):
+    asset_count: int = Field(ge=0)
+    candidate_count: int = Field(ge=0)
+    kept_count: int = Field(ge=0)
+    removed_count: int = Field(ge=0)
+    directory_count: int = Field(ge=0)
+    content_changed: bool
+    annotation_changed: bool
+    indexed_version: int = Field(ge=0)
+    offline: bool
+    skipped_temporary: int = Field(ge=0)
+    skipped_unsupported: int = Field(ge=0)
+
+
+class GalleryScanOperationResponse(BaseModel):
+    operation_id: str | None = Field(default=None, max_length=128)
+    source_id: str = Field(min_length=1, max_length=128)
+    state: Literal["idle", "running", "succeeded", "failed"]
+    started_at: float | None = Field(default=None, ge=0)
+    finished_at: float | None = Field(default=None, ge=0)
+    error_code: Literal[
+        "", "scan_failed", "source_not_found", "source_offline", "io_error",
+        "scan_interrupted",
+    ]
+    stats: GalleryScanStatsResponse | None = None
+
+
+class GalleryDirectoryEntryResponse(BaseModel):
+    directory_id: str = Field(min_length=1, max_length=128)
+    source_id: str = Field(min_length=1, max_length=128)
+    parent_id: str | None = Field(default=None, max_length=128)
+    relative_path: str = Field(max_length=4096)
+    name: str = Field(max_length=255)
+    direct_directory_count: int = Field(ge=0)
+    direct_asset_count: int = Field(ge=0)
+    recursive_asset_count: int = Field(ge=0)
+    cover_asset_ids: list[str] = Field(max_length=9)
+    indexed_version: int = Field(ge=1)
+
+
+class GalleryAssetEntryResponse(BaseModel):
+    asset_id: str = Field(min_length=1, max_length=128)
+    source_id: str | None = Field(default=None, max_length=128)
+    directory_id: str | None = Field(default=None, max_length=128)
+    relative_path: str = Field(min_length=1, max_length=4096)
+    name: str = Field(min_length=1, max_length=255)
+    extension: str = Field(max_length=16)
+    size_bytes: int = Field(ge=0)
+    modified_ns: int = Field(ge=0)
+    content_sha256: str = Field(max_length=64)
+    content_version: int = Field(ge=1)
+    format: str = Field(max_length=16)
+    width: int = Field(ge=0)
+    height: int = Field(ge=0)
+    read_state: Literal["pending", "ok", "failed"]
+    error_code: str = Field(max_length=128)
+    txt_relative_path: str | None = Field(default=None, max_length=4096)
+    txt_size_bytes: int = Field(ge=0)
+    txt_modified_ns: int = Field(ge=0)
+    txt_version: int = Field(ge=1)
+    txt_state: Literal[
+        "normal", "missing", "blank", "invalid_encoding", "pair_conflict", "io_error"
+    ]
+    dedup_visibility: Literal["candidate", "kept", "excluded"]
+    lifecycle_state: Literal["active", "missing", "trashed"]
+    updated_at: float = Field(ge=0)
+
+
+class GalleryDirectoryPageResponse(BaseModel):
+    directory: GalleryDirectoryEntryResponse
+    directories: list[GalleryDirectoryEntryResponse]
+    assets: list[GalleryAssetEntryResponse]
+    directory_cursor: str | None = Field(default=None, max_length=512)
+    asset_cursor: str | None = Field(default=None, max_length=512)
+    include_descendants: bool
+    limit: int = Field(ge=1, le=200)
+
+
+class GallerySearchPageResponse(BaseModel):
+    scope: Literal["directory", "source", "library"]
+    assets: list[GalleryAssetEntryResponse]
+    asset_cursor: str | None = Field(default=None, max_length=512)
+    limit: int = Field(ge=1, le=200)
+
+
+class GalleryAssetEnvelopeResponse(BaseModel):
+    asset: GalleryAssetEntryResponse
+
+
+class GalleryAnnotationResponse(BaseModel):
+    asset_id: str = Field(min_length=1, max_length=128)
+    txt_state: Literal[
+        "normal", "missing", "blank", "invalid_encoding", "pair_conflict", "io_error"
+    ]
+    content: str | None = Field(default=None, max_length=2 * 1024 * 1024)
+    txt_version: int = Field(ge=0)
+    disk_version: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+
+
+class GalleryDirectoryExportResultResponse(BaseModel):
+    directory_name: str = Field(max_length=255)
+    status: Literal["completed", "failed", "cancelled"]
+    copied_file_count: int = Field(ge=0)
+    copied_byte_count: int = Field(ge=0)
+    error_code: str | None = Field(default=None, max_length=128)
+
+
+class GalleryDirectoryExportOperationResponse(BaseModel):
+    operation_id: str = Field(min_length=1, max_length=MAX_DIRECTORY_EXPORT_ID_LENGTH)
+    state: Literal["copying", "completed", "failed", "cancelled"]
+    current_directory_name: str | None = Field(default=None, max_length=255)
+    directory_count: int = Field(ge=1, le=MAX_DIRECTORY_EXPORT_SELECTIONS)
+    completed_directory_count: int = Field(ge=0)
+    failed_directory_count: int = Field(ge=0)
+    discovered_file_count: int = Field(ge=0)
+    copied_file_count: int = Field(ge=0)
+    discovered_byte_count: int = Field(ge=0)
+    copied_byte_count: int = Field(ge=0)
+    error_code: str | None = Field(default=None, max_length=128)
+    successful_directory_names: list[str] = Field(
+        max_length=MAX_DIRECTORY_EXPORT_SELECTIONS
+    )
+    results: list[GalleryDirectoryExportResultResponse] = Field(
+        max_length=MAX_DIRECTORY_EXPORT_SELECTIONS
+    )
+
 GalleryDirectoryExportId = Annotated[
     str,
     Field(min_length=1, max_length=MAX_DIRECTORY_EXPORT_ID_LENGTH),
@@ -201,7 +379,7 @@ def create_gallery_router() -> APIRouter:
 
     # ---- §7.1 来源与目录 ----
 
-    @router.get("/gallery/sources")
+    @router.get("/gallery/sources", response_model=GallerySourcePageResponse)
     async def list_gallery_sources(
         view: Literal["desktop"] = "desktop",
         container: Any = Depends(get_service),
@@ -209,7 +387,9 @@ def create_gallery_router() -> APIRouter:
         catalog: GalleryCatalogService = container.gallery_catalog
         return {"sources": catalog.list_sources()}
 
-    @router.get("/gallery/sources/{source_id}")
+    @router.get(
+        "/gallery/sources/{source_id}", response_model=GallerySourceResponse
+    )
     async def get_gallery_source(
         source_id: str,
         view: Literal["desktop"] = "desktop",
@@ -221,7 +401,9 @@ def create_gallery_router() -> APIRouter:
         except GallerySourceNotFound:
             raise _source_not_found(source_id) from None
 
-    @router.post("/gallery/imports", status_code=201)
+    @router.post(
+        "/gallery/imports", status_code=201, response_model=GallerySourceResponse
+    )
     async def import_gallery_source(
         request: GalleryImportRequest,
         container: Any = Depends(get_service),
@@ -247,7 +429,9 @@ def create_gallery_router() -> APIRouter:
         catalog.start_scan(source["source_id"])
         return source
 
-    @router.patch("/gallery/sources/{source_id}")
+    @router.patch(
+        "/gallery/sources/{source_id}", response_model=GallerySourceResponse
+    )
     async def patch_gallery_source(
         source_id: str,
         request: GallerySourcePatchRequest,
@@ -263,7 +447,9 @@ def create_gallery_router() -> APIRouter:
         except ValueError:
             raise ApiError(422, "invalid_display_name", "显示名不能为空") from None
 
-    @router.delete("/gallery/sources/{source_id}")
+    @router.delete(
+        "/gallery/sources/{source_id}", response_model=GallerySourceRemovedResponse
+    )
     async def delete_gallery_source(
         source_id: str,
         container: Any = Depends(get_service),
@@ -281,7 +467,9 @@ def create_gallery_router() -> APIRouter:
             ) from None
         return {"source_id": source_id, "removed": True}
 
-    @router.post("/gallery/sources/{source_id}/relink")
+    @router.post(
+        "/gallery/sources/{source_id}/relink", response_model=GallerySourceResponse
+    )
     async def relink_gallery_source(
         source_id: str,
         request: GalleryRelinkRequest,
@@ -315,7 +503,11 @@ def create_gallery_router() -> APIRouter:
             pass
         return source
 
-    @router.post("/gallery/sources/{source_id}/scan", status_code=202)
+    @router.post(
+        "/gallery/sources/{source_id}/scan",
+        status_code=202,
+        response_model=GalleryScanOperationResponse,
+    )
     async def start_gallery_scan(
         source_id: str,
         container: Any = Depends(get_service),
@@ -332,7 +524,9 @@ def create_gallery_router() -> APIRouter:
                 409, "source_scan_in_progress", "该来源已有扫描正在进行"
             ) from None
 
-    @router.get("/gallery/sources/{source_id}/scan")
+    @router.get(
+        "/gallery/sources/{source_id}/scan", response_model=GalleryScanOperationResponse
+    )
     async def get_gallery_scan(
         source_id: str,
         view: Literal["desktop"] = "desktop",
@@ -346,7 +540,9 @@ def create_gallery_router() -> APIRouter:
 
 
     @router.post(
-        "/gallery/sources/{source_id}/reconciliation/retry", status_code=202
+        "/gallery/sources/{source_id}/reconciliation/retry",
+        status_code=202,
+        response_model=GallerySourceResponse,
     )
     async def retry_gallery_reconciliation(
         source_id: str,
@@ -374,7 +570,10 @@ def create_gallery_router() -> APIRouter:
                 "去重对账重试失败，请稍后重试",
             ) from None
 
-    @router.get("/gallery/directories/{directory_id}/entries")
+    @router.get(
+        "/gallery/directories/{directory_id}/entries",
+        response_model=GalleryDirectoryPageResponse,
+    )
     async def list_gallery_directory_entries(
         directory_id: str,
         view: Literal["desktop"] = "desktop",
@@ -408,7 +607,7 @@ def create_gallery_router() -> APIRouter:
                 raise ApiError(422, "invalid_page_limit", "分页大小超出范围") from None
             raise ApiError(422, "invalid_gallery_request", "请求参数无效") from None
 
-    @router.get("/gallery/search")
+    @router.get("/gallery/search", response_model=GallerySearchPageResponse)
     async def search_gallery_assets(
         query: str = Query(..., min_length=1, max_length=256),
         scope: Literal["directory", "source", "library"] = Query(...),
@@ -451,7 +650,9 @@ def create_gallery_router() -> APIRouter:
 
     # ---- §7.2 资产、TXT 与缩略图 ----
 
-    @router.get("/gallery/assets/{asset_id}")
+    @router.get(
+        "/gallery/assets/{asset_id}", response_model=GalleryAssetEnvelopeResponse
+    )
     async def get_gallery_asset(
         asset_id: str,
         view: Literal["desktop"] = "desktop",
@@ -535,7 +736,10 @@ def create_gallery_router() -> APIRouter:
             },
         )
 
-    @router.get("/gallery/assets/{asset_id}/annotation")
+    @router.get(
+        "/gallery/assets/{asset_id}/annotation",
+        response_model=GalleryAnnotationResponse,
+    )
     async def get_gallery_asset_annotation(
         asset_id: str,
         view: Literal["desktop"] = "desktop",
@@ -551,7 +755,10 @@ def create_gallery_router() -> APIRouter:
         except GalleryAnnotationError as error:
             status = 409 if error.code == "unsafe_source_path" else 422
             raise ApiError(status, error.code, "TXT 文件当前不可安全读取") from None
-    @router.put("/gallery/assets/{asset_id}/annotation")
+    @router.put(
+        "/gallery/assets/{asset_id}/annotation",
+        response_model=GalleryAnnotationResponse,
+    )
     async def put_gallery_asset_annotation(
         asset_id: str,
         request: GalleryAnnotationPutRequest,
@@ -638,7 +845,7 @@ def create_gallery_router() -> APIRouter:
         except GalleryFileOperationError as error:
             raise _file_operation_api_error(error, asset_ids=request.asset_ids) from None
 
-    @router.get("/gallery/trash")
+    @router.get("/gallery/trash", response_model=GalleryTrashPageResponse)
     async def list_trash(
         view: Literal["desktop"] = Query(...),
         cursor: str | None = Query(default=None),
@@ -715,7 +922,11 @@ def create_gallery_router() -> APIRouter:
 
     # ---- Gallery-owned short-lived directory export ----
 
-    @router.post("/gallery/directory-exports", status_code=202)
+    @router.post(
+        "/gallery/directory-exports",
+        status_code=202,
+        response_model=GalleryDirectoryExportOperationResponse,
+    )
     async def start_gallery_directory_export(
         request: GalleryDirectoryExportRequest,
         container: Any = Depends(get_service),
@@ -732,7 +943,10 @@ def create_gallery_router() -> APIRouter:
         except GalleryDirectoryExportError as error:
             raise _directory_export_api_error(error) from None
 
-    @router.get("/gallery/directory-exports/{operation_id}")
+    @router.get(
+        "/gallery/directory-exports/{operation_id}",
+        response_model=GalleryDirectoryExportOperationResponse,
+    )
     async def get_gallery_directory_export(
         operation_id: GalleryDirectoryExportId,
         view: Literal["desktop"] = Query(...),
@@ -744,7 +958,10 @@ def create_gallery_router() -> APIRouter:
         except GalleryDirectoryExportError as error:
             raise _directory_export_api_error(error) from None
 
-    @router.delete("/gallery/directory-exports/{operation_id}")
+    @router.delete(
+        "/gallery/directory-exports/{operation_id}",
+        response_model=GalleryDirectoryExportOperationResponse,
+    )
     async def cancel_gallery_directory_export(
         operation_id: GalleryDirectoryExportId,
         container: Any = Depends(get_service),

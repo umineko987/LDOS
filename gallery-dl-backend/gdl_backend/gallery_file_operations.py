@@ -1113,18 +1113,107 @@ class GalleryFileOperations:
         with self._repo._read() as conn:  # noqa: SLF001
             rows = conn.execute(
                 """
-                SELECT * FROM gallery_file_operations
-                WHERE kind='trash' AND status='committed'
-                ORDER BY created_at DESC
+                SELECT operations.*
+                FROM gallery_file_operations AS operations
+                WHERE operations.kind='trash'
+                  AND operations.status='committed'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM gallery_file_operation_items AS items
+                      JOIN gallery_assets AS assets ON assets.id=items.asset_id
+                      WHERE items.operation_id=operations.id
+                        AND items.status='done'
+                        AND assets.lifecycle_state='trashed'
+                  )
+                ORDER BY operations.created_at DESC
                 """
             ).fetchall()
         return [_project_operation_row(row) for row in rows]
+
+    def _trash_operation_summary(
+        self, operation: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        operation_id = str(operation["operation_id"])
+        with self._repo._read() as conn:  # noqa: SLF001
+            rows = conn.execute(
+                """
+                SELECT items.*, assets.txt_relative_path AS asset_txt_relative_path
+                FROM gallery_file_operation_items AS items
+                JOIN gallery_assets AS assets ON assets.id=items.asset_id
+                WHERE items.operation_id=?
+                  AND items.status='done'
+                  AND assets.lifecycle_state='trashed'
+                ORDER BY items.ordinal
+                """,
+                (operation_id,),
+            ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            item = _project_item_row(row)
+            item["txt_relative_path"] = str(row["asset_txt_relative_path"] or "")
+            items.append(item)
+
+        disk_usage_bytes = 0
+        item_error_count = 0
+        items_by_source: dict[str, list[dict[str, Any]]] = {}
+        for item in items:
+            items_by_source.setdefault(item["source_id"], []).append(item)
+        files_relative = str(trash_files_relative_dir(operation_id))
+        for source_id, source_items in items_by_source.items():
+            source = self._repo.get_source(source_id)
+            if source is None:
+                item_error_count += len(source_items)
+                continue
+            try:
+                with SafeSourceRoot(source["root_path"]) as safe_root:
+                    for item in source_items:
+                        relative_paths = [
+                            f"{files_relative}/{item['origin_relative_path']}"
+                        ]
+                        if item["has_txt"]:
+                            txt_relative = (
+                                item["txt_relative_path"]
+                                or _txt_target_for_rename(item["origin_relative_path"])
+                            )
+                            relative_paths.append(f"{files_relative}/{txt_relative}")
+                        item_has_error = False
+                        for relative_path in relative_paths:
+                            try:
+                                disk_usage_bytes += safe_root.stat_regular(
+                                    relative_path
+                                ).size
+                            except (OSError, UnsafeSourcePathError):
+                                item_has_error = True
+                        if item_has_error:
+                            item_error_count += 1
+            except (OSError, UnsafeSourcePathError):
+                item_error_count += len(source_items)
+
+        return {
+            "operation_id": operation_id,
+            "created_at": int(round(float(operation["created_at"]) * 1000)),
+            "item_count": len(items),
+            "has_txt_count": sum(1 for item in items if item["has_txt"]),
+            "item_error_count": item_error_count,
+            "disk_usage_bytes": disk_usage_bytes,
+        }
 
     def _repo_list_trash(
         self, *, cursor: str | None, limit: int
     ) -> dict[str, Any]:
         with self._repo._read() as conn:  # noqa: SLF001
-            predicate = "kind='trash' AND status='committed'"
+            predicate = """
+                operations.kind='trash'
+                AND operations.status='committed'
+                AND EXISTS (
+                    SELECT 1
+                    FROM gallery_file_operation_items AS items
+                    JOIN gallery_assets AS assets ON assets.id=items.asset_id
+                    WHERE items.operation_id=operations.id
+                      AND items.status='done'
+                      AND assets.lifecycle_state='trashed'
+                )
+            """
             params: list[Any] = []
             if cursor is not None:
                 row = conn.execute(
@@ -1133,24 +1222,22 @@ class GalleryFileOperations:
                 ).fetchone()
                 if row is None:
                     raise GalleryFileOperationError("invalid_cursor")
-                predicate += " AND (created_at, id) < (?, ?)"
+                predicate += " AND (operations.created_at, operations.id) < (?, ?)"
                 params.extend([row["created_at"], row["id"]])
             rows = conn.execute(
                 f"""
-                SELECT * FROM gallery_file_operations
+                SELECT operations.*
+                FROM gallery_file_operations AS operations
                 WHERE {predicate}
-                ORDER BY created_at DESC, id DESC LIMIT ?
+                ORDER BY operations.created_at DESC, operations.id DESC LIMIT ?
                 """,
                 (*params, limit + 1),
             ).fetchall()
         has_more = len(rows) > limit
         rows = rows[:limit]
-        operations = [_project_operation_row(row) for row in rows]
-        for operation in operations:
-            items = self._repo_list_items(operation["operation_id"])
-            done = [item for item in items if item["status"] == "done"]
-            operation["item_count"] = len(done)
-            operation["has_txt_count"] = sum(1 for i in done if i["has_txt"])
+        operations = [
+            self._trash_operation_summary(_project_operation_row(row)) for row in rows
+        ]
         next_cursor = (
             operations[-1]["operation_id"] if has_more and operations else None
         )
