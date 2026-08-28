@@ -109,6 +109,21 @@
 
   // ---- 选择与查看器（G2-3） ----
   const selectedIds = $derived(new Set(snapshot.selectedAssetIds));
+  const allVisibleItemsSelected = $derived(
+    (snapshot.directories.length > 0 || snapshot.assets.length > 0)
+      && snapshot.directories.every((directory) => selectedDirectoryIds.has(directory.directory_id))
+      && snapshot.assets.every((asset) => selectedIds.has(asset.asset_id)),
+  );
+  function toggleSelectAll(event: Event): void {
+    const checked = (event.currentTarget as HTMLInputElement).checked;
+    if (!checked) {
+      clearVisibleSelection();
+      return;
+    }
+    const sourceLabel = activeSource?.display_name ?? "来源";
+    selectedDirectorySelections = snapshot.directories.map((directory) => exportSelection(directory, sourceLabel));
+    controller.selectAllAssets();
+  }
   const currentAsset = $derived(
     snapshot.viewerAssets[snapshot.viewerIndex] ?? null,
   );
@@ -162,8 +177,16 @@
   );
 
   function requestDeleteSelection(): void {
-    if (snapshot.selectedAssetIds.length === 0) return;
-    controller.requestTrashSelection();
+    if (selectedItemCount === 0) return;
+    controller.requestTrashSelection(
+      snapshot.selectedAssetIds,
+      selectedDirectorySelections.map((selection) => selection.directoryId),
+    );
+  }
+
+  async function confirmTrashSelection(): Promise<void> {
+    const succeeded = await controller.confirmTrashSelection();
+    if (succeeded) clearDirectorySelections();
   }
 
   function requestRenameSelection(): void {
@@ -332,6 +355,31 @@
     return parts.join(" · ");
   }
 
+  function requestSourceRemoval(source: GalleryBrowseState["sources"][number]): void {
+    if (batchDeleteSourceId !== null) return;
+    const isBatch = source.kind === "crawl_batch";
+    const message = isBatch
+      ? "删除批次会递归删除批次下所有文件。\n\n确定删除这个批次吗？"
+      : `解除导入目录“${source.display_name}”？\n\n只会移除 ImageWeave 的来源索引，不会删除原目录中的任何文件。`;
+    if (!window.confirm(message)) return;
+    batchDeleteError = null;
+    batchDeleteSourceId = source.source_id;
+    const request = isBatch
+      ? controller.deleteBatchSource(source.source_id)
+      : controller.unmountSource(source.source_id);
+    void request.then((succeeded) => {
+      if (!succeeded) {
+        batchDeleteError = isBatch
+          ? snapshot.sourcesErrorCode ?? "batch_delete_failed"
+          : snapshot.scanRequestErrorCode ?? "source_unmount_failed";
+      } else {
+        clearDirectorySelections();
+      }
+    }).finally(() => {
+      if (batchDeleteSourceId === source.source_id) batchDeleteSourceId = null;
+    });
+  }
+
   const platform = untrack(() => createPlatformAdapter());
   let platformDirectoryPickerActive = false;
   let platformDirectoryPickerReleaseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -363,6 +411,8 @@
   let sourceManagerName = $state("");
   let sourceManagerPhase: "idle" | "saving" | "relinking" | "unmounting" = $state("idle");
   let sourceManagerError = $state<string | null>(null);
+  let batchDeleteSourceId = $state<string | null>(null);
+  let batchDeleteError = $state<string | null>(null);
   let importWarningPanel = $state<HTMLElement>();
   let importWarningReturnFocus: FocusTarget | null = null;
   let sourceManagerPanel = $state<HTMLElement>();
@@ -551,54 +601,37 @@
     rememberDirectorySelection(selection);
   }
 
-  function sourceRootSelection(
-    source: GalleryBrowseState["sources"][number],
-  ): DirectoryExportSelection | null {
-    if (source.root_directory_id === null) return null;
-    return {
-      directoryId: source.root_directory_id,
-      directoryName: source.display_name,
-      sourceLabel: source.display_name,
-      relativePath: "来源根目录",
-    };
-  }
 
-  function toggleSourceRootSelection(
-    source: GalleryBrowseState["sources"][number],
-  ): void {
-    const selection = sourceRootSelection(source);
-    if (selection === null) return;
-    if (selectedDirectoryIds.has(selection.directoryId)) {
-      selectedDirectorySelections = selectedDirectorySelections.filter(
-        (item) => item.directoryId !== selection.directoryId,
-      );
-      directoryExportSelections = directoryExportSelections.filter(
-        (item) => item.directoryId !== selection.directoryId,
-      );
-      return;
-    }
-    rememberDirectorySelection(selection);
-  }
+  let selectionContextKey: string | null = null;
 
-  function toggleCurrentDirectorySelection(): void {
-    const selection = currentDirectoryExportSelection();
-    if (selection === null) return;
-    if (selectedDirectoryIds.has(selection.directoryId)) {
-      selectedDirectorySelections = selectedDirectorySelections.filter(
-        (item) => item.directoryId !== selection.directoryId,
-      );
-      directoryExportSelections = directoryExportSelections.filter(
-        (item) => item.directoryId !== selection.directoryId,
-      );
-      return;
-    }
-    rememberDirectorySelection(selection);
-  }
-
-  function clearVisibleSelection(): void {
+  function clearDirectorySelections(): void {
     selectedDirectorySelections = [];
     directoryExportSelections = [];
+  }
+
+  function resetBrowseSelection(): void {
+    clearDirectorySelections();
     controller.clearAssetSelection();
+  }
+
+  $effect(() => {
+    const nextSelectionContextKey = [
+      snapshot.activeSourceId ?? "",
+      snapshot.currentDirectory?.directory_id ?? "",
+      snapshot.searchScope,
+      snapshot.query,
+      snapshot.includeDescendants ? "descendants" : "direct",
+      snapshot.txtStateFilter ?? "",
+      snapshot.directories.map((directory) => directory.directory_id).join(","),
+      snapshot.assets.map((asset) => asset.asset_id).join(","),
+    ].join("\u0000");
+    if (selectionContextKey === nextSelectionContextKey) return;
+    selectionContextKey = nextSelectionContextKey;
+    resetBrowseSelection();
+  });
+
+  function clearVisibleSelection(): void {
+    resetBrowseSelection();
   }
 
   function toggleAssetCheckbox(event: Event, asset: GalleryAssetEntry): void {
@@ -1143,34 +1176,37 @@
         <ul class="gallery-source-list">
           {#each snapshot.sources as source (source.source_id)}
             <li>
-              <label class="gallery-selection-control gallery-source__select">
-                <input
-                  type="checkbox"
-                  checked={source.root_directory_id !== null && selectedDirectoryIds.has(source.root_directory_id)}
-                  disabled={source.root_directory_id === null || source.availability !== "available"}
-                  aria-label={`选择目录 ${source.display_name}`}
-                  onclick={(event) => event.stopPropagation()}
-                  onchange={() => toggleSourceRootSelection(source)}
-                />
-                <span>选择目录</span>
-              </label>
-              <button
-                type="button"
-                class="gallery-source"
-                aria-current={snapshot.activeSourceId === source.source_id ? "true" : undefined}
-                onclick={() => void controller.openSource(source.source_id)}
-              >
-                <span class="gallery-source__name">{source.display_name}</span>
-                <span class="gallery-source__meta">{sourceSubtitle(source)}</span>
-                <span class="gallery-source__count">
-                  {#if source.dedup_required}
-                    候选 {formatCount(source.candidate_count)} · 保留 {formatCount(source.kept_count)} · 已移除 {formatCount(source.removed_count)}
-                  {:else}
-                    {formatCount(source.asset_count)} 张图片
-                  {/if}
-                  {source.root_directory_id === null ? " · 待扫描" : ""}
-                </span>
-              </button>
+              <div class="gallery-source-card gallery-source-card--deletable">
+                <button
+                  type="button"
+                  class="gallery-source"
+                  aria-current={snapshot.activeSourceId === source.source_id ? "true" : undefined}
+                  onclick={() => void controller.openSource(source.source_id)}
+                >
+                  <span class="gallery-source__name">{source.display_name}</span>
+                  <span class="gallery-source__meta">{sourceSubtitle(source)}</span>
+                  <span class="gallery-source__count">
+                    {#if source.dedup_required}
+                      候选 {formatCount(source.candidate_count)} · 保留 {formatCount(source.kept_count)} · 已移除 {formatCount(source.removed_count)}
+                    {:else}
+                      {formatCount(source.asset_count)} 张图片
+                    {/if}
+                    {source.root_directory_id === null ? " · 待扫描" : ""}
+                  </span>
+                </button>
+                {#if source.kind === "crawl_batch" || source.kind === "imported"}
+                  <button
+                    type="button"
+                    class="gallery-source__delete"
+                    aria-label={source.kind === "crawl_batch" ? `删除批次 ${source.display_name}` : `解除挂载 ${source.display_name}`}
+                    title={source.kind === "crawl_batch" ? "删除批次" : "解除挂载（保留原文件）"}
+                    disabled={batchDeleteSourceId !== null}
+                    onclick={(event) => { event.stopPropagation(); requestSourceRemoval(source); }}
+                  >
+                    {batchDeleteSourceId === source.source_id ? "…" : "×"}
+                  </button>
+                {/if}
+              </div>
               {#if snapshot.activeSourceId === source.source_id && snapshot.path.length > 0}
                 <ul class="gallery-pathlist" aria-label="当前目录路径">
                   {#each snapshot.path as segment (segment.directory_id)}
@@ -1181,6 +1217,9 @@
             </li>
           {/each}
         </ul>
+        {#if batchDeleteError !== null}
+          <p class="gallery-hint gallery-hint--error" role="alert">来源操作失败（{batchDeleteError}）</p>
+        {/if}
       {/if}
       <div class="gallery-import">
         <button data-gallery-import type="button" onclick={requestImportDirectory} disabled={!canImportDirectories || importPhase !== "idle"}>
@@ -1306,14 +1345,15 @@
               />
             </label>
             {#if snapshot.currentDirectory !== null && activeSource !== null}
-              <label class="gallery-selection-control gallery-current-directory-select">
+              <label class="gallery-selection-control gallery-select-all">
                 <input
                   type="checkbox"
-                  checked={selectedDirectoryIds.has(snapshot.currentDirectory.directory_id)}
-                  aria-label={`选择当前目录 ${snapshot.currentDirectory.name || activeSource.display_name}`}
-                  onchange={toggleCurrentDirectorySelection}
+                  checked={allVisibleItemsSelected}
+                  disabled={snapshot.assets.length === 0 && snapshot.directories.length === 0}
+                  aria-label="全选"
+                  onchange={toggleSelectAll}
                 />
-                <span>选择当前目录</span>
+                <span>全选</span>
               </label>
             {/if}
             <label>
@@ -1337,8 +1377,8 @@
               <button type="button" onclick={clearVisibleSelection}>清除选择</button>
               {#if snapshot.selectedAssetIds.length > 0}
                 <button type="button" onclick={requestRenameSelection} disabled={singleSelectedAsset === null}>重命名…</button>
-                <button type="button" class="gallery-toolbar-danger" onclick={requestDeleteSelection}>删除…</button>
               {/if}
+              <button type="button" class="gallery-toolbar-danger" disabled={selectedItemCount === 0} onclick={requestDeleteSelection}>删除…</button>
             {/if}
             <button
               type="button"
@@ -1374,25 +1414,27 @@
             <ul class="gallery-folders" aria-label="子目录">
               {#each snapshot.directories as directory (directory.directory_id)}
                 <li class:selected={selectedDirectoryIds.has(directory.directory_id)}>
-                  <label class="gallery-selection-control gallery-folder__select">
-                    <input
-                      type="checkbox"
-                      checked={selectedDirectoryIds.has(directory.directory_id)}
-                      aria-label={`选择目录 ${directoryLabel(directory)}`}
-                      onclick={(event) => event.stopPropagation()}
-                      onchange={() => toggleDirectorySelection(directory, activeSource?.display_name ?? "来源")}
-                    />
-                    <span>选择目录</span>
-                  </label>
-                  <button type="button" class="gallery-folder" onclick={() => void controller.openDirectory(directory.directory_id)}>
-                    <span class="gallery-folder__cover" data-count={Math.min(directory.recursive_asset_count, 4)} aria-hidden="true">
-                      {#each directory.cover_asset_ids.slice(0, 4) as coverId (coverId)}
-                        <img src={service.thumbnailUrl(coverId, 256)} alt="" crossorigin="anonymous" loading="lazy" decoding="async" />
-                      {/each}
-                    </span>
-                    <span class="gallery-folder__name">{directoryLabel(directory)}</span>
-                    <span class="gallery-folder__meta">{formatCount(directory.recursive_asset_count)} 张 · {formatCount(directory.direct_asset_count)} 张直属</span>
-                  </button>
+                  <div class="gallery-folder-shell">
+                    <label class="gallery-selection-control gallery-folder__select">
+                      <input
+                        type="checkbox"
+                        checked={selectedDirectoryIds.has(directory.directory_id)}
+                        aria-label={`选择目录 ${directoryLabel(directory)}`}
+                        onclick={(event) => event.stopPropagation()}
+                        onchange={() => toggleDirectorySelection(directory, activeSource?.display_name ?? "来源")}
+                      />
+                      <span>选择目录</span>
+                    </label>
+                    <button type="button" class="gallery-folder" onclick={() => void controller.openDirectory(directory.directory_id)}>
+                      <span class="gallery-folder__cover" data-count={Math.min(directory.recursive_asset_count, 4)} aria-hidden="true">
+                        {#each directory.cover_asset_ids.slice(0, 4) as coverId (coverId)}
+                          <img src={service.thumbnailUrl(coverId, 256)} alt="" crossorigin="anonymous" loading="lazy" decoding="async" />
+                        {/each}
+                      </span>
+                      <span class="gallery-folder__name">{directoryLabel(directory)}</span>
+                      <span class="gallery-folder__meta">{formatCount(directory.recursive_asset_count)} 张 · {formatCount(directory.direct_asset_count)} 张直属</span>
+                    </button>
+                  </div>
                 </li>
               {/each}
               {#if snapshot.directoryCursor !== null}
@@ -1895,6 +1937,7 @@
 
 {#if snapshot.trashConfirmPhase !== "closed"}
   {@const imageCount = snapshot.trashConfirmAssetIds.length}
+  {@const directoryCount = snapshot.trashConfirmDirectoryIds.length}
   {@const txtCount = snapshot.assets.filter((item) => snapshot.trashConfirmAssetIds.includes(item.asset_id) && item.txt_relative_path !== null).length}
   {@const abnormalCount = snapshot.assets.filter((item) => snapshot.trashConfirmAssetIds.includes(item.asset_id) && item.txt_state !== "normal" && item.txt_state !== "missing").length}
   <div class="gallery-dialog-backdrop">
@@ -1907,10 +1950,9 @@
     >
       <h2 id="gallery-trash-confirm-title">移入回收区</h2>
       <p>
-        将删除 <strong>{formatCount(imageCount)}</strong> 张图片、
-        <strong>{formatCount(txtCount)}</strong> 个同名 TXT、
-        <strong>{formatCount(abnormalCount)}</strong> 项 TXT 异常。
-        整组操作可撤销；任何单项失败都会回滚整组。
+        将删除 <strong>{formatCount(directoryCount)}</strong> 个完整目录、<strong>{formatCount(imageCount)}</strong> 张图片、
+        <strong>{formatCount(txtCount)}</strong> 个同名 TXT、<strong>{formatCount(abnormalCount)}</strong> 项 TXT 异常。
+        目录会连同其中未被图库扫描的文件一起移动；整组操作可撤销，任何单项失败都会回滚整组。
       </p>
       {#if snapshot.trashConfirmError !== null}
         <p class="gallery-dialog__error">{snapshot.trashConfirmError}</p>
@@ -1921,7 +1963,7 @@
           type="button"
           class="gallery-dialog__danger"
           disabled={snapshot.trashConfirmPhase === "busy"}
-          onclick={() => void controller.confirmTrashSelection()}
+          onclick={() => void confirmTrashSelection()}
         >移入回收区</button>
       </div>
     </div>

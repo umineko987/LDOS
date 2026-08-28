@@ -563,28 +563,46 @@ class GalleryRepository:
         conn.execute(
             """
             UPDATE gallery_directories SET
+                direct_directory_count=(
+                    SELECT COUNT(*) FROM gallery_directories AS child
+                    WHERE child.parent_id=? AND child.lifecycle_state='active'
+                ),
                 direct_asset_count=(
                     SELECT COUNT(*) FROM gallery_assets
                     WHERE directory_id=? AND lifecycle_state='active'
-                      AND dedup_visibility!='excluded'),
+                      AND dedup_visibility!='excluded'
+                ),
                 recursive_asset_count=(
                     SELECT COUNT(*) FROM gallery_assets
                     WHERE source_id=? AND lifecycle_state='active'
                       AND dedup_visibility!='excluded'
-                      AND (relative_path=? OR relative_path LIKE ?)),
+                      AND (relative_path=? OR relative_path LIKE ?)
+                ),
                 cover_asset_ids_json=(
                     SELECT COALESCE(json_group_array(id), '[]') FROM (
                         SELECT id FROM gallery_assets
                         WHERE source_id=? AND lifecycle_state='active'
                           AND dedup_visibility!='excluded'
                           AND (relative_path=? OR relative_path LIKE ?)
-                        ORDER BY sort_key LIMIT 4)),
+                        ORDER BY sort_key LIMIT 4
+                    )
+                ),
                 updated_at=?
             WHERE source_id=? AND id=?
             """,
-            (directory_id, source_id, relative_path, f"{prefix}%",
-             source_id, relative_path, f"{prefix}%",
-             now, source_id, directory_id),
+            (
+                directory_id,
+                directory_id,
+                source_id,
+                relative_path,
+                f"{prefix}%",
+                source_id,
+                relative_path,
+                f"{prefix}%",
+                now,
+                source_id,
+                directory_id,
+            ),
         )
 
 
@@ -789,8 +807,8 @@ class GalleryRepository:
                         id, source_id, parent_id, relative_path, name, sort_key,
                         direct_directory_count, direct_asset_count,
                         recursive_asset_count, cover_asset_ids_json,
-                        indexed_version, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        indexed_version, lifecycle_state, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         parent_id=excluded.parent_id,
                         name=excluded.name,
@@ -800,6 +818,7 @@ class GalleryRepository:
                         recursive_asset_count=excluded.recursive_asset_count,
                         cover_asset_ids_json=excluded.cover_asset_ids_json,
                         indexed_version=excluded.indexed_version,
+                        lifecycle_state='active',
                         updated_at=excluded.updated_at
                     """,
                     (
@@ -986,12 +1005,14 @@ class GalleryRepository:
                     f"""
                     DELETE FROM gallery_directories
                     WHERE source_id=? AND id NOT IN ({directory_placeholders})
+                      AND lifecycle_state!='trashed'
                     """,
                     (source_id, *seen_directory_ids),
                 )
             else:
                 conn.execute(
-                    "DELETE FROM gallery_directories WHERE source_id=?", (source_id,)
+                    "DELETE FROM gallery_directories "
+                    "WHERE source_id=? AND lifecycle_state!='trashed'", (source_id,)
                 )
 
             for directory_id in seen_directory_ids:
@@ -1092,18 +1113,20 @@ class GalleryRepository:
     def get_directory(self, directory_id: str) -> dict[str, Any] | None:
         with self._read() as conn:
             row = conn.execute(
-                "SELECT * FROM gallery_directories WHERE id=?", (directory_id,)
+                "SELECT * FROM gallery_directories "
+                "WHERE id=? AND lifecycle_state='active'",
+                (directory_id,),
             ).fetchone()
         return None if row is None else self._project_directory_row(row)
 
     def get_root_directory(self, source_id: str) -> dict[str, Any] | None:
         with self._read() as conn:
             row = conn.execute(
-                "SELECT * FROM gallery_directories WHERE source_id=? AND relative_path=''",
+                "SELECT * FROM gallery_directories "
+                "WHERE source_id=? AND relative_path='' AND lifecycle_state='active'",
                 (source_id,),
             ).fetchone()
         return None if row is None else self._project_directory_row(row)
-
     @staticmethod
     def _project_directory_row(row: Any) -> dict[str, Any]:
         return {
@@ -1133,7 +1156,9 @@ class GalleryRepository:
         page_limit = _bounded_limit(limit)
         with self._read() as conn:
             directory_row = conn.execute(
-                "SELECT * FROM gallery_directories WHERE id=?", (directory_id,)
+                "SELECT * FROM gallery_directories "
+                "WHERE id=? AND lifecycle_state='active'",
+                (directory_id,),
             ).fetchone()
             if directory_row is None:
                 raise ValueError("gallery_directory_not_found")
@@ -1170,7 +1195,7 @@ class GalleryRepository:
         limit: int,
     ) -> tuple[list[dict[str, Any]], str | None]:
         params: list[Any] = [directory_id]
-        predicate = "parent_id=?"
+        predicate = "parent_id=? AND lifecycle_state='active'"
         if cursor is not None:
             decoded = _decode_cursor("gallery-directory", cursor)
             predicate += " AND (sort_key, name, id) > (?, ?, ?)"

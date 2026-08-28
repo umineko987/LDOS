@@ -40,6 +40,8 @@ export interface GalleryController {
   renameActiveSource(displayName: string): Promise<boolean>;
   relinkActiveSource(rootPath: string): Promise<boolean>;
   unmountActiveSource(): Promise<boolean>;
+  unmountSource(sourceId: string): Promise<boolean>;
+  deleteBatchSource(sourceId: string): Promise<boolean>;
   openSource(sourceId: string): Promise<boolean>;
   openDirectory(directoryId: string): Promise<boolean>;
   navigateToBreadcrumb(index: number): Promise<boolean>;
@@ -70,7 +72,7 @@ export interface GalleryController {
   submitRename(newStem: string): Promise<boolean>;
   cancelRename(): boolean;
   // ---- G3-3 回收 ----
-  requestTrashSelection(): boolean;
+  requestTrashSelection(assetIds?: readonly string[], directoryIds?: readonly string[]): boolean;
   confirmTrashSelection(): Promise<boolean>;
   cancelTrashConfirm(): boolean;
   undoLastTrash(): Promise<boolean>;
@@ -299,6 +301,22 @@ export function createGalleryController({ store, service }: {
     }
   }
 
+  async function unmountSource(sourceId: string): Promise<boolean> {
+    if (!active || destroyed || !store.getState().sources.some((source) => source.source_id === sourceId)) return false;
+    try {
+      await service.unmountSource(sourceId);
+      if (destroyed) return false;
+      if (store.getState().activeSourceId === sourceId) {
+        clearScanPolling();
+        scanVersion += 1;
+      }
+      return loadSources();
+    } catch (error) {
+      store.patch({ scanRequestErrorCode: errorCode(error) });
+      return false;
+    }
+  }
+
   const controller: GalleryController = {
     activate() {
       if (destroyed) return;
@@ -404,15 +422,24 @@ export function createGalleryController({ store, service }: {
     },
     async unmountActiveSource() {
       const sourceId = store.getState().activeSourceId;
-      if (!active || destroyed || sourceId === null) return false;
+      if (sourceId === null) return false;
+      return unmountSource(sourceId);
+    },
+    async unmountSource(sourceId) {
+      return unmountSource(sourceId);
+    },
+    async deleteBatchSource(sourceId) {
+      if (!active || destroyed) return false;
       try {
-        await service.unmountSource(sourceId);
+        await service.deleteBatchSource(sourceId);
         if (destroyed) return false;
-        clearScanPolling();
-        scanVersion += 1;
+        if (store.getState().activeSourceId === sourceId) {
+          clearScanPolling();
+          scanVersion += 1;
+        }
         return loadSources();
       } catch (error) {
-        store.patch({ scanRequestErrorCode: errorCode(error) });
+        store.patch({ sourcesErrorCode: errorCode(error) });
         return false;
       }
     },
@@ -640,18 +667,27 @@ export function createGalleryController({ store, service }: {
     cancelRename() {
       return run(() => store.closeRenameDialog());
     },
-    requestTrashSelection() {
+    requestTrashSelection(assetIds, directoryIds = []) {
       const state = store.getState();
-      if (state.selectedAssetIds.length === 0) return false;
-      return run(() => store.openTrashConfirm(state.selectedAssetIds));
+      const selectedAssets = assetIds ?? state.selectedAssetIds;
+      if (selectedAssets.length === 0 && directoryIds.length === 0) return false;
+      return run(() => store.openTrashConfirm(selectedAssets, directoryIds));
     },
     async confirmTrashSelection() {
       const state = store.getState();
       if (state.trashConfirmPhase !== "open") return false;
-      if (state.trashConfirmAssetIds.length === 0) return false;
+      if (
+        state.trashConfirmAssetIds.length === 0 &&
+        state.trashConfirmDirectoryIds.length === 0
+      ) return false;
       store.setTrashConfirm("busy", null);
       try {
-        const result = await service.trashAssets(state.trashConfirmAssetIds);
+        const result = state.trashConfirmDirectoryIds.length
+          ? await service.trashAssets(
+              state.trashConfirmAssetIds,
+              state.trashConfirmDirectoryIds,
+            )
+          : await service.trashAssets(state.trashConfirmAssetIds);
         if (destroyed) return false;
         store.closeTrashConfirm();
         store.clearSelection();

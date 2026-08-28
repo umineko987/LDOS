@@ -62,6 +62,7 @@ export interface GalleryService {
   renameSource(sourceId: string, displayName: string): Promise<GallerySourceSummary>;
   relinkSource(sourceId: string, rootPath: string): Promise<GallerySourceSummary>;
   unmountSource(sourceId: string): Promise<void>;
+  deleteBatchSource(sourceId: string): Promise<void>;
   startSourceScan(sourceId: string): Promise<GalleryScanOperation>;
   getSourceScan(sourceId: string, signal?: AbortSignal): Promise<GalleryScanOperation>;
   retrySourceReconciliation(sourceId: string): Promise<GallerySourceSummary>;
@@ -92,7 +93,7 @@ export interface GalleryService {
     expectedDiskVersion: string,
   ): Promise<GalleryAnnotation>;
   renameAsset(assetId: string, newStem: string): Promise<GalleryFileOperationResult>;
-  trashAssets(assetIds: readonly string[]): Promise<GalleryFileOperationResult>;
+  trashAssets(assetIds: readonly string[], directoryIds?: readonly string[]): Promise<GalleryFileOperationResult>;
   undoTrash(operationId: string): Promise<GalleryFileOperationResult>;
   restoreTrash(operationId: string): Promise<GalleryFileOperationResult>;
   purgeTrash(operationId: string): Promise<GalleryFileOperationResult>;
@@ -206,6 +207,11 @@ export function createGalleryService(api: ApiClient): GalleryService {
     async unmountSource(sourceId) {
       await api.delete(`/api/v1/gallery/sources/${endpointId(sourceId)}`);
     },
+    async deleteBatchSource(sourceId) {
+      await api.delete(`/api/v1/gallery/sources/${endpointId(sourceId)}?delete_files=true`, {
+        idempotencyKey: true,
+      });
+    },
     async startSourceScan(sourceId) {
       return sanitizeGalleryScanOperation(
         await api.post(`/api/v1/gallery/sources/${endpointId(sourceId)}/scan`),
@@ -306,13 +312,25 @@ export function createGalleryService(api: ApiClient): GalleryService {
         }),
       );
     },
-    async trashAssets(assetIds) {
-      if (assetIds.length === 0 || assetIds.length > 2000) {
-        throw new TypeError("gallery_trash_assets: invalid asset id count");
+    async trashAssets(assetIds, directoryIds = []) {
+      if (
+        !Array.isArray(assetIds) ||
+        !Array.isArray(directoryIds) ||
+        assetIds.length + directoryIds.length === 0 ||
+        assetIds.length > 2000 ||
+        directoryIds.length > 200 ||
+        assetIds.length + directoryIds.length > 2000 ||
+        new Set(assetIds).size !== assetIds.length ||
+        new Set(directoryIds).size !== directoryIds.length
+      ) {
+        throw new TypeError("gallery_trash_selection: invalid item count");
       }
+      for (const assetId of assetIds) endpointId(assetId);
+      for (const directoryId of directoryIds) endpointId(directoryId);
       return sanitizeGalleryFileOperationResult(
         await api.post(`${GALLERY_ENDPOINTS.fileOperations}/trash`, {
           asset_ids: [...assetIds],
+          directory_ids: [...directoryIds],
         }),
       );
     },

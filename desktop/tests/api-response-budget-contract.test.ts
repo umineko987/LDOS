@@ -63,7 +63,7 @@ describe("desktop API response-budget contract", () => {
   });
   it("fails when an application adds an unclassified transport call", () => {
     const inventory = [
-      ["gallery", galleryServiceSource, 22],
+      ["gallery", galleryServiceSource, 23],
       ["crawl", crawlServiceSource, 3],
       ["tasks", tasksServiceSource, 5],
       ["review", reviewServiceSource, 4],

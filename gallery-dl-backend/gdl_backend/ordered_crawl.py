@@ -307,11 +307,7 @@ class OrderedCrawlManager:
             latest = await self._read_batch_tick_view(batch["id"])
             if self._batch_no_longer_plannable(latest):
                 return
-            address_output = (
-                Path(batch["output_dir"])
-                / f"{int(address['source_order']):02d}-{address['site']}"
-                / f"{int(address['address_order']):04d}"
-            )
+            address_output = Path(batch["output_dir"])
             for chunk_start in range(0, len(deduplicated), _ENQUEUE_CHUNK_SIZE):
                 # 热路径每块只读取一次取消标记，避免按媒体单元重复查询。
                 cancelled = await asyncio.to_thread(

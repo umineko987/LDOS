@@ -67,6 +67,29 @@ class GalleryFileOperationsTestBase(unittest.TestCase):
                 directories.append(child["directory_id"])
         raise AssertionError(f"asset not found: {name}")
 
+    def directory_by_path(self, source_id: str, relative_path: str) -> dict:
+        root_dir = self.db.gallery.get_root_directory(source_id)
+        assert root_dir is not None
+        pending = [root_dir["directory_id"]]
+        while pending:
+            directory_id = pending.pop()
+            with self.db.gallery._read() as conn:  # noqa: SLF001
+                row = conn.execute(
+                    "SELECT * FROM gallery_directories WHERE id=?",
+                    (directory_id,),
+                ).fetchone()
+            assert row is not None
+            directory = self.db.gallery._project_directory_row(row)  # noqa: SLF001
+            if directory["relative_path"] == relative_path:
+                return directory
+            entries = self.db.gallery.list_directory_entries(
+                directory_id=directory_id
+            )
+            pending.extend(
+                child["directory_id"] for child in entries["directories"]
+            )
+        raise AssertionError(f"directory not found: {relative_path}")
+
 
 class RenameTest(GalleryFileOperationsTestBase):
     def setUp(self) -> None:
@@ -166,6 +189,108 @@ class TrashTest(GalleryFileOperationsTestBase):
         self.assertNotIn("a.jpg", names)
         self.assertIn("b.jpg", names)
 
+
+    def test_trash_moves_entire_physical_directory_and_undo_restores_it(self) -> None:
+        # 该文件未被图库扫描，但目录回收仍必须带走全部物理内容。
+        unindexed = self.root / "sub" / "unindexed.bin"
+        nested = self.root / "sub" / "nested" / "notes.dat"
+        unindexed.write_bytes(b"not indexed")
+        nested.parent.mkdir(parents=True)
+        nested.write_bytes(b"nested payload")
+        directory = self.directory_by_path(self.sid, "sub")
+        asset_c = self.asset_by_name(self.sid, "c.jpg")
+        result = self.engine.trash_assets([], [directory["directory_id"]])
+        self.assertEqual(result["status"], "committed")
+        self.assertEqual(result["item_count"], 1)
+        op_id = result["operation_id"]
+        trash_directory = (
+            self.root / ".imageweave" / "trash" / op_id / "files" / "sub"
+        )
+        self.assertTrue((trash_directory / "unindexed.bin").exists())
+        self.assertTrue((trash_directory / "nested" / "notes.dat").exists())
+        self.assertFalse((self.root / "sub").exists())
+        trash_listing = self.engine.list_trash()
+        self.assertEqual([item["operation_id"] for item in trash_listing["operations"]], [op_id])
+        self.assertEqual(trash_listing["operations"][0]["item_count"], 1)
+        self.assertEqual(
+            trash_listing["operations"][0]["disk_usage_bytes"],
+            len(_png_bytes()) + len(b"gamma") + len(b"not indexed") + len(b"nested payload"),
+        )
+        self.assertEqual(
+            self.db.gallery.get_asset(asset_c["asset_id"])["lifecycle_state"],
+            "trashed",
+        )
+        with self.db.gallery._read() as conn:  # noqa: SLF001
+            row = conn.execute(
+                "SELECT lifecycle_state FROM gallery_directories WHERE id=?",
+                (directory["directory_id"],),
+            ).fetchone()
+        self.assertEqual(row["lifecycle_state"], "trashed")
+        undo = self.engine.undo_trash(op_id)
+        self.assertEqual(undo["status"], "committed")
+        self.assertTrue((self.root / "sub" / "unindexed.bin").exists())
+        self.assertTrue((self.root / "sub" / "nested" / "notes.dat").exists())
+        self.assertTrue((self.root / "sub" / "c.jpg").exists())
+        self.assertEqual(
+            self.db.gallery.get_asset(asset_c["asset_id"])["lifecycle_state"],
+            "active",
+        )
+        self.assertTrue(
+            self.db.gallery.get_directory(directory["directory_id"]) is not None
+        )
+
+    def test_mixed_selection_moves_directory_and_outside_asset_once(self) -> None:
+        directory = self.directory_by_path(self.sid, "sub")
+        asset_a = self.asset_by_name(self.sid, "a.jpg")
+        asset_c = self.asset_by_name(self.sid, "c.jpg")
+        result = self.engine.trash_assets(
+            [asset_a["asset_id"], asset_c["asset_id"]],
+            [directory["directory_id"]],
+        )
+        self.assertEqual(result["status"], "committed")
+        self.assertEqual(result["item_count"], 2)
+        operation_id = result["operation_id"]
+        self.assertTrue(
+            (self.root / ".imageweave" / "trash" / operation_id / "files" / "a.jpg").exists()
+        )
+        self.assertTrue(
+            (self.root / ".imageweave" / "trash" / operation_id / "files" / "sub").is_dir()
+        )
+        self.assertFalse((self.root / "a.jpg").exists())
+        self.assertFalse((self.root / "sub").exists())
+        restored = self.engine.undo_trash(operation_id)
+        self.assertEqual(restored["status"], "committed")
+        self.assertTrue((self.root / "a.jpg").exists())
+        self.assertTrue((self.root / "sub" / "c.jpg").exists())
+        self.assertEqual(
+            self.db.gallery.get_asset(asset_a["asset_id"])["lifecycle_state"],
+            "active",
+        )
+        self.assertEqual(
+            self.db.gallery.get_asset(asset_c["asset_id"])["lifecycle_state"],
+            "active",
+        )
+
+
+    def test_purge_directory_removes_physical_tree_and_index_rows(self) -> None:
+        directory = self.directory_by_path(self.sid, "sub")
+        asset_c = self.asset_by_name(self.sid, "c.jpg")
+        result = self.engine.trash_assets([], [directory["directory_id"]])
+        op_id = result["operation_id"]
+        purge = self.engine.purge_trash(op_id)
+        self.assertEqual(purge["status"], "committed")
+        self.assertFalse((self.root / "sub").exists())
+        self.assertFalse(
+            (self.root / ".imageweave" / "trash" / op_id / "files" / "sub").exists()
+        )
+        self.assertIsNone(self.db.gallery.get_asset(asset_c["asset_id"]))
+        with self.db.gallery._read() as conn:  # noqa: SLF001
+            row = conn.execute(
+                "SELECT 1 FROM gallery_directories WHERE id=?",
+                (directory["directory_id"],),
+            ).fetchone()
+        self.assertIsNone(row)
+        self.assertEqual(self.engine.list_trash()["operations"], [])
     def test_batch_trash_atomic_rollback(self) -> None:
         asset_a = self.asset_by_name(self.sid, "a.jpg")
         asset_sub = self.asset_by_name(self.sid, "c.jpg")

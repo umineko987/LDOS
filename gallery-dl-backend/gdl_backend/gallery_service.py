@@ -49,6 +49,15 @@ class GalleryScanInProgress(Exception):
         super().__init__(f"gallery_scan_in_progress:{source_id}")
         self.source_id = source_id
 
+class GalleryBatchDeleteError(Exception):
+    """The physical directory of a downloaded batch could not be removed."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+
 
 class GalleryRootMissing(Exception):
     """导入或重关联指定的来源根目录不存在（source_path_not_found）。"""
@@ -439,6 +448,32 @@ class GalleryCatalogService:
             if job is not None and job["state"] == "running":
                 raise GalleryScanInProgress(source_id)
             self._repo.unregister_source(source_id)
+            self._scan_jobs.pop(source_id, None)
+            self._scan_threads.pop(source_id, None)
+
+    def delete_batch_source(self, source_id: str) -> None:
+        """Delete one downloaded batch directory and its Gallery index."""
+        with self._scan_lock:
+            source = self._repo.get_source(source_id)
+            if source is None:
+                raise GallerySourceNotFound(source_id)
+            if source["kind"] != "crawl_batch":
+                raise ValueError("gallery_batch_source_required")
+            job = self._scan_jobs.get(source_id)
+            if job is not None and job["state"] == "running":
+                raise GalleryScanInProgress(source_id)
+            try:
+                with self._filesystem_locks.hold(f"source:{source_id}"):
+                    with SafeSourceRoot(source["root_path"]) as safe_root:
+                        safe_root.remove_root_tree()
+            except UnsafeSourcePathError as error:
+                if error.reason == "source_root_unavailable":
+                    raise GalleryBatchDeleteError("batch_root_missing") from error
+                raise GalleryBatchDeleteError("batch_delete_failed") from error
+            except OSError as error:
+                raise GalleryBatchDeleteError("batch_delete_failed") from error
+            if not self._repo.unregister_source(source_id):
+                raise GallerySourceNotFound(source_id)
             self._scan_jobs.pop(source_id, None)
             self._scan_threads.pop(source_id, None)
 

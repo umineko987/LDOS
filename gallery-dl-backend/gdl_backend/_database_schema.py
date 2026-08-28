@@ -5,11 +5,11 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION = 8
 GALLERY_EXPORT_SCHEMA_VERSION = 9
 GALLERY_RECONCILIATION_SCHEMA_VERSION = 10
-
+GALLERY_DIRECTORY_TRASH_SCHEMA_VERSION = 11
 TransactionFactory = Callable[[], AbstractContextManager[sqlite3.Connection]]
 
 
@@ -357,6 +357,7 @@ def initialize_schema(
             recursive_asset_count INTEGER NOT NULL DEFAULT 0,
             cover_asset_ids_json TEXT NOT NULL DEFAULT '[]',
             indexed_version INTEGER NOT NULL DEFAULT 0,
+            lifecycle_state TEXT NOT NULL DEFAULT 'active',
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
             UNIQUE(source_id, relative_path)
@@ -439,6 +440,8 @@ def initialize_schema(
             operation_id TEXT NOT NULL REFERENCES gallery_file_operations(id) ON DELETE CASCADE,
             ordinal INTEGER NOT NULL,
             source_id TEXT NOT NULL,
+            item_type TEXT NOT NULL DEFAULT 'asset',
+            directory_id TEXT NOT NULL DEFAULT '',
             asset_id TEXT NOT NULL,
             origin_relative_path TEXT NOT NULL,
             target_relative_path TEXT NOT NULL DEFAULT '',
@@ -597,3 +600,38 @@ def initialize_schema(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(GALLERY_RECONCILIATION_SCHEMA_VERSION),),
             )
+        schema_version = GALLERY_RECONCILIATION_SCHEMA_VERSION
+
+    if schema_version < GALLERY_DIRECTORY_TRASH_SCHEMA_VERSION:
+        # v11 迁移：目录回收需要持久区分目录条目，并保留已移入回收区的目录索引。
+        with transaction() as conn:
+            directory_columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(gallery_directories)")
+            }
+            if "lifecycle_state" not in directory_columns:
+                conn.execute(
+                    "ALTER TABLE gallery_directories ADD COLUMN "
+                    "lifecycle_state TEXT NOT NULL DEFAULT 'active'"
+                )
+            item_columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(gallery_file_operation_items)"
+                )
+            }
+            if "item_type" not in item_columns:
+                conn.execute(
+                    "ALTER TABLE gallery_file_operation_items ADD COLUMN "
+                    "item_type TEXT NOT NULL DEFAULT 'asset'"
+                )
+            if "directory_id" not in item_columns:
+                conn.execute(
+                    "ALTER TABLE gallery_file_operation_items ADD COLUMN "
+                    "directory_id TEXT NOT NULL DEFAULT ''"
+                )
+            conn.execute(
+                "UPDATE meta SET value=? WHERE key='schema_version'",
+                (str(GALLERY_DIRECTORY_TRASH_SCHEMA_VERSION),),
+            )
+        schema_version = GALLERY_DIRECTORY_TRASH_SCHEMA_VERSION

@@ -99,6 +99,8 @@ export interface GalleryBrowseState {
   readonly trashConfirmPhase: GalleryDialogPhase;
   /** 待删除的资产 ID 列表（含关联 TXT 计数由资产数据推导）。 */
   readonly trashConfirmAssetIds: readonly string[];
+  /** 待删除的完整物理目录 ID 列表。 */
+  readonly trashConfirmDirectoryIds: readonly string[];
   readonly trashConfirmError: string | null;
   // ---- 撤销 toast（G3-3） ----
   /** 最近一次回收操作（供撤销）。 */
@@ -161,6 +163,7 @@ export const GALLERY_BROWSE_DEFAULTS: GalleryBrowseState = Object.freeze({
   renameDialogError: null,
   trashConfirmPhase: "closed" as const,
   trashConfirmAssetIds: Object.freeze([]),
+  trashConfirmDirectoryIds: Object.freeze([]),
   trashConfirmError: null,
   undoableOperationId: null,
   undoItemCount: 0,
@@ -232,7 +235,7 @@ export interface GalleryStore {
   setRenameDialog(phase: GalleryDialogPhase, error: string | null): boolean;
   closeRenameDialog(): boolean;
   // ---- G3-3 删除确认 ----
-  openTrashConfirm(assetIds: readonly string[]): boolean;
+  openTrashConfirm(assetIds: readonly string[], directoryIds?: readonly string[]): boolean;
   setTrashConfirm(phase: GalleryDialogPhase, error: string | null): boolean;
   closeTrashConfirm(): boolean;
   // ---- G3-3 撤销 toast ----
@@ -299,6 +302,7 @@ function statesEqual(left: GalleryBrowseState, right: GalleryBrowseState): boole
     left.renameDialogError === right.renameDialogError &&
     left.trashConfirmPhase === right.trashConfirmPhase &&
     left.trashConfirmAssetIds === right.trashConfirmAssetIds &&
+    left.trashConfirmDirectoryIds === right.trashConfirmDirectoryIds &&
     left.trashConfirmError === right.trashConfirmError &&
     left.undoableOperationId === right.undoableOperationId &&
     left.undoItemCount === right.undoItemCount &&
@@ -666,11 +670,13 @@ export function createGalleryStore(): GalleryStore {
         renameDialogError: null,
       });
     },
-    openTrashConfirm(assetIds) {
+    openTrashConfirm(assetIds, directoryIds = []) {
+      if (assetIds.length === 0 && directoryIds.length === 0) return false;
       return publish({
         ...state,
         trashConfirmPhase: "open",
         trashConfirmAssetIds: Object.freeze([...assetIds]),
+        trashConfirmDirectoryIds: Object.freeze([...directoryIds]),
         trashConfirmError: null,
       });
     },
@@ -683,6 +689,7 @@ export function createGalleryStore(): GalleryStore {
         trashConfirmPhase: "closed",
         trashConfirmAssetIds: Object.freeze([]),
         trashConfirmError: null,
+        trashConfirmDirectoryIds: Object.freeze([]),
       });
     },
     showUndoToast(operationId, itemCount) {

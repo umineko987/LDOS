@@ -16,7 +16,7 @@ async function openCurrentGalleryDirectoryExport(
 ) {
   await launchApp(page, "gallery");
   const gallery = appWindow(page, "gallery");
-  await gallery.getByRole("button", { name: "E2E 导入目录" }).click();
+  await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
   await gallery.getByRole("button", { name: "导出目录…" }).click();
   const directoryExport = gallery.getByRole("dialog", { name: "导出完整目录" });
   await expect(directoryExport).toBeVisible();
@@ -298,7 +298,7 @@ test.describe("可用应用关键旅程", () => {
     await launchApp(page, "gallery");
     const gallery = appWindow(page, "gallery");
     await expect(gallery.locator("[data-gallery-app]")).toHaveAttribute("data-preview-availability", "live");
-    await gallery.getByRole("button", { name: "E2E 导入目录" }).click();
+    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
     await expect(gallery.locator("[data-gallery-asset=\"gal-asset-01\"]")).toBeVisible();
     // 虚拟网格在 ResizeObserver 首次回调前只渲染首行；toHaveCount 自动重试等待窗口稳定。
     await expect(gallery.locator("[data-gallery-asset]")).toHaveCount(4);
@@ -349,15 +349,27 @@ test.describe("可用应用关键旅程", () => {
     const api = await bootDesktop(page);
     await launchApp(page, "gallery");
     const gallery = appWindow(page, "gallery");
-    await gallery.getByRole("button", { name: "E2E 导入目录" }).click();
+    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
 
-    await expect(gallery.getByRole("checkbox", { name: "选择目录 E2E 导入目录" })).toBeVisible();
-    await expect(gallery.getByRole("checkbox", { name: "选择当前目录 E2E 导入目录" })).toBeVisible();
-    const folderCheckbox = gallery.getByRole("checkbox", { name: "选择目录 subdir" });
+    await expect(gallery.getByRole("checkbox", { name: "选择目录 E2E 导入目录" })).toHaveCount(0);
+    const selectAll = gallery.getByRole("checkbox", { name: "全选" });
+    await expect(selectAll).toBeVisible();
+    const folderCheckbox = gallery.locator(".gallery-folder-shell").getByRole("checkbox", { name: "选择目录 subdir" });
     await expect(folderCheckbox).toBeVisible();
     const imageCheckboxes = gallery.getByRole("checkbox", { name: /选择图片/ });
     await expect(imageCheckboxes).toHaveCount(4);
+    await selectAll.check();
+    await expect(imageCheckboxes.nth(0)).toBeChecked();
+    await expect(imageCheckboxes.nth(3)).toBeChecked();
+    await expect(folderCheckbox).toBeChecked();
+    await selectAll.uncheck();
+    await expect(folderCheckbox).not.toBeChecked();
 
+    await folderCheckbox.check();
+    const deleteButton = gallery.getByRole("button", { name: "删除…" });
+    await expect(deleteButton).toBeVisible();
+    await expect(deleteButton).toBeEnabled();
+    await folderCheckbox.uncheck();
     await imageCheckboxes.nth(0).check();
     await imageCheckboxes.nth(1).check();
     const selectionSummary = gallery.locator("[data-gallery-selection-summary]");
@@ -378,13 +390,116 @@ test.describe("可用应用关键旅程", () => {
     await expect(selectionSummary).toBeHidden();
     expect(api.unhandled).toEqual([]);
   });
+  test("图库批次卡片可警告并递归删除整个批次", async ({ page }) => {
+    const api = await bootDesktop(page, { galleryScenario: "batch_delete" });
+    await launchApp(page, "gallery");
+    const gallery = appWindow(page, "gallery");
+    const batchCard = gallery.locator(".gallery-source-card--deletable");
+    await expect(batchCard).toHaveCount(1);
+    const deleteButton = batchCard.getByRole("button", { name: "删除批次 E2E 下载批次" });
+
+    page.once("dialog", async (dialog) => {
+      expect(dialog.type()).toBe("confirm");
+      expect(dialog.message()).toContain("删除批次会递归删除批次下所有文件");
+      await dialog.dismiss();
+    });
+    await deleteButton.click();
+    expect(api.count("DELETE", "/api/v1/gallery/sources/gal-src-batch?delete_files=true")).toBe(0);
+
+    page.once("dialog", async (dialog) => {
+      expect(dialog.message()).toContain("删除批次会递归删除批次下所有文件");
+      await dialog.accept();
+    });
+    await deleteButton.click();
+    await expect(gallery.getByText("暂无图库来源")).toBeVisible();
+    expect(api.count("DELETE", "/api/v1/gallery/sources/gal-src-batch?delete_files=true")).toBe(1);
+    expect(api.unhandled).toEqual([]);
+  });
+
+  test("图库导入目录卡片可解除挂载但不删除原文件", async ({ page }) => {
+    const api = await bootDesktop(page);
+    await launchApp(page, "gallery");
+    const gallery = appWindow(page, "gallery");
+    const sourceCard = gallery.locator(".gallery-source-card--deletable");
+    await expect(sourceCard).toHaveCount(1);
+    const removeButton = sourceCard.getByRole("button", { name: "解除挂载 E2E 导入目录" });
+    await expect(removeButton).toBeVisible();
+
+    page.once("dialog", async (dialog) => {
+      expect(dialog.type()).toBe("confirm");
+      expect(dialog.message()).toContain("不会删除原目录中的任何文件");
+      await dialog.dismiss();
+    });
+    await removeButton.click();
+    expect(api.count("DELETE", "/api/v1/gallery/sources/gal-src-import")).toBe(0);
+
+    page.once("dialog", async (dialog) => {
+      expect(dialog.message()).toContain("不会删除原目录中的任何文件");
+      await dialog.accept();
+    });
+    await removeButton.click();
+    await expect(gallery.getByText("暂无图库来源")).toBeVisible();
+    expect(api.count("DELETE", "/api/v1/gallery/sources/gal-src-import")).toBe(1);
+    expect(api.unhandled).toEqual([]);
+  });
+
+
+  test("图库目录删除提交完整目录选择并保留回收撤销入口", async ({ page }) => {
+    const api = await bootDesktop(page);
+    await launchApp(page, "gallery");
+    const gallery = appWindow(page, "gallery");
+    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+
+    await gallery.getByRole("checkbox", { name: "选择目录 subdir" }).check();
+    await gallery.getByRole("button", { name: "删除…" }).click();
+    const confirm = gallery.getByRole("alertdialog", { name: "移入回收区" });
+    await expect(confirm).toContainText("1 个完整目录");
+    await confirm.getByRole("button", { name: "移入回收区" }).click();
+    await expect(confirm).toBeHidden();
+
+    const request = api.requests.find(
+      (entry) => entry.method === "POST" && entry.path === "/api/v1/gallery/file-operations/trash",
+    );
+    expect(request?.body).toEqual({ asset_ids: [], directory_ids: ["gal-dir-sub"] });
+    await expect(gallery.getByRole("button", { name: "subdir" })).toHaveCount(0);
+    expect(api.unhandled).toEqual([]);
+  });
+
+  test("图库切换目录后单张图片删除不会带入残留目录选择", async ({ page }) => {
+    const api = await bootDesktop(page);
+    await launchApp(page, "gallery");
+    const gallery = appWindow(page, "gallery");
+    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+
+    await gallery.getByRole("checkbox", { name: "选择目录 subdir" }).check();
+    await gallery.getByRole("button", { name: "subdir" }).click();
+    const imageCheckbox = gallery.getByRole("checkbox", { name: "选择图片 image-05.jpg" });
+    await expect(imageCheckbox).toBeVisible();
+    await imageCheckbox.check();
+
+    const selectionSummary = gallery.locator("[data-gallery-selection-summary]");
+    await expect(selectionSummary).toContainText("1 张图片");
+    await expect(selectionSummary).not.toContainText("个目录");
+    await gallery.getByRole("button", { name: "删除…" }).click();
+    const confirm = gallery.getByRole("alertdialog", { name: "移入回收区" });
+    await expect(confirm).toContainText("0 个完整目录");
+    await expect(confirm).toContainText("1 张图片");
+    await confirm.getByRole("button", { name: "移入回收区" }).click();
+    await expect(confirm).toBeHidden();
+
+    const request = api.requests.find(
+      (entry) => entry.method === "POST" && entry.path === "/api/v1/gallery/file-operations/trash",
+    );
+    expect(request?.body).toEqual({ asset_ids: ["gal-asset-05"], directory_ids: [] });
+    expect(api.unhandled).toEqual([]);
+  });
 
 
   test("图库呈现扫描失败、原目录管理警告与来源生命周期操作", async ({ page }) => {
     const api = await bootDesktop(page, { galleryScenario: "scan_failed" });
     await launchApp(page, "gallery");
     const gallery = appWindow(page, "gallery");
-    await gallery.getByRole("button", { name: /E2E 导入目录/ }).click();
+    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
 
     const sourceStatus = gallery.locator(".gallery-source-status");
     await expect(sourceStatus.getByText(/直接管理原目录/)).toBeVisible();
@@ -406,7 +521,7 @@ test.describe("可用应用关键旅程", () => {
     manager = gallery.getByRole("dialog", { name: /管理“E2E 导入目录”/ });
     await manager.getByLabel("显示名称").fill("已重命名来源");
     await manager.getByRole("button", { name: "保存名称" }).click();
-    await expect(gallery.getByRole("button", { name: /已重命名来源/ })).toBeVisible();
+    await expect(gallery.locator(".gallery-source").filter({ hasText: "已重命名来源" })).toBeVisible();
     expect(api.count("PATCH", "/api/v1/gallery/sources/gal-src-import")).toBe(1);
 
     await gallery.locator(".gallery-source-status").getByRole("button", { name: "来源设置…" }).click();
@@ -421,7 +536,7 @@ test.describe("可用应用关键旅程", () => {
     const api = await bootDesktop(page, { galleryScenario: "reconciliation_failed" });
     await launchApp(page, "gallery");
     const gallery = appWindow(page, "gallery");
-    await gallery.getByRole("button", { name: /E2E 导入目录/ }).click();
+    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
     const sourceStatus = gallery.locator(".gallery-source-status");
 
     await expect(sourceStatus.getByText("候选")).toBeVisible();
@@ -444,7 +559,7 @@ test.describe("可用应用关键旅程", () => {
     const api = await bootDesktop(page);
     await launchApp(page, "gallery");
     const gallery = appWindow(page, "gallery");
-    await gallery.getByRole("button", { name: /E2E 导入目录/ }).click();
+    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
 
     await gallery.getByRole("combobox", { name: "范围", exact: true }).selectOption("library");
     await gallery.getByLabel("搜索当前范围").fill("image");
@@ -539,7 +654,7 @@ test.describe("可用应用关键旅程", () => {
     const api = await bootDesktop(page);
     await launchApp(page, "gallery");
     const gallery = appWindow(page, "gallery");
-    await gallery.getByRole("button", { name: /E2E 导入目录/ }).click();
+    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
 
     const trashFirstTwoFromViewer = async () => {
       await gallery.locator('[data-gallery-asset="gal-asset-01"]').dblclick();

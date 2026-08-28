@@ -23,6 +23,7 @@ from .._database_gallery_repository import (
 )
 from ..gallery_catalog import TXT_STATES
 from ..gallery_service import (
+    GalleryBatchDeleteError,
     GalleryAnnotationError,
     GalleryAssetFileError,
     GalleryAssetNotFound,
@@ -82,8 +83,8 @@ class GalleryRenameRequest(BaseModel):
 
 
 class GalleryTrashRequest(BaseModel):
-    asset_ids: list[str] = Field(min_length=1, max_length=2000)
-
+    asset_ids: list[str] = Field(default_factory=list, max_length=2000)
+    directory_ids: list[str] = Field(default_factory=list, max_length=200)
 
 class GalleryFileOperationResponse(BaseModel):
     operation_id: str = Field(min_length=1, max_length=128)
@@ -298,6 +299,15 @@ def _asset_not_found(asset_id: str) -> ApiError:
 
 _FILE_OPERATION_ERROR_STATUS: dict[str, int] = {
     "asset_not_found": 404,
+    "directory_not_found": 404,
+    "directory_root_not_deletable": 409,
+    "directory_selection_overlap": 409,
+    "directory_selection_invalid": 422,
+    "selection_required": 422,
+    "directory_missing": 409,
+    "trash_directory_missing": 409,
+    "directory_rename_not_supported": 409,
+    "trash_operation_not_found": 409,
     "asset_not_active": 409,
     "operation_not_found": 404,
     "source_not_found": 404,
@@ -324,6 +334,7 @@ def _file_operation_api_error(
     *,
     asset_id: str | None = None,
     asset_ids: list[str] | None = None,
+    directory_ids: list[str] | None = None,
     operation_id: str | None = None,
 ) -> ApiError:
     status = _FILE_OPERATION_ERROR_STATUS.get(error.code, 500)
@@ -332,6 +343,8 @@ def _file_operation_api_error(
         details.setdefault("asset_id", asset_id)
     if asset_ids is not None:
         details.setdefault("asset_ids", asset_ids)
+    if directory_ids is not None:
+        details.setdefault("directory_ids", directory_ids)
     if operation_id is not None:
         details.setdefault("operation_id", operation_id)
     return ApiError(status, error.code, "图库文件操作失败", details=details)
@@ -452,21 +465,34 @@ def create_gallery_router() -> APIRouter:
     )
     async def delete_gallery_source(
         source_id: str,
+        delete_files: bool = Query(default=False),
         container: Any = Depends(get_service),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> Any:
         validate_idempotency_key(idempotency_key)
         catalog: GalleryCatalogService = container.gallery_catalog
         try:
-            catalog.unregister_source(source_id)
+            if delete_files:
+                catalog.delete_batch_source(source_id)
+            else:
+                catalog.unregister_source(source_id)
         except GallerySourceNotFound:
             raise _source_not_found(source_id) from None
+        except GalleryBatchDeleteError as error:
+            raise ApiError(
+                409, error.code, "删除下载批次失败，请检查批次目录是否可访问"
+            ) from None
+        except ValueError as error:
+            if str(error) == "gallery_batch_source_required":
+                raise ApiError(
+                    409, "gallery_batch_source_required", "只有下载批次可以递归删除文件"
+                ) from None
+            raise
         except GalleryScanInProgress:
             raise ApiError(
                 409, "source_scan_in_progress", "来源正在扫描，稍后再解除"
             ) from None
         return {"source_id": source_id, "removed": True}
-
     @router.post(
         "/gallery/sources/{source_id}/relink", response_model=GallerySourceResponse
     )
@@ -841,9 +867,15 @@ def create_gallery_router() -> APIRouter:
         validate_idempotency_key(idempotency_key)
         engine: GalleryFileOperations = container.gallery_file_operations
         try:
-            return engine.trash_assets(request.asset_ids)
+            return engine.trash_assets(
+                request.asset_ids, request.directory_ids
+            )
         except GalleryFileOperationError as error:
-            raise _file_operation_api_error(error, asset_ids=request.asset_ids) from None
+            raise _file_operation_api_error(
+                error,
+                asset_ids=request.asset_ids,
+                directory_ids=request.directory_ids,
+            ) from None
 
     @router.get("/gallery/trash", response_model=GalleryTrashPageResponse)
     async def list_trash(

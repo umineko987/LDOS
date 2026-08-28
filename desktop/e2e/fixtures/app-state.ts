@@ -37,7 +37,7 @@ export async function prepareRichState(page: Page, appId: AppId): Promise<void> 
     await expect(window.getByRole("heading", { name: /组 1/ })).toBeVisible();
     await expect(window.locator("[data-review-engine-image]").first()).toHaveAttribute("data-review-engine-decoded", "true");
   } else if (appId === "gallery") {
-    await window.getByRole("button", { name: "E2E 导入目录" }).click();
+    await window.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
     await expect(window.locator("[data-gallery-asset=\"gal-asset-01\"]")).toBeVisible();
   } else {
     const busy = window.locator("[aria-busy]").first();

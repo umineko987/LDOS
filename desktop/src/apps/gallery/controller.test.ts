@@ -76,7 +76,8 @@ function makeService(
     | "renameSource"
     | "relinkSource"
     | "importSource"
-    | "unmountSource",
+    | "unmountSource"
+    | "deleteBatchSource",
     ReturnType<typeof vi.fn>
   >> = {},
 ) {
@@ -109,6 +110,7 @@ function makeService(
     relinkSource: overrides.relinkSource ?? vi.fn(async () => source),
     importSource: overrides.importSource ?? vi.fn(async () => source),
     unmountSource: overrides.unmountSource ?? vi.fn(async () => undefined),
+    deleteBatchSource: overrides.deleteBatchSource ?? vi.fn(async () => undefined),
     thumbnailUrl: (assetId: string) => `thumb:${assetId}`,
     contentUrl: (assetId: string) => `content:${assetId}`,
   } as unknown as GalleryService;
@@ -325,6 +327,30 @@ describe("gallery browse controller", () => {
     expect(store.getState().activeSourceId).toBeNull();
     controller.destroy();
   });
+  it("deletes a batch source and refreshes the source list", async () => {
+    const batchSource = {
+      ...source,
+      source_id: "batch-source",
+      kind: "crawl_batch",
+      batch_id: "batch-1",
+      display_name: "下载批次",
+    } as GallerySourceSummary;
+    const deleteBatchSource = vi.fn(async () => undefined);
+    const listSources = vi.fn().mockResolvedValueOnce([batchSource]).mockResolvedValueOnce([]);
+    const store = createGalleryStore();
+    const service = makeService({ deleteBatchSource, listSources });
+    const controller = createGalleryController({ store, service });
+    controller.activate();
+    await vi.waitFor(() => expect(store.getState().sourcesPhase).toBe("ready"));
+
+    await expect(controller.deleteBatchSource("batch-source")).resolves.toBe(true);
+    expect(deleteBatchSource).toHaveBeenCalledWith("batch-source");
+    expect(store.getState().sources).toEqual([]);
+    expect(store.getState().activeSourceId).toBeNull();
+    controller.destroy();
+  });
+
+
 
   it("records stable error codes and recovers on retry", async () => {
     const store = createGalleryStore();
@@ -898,6 +924,15 @@ describe("gallery file operations controller (G3-3 TXT 编辑/重命名/回收)"
     expect(undone).toBe(true);
     expect(service.undoTrash).toHaveBeenCalledWith("op-1");
     expect(store.getState().undoToastVisible).toBe(false);
+  });
+
+  it("confirms a directory-only selection through the complete physical-directory contract", async () => {
+    const { store, controller, service } = await openReady();
+    expect(controller.requestTrashSelection([], ["dir-sub"])).toBe(true);
+    expect(store.getState().trashConfirmDirectoryIds).toEqual(["dir-sub"]);
+    expect(await controller.confirmTrashSelection()).toBe(true);
+    expect(service.trashAssets).toHaveBeenCalledWith([], ["dir-sub"]);
+    expect(store.getState().trashConfirmPhase).toBe("closed");
   });
 
   it("keeps confirm data but records the code when trashing fails", async () => {

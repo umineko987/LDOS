@@ -559,6 +559,22 @@ class OrderedCrawlPlanningConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current["status"], "running")
         self.assertGreaterEqual(tick_mock.call_count, 4)
 
+    async def test_tasks_use_batch_root_output_directory(self):
+        batch, address = self._create_batch("compact-path", "exhentai")
+
+        async def fake_plan(address, **_kwargs):
+            return [self._unit(address)], 0
+
+        with patch.object(self.manager, "_plan_address", new=fake_plan):
+            await self.manager._activate_address(batch, address)
+
+        tasks = self.db.crawl_address_tasks(address["id"])
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(
+            tasks[0]["output_dir"],
+            str(self.root / "compact-path"),
+        )
+
 
 class _DirectProxy:
     def acquire(self, _task_id: str, **_kwargs):

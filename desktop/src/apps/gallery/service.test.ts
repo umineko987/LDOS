@@ -101,6 +101,19 @@ describe("Gallery directory export service", () => {
   });
 });
 
+describe("Gallery source lifecycle service", () => {
+  it("deletes a batch through the recursive-delete endpoint", async () => {
+    const remove = vi.fn(async () => ({ source_id: "batch-source", removed: true }));
+    const service = createGalleryService({ delete: remove } as unknown as ApiClient);
+
+    await expect(service.deleteBatchSource("batch-source")).resolves.toBeUndefined();
+    expect(remove).toHaveBeenCalledWith(
+      "/api/v1/gallery/sources/batch-source?delete_files=true",
+      { idempotencyKey: true },
+    );
+  });
+});
+
 describe("Gallery file operation service", () => {
   const operationProjection = {
     operation_id: "operation-1",
@@ -122,6 +135,19 @@ describe("Gallery file operation service", () => {
     });
     expect(remove).toHaveBeenCalledWith(GALLERY_ENDPOINTS.trash);
   });
+  it("posts complete directory selections alongside optional asset selections", async () => {
+    const post = vi.fn(async () => operationProjection);
+    const service = createGalleryService({ post } as unknown as ApiClient);
+
+    await expect(service.trashAssets([], ["directory-sub"])).resolves.toEqual(
+      operationProjection,
+    );
+    expect(post).toHaveBeenCalledWith(
+      `${GALLERY_ENDPOINTS.fileOperations}/trash`,
+      { asset_ids: [], directory_ids: ["directory-sub"] },
+    );
+  });
+
 
   it("loads the bounded trash projection with the desktop view", async () => {
     const page = {

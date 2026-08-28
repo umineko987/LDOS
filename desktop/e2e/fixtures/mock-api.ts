@@ -11,7 +11,7 @@ export interface MockApiOptions {
   readonly emptyRecent?: boolean;
   readonly failPaths?: readonly string[];
   readonly directoryExportScenario?: "completed" | "copying" | "failed" | "conflict";
-  readonly galleryScenario?: "ready" | "reconciliation_failed" | "scan_failed";
+  readonly galleryScenario?: "ready" | "reconciliation_failed" | "scan_failed" | "batch_delete";
   readonly delayMs?: number;
 }
 
@@ -646,14 +646,17 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
   const unhandled: RecordedRequest[] = [];
   const decisions = new Map<string, readonly string[]>();
   let gallerySourceMounted = true;
+  let galleryBatchDeleted = false;
   let galleryDisplayName = "E2E 导入目录";
   let galleryReconciliationRetried = false;
   const galleryAnnotationContent = new Map<string, string>();
   const galleryAnnotationVersions = new Map<string, number>();
   const galleryTrashedAssetIds = new Set<string>();
+  const galleryTrashedDirectoryIds = new Set<string>();
   const galleryTrashOperations = new Map<string, {
     readonly operation_id: string;
     readonly asset_ids: readonly string[];
+    readonly directory_ids: readonly string[];
     readonly created_at: number;
     readonly item_count: number;
     readonly has_txt_count: number;
@@ -804,6 +807,19 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
     }
     // ---- Gallery（G2+ 正式图库）----
     if (url.pathname === "/api/v1/gallery/sources" && request.method() === "GET") {
+      if (options.galleryScenario === "batch_delete") {
+        await respond(route, {
+          sources: galleryBatchDeleted
+            ? []
+            : [gallerySource({
+                source_id: "gal-src-batch",
+                kind: "crawl_batch",
+                batch_id: "batch-e2e",
+                display_name: "E2E 下载批次",
+              })],
+        });
+        return;
+      }
       const reconciliationFailed =
         options.galleryScenario === "reconciliation_failed" && !galleryReconciliationRetried;
       const projection = gallerySource({
@@ -874,8 +890,15 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       return;
     }
     if (gallerySourceMatch && request.method() === "DELETE") {
-      gallerySourceMounted = false;
-      await respond(route, { source_id: GALLERY_SOURCE_ID, removed: true });
+      if (options.galleryScenario === "batch_delete" && url.searchParams.get("delete_files") === "true") {
+        galleryBatchDeleted = true;
+      } else {
+        gallerySourceMounted = false;
+      }
+      await respond(route, {
+        source_id: options.galleryScenario === "batch_delete" ? "gal-src-batch" : GALLERY_SOURCE_ID,
+        removed: true,
+      });
       return;
     }
     const galleryEntriesMatch = url.pathname.match(/^\/api\/v1\/gallery\/directories\/([^/]+)\/entries$/);
@@ -883,9 +906,17 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       const directoryId = decodeURIComponent(galleryEntriesMatch[1]);
       const query = (url.searchParams.get("query") ?? "").trim().toLowerCase();
       const page = galleryDirectoryPage(directoryId);
-      page.assets = (page.assets as Record<string, unknown>[]).filter(
-        (asset) => !galleryTrashedAssetIds.has(String(asset.asset_id)),
-      );
+      if (galleryTrashedDirectoryIds.has(directoryId)) {
+        page.directories = [];
+        page.assets = [];
+      } else {
+        page.directories = (page.directories as Record<string, unknown>[]).filter(
+          (directory) => !galleryTrashedDirectoryIds.has(String(directory.directory_id)),
+        );
+        page.assets = (page.assets as Record<string, unknown>[]).filter(
+          (asset) => !galleryTrashedAssetIds.has(String(asset.asset_id)),
+        );
+      }
       if (query) {
         page.assets = (page.assets as Record<string, unknown>[]).filter((asset) => String(asset.name).toLowerCase().includes(query));
       }
@@ -960,6 +991,7 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
         return;
       }
       for (const assetId of operation.asset_ids) galleryTrashedAssetIds.delete(assetId);
+      for (const directoryId of operation.directory_ids) galleryTrashedDirectoryIds.delete(directoryId);
       galleryTrashOperations.delete(operationId);
       await respond(route, {
         operation_id: operationId,
@@ -973,6 +1005,10 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
     if (galleryTrashItemMatch && galleryTrashItemMatch[2] === undefined && request.method() === "DELETE") {
       const operationId = decodeURIComponent(galleryTrashItemMatch[1]);
       const operation = galleryTrashOperations.get(operationId);
+      if (operation !== undefined) {
+        for (const assetId of operation.asset_ids) galleryTrashedAssetIds.delete(assetId);
+        for (const directoryId of operation.directory_ids) galleryTrashedDirectoryIds.delete(directoryId);
+      }
       galleryTrashOperations.delete(operationId);
       await respond(route, {
         operation_id: operationId,
@@ -984,7 +1020,7 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       return;
     }
     if (url.pathname === "/api/v1/gallery/trash" && request.method() === "GET") {
-      const operations = [...galleryTrashOperations.values()].map(({ asset_ids: _assetIds, ...operation }) => operation);
+      const operations = [...galleryTrashOperations.values()].map(({ asset_ids: _assetIds, directory_ids: _directoryIds, ...operation }) => operation);
       await respond(route, galleryTrashPage(operations));
       return;
     }
@@ -1002,28 +1038,34 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       return;
     }
     if (url.pathname === "/api/v1/gallery/file-operations/trash" && request.method() === "POST") {
-      const body = requestBody(request) as { asset_ids?: unknown };
+      const body = requestBody(request) as { asset_ids?: unknown; directory_ids?: unknown };
       const assetIds = Array.isArray(body.asset_ids)
         ? body.asset_ids.filter((assetId): assetId is string => typeof assetId === "string")
         : [];
+      const directoryIds = Array.isArray(body.directory_ids)
+        ? body.directory_ids.filter((directoryId): directoryId is string => typeof directoryId === "string")
+        : [];
       galleryTrashSerial += 1;
-      const operationId = `gal-trash-${galleryTrashSerial}`;
+      const itemCount = assetIds.length + directoryIds.length;
       for (const assetId of assetIds) galleryTrashedAssetIds.add(assetId);
+      for (const directoryId of directoryIds) galleryTrashedDirectoryIds.add(directoryId);
+      const operationId = `gal-trash-${galleryTrashSerial}`;
       galleryTrashOperations.set(operationId, {
         operation_id: operationId,
         asset_ids: [...assetIds],
+        directory_ids: [...directoryIds],
         created_at: 1_700_000_000_000 + galleryTrashSerial,
-        item_count: assetIds.length,
-        has_txt_count: assetIds.length,
+        item_count: itemCount,
+        has_txt_count: assetIds.length + directoryIds.length * 2,
         item_error_count: 0,
-        disk_usage_bytes: assetIds.length * 49_152,
+        disk_usage_bytes: assetIds.length * 49_152 + directoryIds.length * 98_304,
       });
       await respond(route, {
         operation_id: operationId,
         kind: "trash",
         status: "committed",
-        item_count: assetIds.length,
-        has_txt_count: assetIds.length,
+        item_count: itemCount,
+        has_txt_count: assetIds.length + directoryIds.length * 2,
       });
       return;
     }
@@ -1033,6 +1075,7 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       const operation = galleryTrashOperations.get(operationId);
       if (operation !== undefined) {
         for (const assetId of operation.asset_ids) galleryTrashedAssetIds.delete(assetId);
+        for (const directoryId of operation.directory_ids) galleryTrashedDirectoryIds.delete(directoryId);
         galleryTrashOperations.delete(operationId);
       }
       await respond(route, {

@@ -387,6 +387,43 @@ class SafeSourceRoot:
             raise
         return True
 
+    def exists_directory(
+        self, relative_path: str, *, allow_missing: bool = False
+    ) -> bool:
+        """Return whether a managed relative path is a real directory."""
+        if not _HAS_DIR_FD:
+            target = self._fallback_path(relative_path)
+            try:
+                metadata = target.lstat()
+            except FileNotFoundError:
+                return False
+            if _is_reparse_path(target):
+                raise UnsafeSourcePathError(relative_path, "leaf_reparse_point")
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise UnsafeSourcePathError(relative_path, "leaf_not_directory")
+            return True
+        try:
+            with self._parent_fd(relative_path) as (parent_fd, name):
+                try:
+                    metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    return False
+                except OSError as error:
+                    raise UnsafeSourcePathError(
+                        relative_path, "directory_unavailable"
+                    ) from error
+                if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+                    reason = (
+                        "leaf_reparse_point"
+                        if stat.S_ISLNK(metadata.st_mode)
+                        else "leaf_not_directory"
+                    )
+                    raise UnsafeSourcePathError(relative_path, reason)
+                return True
+        except UnsafeSourcePathError as error:
+            if allow_missing and error.reason == "parent_missing":
+                return False
+            raise
     def disk_version(self, relative_path: str, *, allow_missing: bool = False) -> str:
         try:
             with self.open_binary(relative_path) as handle:
@@ -599,6 +636,85 @@ class SafeSourceRoot:
                 if target_parent != source_parent:
                     os.fsync(target_parent)
 
+
+    def move_directory(
+        self,
+        source_relative: str,
+        target_relative: str,
+        *,
+        create_target_parents: bool = True,
+    ) -> None:
+        """Move one real directory without following links or replacing a target."""
+        source_parts = validate_relative_path(source_relative)
+        target_parts = validate_relative_path(target_relative)
+        if target_parts[: len(source_parts)] == source_parts:
+            raise UnsafeSourcePathError(target_relative, "target_inside_source")
+        if not _HAS_DIR_FD:
+            source = self._fallback_path(source_relative)
+            target = self._fallback_path(
+                target_relative,
+                allow_missing_leaf=True,
+                create_parents=create_target_parents,
+            )
+            try:
+                source_metadata = source.lstat()
+            except FileNotFoundError as error:
+                raise UnsafeSourcePathError(source_relative, "directory_missing") from error
+            if _is_reparse_path(source) or not stat.S_ISDIR(source_metadata.st_mode):
+                raise UnsafeSourcePathError(source_relative, "leaf_not_directory")
+            if target.exists() or _is_reparse_path(target):
+                raise FileExistsError(target)
+            os.rename(source, target)
+            return
+        with self._parent_fd(source_relative) as (source_parent, source_name):
+            with self._parent_fd(
+                target_relative, create=create_target_parents
+            ) as (target_parent, target_name):
+                descriptor = -1
+                try:
+                    try:
+                        descriptor = os.open(
+                            source_name,
+                            os.O_RDONLY | _OPEN_DIRECTORY | _CLOSE_ON_EXEC | _NO_FOLLOW,
+                            dir_fd=source_parent,
+                        )
+                    except FileNotFoundError as error:
+                        raise UnsafeSourcePathError(
+                            source_relative, "directory_missing"
+                        ) from error
+                    except OSError as error:
+                        raise UnsafeSourcePathError(
+                            source_relative, "directory_unavailable"
+                        ) from error
+                    metadata = os.fstat(descriptor)
+                    if not stat.S_ISDIR(metadata.st_mode):
+                        raise UnsafeSourcePathError(source_relative, "leaf_not_directory")
+                    try:
+                        target_metadata = os.stat(
+                            target_name,
+                            dir_fd=target_parent,
+                            follow_symlinks=False,
+                        )
+                    except FileNotFoundError:
+                        target_metadata = None
+                    if target_metadata is not None:
+                        if stat.S_ISLNK(target_metadata.st_mode):
+                            raise UnsafeSourcePathError(
+                                target_relative, "target_reparse_point"
+                            )
+                        raise FileExistsError(target_relative)
+                    os.rename(
+                        source_name,
+                        target_name,
+                        src_dir_fd=source_parent,
+                        dst_dir_fd=target_parent,
+                    )
+                finally:
+                    if descriptor >= 0:
+                        os.close(descriptor)
+                os.fsync(source_parent)
+                if target_parent != source_parent:
+                    os.fsync(target_parent)
     def unlink_regular(self, relative_path: str, *, missing_ok: bool = False) -> None:
         if not _HAS_DIR_FD:
             target = self._fallback_path(relative_path)
@@ -625,6 +741,126 @@ class SafeSourceRoot:
             os.unlink(name, dir_fd=parent_fd)
             os.fsync(parent_fd)
 
+
+    def remove_directory_tree(
+        self, relative_path: str, *, missing_ok: bool = False
+    ) -> None:
+        """Remove a directory tree while treating links as opaque entries."""
+        validate_relative_path(relative_path)
+        if not _HAS_DIR_FD:
+            target = self._fallback_path(relative_path)
+            try:
+                metadata = target.lstat()
+            except FileNotFoundError:
+                if missing_ok:
+                    return
+                raise
+            if _is_reparse_path(target) or not stat.S_ISDIR(metadata.st_mode):
+                raise UnsafeSourcePathError(relative_path, "leaf_not_directory")
+            self._remove_fallback_directory(target, relative_path)
+            return
+        with self._parent_fd(relative_path) as (parent_fd, name):
+            try:
+                descriptor = os.open(
+                    name,
+                    os.O_RDONLY | _OPEN_DIRECTORY | _CLOSE_ON_EXEC | _NO_FOLLOW,
+                    dir_fd=parent_fd,
+                )
+            except FileNotFoundError:
+                if missing_ok:
+                    return
+                raise UnsafeSourcePathError(relative_path, "directory_missing")
+            except OSError as error:
+                raise UnsafeSourcePathError(
+                    relative_path, "directory_unavailable"
+                ) from error
+            try:
+                self._remove_directory_descriptor(descriptor, relative_path)
+            finally:
+                os.close(descriptor)
+            os.rmdir(name, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+
+    def remove_root_tree(self) -> None:
+        """Remove this managed source root itself and everything below it."""
+        self.open()
+        if not _HAS_DIR_FD:
+            self._verify_fallback_root("")
+            self._remove_fallback_directory(self.path, "")
+            self._verify_fallback_root("")
+            try:
+                self.path.rmdir()
+            except OSError as error:
+                raise UnsafeSourcePathError("", "source_root_delete_failed") from error
+            return
+
+        descriptor = self.root_fd
+        self._remove_directory_descriptor(descriptor, "")
+        name = self.path.name
+        if not name:
+            raise UnsafeSourcePathError("", "source_root_delete_failed")
+        try:
+            parent_fd = os.open(
+                self.path.parent,
+                os.O_RDONLY | _OPEN_DIRECTORY | _CLOSE_ON_EXEC | _NO_FOLLOW,
+            )
+        except OSError as error:
+            raise UnsafeSourcePathError("", "source_root_delete_failed") from error
+        try:
+            try:
+                metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            except OSError as error:
+                raise UnsafeSourcePathError("", "source_root_changed") from error
+            opened = os.fstat(descriptor)
+            reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+            if (
+                stat.S_ISLNK(metadata.st_mode)
+                or bool(getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+                or not stat.S_ISDIR(metadata.st_mode)
+                or (int(metadata.st_dev), int(metadata.st_ino))
+                != (int(opened.st_dev), int(opened.st_ino))
+            ):
+                raise UnsafeSourcePathError("", "source_root_changed")
+            os.rmdir(name, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+
+
+    def _remove_directory_descriptor(self, descriptor: int, relative_path: str) -> None:
+        with os.scandir(descriptor) as entries:
+            for entry in entries:
+                child_relative = f"{relative_path}/{entry.name}"
+                if _is_reparse_entry(entry):
+                    os.unlink(entry.name, dir_fd=descriptor)
+                    continue
+                metadata = entry.stat(follow_symlinks=False)
+                if stat.S_ISDIR(metadata.st_mode):
+                    child = os.open(
+                        entry.name,
+                        os.O_RDONLY | _OPEN_DIRECTORY | _CLOSE_ON_EXEC | _NO_FOLLOW,
+                        dir_fd=descriptor,
+                    )
+                    try:
+                        self._remove_directory_descriptor(child, child_relative)
+                    finally:
+                        os.close(child)
+                    os.rmdir(entry.name, dir_fd=descriptor)
+                else:
+                    os.unlink(entry.name, dir_fd=descriptor)
+
+    def _remove_fallback_directory(self, target: Path, relative_path: str) -> None:
+        with os.scandir(target) as entries:
+            for entry in entries:
+                child_relative = f"{relative_path}/{entry.name}"
+                child = Path(entry.path)
+                if _is_reparse_entry(entry):
+                    child.unlink()
+                elif entry.is_dir(follow_symlinks=False):
+                    self._remove_fallback_directory(child, child_relative)
+                    child.rmdir()
+                else:
+                    child.unlink()
     def iter_tree(
         self,
         *,

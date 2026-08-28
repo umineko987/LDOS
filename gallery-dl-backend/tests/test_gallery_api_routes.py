@@ -212,6 +212,43 @@ class GallerySourceRoutesTest(GalleryApiTestBase):
         missing = self.client.delete(f"/api/v1/gallery/sources/{source_id}")
         self.assertEqual(missing.status_code, 404)
 
+    def test_delete_batch_recursively_removes_physical_root(self) -> None:
+        batch_root = self.root / "batch-1"
+        (batch_root / "eh" / "gallery").mkdir(parents=True)
+        (batch_root / "eh" / "gallery" / "image.jpg").write_bytes(_png_bytes())
+        (batch_root / "eh" / "gallery" / "image.txt").write_text("tag", encoding="utf-8")
+        (batch_root / "other.bin").write_bytes(b"other")
+        self.container.db.create_crawl_batch(
+            {"id": "batch-1", "output_dir": str(batch_root), "concurrency": 1, "max_tasks": 1},
+            [{
+                "id": "batch-1-addr",
+                "site": "example.com",
+                "source_order": 0,
+                "address_order": 0,
+                "url": "https://example.com/gallery",
+                "proxy_mode": "direct",
+                "max_attempts": 1,
+                "priority": 0,
+            }],
+        )
+        source = self.container.gallery_catalog.register_batch_source(
+            batch_id="batch-1",
+            root_path=str(batch_root),
+            display_name="批次 1",
+            dedup_required=False,
+        )
+        source_id = source["source_id"]
+
+        response = self.client.delete(
+            f"/api/v1/gallery/sources/{source_id}",
+            params={"delete_files": "true"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["removed"])
+        self.assertFalse(batch_root.exists())
+        self.assertIsNone(self.container.db.gallery.get_source(source_id))
+
     def test_source_lifecycle_validates_optional_idempotency_keys(self) -> None:
         source = self.import_source({"a.jpg": _png_bytes()})
         source_id = source["source_id"]
@@ -839,6 +876,46 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
         self.assertEqual(listing.status_code, 200, listing.text)
         self.assertEqual(listing.json()["operations"], [])
 
+
+    def test_directory_trash_moves_unindexed_children_and_undoes(self) -> None:
+        directory_path = self.root / "src-a" / "whole"
+        (directory_path / "indexed.jpg").parent.mkdir(parents=True)
+        (directory_path / "indexed.jpg").write_bytes(_png_bytes())
+        (directory_path / "unindexed.bin").write_bytes(b"kept with directory")
+        started = self.client.post(
+            f"/api/v1/gallery/sources/{self.source['source_id']}/scan"
+        )
+        self.assertEqual(started.status_code, 202, started.text)
+        self.wait_scan_finished(self.source["source_id"])
+
+        root_directory = self.container.db.gallery.get_root_directory(
+            self.source["source_id"]
+        )
+        assert root_directory is not None
+        entries = self.client.get(
+            f"/api/v1/gallery/directories/{root_directory['directory_id']}/entries",
+            params={"view": "desktop", "limit": 100},
+        )
+        self.assertEqual(entries.status_code, 200, entries.text)
+        directory = next(item for item in entries.json()["directories"] if item["name"] == "whole")
+
+        response = self.client.post(
+            "/api/v1/gallery/file-operations/trash",
+            json={"asset_ids": [], "directory_ids": [directory["directory_id"]]},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        operation = response.json()
+        self._assert_file_operation_projection(operation)
+        self.assertFalse(directory_path.exists())
+        self.assertTrue(
+            (self.root / "src-a" / ".imageweave" / "trash" / operation["operation_id"] / "files" / "whole" / "unindexed.bin").exists()
+        )
+
+        undo = self.client.post(
+            f"/api/v1/gallery/file-operations/{operation['operation_id']}/undo"
+        )
+        self.assertEqual(undo.status_code, 200, undo.text)
+        self.assertTrue((directory_path / "unindexed.bin").exists())
     def test_trash_list_and_purge(self) -> None:
         asset_id = self.assets["pic.jpg"]["asset_id"]
         response = self.client.post(
