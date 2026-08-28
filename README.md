@@ -1,50 +1,34 @@
-# ImageWeave
+# ImageWeave 部署教程
 
-![ImageWeave 玻璃桌面 WebUI 中的批次管理应用](./assets/example.png)
+本文只介绍 ImageWeave 的源码获取、环境安装、配置、启动和部署检查。
 
-ImageWeave 是一个在本机运行的插画与图库采集工作台。它通过桌面式 WebUI，把跨站来源发现、
-[gallery-dl](https://codeberg.org/mikf/gallery-dl) 批次下载、任务管理、代理与站点授权，以及图片去重审核整合在一起。
+## 1. 获取源码
 
-## 核心功能
-
-- 聚合搜索 X / Twitter、Pixiv、Danbooru、E-Hentai / ExHentai 与 Pawchive；
-- 筛选搜索结果并创建顺序下载批次；
-- 查看任务进度，取消任务，补齐失败下载或重新爬取；
-- 在 WebUI 中管理抓取代理池、站点授权和每站运行策略；
-- 使用 SHA-256、像素哈希、pHash、SSCD 与 DINOv2 分层发现重复图和相似变体；
-- 在去重审核界面比较候选、保存保留决定并整理文件；
-- 通过系统诊断查看后端、下载器、代理和去重组件状态。
-
-## 运行要求
-
-- Python 3.11–3.14；
-- Git，以及完整初始化的 `gallery-dl-codeberg` submodule；
-- 安装依赖、Mihomo 和去重模型所需的网络与磁盘空间；
-- 使用 X、Pixiv 或 ExHentai 托管授权时，需要 Chrome 或 Chromium；
-- 使用 CUDA 模式时，需要 NVIDIA GPU 和兼容 CUDA 12.8 PyTorch 的驱动。
-
-项目会创建两个虚拟环境：
-
-- `gallery-dl-backend/.venv`：WebUI、API、任务调度和下载后端；
-- `.venv`：PyTorch、OpenCV 和去重模型。
-
-## 获取源码
+需要完整检出 `gallery-dl-codeberg` 子模块：
 
 ```bash
 git clone --recurse-submodules https://github.com/KKKneko/ImageWeave.git
 cd ImageWeave
 ```
 
-如果已有源码但 submodule 不完整，请在仓库根目录执行：
+已有源码但子模块不完整时，在仓库根目录执行：
 
 ```bash
 git submodule update --init --recursive
 ```
 
-## Linux 快速开始
+## 2. Linux 部署
 
-Linux 安装器仅接受 x86_64，并要求系统提供 Python、`venv`、Git、`curl` 或 `wget`、`gzip` 和
-SHA-256 校验工具。
+### 2.1 系统要求
+
+Linux 安装脚本当前只接受 `x86_64` / `amd64`。系统需要提供：
+
+- Python `3.11`–`3.14`，并包含 `venv` 模块；
+- Git；
+- `curl` 或 `wget`；
+- `gzip`；
+- `sha256sum` 或 `shasum`；
+- `coreutils`。
 
 Debian / Ubuntu：
 
@@ -59,59 +43,84 @@ Arch Linux：
 sudo pacman -S python git curl ca-certificates gzip coreutils
 ```
 
-在仓库根目录安装纯 CPU 环境：
+安装器不会自动运行 `sudo`。
+
+### 2.2 安装 CPU 环境
+
+在仓库根目录执行：
 
 ```bash
 ./scripts/setup-linux.sh --device cpu
 ```
 
-安装器会初始化 submodule、创建两个虚拟环境、安装锁定依赖、下载并校验 Mihomo 与 SSCD/DINOv2
-模型，并在首次运行时创建私有配置 `gallery-dl-backend/config.json`。重复执行不会覆盖已有配置。
+### 2.3 安装 CUDA 12.8 环境
 
-NVIDIA CUDA 12.8 环境改用：
+确认主机已有兼容的 NVIDIA 驱动和 GPU，然后执行：
 
 ```bash
 ./scripts/setup-linux.sh --device cuda
 ```
 
-安装过程需要代理时，可以只为本次下载指定 HTTP(S) 代理：
+### 2.4 安装过程使用代理
+
+安装代理只影响本次 Git、Python 依赖、Mihomo 和模型下载，不会自动写入运行时抓取代理池：
 
 ```bash
 ./scripts/setup-linux.sh --device cpu --proxy http://127.0.0.1:7890
 ```
 
-查看跳过模型、Mihomo 或其他安装选项：
+明确关闭安装阶段的代理：
+
+```bash
+./scripts/setup-linux.sh --device cpu --no-proxy
+```
+
+常用可选项：
 
 ```bash
 ./scripts/setup-linux.sh --help
 ```
 
-安装完成后运行诊断并启动服务：
+- `--skip-models`：跳过模型下载；之后启用去重前需要重新运行一次不带该参数的安装命令；
+- `--skip-mihomo`：跳过 Mihomo 安装；
+- `--skip-submodule`：跳过子模块初始化；仅适用于子模块已经准备好的情况；
+- `--python PATH`：指定创建虚拟环境所使用的 Python。
+
+安装脚本会创建或复用以下目录：
+
+- `gallery-dl-backend/.venv`：后端环境；
+- `.venv`：去重环境；
+- `.models`：去重模型缓存；
+- `gallery-dl-backend/runtime`：运行时数据；
+- `gallery-dl-backend/credentials`：授权材料。
+
+### 2.5 Linux 启动
+
+先运行部署诊断：
 
 ```bash
 ./scripts/doctor.sh
+```
+
+诊断通过后启动后端：
+
+```bash
 ./scripts/run.sh
 ```
 
-然后打开 <http://127.0.0.1:8787/ui/>。停止服务请按 `Ctrl+C`。
+`run.sh` 会再次执行诊断，然后启动 `gallery-dl-backend`。停止服务时按 `Ctrl+C`。
 
-使用其他配置文件或端口时，建议让诊断与后端读取同一配置：
+## 3. Windows 部署
 
-```bash
-GDL_BACKEND_CONFIG=/path/to/config.json ./scripts/run.sh --port 8788
-```
+以下命令在仓库根目录的 PowerShell 中执行。需要 Python `3.11`–`3.14`、Git 和可用的网络连接。
 
-## Windows 安装
-
-Windows 当前没有一键安装器；以下命令需要在仓库根目录的 PowerShell 中执行。Windows x64 纯 CPU
-路径已纳入 CI，CUDA 12.8 路径尚未在 GPU runner 上验证。如果 PowerShell 拒绝执行本地脚本，
-可以先只为当前进程放行：
+如果 PowerShell 阻止执行本地脚本，只为当前进程放行：
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 ```
 
-先安装后端环境：
+### 3.1 准备子模块和后端环境
 
 ```powershell
 git submodule update --init --recursive
@@ -121,19 +130,43 @@ python -m venv .\gallery-dl-backend\.venv
   -r .\gallery-dl-backend\requirements.txt
 ```
 
-再选择一个去重环境；两个命令都会安装锁定依赖并准备 SSCD/DINOv2 模型：
+### 3.2 准备去重环境
+
+纯 CPU：
 
 ```powershell
-# 纯 CPU
 .\setup-dedup.ps1 -Device cpu
+```
 
-# 或 NVIDIA CUDA 12.8
+NVIDIA CUDA 12.8：
+
+```powershell
 .\setup-dedup.ps1 -Device cuda
 ```
 
-若只想验证锁定依赖、暂不下载模型，可添加 `-SkipModels`；启用去重前必须重新运行不带该参数的命令。
+安装阶段使用代理：
 
-首次创建配置：
+```powershell
+.\setup-dedup.ps1 -Device cpu -ProxyUrl http://127.0.0.1:7890
+```
+
+明确关闭安装阶段代理：
+
+```powershell
+.\setup-dedup.ps1 -Device cpu -NoProxy
+```
+
+如果只想安装依赖、暂时跳过模型下载：
+
+```powershell
+.\setup-dedup.ps1 -Device cpu -SkipModels
+```
+
+之后启用去重前，需要重新运行不带 `-SkipModels` 的命令。
+
+### 3.3 创建配置
+
+首次部署时复制示例配置：
 
 ```powershell
 if (-not (Test-Path .\gallery-dl-backend\config.json)) {
@@ -141,9 +174,20 @@ if (-not (Test-Path .\gallery-dl-backend\config.json)) {
 }
 ```
 
-复制得到的示例配置默认关闭 WebUI 去重。需要去重时，请编辑 `gallery-dl-backend/config.json`，将
-`dedup.enabled` 设为 `true`，并把 `dedup.device` 设为与安装命令一致的 `"cpu"` 或 `"cuda"`。
-`gallery.python_executable` 和 `dedup.python_executable` 可以留空，程序会使用上述两个虚拟环境。
+配置文件中的相对路径以 `gallery-dl-backend/config.json` 所在目录为基准。需要启用去重时，编辑配置中的：
+
+```json
+{
+  "dedup": {
+    "enabled": true,
+    "device": "cpu"
+  }
+}
+```
+
+CUDA 部署将 `device` 改为 `"cuda"`。两个去重环境都使用根目录下的 `.venv`；后端使用 `gallery-dl-backend/.venv`。
+
+### 3.4 可选安装 Mihomo
 
 只有使用 VLESS、VMess、Trojan 等隧道节点时才需要安装 Mihomo：
 
@@ -151,15 +195,35 @@ if (-not (Test-Path .\gallery-dl-backend\config.json)) {
 & .\gallery-dl-backend\scripts\install_mihomo.ps1
 ```
 
-启动服务：
+### 3.5 Windows 启动
 
 ```powershell
 .\gallery-dl-backend\run_backend.ps1
 ```
 
-打开 <http://127.0.0.1:8787/ui/>；停止服务请按 `Ctrl+C`。
+停止服务时按 `Ctrl+C`。
 
-指定其他配置或端口：
+## 4. 配置端口和路径
+
+默认配置文件：
+
+```text
+gallery-dl-backend/config.json
+```
+
+默认服务地址：
+
+```text
+http://127.0.0.1:8787
+```
+
+Linux 使用其他配置文件或端口：
+
+```bash
+GDL_BACKEND_CONFIG=/path/to/config.json ./scripts/run.sh --port 8788
+```
+
+Windows 使用其他配置文件或端口：
 
 ```powershell
 .\gallery-dl-backend\run_backend.ps1 `
@@ -167,61 +231,7 @@ if (-not (Test-Path .\gallery-dl-backend\config.json)) {
   -PortOverride 8788
 ```
 
-## 首次使用
-
-默认服务地址如下：
-
-| 用途 | 地址 |
-| --- | --- |
-| WebUI | <http://127.0.0.1:8787/ui/> |
-| API 前缀 | <http://127.0.0.1:8787/api/v1> |
-| Swagger | <http://127.0.0.1:8787/docs> |
-| 存活检查 | <http://127.0.0.1:8787/healthz> |
-| 完整就绪检查 | <http://127.0.0.1:8787/readyz> |
-
-打开裸 `/ui/` 后先看到空玻璃桌面。使用底部 Dock 的“应用中心”查看全部 10 个应用，或直接点击
-Dock 中固定的“图片采集”“批次管理”“图片库”“去重审核”。推荐流程：
-
-1. 从应用中心打开“系统诊断”，确认必需组件可用；
-2. 按需在“授权管理”登录站点，在“代理管理”配置抓取代理；
-3. 在“图片采集”搜索、筛选并创建批次；
-4. 在“批次管理”查看进度或处理失败任务；
-5. 批次结束后，在“去重审核”分析目录、选择保留图并应用结果。
-
-窗口可通过左上角交通灯关闭、最小化或最大化。当前聚焦窗口最大化时，Dock 会完全隐藏，窗口从菜单栏
-下沿填满到视口底部；恢复、最小化、关闭或切换到普通窗口后，Dock 自动返回，不会浮在窗口上遮挡内容。
-WebUI 的 HTML、CSS、JavaScript 与 SVG 保留 ETag/Last-Modified，并要求浏览器每次复用前重新验证；
-关键桌面样式另使用显式版本 URL。该交付合同用于避免滚动升级时新 HTML 与旧 CSS/ESM 混用，正常使用
-不依赖强制刷新。
-
-关闭或最小化所有窗口后返回空桌面。新页面不会自动重开上次运行的应用，但会为每个应用沿用经过校验的
-最近普通窗口位置和可选最大化偏好。
-
-### 站点授权
-
-| 来源 | 授权要求 |
-| --- | --- |
-| Danbooru | 公共搜索可直接使用，账号或 API key 可选。 |
-| Pawchive | 公共搜索和下载无需登录。 |
-| E-Hentai / ExHentai | E-Hentai 公共搜索可直接使用；ExHentai 需要有效 Cookie。 |
-| X / Twitter | 需要有效登录 Cookie。 |
-| Pixiv | 需要 refresh token 或有效登录 Cookie。 |
-
-“授权管理”使用项目专属浏览器 Profile，不会读取日常浏览器 Profile。页面显示“已配置”只代表本地材料存在；
-站点可能仍会因会话过期、风控或接口变化拒绝请求。
-
-## 配置
-
-主配置文件为 `gallery-dl-backend/config.json`，可用字段与安全默认值见
-[`gallery-dl-backend/config.example.json`](./gallery-dl-backend/config.example.json)。相对路径以配置文件所在目录为基准。
-
-默认下载目录是：
-
-```text
-gallery-dl-backend/runtime/downloads/
-```
-
-输出到其他磁盘时，必须同时更新默认目录和允许写入的目录：
+如果修改下载目录，必须同时更新 `default_output_root` 和 `allowed_output_roots`，例如：
 
 ```json
 {
@@ -230,52 +240,30 @@ gallery-dl-backend/runtime/downloads/
 }
 ```
 
-Windows JSON 路径可以写成 `D:/ImageWeave/downloads`。从 CPU 切换到 CUDA 或反向切换后，除了重新运行
-对应安装脚本，还要同步修改 `dedup.device`。
+## 5. 部署检查
 
-### 三类代理不要混用
-
-1. `setup-linux.sh --proxy` / `setup-dedup.ps1 -ProxyUrl`：只影响安装期间的依赖和模型下载；
-2. “代理管理”或配置中的 `proxy`：供站点搜索与图片下载使用；
-3. “授权管理”或 `auth.authorization_proxy`：只供登录浏览器和授权流程使用。
-
-安装代理不会自动写入抓取代理池。代理订阅 URL、节点凭据、Cookie 和 Token 都不应提交到仓库或公开 Issue。
-
-## 独立使用去重 CLI
-
-完成去重环境安装后，也可以绕过 WebUI 扫描任意目录。建议先用不会移动或删除源图片的模式预览：
-
-Linux：
+服务启动后检查存活状态：
 
 ```bash
-./.venv/bin/python ./dedup_core.py "/path/to/images" --device cpu --dry-run --no-gui
+curl -fsS http://127.0.0.1:8787/healthz
 ```
 
-Windows：
-
-```powershell
-& .\.venv\Scripts\python.exe .\dedup_core.py "D:\Images" --device cpu --dry-run --no-gui
-```
-
-移除 `--dry-run` 后，自动判定为重复的图片默认会移入其所在目录下的 `duplicates/`；`--delete` 会直接删除文件。
-执行实际整理前请先备份，并通过以下命令查看完整选项：
+检查完整就绪状态：
 
 ```bash
-./.venv/bin/python ./dedup_core.py --help
+curl -i http://127.0.0.1:8787/readyz
 ```
 
-## 安全与使用边界
+如果跳过了模型下载，完整就绪检查可能保持未就绪；完成模型准备后重新运行安装脚本即可。
 
-- 服务只允许监听 `127.0.0.1`、`localhost` 或 `::1`，不支持直接暴露到公网；
-- 默认拒绝下载任务访问回环、私网、链路本地和保留地址；
-- 不要公开 `gallery-dl-backend/config.json`、浏览器 Profile、Cookie、Token、代理订阅或运行数据库；
-- 第三方站点的可用性、登录规则和限流策略可能变化；请遵守站点条款，并确保有权下载和使用相关内容。
+## 6. 凭证和代理文件
 
-## 维护者文档
+以下内容只保存在部署机器上，不要提交到 Git 或公开发布：
 
-- [架构与开发约定](./docs/ARCHITECTURE.md)：后端所有权、WebUI 模块/窗口边界和正式门禁；
-- [gallery-dl 后端说明](./docs/gallery-dl-backend.md)：运行边界、API、授权、代理、批次与去重流程。
+- `gallery-dl-backend/config.json`；
+- `gallery-dl-backend/credentials/` 下的 Cookie、授权元数据和浏览器 Profile；
+- `gallery-dl-backend/runtime/` 下的数据库、运行时代理覆盖和日志；
+- 代理订阅文件、节点文件和节点凭据；
+- 安装或运行时使用的环境变量中的 Token、密码和私有 URL。
 
-## 许可证
-
-ImageWeave 项目代码采用 [MIT License](./LICENSE)。gallery-dl、Mihomo 及其他第三方组件仍受各自许可证约束。
+安装代理、站点抓取代理和授权流程代理是三种不同配置，不要把安装代理地址或授权凭证直接写入源码。
