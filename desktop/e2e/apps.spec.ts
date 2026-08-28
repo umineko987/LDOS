@@ -345,6 +345,40 @@ test.describe("可用应用关键旅程", () => {
     expect(api.count("GET", "/api/v1/gallery/directory-exports/gallery-export-op-01")).toBeGreaterThan(0);
     expect(api.unhandled).toEqual([]);
   });
+  test("图库为图片和目录提供显式多选控件", async ({ page }) => {
+    const api = await bootDesktop(page);
+    await launchApp(page, "gallery");
+    const gallery = appWindow(page, "gallery");
+    await gallery.getByRole("button", { name: "E2E 导入目录" }).click();
+
+    await expect(gallery.getByRole("checkbox", { name: "选择目录 E2E 导入目录" })).toBeVisible();
+    await expect(gallery.getByRole("checkbox", { name: "选择当前目录 E2E 导入目录" })).toBeVisible();
+    const folderCheckbox = gallery.getByRole("checkbox", { name: "选择目录 subdir" });
+    await expect(folderCheckbox).toBeVisible();
+    const imageCheckboxes = gallery.getByRole("checkbox", { name: /选择图片/ });
+    await expect(imageCheckboxes).toHaveCount(4);
+
+    await imageCheckboxes.nth(0).check();
+    await imageCheckboxes.nth(1).check();
+    const selectionSummary = gallery.locator("[data-gallery-selection-summary]");
+    await expect(selectionSummary).toContainText("2 张图片");
+    await folderCheckbox.check();
+    await expect(selectionSummary).toContainText("1 个目录");
+
+    await gallery.getByRole("button", { name: "导出目录…" }).click();
+    const directoryExport = gallery.getByRole("dialog", { name: "导出完整目录" });
+    await expect(directoryExport.locator(".gallery-export-selection-list li")).toHaveCount(1);
+    await expect(directoryExport.locator(".gallery-export-selection-list")).toContainText("subdir");
+    await directoryExport.getByRole("button", { name: "关闭" }).click();
+    await expect(directoryExport).toBeHidden();
+    await gallery.getByRole("button", { name: "列表" }).click();
+    await expect(gallery.getByRole("checkbox", { name: /选择图片/ })).toHaveCount(4);
+    await gallery.getByRole("button", { name: "网格" }).click();
+    await gallery.getByRole("button", { name: "清除选择" }).click();
+    await expect(selectionSummary).toBeHidden();
+    expect(api.unhandled).toEqual([]);
+  });
+
 
   test("图库呈现扫描失败、原目录管理警告与来源生命周期操作", async ({ page }) => {
     const api = await bootDesktop(page, { galleryScenario: "scan_failed" });

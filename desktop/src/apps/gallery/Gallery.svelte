@@ -520,6 +520,92 @@
   let directoryExportOpen = $state(false);
   let directoryExportPhase = $state<DirectoryExportPhase>("idle");
   let directoryExportSelections = $state<DirectoryExportSelection[]>([]);
+  // ---- 统一、显式的目录/图片选择 ----
+  let selectedDirectorySelections = $state<DirectoryExportSelection[]>([]);
+  const selectedDirectoryIds = $derived(
+    new Set(selectedDirectorySelections.map((selection) => selection.directoryId)),
+  );
+  const selectedItemCount = $derived(
+    snapshot.selectedAssetIds.length + selectedDirectorySelections.length,
+  );
+
+  function rememberDirectorySelection(selection: DirectoryExportSelection): void {
+    if (selectedDirectoryIds.has(selection.directoryId)) return;
+    selectedDirectorySelections = [...selectedDirectorySelections, selection];
+  }
+
+  function toggleDirectorySelection(
+    directory: GalleryDirectoryEntry,
+    sourceLabel: string,
+  ): void {
+    const selection = exportSelection(directory, sourceLabel);
+    if (selectedDirectoryIds.has(selection.directoryId)) {
+      selectedDirectorySelections = selectedDirectorySelections.filter(
+        (item) => item.directoryId !== selection.directoryId,
+      );
+      directoryExportSelections = directoryExportSelections.filter(
+        (item) => item.directoryId !== selection.directoryId,
+      );
+      return;
+    }
+    rememberDirectorySelection(selection);
+  }
+
+  function sourceRootSelection(
+    source: GalleryBrowseState["sources"][number],
+  ): DirectoryExportSelection | null {
+    if (source.root_directory_id === null) return null;
+    return {
+      directoryId: source.root_directory_id,
+      directoryName: source.display_name,
+      sourceLabel: source.display_name,
+      relativePath: "来源根目录",
+    };
+  }
+
+  function toggleSourceRootSelection(
+    source: GalleryBrowseState["sources"][number],
+  ): void {
+    const selection = sourceRootSelection(source);
+    if (selection === null) return;
+    if (selectedDirectoryIds.has(selection.directoryId)) {
+      selectedDirectorySelections = selectedDirectorySelections.filter(
+        (item) => item.directoryId !== selection.directoryId,
+      );
+      directoryExportSelections = directoryExportSelections.filter(
+        (item) => item.directoryId !== selection.directoryId,
+      );
+      return;
+    }
+    rememberDirectorySelection(selection);
+  }
+
+  function toggleCurrentDirectorySelection(): void {
+    const selection = currentDirectoryExportSelection();
+    if (selection === null) return;
+    if (selectedDirectoryIds.has(selection.directoryId)) {
+      selectedDirectorySelections = selectedDirectorySelections.filter(
+        (item) => item.directoryId !== selection.directoryId,
+      );
+      directoryExportSelections = directoryExportSelections.filter(
+        (item) => item.directoryId !== selection.directoryId,
+      );
+      return;
+    }
+    rememberDirectorySelection(selection);
+  }
+
+  function clearVisibleSelection(): void {
+    selectedDirectorySelections = [];
+    directoryExportSelections = [];
+    controller.clearAssetSelection();
+  }
+
+  function toggleAssetCheckbox(event: Event, asset: GalleryAssetEntry): void {
+    event.stopPropagation();
+    const shift = "shiftKey" in event && Boolean(event.shiftKey);
+    controller.clickAsset(asset.asset_id, { additive: !shift, range: shift });
+  }
   let directoryExportTargetPath = $state("");
   let directoryExportTargetPicking = $state(false);
   let directoryExportTargetError = $state<string | null>(null);
@@ -608,8 +694,12 @@
     directoryExportConflictNames = [];
     directoryExportRevealError = null;
     directoryExportOperation = null;
-    const current = currentDirectoryExportSelection();
-    directoryExportSelections = current === null ? [] : [current];
+    directoryExportSelections = selectedDirectorySelections.length > 0
+      ? [...selectedDirectorySelections]
+      : (() => {
+          const current = currentDirectoryExportSelection();
+          return current === null ? [] : [current];
+        })();
     focusDirectoryExportPanel();
   }
 
@@ -631,15 +721,18 @@
     if (directoryExportSelections.some((item) => item.directoryId === directory.directory_id)) {
       return;
     }
-    directoryExportSelections = [
-      ...directoryExportSelections,
-      exportSelection(directory, sourceLabel),
-    ];
+    const selection = exportSelection(directory, sourceLabel);
+    directoryExportSelections = [...directoryExportSelections, selection];
+    rememberDirectorySelection(selection);
+
   }
 
   function removeDirectoryExportSelection(directoryId: string): void {
     if (directoryExportBusy) return;
     directoryExportSelections = directoryExportSelections.filter(
+      (item) => item.directoryId !== directoryId,
+    );
+    selectedDirectorySelections = selectedDirectorySelections.filter(
       (item) => item.directoryId !== directoryId,
     );
   }
@@ -1050,6 +1143,17 @@
         <ul class="gallery-source-list">
           {#each snapshot.sources as source (source.source_id)}
             <li>
+              <label class="gallery-selection-control gallery-source__select">
+                <input
+                  type="checkbox"
+                  checked={source.root_directory_id !== null && selectedDirectoryIds.has(source.root_directory_id)}
+                  disabled={source.root_directory_id === null || source.availability !== "available"}
+                  aria-label={`选择目录 ${source.display_name}`}
+                  onclick={(event) => event.stopPropagation()}
+                  onchange={() => toggleSourceRootSelection(source)}
+                />
+                <span>选择目录</span>
+              </label>
               <button
                 type="button"
                 class="gallery-source"
@@ -1201,6 +1305,17 @@
                 onchange={(event) => void controller.setIncludeDescendants((event.currentTarget as HTMLInputElement).checked)}
               />
             </label>
+            {#if snapshot.currentDirectory !== null && activeSource !== null}
+              <label class="gallery-selection-control gallery-current-directory-select">
+                <input
+                  type="checkbox"
+                  checked={selectedDirectoryIds.has(snapshot.currentDirectory.directory_id)}
+                  aria-label={`选择当前目录 ${snapshot.currentDirectory.name || activeSource.display_name}`}
+                  onchange={toggleCurrentDirectorySelection}
+                />
+                <span>选择当前目录</span>
+              </label>
+            {/if}
             <label>
               <span>TXT 状态</span>
               <select value={snapshot.txtStateFilter ?? ""} onchange={(event) => { const value = (event.currentTarget as HTMLSelectElement).value; void controller.setTxtStateFilter(value === "" ? null : (value as GalleryTxtState)); }}>
@@ -1213,10 +1328,17 @@
               <button type="button" aria-pressed={snapshot.viewMode === "grid"} onclick={() => controller.setViewMode("grid")}>网格</button>
               <button type="button" aria-pressed={snapshot.viewMode === "list"} onclick={() => controller.setViewMode("list")}>列表</button>
             </div>
-            {#if snapshot.selectedAssetIds.length > 0}
-              <span class="gallery-toolbar-selection">已选 {formatCount(snapshot.selectedAssetIds.length)} 张</span>
-              <button type="button" onclick={requestRenameSelection} disabled={singleSelectedAsset === null}>重命名…</button>
-              <button type="button" class="gallery-toolbar-danger" onclick={requestDeleteSelection}>删除…</button>
+            {#if selectedItemCount > 0}
+              <span class="gallery-toolbar-selection" data-gallery-selection-summary>
+                {#if selectedDirectorySelections.length > 0}{formatCount(selectedDirectorySelections.length)} 个目录{/if}
+                {#if selectedDirectorySelections.length > 0 && snapshot.selectedAssetIds.length > 0} · {/if}
+                {#if snapshot.selectedAssetIds.length > 0}{formatCount(snapshot.selectedAssetIds.length)} 张图片{/if} 已选
+              </span>
+              <button type="button" onclick={clearVisibleSelection}>清除选择</button>
+              {#if snapshot.selectedAssetIds.length > 0}
+                <button type="button" onclick={requestRenameSelection} disabled={singleSelectedAsset === null}>重命名…</button>
+                <button type="button" class="gallery-toolbar-danger" onclick={requestDeleteSelection}>删除…</button>
+              {/if}
             {/if}
             <button
               type="button"
@@ -1227,7 +1349,7 @@
               type="button"
               class="gallery-toolbar-export"
               onclick={openDirectoryExport}
-              disabled={snapshot.currentDirectory === null}
+              disabled={snapshot.currentDirectory === null && selectedDirectorySelections.length === 0}
             >导出目录…</button>
           </div>
         </nav>
@@ -1251,7 +1373,17 @@
           {#if snapshot.directories.length > 0}
             <ul class="gallery-folders" aria-label="子目录">
               {#each snapshot.directories as directory (directory.directory_id)}
-                <li>
+                <li class:selected={selectedDirectoryIds.has(directory.directory_id)}>
+                  <label class="gallery-selection-control gallery-folder__select">
+                    <input
+                      type="checkbox"
+                      checked={selectedDirectoryIds.has(directory.directory_id)}
+                      aria-label={`选择目录 ${directoryLabel(directory)}`}
+                      onclick={(event) => event.stopPropagation()}
+                      onchange={() => toggleDirectorySelection(directory, activeSource?.display_name ?? "来源")}
+                    />
+                    <span>选择目录</span>
+                  </label>
                   <button type="button" class="gallery-folder" onclick={() => void controller.openDirectory(directory.directory_id)}>
                     <span class="gallery-folder__cover" data-count={Math.min(directory.recursive_asset_count, 4)} aria-hidden="true">
                       {#each directory.cover_asset_ids.slice(0, 4) as coverId (coverId)}
@@ -1281,35 +1413,48 @@
                 <div class="gallery-grid" style={`grid-template-columns: repeat(${gridColumns}, minmax(0, 1fr)); height: ${windowing.totalHeight}px;`}>
                   <div class="gallery-grid-window" style={`transform: translateY(${windowing.startOffsetY}px);`}>
                     {#each visibleAssets as asset (asset.asset_id)}
-                      <button
-                        type="button"
-                        class="gallery-card"
-                        class:selected={selectedIds.has(asset.asset_id)}
-                        data-gallery-asset={asset.asset_id}
-                        title={asset.relative_path}
-                        aria-pressed={selectedIds.has(asset.asset_id)}
-                        onclick={(event) => onAssetClick(event, asset)}
-                        ondblclick={() => onAssetActivate(asset)}
-                        onkeydown={(event) => onCardKeydown(event, asset)}
-                        onfocus={() => (viewerReturnAssetId = asset.asset_id)}
-                      >
-                        <span class="gallery-card__media">
-                          {#if failedThumbnailIds.has(asset.asset_id)}
-                            <span class="gallery-thumbnail-fallback" role="img" aria-label={`${asset.name} 缩略图不可读`}>无法预览</span>
-                          {:else}
-                            <img src={service.thumbnailUrl(asset.asset_id, 512)} alt={asset.name} crossorigin="anonymous" loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
+                      <div class="gallery-card-shell" class:selected={selectedIds.has(asset.asset_id)}>
+                        <label class="gallery-selection-control gallery-card__select">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(asset.asset_id)}
+                            aria-label={`选择图片 ${asset.name}`}
+                            onclick={(event) => event.stopPropagation()}
+                            onkeydown={(event) => event.stopPropagation()}
+                            onchange={(event) => toggleAssetCheckbox(event, asset)}
+                          />
+                          <span>选择图片</span>
+                        </label>
+                        <button
+                          type="button"
+                          class="gallery-card"
+                          class:selected={selectedIds.has(asset.asset_id)}
+                          data-gallery-asset={asset.asset_id}
+                          title={asset.relative_path}
+                          aria-pressed={selectedIds.has(asset.asset_id)}
+                          onclick={(event) => onAssetClick(event, asset)}
+                          ondblclick={() => onAssetActivate(asset)}
+                          onkeydown={(event) => onCardKeydown(event, asset)}
+                          onfocus={() => (viewerReturnAssetId = asset.asset_id)}
+                        >
+                          <span class="gallery-card__media">
+                            {#if failedThumbnailIds.has(asset.asset_id)}
+                              <span class="gallery-thumbnail-fallback" role="img" aria-label={`${asset.name} 缩略图不可读`}>无法预览</span>
+                            {:else}
+                              <img src={service.thumbnailUrl(asset.asset_id, 512)} alt={asset.name} crossorigin="anonymous" loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
+                            {/if}
+                          </span>
+                          <span class="gallery-card__name">{asset.name}</span>
+                          {#if snapshot.query.length > 0}
+                            <span class="gallery-card__context">{assetSourceLabel(asset)} · {asset.relative_path}</span>
                           {/if}
-                        </span>
-                        <span class="gallery-card__name">{asset.name}</span>
-                        {#if snapshot.query.length > 0}
-                          <span class="gallery-card__context">{assetSourceLabel(asset)} · {asset.relative_path}</span>
-                        {/if}
-                        <span class="gallery-card__badges">
-                          <span class="gallery-badge" data-kind={txtBadgeKind(asset)}>{txtBadge(asset)}</span>
-                          {#if asset.dedup_visibility === "candidate"}<span class="gallery-badge" data-kind="warn">待去重</span>{/if}
-                          {#if asset.dedup_visibility === "excluded"}<span class="gallery-badge" data-kind="muted">已排除</span>{/if}
-                        </span>
-                      </button>
+                          <span class="gallery-card__badges">
+                            <span class="gallery-badge" data-kind={txtBadgeKind(asset)}>{txtBadge(asset)}</span>
+                            {#if asset.dedup_visibility === "candidate"}<span class="gallery-badge" data-kind="warn">待去重</span>{/if}
+                            {#if asset.dedup_visibility === "excluded"}<span class="gallery-badge" data-kind="muted">已排除</span>{/if}
+                          </span>
+                        </button>
+                      </div>
                     {/each}
                   </div>
                 </div>
@@ -1325,6 +1470,7 @@
               >
                 <div class="gallery-list" role="table" aria-label="当前目录图片明细">
                   <div class="gallery-list-head" role="row">
+                    <span role="columnheader">选择</span>
                     <span role="columnheader">文件名</span>
                     <span role="columnheader">相对路径</span>
                     <span role="columnheader">TXT 状态</span>
@@ -1346,6 +1492,19 @@
                           onkeydown={(event) => onCardKeydown(event, asset)}
                           onfocus={() => (viewerReturnAssetId = asset.asset_id)}
                         >
+                          <span class="gallery-list-row__select-cell" role="cell">
+                            <label class="gallery-selection-control gallery-list-row__select">
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(asset.asset_id)}
+                                aria-label={`选择图片 ${asset.name}`}
+                                onclick={(event) => event.stopPropagation()}
+                                onkeydown={(event) => event.stopPropagation()}
+                                onchange={(event) => toggleAssetCheckbox(event, asset)}
+                              />
+                              <span>选择图片</span>
+                            </label>
+                          </span>
                           <span class="gallery-list-row__thumb" role="cell">
                             {#if failedThumbnailIds.has(asset.asset_id)}
                               <span class="gallery-thumbnail-fallback" role="img" aria-label={`${asset.name} 缩略图不可读`}>!</span>
