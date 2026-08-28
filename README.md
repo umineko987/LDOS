@@ -1,7 +1,3 @@
-# ImageWeave 部署教程
-
-本文只介绍 ImageWeave 的源码获取、环境安装、配置、启动和部署检查。
-
 ## 1. 获取源码
 
 需要完整检出 `gallery-dl-codeberg` 子模块：
@@ -239,31 +235,3 @@ Windows 使用其他配置文件或端口：
   "allowed_output_roots": ["/data/imageweave"]
 }
 ```
-
-## 5. 部署检查
-
-服务启动后检查存活状态：
-
-```bash
-curl -fsS http://127.0.0.1:8787/healthz
-```
-
-检查完整就绪状态：
-
-```bash
-curl -i http://127.0.0.1:8787/readyz
-```
-
-如果跳过了模型下载，完整就绪检查可能保持未就绪；完成模型准备后重新运行安装脚本即可。
-
-## 6. 凭证和代理文件
-
-以下内容只保存在部署机器上，不要提交到 Git 或公开发布：
-
-- `gallery-dl-backend/config.json`；
-- `gallery-dl-backend/credentials/` 下的 Cookie、授权元数据和浏览器 Profile；
-- `gallery-dl-backend/runtime/` 下的数据库、运行时代理覆盖和日志；
-- 代理订阅文件、节点文件和节点凭据；
-- 安装或运行时使用的环境变量中的 Token、密码和私有 URL。
-
-安装代理、站点抓取代理和授权流程代理是三种不同配置，不要把安装代理地址或授权凭证直接写入源码。
