@@ -1255,7 +1255,7 @@
                   <button type="button" class="gallery-folder" onclick={() => void controller.openDirectory(directory.directory_id)}>
                     <span class="gallery-folder__cover" data-count={Math.min(directory.recursive_asset_count, 4)} aria-hidden="true">
                       {#each directory.cover_asset_ids.slice(0, 4) as coverId (coverId)}
-                        <img src={service.thumbnailUrl(coverId, 256)} alt="" loading="lazy" decoding="async" />
+                        <img src={service.thumbnailUrl(coverId, 256)} alt="" crossorigin="anonymous" loading="lazy" decoding="async" />
                       {/each}
                     </span>
                     <span class="gallery-folder__name">{directoryLabel(directory)}</span>
@@ -1297,7 +1297,7 @@
                           {#if failedThumbnailIds.has(asset.asset_id)}
                             <span class="gallery-thumbnail-fallback" role="img" aria-label={`${asset.name} 缩略图不可读`}>无法预览</span>
                           {:else}
-                            <img src={service.thumbnailUrl(asset.asset_id, 512)} alt={asset.name} loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
+                            <img src={service.thumbnailUrl(asset.asset_id, 512)} alt={asset.name} crossorigin="anonymous" loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
                           {/if}
                         </span>
                         <span class="gallery-card__name">{asset.name}</span>
@@ -1350,7 +1350,7 @@
                             {#if failedThumbnailIds.has(asset.asset_id)}
                               <span class="gallery-thumbnail-fallback" role="img" aria-label={`${asset.name} 缩略图不可读`}>!</span>
                             {:else}
-                              <img src={service.thumbnailUrl(asset.asset_id, 256)} alt="" loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
+                              <img src={service.thumbnailUrl(asset.asset_id, 256)} alt="" crossorigin="anonymous" loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
                             {/if}
                           </span>
                           <span class="gallery-list-row__name" role="cell">{asset.name}{#if asset.dedup_visibility === "candidate"}<span class="gallery-list-row__candidate"> · 待去重</span>{/if}</span>

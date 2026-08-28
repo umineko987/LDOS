@@ -324,6 +324,7 @@
         <img
           src={contentUrl(currentAsset.asset_id)}
           alt=""
+          crossorigin="anonymous"
           draggable="false"
           onerror={() => (imageFailed = true)}
           style={`transform: translate(${offsetX}px, ${offsetY}px) scale(${scale})`}
@@ -454,7 +455,7 @@
             {#if failedThumbnailIds.has(asset.asset_id)}
               <span class="gallery-thumbnail-fallback" aria-hidden="true">!</span>
             {:else}
-              <img src={thumbnailUrl(asset.asset_id, 256)} alt="" loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
+              <img src={thumbnailUrl(asset.asset_id, 256)} alt="" crossorigin="anonymous" loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
             {/if}
           </button>
         {/each}

@@ -3,9 +3,9 @@
   "entrypoint": "index.html",
   "files": [
     {
-      "path": "assets/index-By9dTk2r.js",
-      "sha256": "f076188900b11486c82229f7e4723e4592d17ba6bc7cc242e69f903fc6bb88d0",
-      "size": 535144
+      "path": "assets/index-BXr01w4V.js",
+      "sha256": "69db811d2a98ef36eec57aead489870866c856e303bebed60a3a3ad247798ac5",
+      "size": 535240
     },
     {
       "path": "assets/index-DR1WTGfJ.css",
@@ -24,7 +24,7 @@
     },
     {
       "path": "index.html",
-      "sha256": "ffa551947f715acfdd838bd23314317313e00a53e275be409b56998bfc5d9580",
+      "sha256": "5fe77af3c6ba9290568784b64ea6eed3f39bc8dcd092ee89cf3d32cc1ca70a67",
       "size": 509
     }
   ],

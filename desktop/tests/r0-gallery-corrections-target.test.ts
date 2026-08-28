@@ -144,6 +144,15 @@ describe("R0 single Gallery product contract", () => {
     expect(viewerSource).toContain("thumbnailUrl(asset.asset_id, 256)");
     expect(viewerSource).not.toMatch(/thumbnailUrl\([^,\n]+\)/);
   });
+  it("marks every loopback Gallery image request as anonymous CORS", () => {
+    const galleryPath = fileURLToPath(new URL("../src/apps/gallery/Gallery.svelte", import.meta.url));
+    const viewerPath = fileURLToPath(new URL("../src/apps/gallery/Viewer.svelte", import.meta.url));
+    for (const source of [readFileSync(galleryPath, "utf8"), readFileSync(viewerPath, "utf8")]) {
+      const imageElements = source.match(/<img\b[\s\S]*?\/>/g) ?? [];
+      expect(imageElements.length).toBeGreaterThan(0);
+      expect(imageElements.every((element) => element.includes('crossorigin="anonymous"'))).toBe(true);
+    }
+  });
 });
 
 describe("R0 TXT tag presentation contract", () => {
