@@ -4,11 +4,18 @@ import {
   gallerySelectAll,
   validateGalleryQuery,
   validateGalleryRenameStem,
+  type GalleryAssetEntry,
   type GallerySearchScope,
   type GalleryTxtState,
 } from "./model";
-import type { GalleryStore, GalleryTxtViewMode, GalleryViewMode } from "./state";
-import type { GalleryDirectoryRequest, GalleryService } from "./service";
+import type {
+  GalleryStore,
+  GalleryTxtViewMode,
+  GalleryViewMode,
+  GalleryViewerPendingAction,
+  GalleryViewerQueryContext,
+} from "./state";
+import type { GalleryDirectoryRequest, GallerySearchRequest, GalleryService } from "./service";
 
 function isAbortError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
@@ -48,6 +55,9 @@ export interface GalleryController {
   openViewer(assetId: string): boolean;
   viewerNext(): Promise<boolean>;
   viewerPrevious(): Promise<boolean>;
+  viewerJump(index: number): Promise<boolean>;
+  resolveViewerPendingAction(decision: "save" | "discard" | "cancel"): Promise<boolean>;
+  trashViewerAsset(): Promise<boolean>;
   closeViewer(): boolean;
   setTxtViewMode(mode: GalleryTxtViewMode): boolean;
   refreshDirectory(): Promise<boolean>;
@@ -85,6 +95,8 @@ export function createGalleryController({ store, service }: {
   let pageController: AbortController | null = null;
   let pageVersion = 0;
   let annotationController: AbortController | null = null;
+  let viewerPageController: AbortController | null = null;
+  let viewerPageVersion = 0;
 
   let scanController: AbortController | null = null;
   let scanTimer: ReturnType<typeof setTimeout> | null = null;
@@ -211,26 +223,51 @@ export function createGalleryController({ store, service }: {
   }
 
   function targetDirectoryId(state: ReturnType<GalleryStore["getState"]>): string | null {
-    if (state.searchScope === "source") return state.rootDirectoryId;
     return state.currentDirectory?.directory_id ?? state.rootDirectoryId;
   }
 
   async function loadPage(append: boolean): Promise<boolean> {
     if (!active || destroyed) return false;
     const state = store.getState();
+    const query = validateGalleryQuery(state.query);
+    const searching = query.length > 0;
     const directoryId = targetDirectoryId(state);
-    if (directoryId === null) return false;
+    if (!searching && directoryId === null) return false;
+    if (searching && state.searchScope === "directory" && directoryId === null) return false;
+    if (searching && state.searchScope === "source" && state.activeSourceId === null) return false;
     pageController?.abort();
     const controller = new AbortController();
     pageController = controller;
     const version = ++pageVersion;
     if (!append) store.setPageLoading();
     try {
+      if (searching) {
+        const request: GallerySearchRequest = {
+          query,
+          scope: state.searchScope,
+          sourceId: state.searchScope === "source" ? state.activeSourceId : null,
+          directoryId: state.searchScope === "directory" ? directoryId : null,
+          includeDescendants: state.searchScope === "directory" ? state.includeDescendants : true,
+          txtState: state.txtStateFilter,
+          assetCursor: append ? state.assetCursor : null,
+        };
+        const page = await service.searchAssets(request, controller.signal);
+        if (
+          destroyed ||
+          pageController !== controller ||
+          version !== pageVersion
+        ) {
+          return false;
+        }
+        store.applySearchPage(page, append);
+        return true;
+      }
+
       const request: GalleryDirectoryRequest = {
-        directoryId,
-        includeDescendants: state.includeDescendants || state.searchScope === "source",
+        directoryId: directoryId!,
+        includeDescendants: state.includeDescendants,
         txtState: state.txtStateFilter,
-        query: validateGalleryQuery(state.query),
+        query,
         directoryCursor: append ? state.directoryCursor : null,
         assetCursor: append ? state.assetCursor : null,
       };
@@ -245,7 +282,7 @@ export function createGalleryController({ store, service }: {
       }
       if (append) {
         store.appendDirectoryPage({
-          directory_id: directoryId,
+          directory_id: directoryId!,
           directories: page.directories,
           assets: page.assets,
           directory_cursor: page.directory_cursor,
@@ -275,6 +312,11 @@ export function createGalleryController({ store, service }: {
       sourcesController = null;
       pageController?.abort();
       pageController = null;
+      annotationController?.abort();
+      annotationController = null;
+      viewerPageController?.abort();
+      viewerPageController = null;
+      viewerPageVersion += 1;
       clearScanPolling();
       scanVersion += 1;
     },
@@ -418,8 +460,9 @@ export function createGalleryController({ store, service }: {
     },
     async setSearchScope(scope) {
       if (!active || destroyed) return false;
+      const hasQuery = store.getState().query.length > 0;
       store.patch({ searchScope: scope });
-      return loadPage(false);
+      return hasQuery ? loadPage(false) : true;
     },
     async submitQuery(query) {
       if (!active || destroyed) return false;
@@ -472,20 +515,41 @@ export function createGalleryController({ store, service }: {
       const state = store.getState();
       const index = state.assets.findIndex((asset) => asset.asset_id === assetId);
       if (index < 0) return false;
-      if (!store.openViewer(state.assets, index)) return false;
+      const context: GalleryViewerQueryContext = Object.freeze({
+        mode: state.query.length > 0 ? "search" : "directory",
+        directoryId: targetDirectoryId(state),
+        sourceId: state.activeSourceId,
+        scope: state.searchScope,
+        includeDescendants: state.includeDescendants,
+        txtState: state.txtStateFilter,
+        query: state.query,
+      });
+      if (!store.openViewer(state.assets, index, context, state.assetCursor)) return false;
       void loadViewerAnnotation();
       return true;
     },
-    async viewerNext() {
-      return moveViewerBy(1);
+    viewerNext() {
+      return requestViewerAction(Object.freeze({ kind: "next" }));
     },
-    async viewerPrevious() {
-      return moveViewerBy(-1);
+    viewerPrevious() {
+      return requestViewerAction(Object.freeze({ kind: "previous" }));
+    },
+    viewerJump(index) {
+      return requestViewerAction(Object.freeze({ kind: "jump", index }));
+    },
+    resolveViewerPendingAction(decision) {
+      return resolveViewerPendingAction(decision);
+    },
+    trashViewerAsset() {
+      const state = store.getState();
+      const asset = state.viewerAssets[state.viewerIndex];
+      if (!asset) return Promise.resolve(false);
+      return requestViewerAction(Object.freeze({ kind: "trash", assetId: asset.asset_id }));
     },
     closeViewer() {
-      annotationController?.abort();
-      annotationController = null;
-      return run(() => store.closeViewer());
+      const action = Object.freeze({ kind: "close" } as const);
+      if (!prepareViewerAction(action)) return false;
+      return closeViewerImmediately();
     },
     setTxtViewMode(mode) {
       return run(() => store.setTxtViewMode(mode));
@@ -783,14 +847,216 @@ export function createGalleryController({ store, service }: {
     }
   }
 
-  async function moveViewerBy(delta: number): Promise<boolean> {
+  function hasUnsavedViewerDraft(
+    state: ReturnType<GalleryStore["getState"]>,
+  ): boolean {
+    return (
+      state.txtDraft !== null &&
+      state.txtDraft !== (state.viewerAnnotation?.content ?? "")
+    );
+  }
+
+  function closeViewerImmediately(): boolean {
+    annotationController?.abort();
+    annotationController = null;
+    viewerPageController?.abort();
+    viewerPageController = null;
+    viewerPageVersion += 1;
+    return run(() => store.closeViewer());
+  }
+
+  async function loadNextViewerPage(): Promise<boolean> {
     if (!active || destroyed) return false;
     const state = store.getState();
-    const next = state.viewerIndex + delta;
-    if (next < 0 || next >= state.viewerAssets.length) return false;
-    if (!store.moveViewer(next)) return false;
+    const context = state.viewerQuery;
+    const cursor = state.viewerAssetCursor;
+    if (context === null || cursor === null || state.viewerPagePhase === "loading") return false;
+    viewerPageController?.abort();
+    const requestController = new AbortController();
+    viewerPageController = requestController;
+    const version = ++viewerPageVersion;
+    store.setViewerPageLoading();
+    try {
+      let assets: readonly GalleryAssetEntry[];
+      let nextCursor: string | null;
+      if (context.mode === "search") {
+        const page = await service.searchAssets({
+          query: context.query,
+          scope: context.scope,
+          sourceId: context.scope === "source" ? context.sourceId : null,
+          directoryId: context.scope === "directory" ? context.directoryId : null,
+          includeDescendants: context.scope === "directory" ? context.includeDescendants : true,
+          txtState: context.txtState,
+          assetCursor: cursor,
+        }, requestController.signal);
+        assets = page.assets;
+        nextCursor = page.asset_cursor;
+      } else {
+        if (context.directoryId === null) {
+          store.setViewerPageError("gallery_viewer_directory_missing");
+          return false;
+        }
+        const page = await service.listDirectoryEntries({
+          directoryId: context.directoryId,
+          includeDescendants: context.includeDescendants,
+          txtState: context.txtState,
+          query: context.query,
+          directoryCursor: null,
+          assetCursor: cursor,
+        }, requestController.signal);
+        assets = page.assets;
+        nextCursor = page.asset_cursor;
+      }
+      if (
+        destroyed ||
+        viewerPageController !== requestController ||
+        version !== viewerPageVersion ||
+        store.getState().viewerIndex < 0
+      ) {
+        return false;
+      }
+      const before = store.getState().viewerAssets.length;
+      store.appendViewerAssets(assets, nextCursor);
+      const after = store.getState().viewerAssets.length;
+      if (after === before && nextCursor === cursor) {
+        store.setViewerPageError("gallery_viewer_pagination_stalled");
+        return false;
+      }
+      return true;
+    } catch (error) {
+      if (
+        isAbortError(error) ||
+        destroyed ||
+        viewerPageController !== requestController ||
+        version !== viewerPageVersion
+      ) {
+        return false;
+      }
+      store.setViewerPageError(errorCode(error));
+      return false;
+    } finally {
+      if (viewerPageController === requestController) viewerPageController = null;
+    }
+  }
+
+  async function moveViewerTo(index: number): Promise<boolean> {
+    if (!active || destroyed || index < 0) return false;
+    let attempts = 0;
+    while (index >= store.getState().viewerAssets.length) {
+      if (store.getState().viewerAssetCursor === null || attempts >= 32) return false;
+      attempts += 1;
+      if (!(await loadNextViewerPage())) return false;
+    }
+    if (!store.moveViewer(index)) return false;
     void loadViewerAnnotation();
     return true;
+  }
+
+  function moveViewerBy(delta: number): Promise<boolean> {
+    const state = store.getState();
+    return moveViewerTo(state.viewerIndex + delta);
+  }
+
+  async function trashViewerAssetImmediately(assetId: string): Promise<boolean> {
+    if (!active || destroyed) return false;
+    const state = store.getState();
+    if (state.viewerAssets[state.viewerIndex]?.asset_id !== assetId) return false;
+    if (state.viewerOperationPhase === "trashing") return false;
+    store.setViewerOperation("trashing", null);
+    try {
+      const result = await service.trashAssets([assetId]);
+      if (destroyed) return false;
+      const deletedIndex = state.viewerIndex;
+      let followingPageAttempts = 0;
+      while (
+        store.getState().viewerAssets.length <= deletedIndex + 1 &&
+        store.getState().viewerAssetCursor !== null &&
+        followingPageAttempts < 32
+      ) {
+        followingPageAttempts += 1;
+        if (!(await loadNextViewerPage())) break;
+      }
+      store.showUndoToast(result.operation_id, result.item_count);
+      store.removeViewerAsset(assetId);
+      if (store.getState().viewerIndex < 0) {
+        closeViewerImmediately();
+      } else {
+        void loadViewerAnnotation();
+      }
+      void loadPage(false);
+      return true;
+    } catch (error) {
+      if (destroyed) return false;
+      store.setViewerOperation("error", errorCode(error));
+      return false;
+    }
+  }
+
+  function executeViewerAction(action: GalleryViewerPendingAction): Promise<boolean> {
+    if (action.kind === "close") return Promise.resolve(closeViewerImmediately());
+    if (action.kind === "previous") return moveViewerBy(-1);
+    if (action.kind === "next") return moveViewerBy(1);
+    if (action.kind === "jump") return moveViewerTo(action.index);
+    return trashViewerAssetImmediately(action.assetId);
+  }
+
+  function viewerActionCanLeave(
+    state: ReturnType<GalleryStore["getState"]>,
+    action: GalleryViewerPendingAction,
+  ): boolean {
+    const current = state.viewerAssets[state.viewerIndex];
+    if (current === undefined) return false;
+    if (action.kind === "close") return true;
+    if (action.kind === "previous") return state.viewerIndex > 0;
+    if (action.kind === "next") {
+      return state.viewerIndex < state.viewerAssets.length - 1 || state.viewerAssetCursor !== null;
+    }
+    if (action.kind === "jump") {
+      return (
+        Number.isSafeInteger(action.index) &&
+        action.index >= 0 &&
+        action.index !== state.viewerIndex &&
+        (action.index < state.viewerAssets.length || state.viewerAssetCursor !== null)
+      );
+    }
+    return action.assetId === current.asset_id;
+  }
+
+  function prepareViewerAction(action: GalleryViewerPendingAction): boolean {
+    if (!active || destroyed) return false;
+    const state = store.getState();
+    if (state.viewerIndex < 0 || state.viewerPendingAction !== null) return false;
+    if (state.viewerOperationPhase === "trashing") return false;
+    if (!viewerActionCanLeave(state, action)) return false;
+    if (hasUnsavedViewerDraft(state)) {
+      store.setViewerPendingAction(action);
+      return false;
+    }
+    return true;
+  }
+
+  function requestViewerAction(action: GalleryViewerPendingAction): Promise<boolean> {
+    if (!prepareViewerAction(action)) return Promise.resolve(false);
+    return executeViewerAction(action);
+  }
+
+  async function resolveViewerPendingAction(
+    decision: "save" | "discard" | "cancel",
+  ): Promise<boolean> {
+    if (!active || destroyed) return false;
+    const action = store.getState().viewerPendingAction;
+    if (action === null) return false;
+    if (decision === "cancel") {
+      store.setViewerPendingAction(null);
+      return true;
+    }
+    if (decision === "save") {
+      if (!(await controller.saveTxtAnnotation({ advance: false }))) return false;
+    } else {
+      store.resetTxtEditor();
+    }
+    store.setViewerPendingAction(null);
+    return executeViewerAction(action);
   }
 
   return Object.freeze(controller);

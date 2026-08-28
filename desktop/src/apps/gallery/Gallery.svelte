@@ -39,6 +39,9 @@
   let contentScroll = $state(0);
   let contentHeight = $state(0);
   let gridColumns = $state(4);
+  let contentViewport: HTMLElement | null = $state(null);
+  let viewerWasOpen = $state(false);
+  let viewerReturnAssetId = $state("");
   const GRID_CELL = 208;
   const GRID_ROW = 268;
   const LIST_ROW = 56;
@@ -84,6 +87,7 @@
   ];
 
   let searchDraft = $state("");
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   function onContentScroll(event: Event): void {
     const element = event.currentTarget as HTMLElement;
@@ -105,6 +109,34 @@
 
   // ---- 选择与查看器（G2-3） ----
   const selectedIds = $derived(new Set(snapshot.selectedAssetIds));
+  const currentAsset = $derived(
+    snapshot.viewerAssets[snapshot.viewerIndex] ?? null,
+  );
+  $effect(() => {
+    const isOpen = snapshot.viewerIndex >= 0;
+    if (isOpen) {
+      viewerWasOpen = true;
+      return;
+    }
+    if (!viewerWasOpen) return;
+
+    viewerWasOpen = false;
+    const returnAssetId = viewerReturnAssetId;
+    const scrollTop = snapshot.pendingGridScrollTop;
+    void tick().then(() => {
+      if (contentViewport !== null) contentViewport.scrollTop = scrollTop;
+      const preferred = returnAssetId.length > 0
+        ? document.querySelector<HTMLElement>(`[data-gallery-asset="${CSS.escape(returnAssetId)}"]`)
+        : null;
+      const fallback = contentViewport?.querySelector<HTMLElement>("[data-gallery-asset]") ?? contentViewport;
+      restoreFocus(preferred ?? fallback);
+    });
+  });
+  let failedThumbnailIds = $state(new Set<string>());
+
+  function markThumbnailFailed(assetId: string): void {
+    failedThumbnailIds = new Set(failedThumbnailIds).add(assetId);
+  }
 
   function onAssetClick(event: MouseEvent, asset: GalleryAssetEntry): void {
     controller.clickAsset(asset.asset_id, {
@@ -114,12 +146,17 @@
   }
 
   function onAssetActivate(asset: GalleryAssetEntry): void {
+    viewerReturnAssetId = asset.asset_id;
+    store.patch({ pendingGridScrollTop: contentViewport?.scrollTop ?? contentScroll });
     controller.openViewer(asset.asset_id);
   }
 
   // ---- G3-3 文件操作 ----
   let renameDraft = $state("");
 
+  let selectedTrashOperationIds = $state<string[]>([]);
+  let trashBulkBusy = $state(false);
+  let trashBulkPurgeConfirm = $state<"selected" | "all" | null>(null);
   const singleSelectedAsset = $derived(
     snapshot.selectedAssetIds.length === 1 ? snapshot.assets.find((item) => item.asset_id === snapshot.selectedAssetIds[0]) ?? null : null,
   );
@@ -134,6 +171,76 @@
     const dot = singleSelectedAsset.name.lastIndexOf(".");
     renameDraft = dot > 0 ? singleSelectedAsset.name.slice(0, dot) : singleSelectedAsset.name;
     controller.openRenameDialog(singleSelectedAsset.asset_id);
+  }
+
+  const selectedTrashOperations = $derived(
+    snapshot.trashOperations.filter((operation) => selectedTrashOperationIds.includes(operation.operation_id)),
+  );
+
+  function toggleTrashOperation(operationId: string, checked: boolean): void {
+    trashBulkPurgeConfirm = null;
+    selectedTrashOperationIds = checked
+      ? [...selectedTrashOperationIds, operationId]
+      : selectedTrashOperationIds.filter((item) => item !== operationId);
+  }
+
+  function toggleTrashPanel(): void {
+    if (snapshot.trashPanelPhase === "closed") {
+      selectedTrashOperationIds = [];
+      trashBulkPurgeConfirm = null;
+      void controller.openTrashPanel();
+    } else {
+      closeTrashPanel();
+    }
+  }
+
+  function closeTrashPanel(): void {
+    if (trashBulkBusy) return;
+    selectedTrashOperationIds = [];
+    trashBulkPurgeConfirm = null;
+    controller.closeTrashPanel();
+  }
+
+  async function restoreSelectedTrash(): Promise<void> {
+    if (trashBulkBusy || selectedTrashOperations.length === 0) return;
+    trashBulkBusy = true;
+    const pending = [...selectedTrashOperationIds];
+    for (const operationId of pending) {
+      if (!(await controller.restoreTrashOperation(operationId))) break;
+      selectedTrashOperationIds = selectedTrashOperationIds.filter((item) => item !== operationId);
+    }
+    trashBulkBusy = false;
+  }
+
+  async function purgeSelectedTrash(): Promise<void> {
+    if (trashBulkBusy || selectedTrashOperations.length === 0) return;
+    trashBulkBusy = true;
+    const pending = [...selectedTrashOperationIds];
+    for (const operationId of pending) {
+      if (!(await controller.purgeTrashOperation(operationId))) break;
+      selectedTrashOperationIds = selectedTrashOperationIds.filter((item) => item !== operationId);
+    }
+    trashBulkBusy = false;
+    trashBulkPurgeConfirm = null;
+  }
+
+  async function purgeAllTrash(): Promise<void> {
+    if (trashBulkBusy || snapshot.trashOperations.length === 0) return;
+    trashBulkBusy = true;
+    if (await controller.purgeAllTrashOperations()) selectedTrashOperationIds = [];
+    trashBulkBusy = false;
+    trashBulkPurgeConfirm = null;
+  }
+
+  async function restoreSingleTrash(operationId: string): Promise<void> {
+    if (await controller.restoreTrashOperation(operationId)) {
+      selectedTrashOperationIds = selectedTrashOperationIds.filter((item) => item !== operationId);
+    }
+  }
+
+  function requestSingleTrashPurge(operationId: string): void {
+    selectedTrashOperationIds = [operationId];
+    trashBulkPurgeConfirm = "selected";
   }
 
   function onGridKeydown(event: KeyboardEvent): void {
@@ -156,7 +263,6 @@
     return Number.isNaN(parsed.getTime()) ? "" : parsed.toLocaleString("zh-Hans-CN");
   }
 
-  let lastFocusedAssetId = "";
 
   function onCardKeydown(event: KeyboardEvent, asset: GalleryAssetEntry): void {
     if (event.target instanceof HTMLElement && event.target.isContentEditable) return;
@@ -168,19 +274,32 @@
 
   function closeViewer(): void {
     controller.closeViewer();
-    // 返回网格：焦点回到活动图片（记忆 #30 契约——返回后恢复活动图片焦点）。
-    queueMicrotask(() => {
-      const element = document.querySelector<HTMLElement>(`[data-gallery-asset="${CSS.escape(lastFocusedAssetId)}"]`);
-      element?.focus();
-    });
+  }
+
+  function clearSearchDebounce(): void {
+    if (searchDebounceTimer !== null) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
+    }
+  }
+
+  function scheduleSearch(value: string): void {
+    searchDraft = value;
+    clearSearchDebounce();
+    searchDebounceTimer = setTimeout(() => {
+      searchDebounceTimer = null;
+      if (searchDraft.trim() !== snapshot.query) void controller.submitQuery(searchDraft);
+    }, 350);
   }
 
   function submitSearch(event: SubmitEvent): void {
     event.preventDefault();
+    clearSearchDebounce();
     void controller.submitQuery(searchDraft);
   }
 
   function clearSearch(): void {
+    clearSearchDebounce();
     searchDraft = "";
     void controller.submitQuery("");
   }
@@ -189,6 +308,10 @@
     return GALLERY_TXT_STATE_LABELS[asset.txt_state];
   }
 
+
+  function assetSourceLabel(asset: GalleryAssetEntry): string {
+    return snapshot.sources.find((source) => source.source_id === asset.source_id)?.display_name ?? asset.source_id ?? "未知来源";
+  }
   function txtBadgeKind(asset: GalleryAssetEntry): string {
     if (asset.txt_state === "normal") return "ok";
     if (asset.txt_state === "missing") return "muted";
@@ -835,6 +958,7 @@
     return () => {
       const activeExport = directoryExportOperation;
       clearDirectoryExportPolling();
+      clearSearchDebounce();
       directoryExportPickerAbort?.abort();
       if (platformDirectoryPickerReleaseTimer !== null) {
         clearTimeout(platformDirectoryPickerReleaseTimer);
@@ -891,7 +1015,8 @@
         event.preventDefault();
         if (snapshot.renameDialogPhase !== "closed") controller.cancelRename();
         else if (snapshot.trashConfirmPhase !== "closed") controller.cancelTrashConfirm();
-        else controller.closeTrashPanel();
+        else if (trashBulkPurgeConfirm !== null) trashBulkPurgeConfirm = null;
+        else closeTrashPanel();
       }
       return;
     }
@@ -906,12 +1031,12 @@
 />
 
 <section class="gallery-app" data-gallery-app data-domain-owner="gallery" data-preview-availability="live" aria-labelledby="gallery-heading">
-  <header class="gallery-header">
+  <header class="gallery-header" inert={snapshot.viewerIndex >= 0 ? true : undefined} aria-hidden={snapshot.viewerIndex >= 0 ? "true" : undefined}>
     <div><p>图片库</p><h1 id="gallery-heading">媒体浏览工作区</h1></div>
     <span class="gallery-status" data-kind={snapshot.sourcesPhase}>{snapshot.sourcesPhase === "ready" ? `${formatCount(snapshot.sources.length)} 个来源` : snapshot.sourcesPhase === "error" ? "来源加载失败" : "正在加载来源"}</span>
   </header>
 
-  <div class="gallery-body">
+  <div class="gallery-body" inert={snapshot.viewerIndex >= 0 ? true : undefined} aria-hidden={snapshot.viewerIndex >= 0 ? "true" : undefined}>
     <aside class="gallery-tree" aria-labelledby="gallery-tree-heading">
       <h2 id="gallery-tree-heading">来源与目录</h2>
       {#if snapshot.sourcesPhase === "loading" || snapshot.sourcesPhase === "idle"}
@@ -1050,7 +1175,8 @@
               placeholder="搜索文件名、相对路径或 TXT 原文"
               maxlength="256"
               autocomplete="off"
-              bind:value={searchDraft}
+              value={searchDraft}
+              oninput={(event) => scheduleSearch((event.currentTarget as HTMLInputElement).value)}
             />
             <button type="submit">搜索</button>
             {#if snapshot.query.length > 0}
@@ -1063,6 +1189,7 @@
               <select value={snapshot.searchScope} onchange={(event) => void controller.setSearchScope((event.currentTarget as HTMLSelectElement).value as typeof snapshot.searchScope)}>
                 <option value="directory">当前目录</option>
                 <option value="source">整个来源</option>
+                <option value="library">整个图库</option>
               </select>
             </label>
             <label>
@@ -1070,7 +1197,7 @@
               <input
                 type="checkbox"
                 checked={snapshot.includeDescendants}
-                disabled={snapshot.searchScope === "source"}
+                disabled={snapshot.searchScope !== "directory"}
                 onchange={(event) => void controller.setIncludeDescendants((event.currentTarget as HTMLInputElement).checked)}
               />
             </label>
@@ -1094,10 +1221,7 @@
             <button
               type="button"
               aria-pressed={snapshot.trashPanelPhase !== "closed"}
-              onclick={() => {
-                if (snapshot.trashPanelPhase === "closed") void controller.openTrashPanel();
-                else controller.closeTrashPanel();
-              }}
+              onclick={toggleTrashPanel}
             >回收区</button>
             <button
               type="button"
@@ -1107,6 +1231,11 @@
             >导出目录…</button>
           </div>
         </nav>
+        {#if snapshot.query.length > 0}
+          <p class="gallery-search-summary" role="status">
+            “{snapshot.query}” · {snapshot.searchScope === "directory" ? "当前目录" : snapshot.searchScope === "source" ? "整个来源" : "整个图库"} · 已载入 {formatCount(snapshot.assets.length)} 项
+          </p>
+        {/if}
 
         {#if snapshot.pagePhase === "loading" && snapshot.directories.length === 0 && snapshot.assets.length === 0}
           <p class="gallery-hint" role="status">正在加载目录内容…</p>
@@ -1143,6 +1272,8 @@
             {#if snapshot.viewMode === "grid"}
               <div
                 class="gallery-grid-scroll"
+                bind:this={contentViewport}
+                tabindex="-1"
                 aria-label="图片网格"
                 onscroll={onContentScroll}
                 use:resizeObserver={{ onContentResize }}
@@ -1160,14 +1291,22 @@
                         onclick={(event) => onAssetClick(event, asset)}
                         ondblclick={() => onAssetActivate(asset)}
                         onkeydown={(event) => onCardKeydown(event, asset)}
-                        onfocus={() => (lastFocusedAssetId = asset.asset_id)}
+                        onfocus={() => (viewerReturnAssetId = asset.asset_id)}
                       >
                         <span class="gallery-card__media">
-                          <img src={service.thumbnailUrl(asset.asset_id)} alt={asset.name} loading="lazy" decoding="async" />
+                          {#if failedThumbnailIds.has(asset.asset_id)}
+                            <span class="gallery-thumbnail-fallback" role="img" aria-label={`${asset.name} 缩略图不可读`}>无法预览</span>
+                          {:else}
+                            <img src={service.thumbnailUrl(asset.asset_id)} alt={asset.name} loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
+                          {/if}
                         </span>
                         <span class="gallery-card__name">{asset.name}</span>
+                        {#if snapshot.query.length > 0}
+                          <span class="gallery-card__context">{assetSourceLabel(asset)} · {asset.relative_path}</span>
+                        {/if}
                         <span class="gallery-card__badges">
                           <span class="gallery-badge" data-kind={txtBadgeKind(asset)}>{txtBadge(asset)}</span>
+                          {#if asset.dedup_visibility === "candidate"}<span class="gallery-badge" data-kind="warn">待去重</span>{/if}
                           {#if asset.dedup_visibility === "excluded"}<span class="gallery-badge" data-kind="muted">已排除</span>{/if}
                         </span>
                       </button>
@@ -1178,6 +1317,8 @@
             {:else}
               <div
                 class="gallery-list-scroll"
+                bind:this={contentViewport}
+                tabindex="-1"
                 aria-label="图片列表"
                 onscroll={onContentScroll}
                 use:resizeObserver={{ onContentResize }}
@@ -1203,11 +1344,17 @@
                           onclick={(event) => onAssetClick(event, asset)}
                           ondblclick={() => onAssetActivate(asset)}
                           onkeydown={(event) => onCardKeydown(event, asset)}
-                          onfocus={() => (lastFocusedAssetId = asset.asset_id)}
+                          onfocus={() => (viewerReturnAssetId = asset.asset_id)}
                         >
-                          <span class="gallery-list-row__thumb" role="cell"><img src={service.thumbnailUrl(asset.asset_id)} alt="" loading="lazy" decoding="async" /></span>
-                          <span class="gallery-list-row__name" role="cell">{asset.name}</span>
-                          <span class="gallery-list-row__path" role="cell">{asset.relative_path}</span>
+                          <span class="gallery-list-row__thumb" role="cell">
+                            {#if failedThumbnailIds.has(asset.asset_id)}
+                              <span class="gallery-thumbnail-fallback" role="img" aria-label={`${asset.name} 缩略图不可读`}>!</span>
+                            {:else}
+                              <img src={service.thumbnailUrl(asset.asset_id)} alt="" loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
+                            {/if}
+                          </span>
+                          <span class="gallery-list-row__name" role="cell">{asset.name}{#if asset.dedup_visibility === "candidate"}<span class="gallery-list-row__candidate"> · 待去重</span>{/if}</span>
+                          <span class="gallery-list-row__path" role="cell">{snapshot.query.length > 0 ? `${assetSourceLabel(asset)} · ${asset.relative_path}` : asset.relative_path}</span>
                           <span role="cell"><span class="gallery-badge" data-kind={txtBadgeKind(asset)}>{txtBadge(asset)}</span></span>
                           <span class="gallery-list-row__size" role="cell">{formatCount(asset.size_bytes)} B</span>
                           <span class="gallery-list-row__dims" role="cell">{asset.width}×{asset.height}</span>
@@ -1570,7 +1717,21 @@
 {/if}
 
 {#if snapshot.viewerIndex >= 0 && snapshot.viewerAssets.length > 0}
-  <Viewer {store} {service} controller={controller} onClose={closeViewer} />
+  <Viewer
+    {snapshot}
+    {currentAsset}
+    contentUrl={service.contentUrl}
+    thumbnailUrl={service.thumbnailUrl}
+    onMove={(delta) => void (delta > 0 ? controller.viewerNext() : controller.viewerPrevious())}
+    onJump={(index) => void controller.viewerJump(index)}
+    onClose={closeViewer}
+    onSetTxtViewMode={(mode) => controller.setTxtViewMode(mode)}
+    onSetTxtDraft={(draft) => controller.setTxtDraft(draft)}
+    onSave={(advance) => void controller.saveTxtAnnotation({ advance })}
+    onDiscard={() => controller.discardTxtDraft()}
+    onTrash={() => void controller.trashViewerAsset()}
+    onResolvePending={(decision) => void controller.resolveViewerPendingAction(decision)}
+  />
 {/if}
 
 {#if snapshot.trashConfirmPhase !== "closed"}
@@ -1660,8 +1821,27 @@
   <aside class="gallery-trash-panel" aria-label="图库回收区">
     <div class="gallery-trash-panel__head">
       <h2>回收区</h2>
-      <button type="button" onclick={() => controller.closeTrashPanel()}>关闭</button>
+      <span>{formatCount(snapshot.trashOperations.reduce((total, item) => total + item.item_count, 0))} 项 · {formatDirectoryExportBytes(snapshot.trashOperations.reduce((total, item) => total + item.disk_usage_bytes, 0))}{snapshot.trashNextCursor !== null ? "（已载入）" : ""}</span>
+      <button type="button" onclick={closeTrashPanel} disabled={trashBulkBusy}>关闭</button>
     </div>
+    {#if snapshot.trashPanelPhase === "ready" && snapshot.trashOperations.length > 0}
+      <div class="gallery-trash-panel__bulk">
+        <span>已选 {formatCount(selectedTrashOperations.length)} 组 · {formatCount(selectedTrashOperations.reduce((total, item) => total + item.item_count, 0))} 项</span>
+        <button
+          type="button"
+          disabled={trashBulkBusy}
+          onclick={() => {
+            selectedTrashOperationIds = selectedTrashOperations.length === snapshot.trashOperations.length
+              ? []
+              : snapshot.trashOperations.map((operation) => operation.operation_id);
+            trashBulkPurgeConfirm = null;
+          }}
+        >{selectedTrashOperations.length === snapshot.trashOperations.length ? "取消全选" : "全选已载入"}</button>
+        <button type="button" disabled={trashBulkBusy || selectedTrashOperations.length === 0} onclick={() => void restoreSelectedTrash()}>恢复所选</button>
+        <button type="button" class="gallery-dialog__danger" disabled={trashBulkBusy || selectedTrashOperations.length === 0} onclick={() => (trashBulkPurgeConfirm = "selected")}>永久删除所选…</button>
+        <button type="button" class="gallery-dialog__danger" disabled={trashBulkBusy} onclick={() => (trashBulkPurgeConfirm = "all")}>清空回收区…</button>
+      </div>
+    {/if}
     <div class="gallery-trash-panel__list">
       {#if snapshot.trashPanelPhase === "loading"}
         <p class="gallery-trash-panel__hint" role="status">正在加载回收区…</p>
@@ -1672,6 +1852,15 @@
       {:else}
         {#each snapshot.trashOperations as operation (operation.operation_id)}
           <div class="gallery-trash-item">
+            <label class="gallery-trash-item__select">
+              <input
+                type="checkbox"
+                checked={selectedTrashOperationIds.includes(operation.operation_id)}
+                disabled={trashBulkBusy || snapshot.trashPanelBusyOperationId !== null}
+                onchange={(event) => toggleTrashOperation(operation.operation_id, (event.currentTarget as HTMLInputElement).checked)}
+              />
+              <span class="gallery-visually-hidden">选择 {formatTrashTimestamp(operation.created_at)} 的回收操作</span>
+            </label>
             <div class="gallery-trash-item__meta">
               <span class="gallery-trash-item__title">{formatTrashTimestamp(operation.created_at)} · {formatCount(operation.item_count)} 项</span>
               <span class="gallery-trash-item__detail">
@@ -1683,19 +1872,38 @@
             <div class="gallery-trash-item__actions">
               <button
                 type="button"
-                disabled={snapshot.trashPanelBusyOperationId === operation.operation_id}
-                onclick={() => void controller.restoreTrashOperation(operation.operation_id)}
+                disabled={trashBulkBusy || snapshot.trashPanelBusyOperationId !== null}
+                onclick={() => void restoreSingleTrash(operation.operation_id)}
               >全部恢复</button>
               <button
                 type="button"
-                disabled={snapshot.trashPanelBusyOperationId === operation.operation_id}
-                onclick={() => void controller.purgeTrashOperation(operation.operation_id)}
+                disabled={trashBulkBusy || snapshot.trashPanelBusyOperationId !== null}
+                onclick={() => requestSingleTrashPurge(operation.operation_id)}
               >彻底删除</button>
             </div>
           </div>
         {/each}
       {/if}
     </div>
+    {#if trashBulkPurgeConfirm !== null}
+      <div class="gallery-trash-panel__confirm" role="alertdialog" aria-labelledby="gallery-trash-purge-title">
+        <strong id="gallery-trash-purge-title">永久删除无法撤销</strong>
+        <p>
+          {trashBulkPurgeConfirm === "all"
+            ? "将清空所有来源的回收区，包括尚未加载的记录。"
+            : `将永久删除所选 ${selectedTrashOperations.length} 组、${selectedTrashOperations.reduce((total, item) => total + item.item_count, 0)} 项。`}
+        </p>
+        <div>
+          <button type="button" disabled={trashBulkBusy} onclick={() => (trashBulkPurgeConfirm = null)}>取消</button>
+          <button
+            type="button"
+            class="gallery-dialog__danger"
+            disabled={trashBulkBusy}
+            onclick={() => void (trashBulkPurgeConfirm === "all" ? purgeAllTrash() : purgeSelectedTrash())}
+          >{trashBulkBusy ? "正在永久删除…" : "确认永久删除"}</button>
+        </div>
+      </div>
+    {/if}
     <div class="gallery-trash-panel__foot">
       <span class="gallery-trash-panel__summary">
         {#if snapshot.trashNextCursor !== null}

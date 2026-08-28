@@ -539,9 +539,9 @@ function galleryDirectoryPage(directoryId: string): Record<string, unknown> {
   };
 }
 
-function galleryTrashPage(): Record<string, unknown> {
+function galleryTrashPage(operations: readonly Record<string, unknown>[] = []): Record<string, unknown> {
   return {
-    operations: [],
+    operations: [...operations],
     next_cursor: null,
   };
 }
@@ -648,6 +648,19 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
   let gallerySourceMounted = true;
   let galleryDisplayName = "E2E 导入目录";
   let galleryReconciliationRetried = false;
+  const galleryAnnotationContent = new Map<string, string>();
+  const galleryAnnotationVersions = new Map<string, number>();
+  const galleryTrashedAssetIds = new Set<string>();
+  const galleryTrashOperations = new Map<string, {
+    readonly operation_id: string;
+    readonly asset_ids: readonly string[];
+    readonly created_at: number;
+    readonly item_count: number;
+    readonly has_txt_count: number;
+    readonly item_error_count: number;
+    readonly disk_usage_bytes: number;
+  }>();
+  let galleryTrashSerial = 0;
 
   await page.route("**/*", async (route) => {
     const request = route.request();
@@ -870,10 +883,38 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       const directoryId = decodeURIComponent(galleryEntriesMatch[1]);
       const query = (url.searchParams.get("query") ?? "").trim().toLowerCase();
       const page = galleryDirectoryPage(directoryId);
+      page.assets = (page.assets as Record<string, unknown>[]).filter(
+        (asset) => !galleryTrashedAssetIds.has(String(asset.asset_id)),
+      );
       if (query) {
         page.assets = (page.assets as Record<string, unknown>[]).filter((asset) => String(asset.name).toLowerCase().includes(query));
       }
       await respond(route, page);
+      return;
+    }
+    if (url.pathname === "/api/v1/gallery/search" && request.method() === "GET") {
+      const query = (url.searchParams.get("query") ?? "").trim().toLowerCase();
+      const scope = url.searchParams.get("scope") ?? "library";
+      const matchingAssets = Array.from({ length: 6 }, (_, index) => galleryAsset(index)).filter((asset) => {
+        if (galleryTrashedAssetIds.has(String(asset.asset_id))) return false;
+        const annotation = galleryAnnotationContent.get(String(asset.asset_id)) ?? "e2e 标注文本";
+        return [asset.name, asset.relative_path, annotation].some((value) =>
+          String(value).toLowerCase().includes(query),
+        );
+      });
+      const rawCursor = url.searchParams.get("asset_cursor");
+      const start = rawCursor?.startsWith("gallery-search-")
+        ? Number.parseInt(rawCursor.slice("gallery-search-".length), 10)
+        : 0;
+      const safeStart = Number.isSafeInteger(start) && start >= 0 ? start : 0;
+      const assets = matchingAssets.slice(safeStart, safeStart + 2);
+      const nextOffset = safeStart + assets.length;
+      await respond(route, {
+        scope,
+        assets,
+        asset_cursor: nextOffset < matchingAssets.length ? `gallery-search-${nextOffset}` : null,
+        limit: 2,
+      });
       return;
     }
     const galleryAssetMatch = url.pathname.match(/^\/api\/v1\/gallery\/assets\/([^/]+)\/(thumbnail|content)$/);
@@ -883,36 +924,146 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
     }
     const galleryAnnotationMatch = url.pathname.match(/^\/api\/v1\/gallery\/assets\/([^/]+)\/annotation$/);
     if (galleryAnnotationMatch && request.method() === "GET") {
+      const assetId = decodeURIComponent(galleryAnnotationMatch[1]);
+      const version = galleryAnnotationVersions.get(assetId) ?? 1;
       await respond(route, {
-        asset_id: decodeURIComponent(galleryAnnotationMatch[1]),
+        asset_id: assetId,
         txt_state: "normal",
-        content: "e2e 标注文本",
-        txt_version: 1,
-        disk_version: "e2e-disk-version-1",
+        content: galleryAnnotationContent.get(assetId) ?? "alpha, beta, alpha,  , gamma ",
+        txt_version: version,
+        disk_version: version.toString(16).padStart(64, "0"),
       });
       return;
     }
     if (galleryAnnotationMatch && request.method() === "PUT") {
+      const assetId = decodeURIComponent(galleryAnnotationMatch[1]);
+      const body = requestBody(request) as { content?: unknown };
+      const content = typeof body.content === "string" ? body.content : "";
+      const version = (galleryAnnotationVersions.get(assetId) ?? 1) + 1;
+      galleryAnnotationContent.set(assetId, content);
+      galleryAnnotationVersions.set(assetId, version);
       await respond(route, {
-        asset_id: decodeURIComponent(galleryAnnotationMatch[1]),
-        txt_state: "normal",
-        content: "e2e 已保存标注",
-        txt_version: 2,
-        disk_version: "e2e-disk-version-2",
+        asset_id: assetId,
+        txt_state: content.trim().length === 0 ? "blank" : "normal",
+        content,
+        txt_version: version,
+        disk_version: version.toString(16).padStart(64, "0"),
+      });
+      return;
+    }
+    const galleryTrashItemMatch = url.pathname.match(/^\/api\/v1\/gallery\/trash\/([^/]+)(\/restore)?$/);
+    if (galleryTrashItemMatch && galleryTrashItemMatch[2] === "/restore" && request.method() === "POST") {
+      const operationId = decodeURIComponent(galleryTrashItemMatch[1]);
+      const operation = galleryTrashOperations.get(operationId);
+      if (operation === undefined) {
+        await respond(route, { error: { code: "trash_operation_not_found", message: "回收操作不存在", request_id: "e2e-request" } }, 404);
+        return;
+      }
+      for (const assetId of operation.asset_ids) galleryTrashedAssetIds.delete(assetId);
+      galleryTrashOperations.delete(operationId);
+      await respond(route, {
+        operation_id: operationId,
+        kind: "restore",
+        status: "committed",
+        item_count: operation.item_count,
+        has_txt_count: operation.has_txt_count,
+      });
+      return;
+    }
+    if (galleryTrashItemMatch && galleryTrashItemMatch[2] === undefined && request.method() === "DELETE") {
+      const operationId = decodeURIComponent(galleryTrashItemMatch[1]);
+      const operation = galleryTrashOperations.get(operationId);
+      galleryTrashOperations.delete(operationId);
+      await respond(route, {
+        operation_id: operationId,
+        kind: "purge",
+        status: "committed",
+        item_count: operation?.item_count ?? 0,
+        has_txt_count: operation?.has_txt_count ?? 0,
       });
       return;
     }
     if (url.pathname === "/api/v1/gallery/trash" && request.method() === "GET") {
-      await respond(route, galleryTrashPage());
+      const operations = [...galleryTrashOperations.values()].map(({ asset_ids: _assetIds, ...operation }) => operation);
+      await respond(route, galleryTrashPage(operations));
       return;
     }
     if (url.pathname === "/api/v1/gallery/trash" && request.method() === "DELETE") {
-      await respond(route, { purged_operations: 0 });
+      const itemCount = [...galleryTrashOperations.values()].reduce((total, item) => total + item.item_count, 0);
+      const txtCount = [...galleryTrashOperations.values()].reduce((total, item) => total + item.has_txt_count, 0);
+      galleryTrashOperations.clear();
+      await respond(route, {
+        operation_id: "gal-purge-all",
+        kind: "purge",
+        status: "committed",
+        item_count: itemCount,
+        has_txt_count: txtCount,
+      });
+      return;
+    }
+    if (url.pathname === "/api/v1/gallery/file-operations/trash" && request.method() === "POST") {
+      const body = requestBody(request) as { asset_ids?: unknown };
+      const assetIds = Array.isArray(body.asset_ids)
+        ? body.asset_ids.filter((assetId): assetId is string => typeof assetId === "string")
+        : [];
+      galleryTrashSerial += 1;
+      const operationId = `gal-trash-${galleryTrashSerial}`;
+      for (const assetId of assetIds) galleryTrashedAssetIds.add(assetId);
+      galleryTrashOperations.set(operationId, {
+        operation_id: operationId,
+        asset_ids: [...assetIds],
+        created_at: 1_700_000_000_000 + galleryTrashSerial,
+        item_count: assetIds.length,
+        has_txt_count: assetIds.length,
+        item_error_count: 0,
+        disk_usage_bytes: assetIds.length * 49_152,
+      });
+      await respond(route, {
+        operation_id: operationId,
+        kind: "trash",
+        status: "committed",
+        item_count: assetIds.length,
+        has_txt_count: assetIds.length,
+      });
+      return;
+    }
+    const galleryUndoMatch = url.pathname.match(/^\/api\/v1\/gallery\/file-operations\/([^/]+)\/undo$/);
+    if (galleryUndoMatch && request.method() === "POST") {
+      const operationId = decodeURIComponent(galleryUndoMatch[1]);
+      const operation = galleryTrashOperations.get(operationId);
+      if (operation !== undefined) {
+        for (const assetId of operation.asset_ids) galleryTrashedAssetIds.delete(assetId);
+        galleryTrashOperations.delete(operationId);
+      }
+      await respond(route, {
+        operation_id: operationId,
+        kind: "restore",
+        status: "committed",
+        item_count: operation?.item_count ?? 0,
+        has_txt_count: operation?.has_txt_count ?? 0,
+      });
+      return;
+    }
+    const galleryRenameMatch = url.pathname.match(/^\/api\/v1\/gallery\/assets\/([^/]+)\/rename$/);
+    if (galleryRenameMatch && request.method() === "POST") {
+      await respond(route, {
+        operation_id: "gal-rename-fixture",
+        kind: "rename",
+        status: "committed",
+        item_count: 1,
+        has_txt_count: 1,
+      });
       return;
     }
     const galleryFileOperationMatch = url.pathname.match(/^\/api\/v1\/gallery\/file-operations(\/.*)?$/);
     if (galleryFileOperationMatch) {
-      await respond(route, { operation_id: "gal-op-fixture", status: "committed", item_count: 0, error_count: 0 });
+      await respond(route, {
+        operation_id: "gal-op-fixture",
+        kind: "unknown",
+        status: "committed",
+        item_count: 0,
+        has_txt_count: 0,
+      });
       return;
     }
     if (url.pathname === "/api/v1/gallery/imports" && request.method() === "POST") {

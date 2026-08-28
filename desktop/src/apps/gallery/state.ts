@@ -19,6 +19,24 @@ export type GalleryTxtViewMode = "raw" | "tags";
 export type GallerySavePhase = "idle" | "saving" | "saved" | "conflict" | "error";
 export type GalleryDialogPhase = "closed" | "open" | "busy";
 export type GalleryTrashPanelPhase = "closed" | "loading" | "ready" | "error";
+export type GalleryViewerPagePhase = "idle" | "loading" | "error";
+export type GalleryViewerOperationPhase = "idle" | "trashing" | "error";
+export type GalleryViewerPendingAction =
+  | Readonly<{ kind: "close" }>
+  | Readonly<{ kind: "previous" }>
+  | Readonly<{ kind: "next" }>
+  | Readonly<{ kind: "jump"; index: number }>
+  | Readonly<{ kind: "trash"; assetId: string }>;
+
+export interface GalleryViewerQueryContext {
+  readonly mode: "directory" | "search";
+  readonly directoryId: string | null;
+  readonly sourceId: string | null;
+  readonly scope: GallerySearchScope;
+  readonly includeDescendants: boolean;
+  readonly txtState: GalleryTxtState | null;
+  readonly query: string;
+}
 export interface GalleryBrowseState {
   /** 来源列表加载阶段。 */
   readonly sourcesPhase: GalleryLoadPhase;
@@ -58,6 +76,13 @@ export interface GalleryBrowseState {
   readonly viewerAnnotation: GalleryAnnotation | null;
   readonly txtViewMode: GalleryTxtViewMode;
   /** 返回网格时要恢复的滚动位置。 */
+  readonly viewerAssetCursor: string | null;
+  readonly viewerQuery: GalleryViewerQueryContext | null;
+  readonly viewerPagePhase: GalleryViewerPagePhase;
+  readonly viewerPageErrorCode: string | null;
+  readonly viewerPendingAction: GalleryViewerPendingAction | null;
+  readonly viewerOperationPhase: GalleryViewerOperationPhase;
+  readonly viewerOperationErrorCode: string | null;
   readonly pendingGridScrollTop: number;
   // ---- TXT 编辑（G3-3） ----
   /** TXT 编辑草稿；null 表示未进入编辑态（与已保存内容一致）。 */
@@ -120,6 +145,13 @@ export const GALLERY_BROWSE_DEFAULTS: GalleryBrowseState = Object.freeze({
   viewerErrorCode: null,
   viewerAnnotation: null,
   txtViewMode: "raw" as const,
+  viewerAssetCursor: null,
+  viewerQuery: null,
+  viewerPagePhase: "idle" as const,
+  viewerPageErrorCode: null,
+  viewerPendingAction: null,
+  viewerOperationPhase: "idle" as const,
+  viewerOperationErrorCode: null,
   pendingGridScrollTop: 0,
   txtDraft: null,
   txtSavePhase: "idle" as const,
@@ -164,16 +196,31 @@ export interface GalleryStore {
     directory_cursor: string | null;
     asset_cursor: string | null;
   }): boolean;
+  applySearchPage(page: {
+    assets: readonly GalleryAssetEntry[];
+    asset_cursor: string | null;
+  }, append: boolean): boolean;
   setPageError(errorCode: string): boolean;
   setPageLoading(): boolean;
   resetPage(): boolean;
   applySelection(patch: { anchorIndex: number | null; selectedIds: readonly string[] }): boolean;
   clearSelection(): boolean;
-  openViewer(assets: readonly GalleryAssetEntry[], index: number): boolean;
+  openViewer(
+    assets: readonly GalleryAssetEntry[],
+    index: number,
+    context?: GalleryViewerQueryContext,
+    assetCursor?: string | null,
+  ): boolean;
   setViewerAnnotation(annotation: GalleryAnnotation): boolean;
   setViewerLoading(): boolean;
   setViewerError(errorCode: string): boolean;
   moveViewer(index: number): boolean;
+  setViewerPageLoading(): boolean;
+  appendViewerAssets(assets: readonly GalleryAssetEntry[], assetCursor: string | null): boolean;
+  setViewerPageError(errorCode: string): boolean;
+  setViewerPendingAction(action: GalleryViewerPendingAction | null): boolean;
+  setViewerOperation(phase: GalleryViewerOperationPhase, errorCode: string | null): boolean;
+  removeViewerAsset(assetId: string): boolean;
   closeViewer(): boolean;
   setTxtViewMode(mode: GalleryTxtViewMode): boolean;
   // ---- G3-3 TXT 编辑 ----
@@ -236,6 +283,13 @@ function statesEqual(left: GalleryBrowseState, right: GalleryBrowseState): boole
     left.viewerErrorCode === right.viewerErrorCode &&
     left.viewerAnnotation === right.viewerAnnotation &&
     left.txtViewMode === right.txtViewMode &&
+    left.viewerAssetCursor === right.viewerAssetCursor &&
+    left.viewerQuery === right.viewerQuery &&
+    left.viewerPagePhase === right.viewerPagePhase &&
+    left.viewerPageErrorCode === right.viewerPageErrorCode &&
+    left.viewerPendingAction === right.viewerPendingAction &&
+    left.viewerOperationPhase === right.viewerOperationPhase &&
+    left.viewerOperationErrorCode === right.viewerOperationErrorCode &&
     left.pendingGridScrollTop === right.pendingGridScrollTop &&
     left.txtDraft === right.txtDraft &&
     left.txtSavePhase === right.txtSavePhase &&
@@ -379,6 +433,21 @@ export function createGalleryStore(): GalleryStore {
         assetCursor: page.asset_cursor,
       });
     },
+    applySearchPage(page, append) {
+      const combined = append ? [...state.assets, ...page.assets] : [...page.assets];
+      const unique = new Map(combined.map((asset) => [asset.asset_id, asset]));
+      return publish({
+        ...state,
+        directories: Object.freeze([]),
+        directoryCursor: null,
+        assets: sortGalleryAssetEntries([...unique.values()]),
+        assetCursor: page.asset_cursor,
+        pagePhase: "ready",
+        pageErrorCode: null,
+        selectedAssetIds: Object.freeze([]),
+        selectionAnchorIndex: null,
+      });
+    },
     setPageError(errorCode) {
       return publish({ ...state, pagePhase: "error", pageErrorCode: errorCode });
     },
@@ -409,8 +478,19 @@ export function createGalleryStore(): GalleryStore {
         selectedAssetIds: Object.freeze([]),
       });
     },
-    openViewer(assets, index) {
+    openViewer(assets, index, context, assetCursor) {
       if (index < 0 || index >= assets.length) return false;
+      const viewerQuery = Object.freeze({
+        ...(context ?? {
+          mode: state.query.length > 0 ? "search" : "directory",
+          directoryId: state.currentDirectory?.directory_id ?? null,
+          sourceId: state.activeSourceId,
+          scope: state.searchScope,
+          includeDescendants: state.includeDescendants,
+          txtState: state.txtStateFilter,
+          query: state.query,
+        }),
+      });
       return publish({
         ...state,
         viewerAssets: Object.freeze([...assets]),
@@ -418,6 +498,16 @@ export function createGalleryStore(): GalleryStore {
         viewerPhase: "loading",
         viewerErrorCode: null,
         viewerAnnotation: null,
+        viewerAssetCursor: assetCursor === undefined ? state.assetCursor : assetCursor,
+        viewerQuery,
+        viewerPagePhase: "idle",
+        viewerPageErrorCode: null,
+        viewerPendingAction: null,
+        viewerOperationPhase: "idle",
+        viewerOperationErrorCode: null,
+        txtDraft: null,
+        txtSavePhase: "idle",
+        txtSaveErrorCode: null,
       });
     },
     setViewerAnnotation(annotation) {
@@ -436,13 +526,88 @@ export function createGalleryStore(): GalleryStore {
     },
     moveViewer(index) {
       if (index < 0 || index >= state.viewerAssets.length) return false;
-      // 切换图片：TXT 重置为加载中；几何由视图层重新适应画布（记忆 #57）。
       return publish({
         ...state,
         viewerIndex: index,
         viewerPhase: "loading",
         viewerErrorCode: null,
         viewerAnnotation: null,
+        viewerPendingAction: null,
+        viewerOperationPhase: "idle",
+        viewerOperationErrorCode: null,
+        txtDraft: null,
+        txtSavePhase: "idle",
+        txtSaveErrorCode: null,
+      });
+    },
+    setViewerPageLoading() {
+      return publish({
+        ...state,
+        viewerPagePhase: "loading",
+        viewerPageErrorCode: null,
+      });
+    },
+    appendViewerAssets(assets, assetCursor) {
+      const seen = new Set(state.viewerAssets.map((asset) => asset.asset_id));
+      const nextAssets = [...state.viewerAssets];
+      for (const asset of assets) {
+        if (!seen.has(asset.asset_id)) {
+          seen.add(asset.asset_id);
+          nextAssets.push(asset);
+        }
+      }
+      return publish({
+        ...state,
+        viewerAssets: Object.freeze(nextAssets),
+        viewerAssetCursor: assetCursor,
+        viewerPagePhase: "idle",
+        viewerPageErrorCode: null,
+      });
+    },
+    setViewerPageError(errorCode) {
+      return publish({
+        ...state,
+        viewerPagePhase: "error",
+        viewerPageErrorCode: errorCode,
+      });
+    },
+    setViewerPendingAction(action) {
+      return publish({
+        ...state,
+        viewerPendingAction: action === null ? null : Object.freeze({ ...action }),
+      });
+    },
+    setViewerOperation(phase, errorCode) {
+      return publish({
+        ...state,
+        viewerOperationPhase: phase,
+        viewerOperationErrorCode: errorCode,
+      });
+    },
+    removeViewerAsset(assetId) {
+      const removedIndex = state.viewerAssets.findIndex((asset) => asset.asset_id === assetId);
+      if (removedIndex < 0) return false;
+      const viewerAssets = state.viewerAssets.filter((asset) => asset.asset_id !== assetId);
+      let viewerIndex = state.viewerIndex;
+      if (removedIndex < viewerIndex) viewerIndex -= 1;
+      else if (removedIndex === viewerIndex) viewerIndex = Math.min(viewerIndex, viewerAssets.length - 1);
+      const remainsOpen = viewerIndex >= 0 && viewerAssets.length > 0;
+      return publish({
+        ...state,
+        assets: Object.freeze(state.assets.filter((asset) => asset.asset_id !== assetId)),
+        selectedAssetIds: Object.freeze(state.selectedAssetIds.filter((id) => id !== assetId)),
+        selectionAnchorIndex: null,
+        viewerAssets: Object.freeze(viewerAssets),
+        viewerIndex: remainsOpen ? viewerIndex : -1,
+        viewerPhase: remainsOpen ? "loading" : "idle",
+        viewerErrorCode: null,
+        viewerAnnotation: null,
+        viewerPendingAction: null,
+        viewerOperationPhase: "idle",
+        viewerOperationErrorCode: null,
+        txtDraft: null,
+        txtSavePhase: "idle",
+        txtSaveErrorCode: null,
       });
     },
     closeViewer() {
@@ -453,6 +618,16 @@ export function createGalleryStore(): GalleryStore {
         viewerPhase: "idle",
         viewerErrorCode: null,
         viewerAnnotation: null,
+        viewerAssetCursor: null,
+        viewerQuery: null,
+        viewerPagePhase: "idle",
+        viewerPageErrorCode: null,
+        viewerPendingAction: null,
+        viewerOperationPhase: "idle",
+        viewerOperationErrorCode: null,
+        txtDraft: null,
+        txtSavePhase: "idle",
+        txtSaveErrorCode: null,
       });
     },
     setTxtViewMode(mode) {

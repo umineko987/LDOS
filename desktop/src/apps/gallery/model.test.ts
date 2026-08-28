@@ -12,6 +12,7 @@ import {
   gallerySelectAll,
   galleryZoomAtPointer,
   parseGalleryTxtTags,
+  parseGalleryTxtTagView,
   sanitizeGalleryAnnotation,
   sanitizeGalleryDirectoryExportOperation,
   sanitizeGalleryAssetEntry,
@@ -347,6 +348,16 @@ describe("gallery TXT tags (G2-3 标签视图)", () => {
     expect(parseGalleryTxtTags("  ")).toEqual([]);
     expect(parseGalleryTxtTags(null)).toEqual([]);
     expect(parseGalleryTxtTags("single")).toEqual(["single"]);
+  });
+
+  it("keeps tag ordering and reports non-destructive warnings", () => {
+    const parsed = parseGalleryTxtTagView(" red,blue, red, , blue ");
+    expect(parsed.tags.map((tag) => tag.value)).toEqual(["red", "blue", "red", "", "blue"]);
+    expect(parsed.tags.map((tag) => tag.duplicate)).toEqual([false, false, true, false, true]);
+    expect(parsed).toMatchObject({ duplicate_count: 2, empty_count: 1, whitespace_count: 4 });
+    expect(Object.isFrozen(parsed)).toBe(true);
+    expect(Object.isFrozen(parsed.tags)).toBe(true);
+    expect(parseGalleryTxtTagView(null).tags).toEqual([]);
   });
 
   it("sanitizes annotation payloads strictly", () => {

@@ -316,10 +316,10 @@ test.describe("可用应用关键旅程", () => {
 
     // 沉浸式查看器：双击打开，TXT 面板显示后端标注原文。
     await gallery.locator("[data-gallery-asset=\"gal-asset-05\"]").dblclick();
-    await expect(gallery.getByRole("dialog", { name: /沉浸式查看器：image-05\.jpg/ })).toBeVisible();
-    await expect(gallery.getByText("e2e 标注文本")).toBeVisible();
+    await expect(gallery.getByRole("dialog", { name: /查看 image-05\.jpg/ })).toBeVisible();
+    await expect(gallery.locator(".gallery-viewer__raw")).toContainText("alpha, beta, alpha");
     await page.keyboard.press("Escape");
-    await expect(gallery.getByRole("dialog", { name: /沉浸式查看器：image-05\.jpg/ })).toBeHidden();
+    await expect(gallery.getByRole("dialog", { name: /查看 image-05\.jpg/ })).toBeHidden();
 
     await gallery.getByRole("button", { name: "导出目录…" }).click();
     const directoryExport = gallery.getByRole("dialog", { name: "导出完整目录" });
@@ -403,6 +403,148 @@ test.describe("可用应用关键旅程", () => {
         "/api/v1/gallery/sources/gal-src-import/reconciliation/retry",
       ),
     ).toBe(1);
+    expect(api.unhandled).toEqual([]);
+  });
+
+  test("图库跨全库搜索分页完成沉浸查看、标签辅助与显式 TXT 离开决策", async ({ page }) => {
+    const api = await bootDesktop(page);
+    await launchApp(page, "gallery");
+    const gallery = appWindow(page, "gallery");
+    await gallery.getByRole("button", { name: /E2E 导入目录/ }).click();
+
+    await gallery.getByRole("combobox", { name: "范围", exact: true }).selectOption("library");
+    await gallery.getByLabel("搜索当前范围").fill("image");
+    await gallery.getByRole("button", { name: "搜索", exact: true }).click();
+    await expect(gallery.locator("[data-gallery-asset]")).toHaveCount(2);
+    await expect(gallery.getByText(/整个图库 · 已载入 2 项/)).toBeVisible();
+
+    const opener = gallery.locator('[data-gallery-asset="gal-asset-02"]');
+    await opener.dblclick();
+    const viewer = gallery.locator(".gallery-viewer");
+    await expect(viewer).toBeVisible();
+    await expect(viewer.locator(".gallery-viewer__raw")).toContainText("alpha, beta, alpha");
+
+    await viewer.getByRole("button", { name: "逗号标签", exact: true }).click();
+    const tagWarning = viewer.locator(".gallery-viewer__tag-warning");
+    await expect(tagWarning).toContainText("空标签 1");
+    await expect(tagWarning).toContainText("重复 1");
+    await expect(tagWarning).toContainText("含多余空白 4");
+    await viewer.getByRole("button", { name: "原文", exact: true }).click();
+
+    await page.keyboard.press("f");
+    await expect(viewer).toHaveClass(/gallery-viewer--focus/);
+    await page.keyboard.press("f");
+    await expect(viewer).not.toHaveClass(/gallery-viewer--focus/);
+
+    const separator = viewer.getByRole("slider", { name: "调整 TXT 面板宽度" });
+    const panelWidthBefore = Number(await separator.getAttribute("aria-valuenow"));
+    await separator.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect.poll(async () => Number(await separator.getAttribute("aria-valuenow"))).toBeGreaterThan(panelWidthBefore);
+
+    const stage = viewer.getByRole("group", { name: /图片画布/ });
+    const image = stage.locator("img");
+    await stage.dispatchEvent("wheel", { deltaY: -240, clientX: 420, clientY: 320 });
+    await expect(viewer.locator(".gallery-viewer__zoom")).not.toHaveText("100%");
+    const transformBeforePan = await image.getAttribute("style");
+    const stageBox = await stage.boundingBox();
+    expect(stageBox).not.toBeNull();
+    await page.mouse.move(stageBox!.x + stageBox!.width / 2, stageBox!.y + stageBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(stageBox!.x + stageBox!.width / 2 + 70, stageBox!.y + stageBox!.height / 2 + 35);
+    await page.mouse.up();
+    await expect.poll(() => image.getAttribute("style")).not.toBe(transformBeforePan);
+
+    await viewer.getByRole("button", { name: /关闭/ }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(viewer.getByText("image-03.jpg", { exact: true })).toBeVisible();
+    await expect(viewer.locator(".gallery-viewer__zoom")).toHaveText("100%");
+    expect(
+      api.requests.some(
+        (entry) =>
+          entry.method === "GET" &&
+          entry.path.startsWith("/api/v1/gallery/search?") &&
+          entry.path.includes("scope=library") &&
+          entry.path.includes("asset_cursor=gallery-search-2"),
+      ),
+    ).toBe(true);
+
+    await viewer.getByRole("button", { name: "编辑原文", exact: true }).click();
+    const editor = viewer.getByLabel("TXT 原文编辑器");
+    await editor.fill("尚未保存，先取消");
+    await viewer.getByRole("button", { name: "下一张", exact: true }).click();
+    let pending = viewer.getByRole("alertdialog", { name: "TXT 有未保存更改" });
+    await pending.getByRole("button", { name: "取消" }).click();
+    await expect(viewer.getByText("image-03.jpg", { exact: true })).toBeVisible();
+    await expect(editor).toHaveValue("尚未保存，先取消");
+
+    await viewer.getByRole("button", { name: "下一张", exact: true }).click();
+    pending = viewer.getByRole("alertdialog", { name: "TXT 有未保存更改" });
+    await pending.getByRole("button", { name: "放弃更改" }).click();
+    await expect(viewer.getByText("image-04.jpg", { exact: true })).toBeVisible();
+
+    await viewer.getByRole("button", { name: "编辑原文", exact: true }).click();
+    await viewer.getByLabel("TXT 原文编辑器").fill("Ctrl+S 保存原文");
+    await page.keyboard.press("Control+s");
+    await expect.poll(() => api.count("PUT", "/api/v1/gallery/assets/gal-asset-04/annotation")).toBe(1);
+    await expect(viewer.getByText("Ctrl+S 保存原文", { exact: true })).toBeVisible();
+
+    await viewer.getByRole("button", { name: "编辑原文", exact: true }).click();
+    await viewer.getByLabel("TXT 原文编辑器").fill("保存并前往下一张");
+    await page.keyboard.press("Control+Enter");
+    await expect(viewer.getByText("image-05.jpg", { exact: true })).toBeVisible();
+    await expect.poll(() => api.count("PUT", "/api/v1/gallery/assets/gal-asset-04/annotation")).toBe(2);
+
+    await viewer.getByRole("button", { name: /关闭/ }).click();
+    await expect(viewer).toBeHidden();
+    await expect(opener).toBeFocused();
+    expect(api.unhandled).toEqual([]);
+  });
+
+  test("图库查看器删除自动前进，并支持批量恢复与批量永久删除", async ({ page }) => {
+    const api = await bootDesktop(page);
+    await launchApp(page, "gallery");
+    const gallery = appWindow(page, "gallery");
+    await gallery.getByRole("button", { name: /E2E 导入目录/ }).click();
+
+    const trashFirstTwoFromViewer = async () => {
+      await gallery.locator('[data-gallery-asset="gal-asset-01"]').dblclick();
+      const viewer = gallery.locator(".gallery-viewer");
+      await expect(viewer).toBeVisible();
+      await viewer.getByRole("button", { name: "移入回收区" }).click();
+      await expect(viewer.getByText("image-02.jpg", { exact: true })).toBeVisible();
+      await expect(gallery.locator(".gallery-undo-toast")).toContainText("已移入回收区 1 项");
+      await viewer.getByRole("button", { name: "移入回收区" }).click();
+      await expect(viewer.getByText("image-03.jpg", { exact: true })).toBeVisible();
+      await viewer.getByRole("button", { name: /关闭/ }).click();
+      await expect(viewer).toBeHidden();
+    };
+
+    await trashFirstTwoFromViewer();
+    await gallery.getByRole("button", { name: "回收区" }).click();
+    let trashPanel = gallery.getByRole("complementary", { name: "图库回收区" });
+    await expect(trashPanel.locator(".gallery-trash-item")).toHaveCount(2);
+    await expect(trashPanel).toContainText("2 项");
+    await trashPanel.getByRole("button", { name: "全选已载入" }).click();
+    await trashPanel.getByRole("button", { name: "恢复所选" }).click();
+    await expect(trashPanel.getByText("回收区为空。文件将保留至手动恢复或彻底删除。")).toBeVisible();
+    expect(api.count("POST", "/api/v1/gallery/trash/gal-trash-1/restore")).toBe(1);
+    expect(api.count("POST", "/api/v1/gallery/trash/gal-trash-2/restore")).toBe(1);
+    await trashPanel.getByRole("button", { name: "关闭" }).click();
+    await expect(gallery.locator('[data-gallery-asset="gal-asset-01"]')).toBeVisible();
+
+    await trashFirstTwoFromViewer();
+    await gallery.getByRole("button", { name: "回收区" }).click();
+    trashPanel = gallery.getByRole("complementary", { name: "图库回收区" });
+    await expect(trashPanel.locator(".gallery-trash-item")).toHaveCount(2);
+    await trashPanel.getByRole("button", { name: "全选已载入" }).click();
+    await trashPanel.getByRole("button", { name: "永久删除所选…" }).click();
+    const purgeConfirm = trashPanel.getByRole("alertdialog", { name: "永久删除无法撤销" });
+    await expect(purgeConfirm).toContainText("2 组、2 项");
+    await purgeConfirm.getByRole("button", { name: "确认永久删除" }).click();
+    await expect(trashPanel.getByText("回收区为空。文件将保留至手动恢复或彻底删除。")).toBeVisible();
+    expect(api.count("DELETE", "/api/v1/gallery/trash/gal-trash-3")).toBe(1);
+    expect(api.count("DELETE", "/api/v1/gallery/trash/gal-trash-4")).toBe(1);
     expect(api.unhandled).toEqual([]);
   });
 

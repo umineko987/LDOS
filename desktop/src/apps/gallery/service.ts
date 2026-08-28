@@ -8,11 +8,14 @@ import {
   sanitizeGalleryScanOperation,
   sanitizeGallerySourcePage,
   sanitizeGalleryTrashPage,
+  sanitizeGallerySearchPage,
   validateGalleryQuery,
   type GalleryAnnotation,
   type GalleryDirectoryPage,
   type GalleryDirectoryExportOperation,
   type GalleryFileOperationResult,
+  type GallerySearchPage,
+  type GallerySearchScope,
   type GallerySourceSummary,
   type GalleryScanOperation,
   type GalleryTrashPage,
@@ -26,6 +29,7 @@ export const GALLERY_ENDPOINTS = Object.freeze({
   sources: "/api/v1/gallery/sources",
   imports: "/api/v1/gallery/imports",
   directoryEntries: "/api/v1/gallery/directories",
+  search: "/api/v1/gallery/search",
   directoryExports: "/api/v1/gallery/directory-exports",
   fileOperations: "/api/v1/gallery/file-operations",
   trash: "/api/v1/gallery/trash",
@@ -37,6 +41,16 @@ export interface GalleryDirectoryRequest {
   readonly txtState: GalleryTxtState | null;
   readonly query: string;
   readonly directoryCursor: string | null;
+  readonly assetCursor: string | null;
+}
+
+export interface GallerySearchRequest {
+  readonly query: string;
+  readonly scope: GallerySearchScope;
+  readonly sourceId: string | null;
+  readonly directoryId: string | null;
+  readonly includeDescendants: boolean;
+  readonly txtState: GalleryTxtState | null;
   readonly assetCursor: string | null;
 }
 
@@ -53,6 +67,10 @@ export interface GalleryService {
     request: GalleryDirectoryRequest,
     signal: AbortSignal,
   ): Promise<GalleryDirectoryPage>;
+  searchAssets(
+    request: GallerySearchRequest,
+    signal: AbortSignal,
+  ): Promise<GallerySearchPage>;
   startDirectoryExport(
     directoryIds: readonly string[],
     targetPath: string,
@@ -105,6 +123,31 @@ export function directoryEntriesPath(request: GalleryDirectoryRequest): string {
   // 搜索词与 TXT 筛选作为目录分页的查询参数下发（§7.1 唯一浏览端点）；
   // 搜索范围（当前目录/整个来源）由 controller 解析为目标目录与开关。
   return `${GALLERY_ENDPOINTS.directoryEntries}/${endpointId(request.directoryId)}/entries?${parameters.join("&")}`;
+}
+
+export function searchAssetsPath(request: GallerySearchRequest): string {
+  const query = validateGalleryQuery(request.query);
+  if (query.length === 0) throw new TypeError("invalid_gallery_search_query");
+  if (request.scope === "directory" && request.directoryId === null) {
+    throw new TypeError("gallery_search_directory_required");
+  }
+  if (request.scope === "source" && request.sourceId === null) {
+    throw new TypeError("gallery_search_source_required");
+  }
+  const parameters = [
+    "view=desktop",
+    `scope=${encodeURIComponent(request.scope)}`,
+    `query=${encodeURIComponent(query)}`,
+  ];
+  if (request.scope === "directory") {
+    parameters.push(`directory_id=${endpointId(request.directoryId!)}`);
+    if (request.includeDescendants) parameters.push("include_descendants=true");
+  } else if (request.scope === "source") {
+    parameters.push(`source_id=${endpointId(request.sourceId!)}`);
+  }
+  if (request.txtState !== null) parameters.push(`txt_state=${encodeURIComponent(request.txtState)}`);
+  if (request.assetCursor !== null) parameters.push(`asset_cursor=${encodeURIComponent(request.assetCursor)}`);
+  return `${GALLERY_ENDPOINTS.search}?${parameters.join("&")}`;
 }
 
 export function createGalleryService(api: ApiClient): GalleryService {
@@ -185,6 +228,9 @@ export function createGalleryService(api: ApiClient): GalleryService {
     },
     async listDirectoryEntries(request, signal) {
       return sanitizeGalleryDirectoryPage(await api.get(directoryEntriesPath(request), { signal }));
+    },
+    async searchAssets(request, signal) {
+      return sanitizeGallerySearchPage(await api.get(searchAssetsPath(request), { signal }));
     },
     async startDirectoryExport(directoryIds, targetPath) {
       if (

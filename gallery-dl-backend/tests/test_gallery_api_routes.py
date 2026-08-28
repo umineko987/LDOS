@@ -281,6 +281,74 @@ class GalleryDirectoryEntriesRoutesTest(GalleryApiTestBase):
         self.assertEqual(bad_state.status_code, 422)
         self.assertEqual(bad_state.json()["error"]["code"], "invalid_txt_state")
 
+    def test_search_scopes_page_across_filename_path_and_txt_content(self) -> None:
+        first = self.client.get(
+            "/api/v1/gallery/search",
+            params={"view": "desktop", "scope": "library", "query": "hat", "limit": 1},
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        payload = first.json()
+        self.assertEqual(payload["scope"], "library")
+        self.assertEqual([asset["name"] for asset in payload["assets"]], ["2.jpg"])
+        self.assertIsNotNone(payload["asset_cursor"])
+
+        second = self.client.get(
+            "/api/v1/gallery/search",
+            params={
+                "view": "desktop",
+                "scope": "library",
+                "query": "hat",
+                "limit": 1,
+                "asset_cursor": payload["asset_cursor"],
+            },
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual([asset["name"] for asset in second.json()["assets"]], ["10.jpg"])
+        self.assertIsNone(second.json()["asset_cursor"])
+
+        recursive = self.client.get(
+            "/api/v1/gallery/search",
+            params={
+                "view": "desktop",
+                "scope": "directory",
+                "directory_id": self.root_id,
+                "include_descendants": "true",
+                "query": "car",
+                "txt_state": "normal",
+            },
+        )
+        self.assertEqual(recursive.status_code, 200, recursive.text)
+        self.assertEqual(
+            [asset["relative_path"] for asset in recursive.json()["assets"]],
+            ["sub/1.jpg"],
+        )
+
+        source = self.client.get(
+            "/api/v1/gallery/search",
+            params={
+                "view": "desktop",
+                "scope": "source",
+                "source_id": self.source["source_id"],
+                "query": "jpg",
+            },
+        )
+        self.assertEqual(source.status_code, 200, source.text)
+        self.assertEqual(len(source.json()["assets"]), 3)
+
+    def test_search_rejects_missing_scope_ids_and_invalid_filters(self) -> None:
+        cases = [
+            ({"scope": "directory", "query": "hat"}, "gallery_search_directory_required"),
+            ({"scope": "source", "query": "hat"}, "gallery_search_source_required"),
+            ({"scope": "library", "query": "   "}, "gallery_search_query_required"),
+            ({"scope": "library", "query": "hat", "txt_state": "approved"}, "invalid_txt_state"),
+            ({"scope": "library", "query": "hat", "asset_cursor": "garbage"}, "invalid_gallery_cursor"),
+        ]
+        for params, expected_code in cases:
+            with self.subTest(expected_code=expected_code):
+                response = self.client.get("/api/v1/gallery/search", params=params)
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(response.json()["error"]["code"], expected_code)
+
 
 class GalleryAssetRoutesTest(GalleryApiTestBase):
     def setUp(self) -> None:

@@ -1,430 +1,482 @@
 <script lang="ts">
-  import {
-    GALLERY_TXT_STATE_LABELS,
-    galleryFitViewport,
-    galleryOneToOneViewport,
-    galleryZoomAtPointer,
-    parseGalleryTxtTags,
-    type GalleryCanvasSize,
-    type GalleryViewportState,
-  } from "./model";
-  import type { GalleryService } from "./service";
-  import type { GalleryStore } from "./state";
+  import { onMount, tick } from "svelte";
+  import { parseGalleryTxtTagView, type GalleryAssetEntry } from "./model";
+  import type {
+    GalleryBrowseState,
+    GalleryTxtViewMode,
+  } from "./state";
+  import { restoreFocus, trappedTabIndex, type FocusTarget } from "../../core/a11y/focus";
 
-  interface ViewerProps {
-    readonly store: GalleryStore;
-    readonly service: GalleryService;
-    readonly controller: {
-      readonly setTxtDraft: (draft: string) => boolean;
-      readonly saveTxtAnnotation: (options: { advance: boolean }) => Promise<boolean>;
-      readonly discardTxtDraft: () => boolean;
-      readonly viewerNext: () => Promise<boolean>;
-      readonly viewerPrevious: () => Promise<boolean>;
-      readonly closeViewer: () => boolean;
-    };
-    readonly onClose?: () => void;
+  interface Props {
+    snapshot: GalleryBrowseState;
+    currentAsset: GalleryAssetEntry | null;
+    contentUrl: (assetId: string) => string;
+    thumbnailUrl: (assetId: string) => string;
+    onMove: (delta: number) => void;
+    onJump: (index: number) => void;
+    onClose: () => void;
+    onSetTxtViewMode: (mode: GalleryTxtViewMode) => void;
+    onSetTxtDraft: (draft: string) => void;
+    onSave: (advance: boolean) => void;
+    onDiscard: () => void;
+    onTrash: () => void;
+    onResolvePending: (decision: "save" | "discard" | "cancel") => void;
   }
 
-  let { store, service, controller, onClose: onCloseProp }: ViewerProps = $props();
-  const viewerNext = () => controller.viewerNext();
-  const viewerPrevious = () => controller.viewerPrevious();
-  const onClose = () => {
-    if (isDirty) {
-      unsavedGuardVisible = true;
-      return;
-    }
-    if (onCloseProp) onCloseProp();
-    else controller.closeViewer();
-  };
+  let {
+    snapshot,
+    currentAsset,
+    contentUrl,
+    thumbnailUrl,
+    onMove,
+    onJump,
+    onClose,
+    onSetTxtViewMode,
+    onSetTxtDraft,
+    onSave,
+    onDiscard,
+    onTrash,
+    onResolvePending,
+  }: Props = $props();
 
-  const snapshot = $derived($store);
-
-  const asset = $derived(snapshot.viewerAssets[snapshot.viewerIndex] ?? null);
-  const assetCount = $derived(snapshot.viewerAssets.length);
-  const annotation = $derived(snapshot.viewerAnnotation);
-  const tags = $derived(parseGalleryTxtTags(annotation?.content ?? null));
-
-  // ---- 画布几何（缩放/平移；切图重置为适应画布，记忆 #57） ----
-  let canvasElement = $state<HTMLElement | null>(null);
-  let canvasSize = $state<GalleryCanvasSize>({ width: 0, height: 0 });
-  let imageSize = $state<GalleryCanvasSize>({ width: 1, height: 1 });
-  let viewport = $state<GalleryViewportState>({ scale: 1, offsetX: 0, offsetY: 0 });
-
-  function fitViewport(): GalleryViewportState {
-    if (canvasSize.width <= 0 || imageSize.width <= 0) {
-      return { scale: 1, offsetX: 0, offsetY: 0 };
-    }
-    return galleryFitViewport({ canvas: canvasSize, image: imageSize });
-  }
-
-  function observeCanvas(element: HTMLElement) {
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      canvasSize = { width: entry.contentRect.width, height: entry.contentRect.height };
-      viewport = fitViewport();
-    });
-    observer.observe(element);
-    return {
-      destroy() {
-        observer.disconnect();
-      },
-    };
-  }
-
-  let geometryAssetId = "";
-  $effect(() => {
-    // 切换图片：重置为适应画布并居中；尺寸未知时先用资产记录值。
-    if (asset === null) return;
-    if (asset.asset_id === geometryAssetId) return;
-    geometryAssetId = asset.asset_id;
-    imageSize = { width: asset.width || 1, height: asset.height || 1 };
-    viewport = fitViewport();
-  });
-
-  // ---- 滚轮缩放（指针位于画布时以指针为锚点）；TXT/片带区域自行滚动 ----
-  function onCanvasWheel(event: WheelEvent) {
-    if (asset === null || canvasSize.width <= 0) return;
-    const rect = canvasElement?.getBoundingClientRect();
-    if (!rect) return;
-    const pointerX = event.clientX - rect.left;
-    const pointerY = event.clientY - rect.top;
-    const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2;
-    event.preventDefault();
-    viewport = galleryZoomAtPointer({
-      canvas: canvasSize,
-      image: imageSize,
-      viewport,
-      pointerX,
-      pointerY,
-      factor,
-    });
-  }
-
-  // ---- 拖拽平移 ----
-  let dragPointerId: number | null = null;
+  let viewerRoot: HTMLElement | null = $state(null);
+  let closeButton: HTMLButtonElement | null = $state(null);
+  let focusExitButton: HTMLButtonElement | null = $state(null);
+  let pendingCancelButton: HTMLButtonElement | null = $state(null);
+  let returnFocus: FocusTarget | null = null;
+  let scale = $state(1);
+  let offsetX = $state(0);
+  let offsetY = $state(0);
+  let dragging = $state(false);
   let dragStartX = 0;
   let dragStartY = 0;
-  let dragStartOffsetX = 0;
-  let dragStartOffsetY = 0;
+  let startOffsetX = 0;
+  let startOffsetY = 0;
+  let chromeHidden = $state(false);
+  let imageFailed = $state(false);
+  let failedThumbnailIds = $state(new Set<string>());
+  let panelWidth = $state(380);
+  let stopPanelResize: (() => void) | null = null;
 
-  function onPointerDown(event: PointerEvent) {
-    if (dragPointerId !== null) return;
-    dragPointerId = event.pointerId;
-    dragStartX = event.clientX;
-    dragStartY = event.clientY;
-    dragStartOffsetX = viewport.offsetX;
-    dragStartOffsetY = viewport.offsetY;
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  const currentAnnotation = $derived(snapshot.viewerAnnotation);
+  const draftContent = $derived(
+    snapshot.txtDraft ?? currentAnnotation?.content ?? "",
+  );
+  const annotationEditable = $derived(
+    currentAnnotation !== null && ["normal", "blank", "missing"].includes(currentAnnotation.txt_state),
+  );
+  const rawDisplayContent = $derived.by(() => {
+    if (currentAnnotation?.content !== null && currentAnnotation?.content !== undefined) {
+      return currentAnnotation.content.length > 0 ? currentAnnotation.content : "（TXT 为空）";
+    }
+    if (currentAnnotation?.txt_state === "invalid_encoding") return "TXT 不是有效的 UTF-8，未解码或改写原文件。";
+    if (currentAnnotation?.txt_state === "pair_conflict") return "检测到同名 TXT 配对冲突，未选择其中任何文件。";
+    if (currentAnnotation?.txt_state === "io_error") return "读取 TXT 时发生文件系统错误。";
+    return "（缺少 TXT；首次成功保存时创建）";
+  });
+  const tagView = $derived(parseGalleryTxtTagView(currentAnnotation?.content ?? null));
+  const hasPrevious = $derived(snapshot.viewerIndex > 0);
+  const hasNext = $derived(
+    snapshot.viewerIndex >= 0 &&
+      (snapshot.viewerIndex < snapshot.viewerAssets.length - 1 || snapshot.viewerAssetCursor !== null),
+  );
+  const interactionBusy = $derived(
+    snapshot.viewerPagePhase === "loading" || snapshot.viewerOperationPhase === "trashing",
+  );
+
+  $effect(() => {
+    currentAsset?.asset_id;
+    scale = 1;
+    offsetX = 0;
+    offsetY = 0;
+    imageFailed = false;
+    void tick().then(() => {
+      viewerRoot
+        ?.querySelector<HTMLElement>('[data-gallery-viewer-thumbnail][aria-current="true"]')
+        ?.scrollIntoView({ block: "nearest", inline: "center" });
+    });
+  });
+
+  $effect(() => {
+    if (snapshot.viewerPendingAction !== null) {
+      void tick().then(() => restoreFocus(pendingCancelButton));
+    }
+  });
+
+  onMount(() => {
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    void tick().then(() => restoreFocus(closeButton ?? viewerRoot));
+    return () => {
+      stopPanelResize?.();
+      restoreFocus(returnFocus);
+      returnFocus = null;
+    };
+  });
+
+
+  function toggleChrome(): void {
+    const nextHidden = !chromeHidden;
+    chromeHidden = nextHidden;
+    void tick().then(() => restoreFocus(nextHidden ? focusExitButton ?? viewerRoot : closeButton ?? viewerRoot));
   }
-
-  function onPointerMove(event: PointerEvent) {
-    if (dragPointerId !== event.pointerId) return;
-    if (canvasSize.width <= 0 || imageSize.width <= 0) return;
-    const scaledWidth = imageSize.width * viewport.scale;
-    const scaledHeight = imageSize.height * viewport.scale;
-    let offsetX = dragStartOffsetX + (event.clientX - dragStartX);
-    let offsetY = dragStartOffsetY + (event.clientY - dragStartY);
-    if (scaledWidth <= canvasSize.width) offsetX = (canvasSize.width - scaledWidth) / 2;
-    else offsetX = Math.min(0, Math.max(canvasSize.width - scaledWidth, offsetX));
-    if (scaledHeight <= canvasSize.height) offsetY = (canvasSize.height - scaledHeight) / 2;
-    else offsetY = Math.min(0, Math.max(canvasSize.height - scaledHeight, offsetY));
-    viewport = { scale: viewport.scale, offsetX, offsetY };
-  }
-
-  function onPointerUp(event: PointerEvent) {
-    if (dragPointerId !== event.pointerId) return;
-    dragPointerId = null;
-  }
-
-  function resetToFit() {
-    viewport = fitViewport();
-  }
-
-  function resetToOneToOne() {
-    if (canvasSize.width <= 0 || imageSize.width <= 0) return;
-    viewport = galleryOneToOneViewport({ canvas: canvasSize, image: imageSize });
-  }
-
-  // ---- 键盘：表单控件聚焦时不劫持（记忆 #30 契约） ----
   function isEditableTarget(target: EventTarget | null): boolean {
     return (
-      target instanceof HTMLElement &&
-      (target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.tagName === "SELECT" ||
-        target.isContentEditable)
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable)
     );
   }
 
-  // ---- TXT 编辑（G3-3；记忆 #34 明确保存契约） ----
-  let textareaElement = $state<HTMLTextAreaElement | null>(null);
-  let unsavedGuardVisible = $state(false);
-
-  const isEditing = $derived(snapshot.txtDraft !== null);
-  const savedContent = $derived(annotation?.content ?? "");
-  const displayContent = $derived(isEditing ? (snapshot.txtDraft ?? "") : savedContent);
-  const isDirty = $derived(isEditing && snapshot.txtDraft !== savedContent);
-
-  function enterEditMode() {
-    if (annotation === null || snapshot.viewerPhase !== "ready") return;
-    controller.setTxtDraft(savedContent);
+  function focusableItems(): HTMLElement[] {
+    if (!viewerRoot) return [];
+    const scope = snapshot.viewerPendingAction === null
+      ? viewerRoot
+      : viewerRoot.querySelector<HTMLElement>(".gallery-viewer__guard") ?? viewerRoot;
+    return [...scope.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), textarea:not([disabled]), [tabindex="0"]',
+    )].filter((item) => item.offsetParent !== null && item.getAttribute("aria-hidden") !== "true");
   }
 
-  function onDraftInput(event: Event) {
-    const target = event.currentTarget as HTMLTextAreaElement;
-    controller.setTxtDraft(target.value);
+  function trapTab(event: KeyboardEvent): boolean {
+    if (event.key !== "Tab") return false;
+    const items = focusableItems();
+    const activeIndex = document.activeElement instanceof HTMLElement
+      ? items.indexOf(document.activeElement)
+      : -1;
+    const next = trappedTabIndex(activeIndex < 0 ? 0 : activeIndex, items.length, event.shiftKey);
+    if (next === null && activeIndex >= 0) return false;
+    event.preventDefault();
+    restoreFocus(items[next ?? 0] ?? viewerRoot);
+    return true;
   }
 
-  async function saveTxt(advance: boolean) {
-    unsavedGuardVisible = false;
-    const ok = await controller.saveTxtAnnotation({ advance });
-    if (ok) textareaElement?.focus();
-    return ok;
-  }
-
-  function discardDraft() {
-    unsavedGuardVisible = false;
-    controller.discardTxtDraft();
-  }
-
-  /** 有未保存内容时阻止离开（导航/关闭），弹出三选一。 */
-  function guardUnsaved(action: () => void): boolean {
-    if (!isDirty) {
-      action();
-      return true;
-    }
-    unsavedGuardVisible = true;
-    return false;
-  }
-
-  function onViewerKeydown(event: KeyboardEvent) {
-    if (isEditableTarget(event.target)) {
-      // Ctrl/Cmd+S / Ctrl/Cmd+Enter 在编辑态中仍然生效（保存契约）。
-      if ((event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "S")) {
+  function onKeydown(event: KeyboardEvent): void {
+    if (trapTab(event)) return;
+    if (snapshot.viewerPendingAction !== null) {
+      if (event.key === "Escape") {
         event.preventDefault();
-        void saveTxt(false);
-      } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-        event.preventDefault();
-        void saveTxt(true);
-      } else if (event.key === "Escape" && isEditing) {
-        event.preventDefault();
-        if (isDirty) unsavedGuardVisible = true;
-        else controller.discardTxtDraft();
+        onResolvePending("cancel");
       }
       return;
     }
-    if (event.key === "ArrowRight") {
+    if (event.key === "Escape") {
       event.preventDefault();
-      if (snapshot.viewerIndex < assetCount - 1) {
-        guardUnsaved(() => void viewerNext());
-      }
-    } else if (event.key === "ArrowLeft") {
+      onClose();
+      return;
+    }
+    if (isEditableTarget(event.target)) return;
+    if (event.key === "ArrowLeft") {
       event.preventDefault();
-      if (snapshot.viewerIndex > 0) {
-        guardUnsaved(() => void viewerPrevious());
-      }
-    } else if (event.key === "Escape") {
+      if (!interactionBusy) onMove(-1);
+    } else if (event.key === "ArrowRight") {
       event.preventDefault();
-      guardUnsaved(() => onClose());
-    } else if (event.key === "0") {
+      if (!interactionBusy) onMove(1);
+    } else if (event.key === "Delete") {
       event.preventDefault();
-      resetToFit();
-    } else if (event.key === "1") {
+      if (!interactionBusy) onTrash();
+    } else if (event.key.toLowerCase() === "f") {
       event.preventDefault();
-      resetToOneToOne();
-    } else if (event.key === "Enter" || event.key === " ") {
-      // 网格卡片语义延续：Enter/Space 在查看器中进入 TXT 编辑。
-      event.preventDefault();
-      enterEditMode();
+      toggleChrome();
     }
   }
 
-  function jumpTo(index: number) {
-    if (index === snapshot.viewerIndex) return;
-    if (index > snapshot.viewerIndex) void viewerNext();
-    else void viewerPrevious();
+  function onWheel(event: WheelEvent): void {
+    event.preventDefault();
+    const element = event.currentTarget as HTMLElement;
+    const rect = element.getBoundingClientRect();
+    const pointerX = event.clientX - rect.left - rect.width / 2;
+    const pointerY = event.clientY - rect.top - rect.height / 2;
+    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const nextScale = Math.min(8, Math.max(0.25, scale * factor));
+    const ratio = nextScale / scale;
+    offsetX = pointerX - (pointerX - offsetX) * ratio;
+    offsetY = pointerY - (pointerY - offsetY) * ratio;
+    scale = nextScale;
   }
 
-  // 底部片带：当前项滚动到可见区域。
-  let stripElement = $state<HTMLElement | null>(null);
-  $effect(() => {
-    const index = snapshot.viewerIndex;
-    if (!stripElement || index < 0) return;
-    const active = stripElement.querySelector<HTMLElement>(`[data-strip-index="${index}"]`);
-    active?.scrollIntoView({ block: "nearest", inline: "center", behavior: "instant" });
-  });
+  function onPointerDown(event: PointerEvent): void {
+    if (event.button !== 0) return;
+    dragging = true;
+    dragStartX = event.clientX;
+    dragStartY = event.clientY;
+    startOffsetX = offsetX;
+    startOffsetY = offsetY;
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  function onPointerMove(event: PointerEvent): void {
+    if (!dragging) return;
+    offsetX = startOffsetX + event.clientX - dragStartX;
+    offsetY = startOffsetY + event.clientY - dragStartY;
+  }
+
+  function stopDragging(): void {
+    dragging = false;
+  }
+  function markThumbnailFailed(assetId: string): void {
+    failedThumbnailIds = new Set(failedThumbnailIds).add(assetId);
+  }
+
+
+  function startPanelResize(event: PointerEvent): void {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = panelWidth;
+    const move = (moveEvent: PointerEvent) => {
+      const maximum = Math.max(320, Math.min(680, window.innerWidth - 480));
+      panelWidth = Math.round(Math.min(maximum, Math.max(300, startWidth + startX - moveEvent.clientX)));
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      stopPanelResize = null;
+    };
+    stopPanelResize?.();
+    stopPanelResize = stop;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  }
+
+  function onTextareaKeydown(event: KeyboardEvent): void {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    if (event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      onSave(false);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      onSave(true);
+    }
+  }
+
+  function pendingActionLabel(): string {
+    const action = snapshot.viewerPendingAction;
+    if (action?.kind === "close") return "关闭查看器";
+    if (action?.kind === "trash") return "移入回收区";
+    if (action?.kind === "previous") return "查看上一张";
+    if (action?.kind === "next") return "查看下一张";
+    return "切换图片";
+  }
 </script>
 
-<svelte:window onkeydown={onViewerKeydown} />
-
-{#if asset !== null}
-  <div
-    class="gallery-viewer"
-    data-gallery-viewer
-    role="dialog"
-    aria-modal="true"
-    aria-label={`沉浸式查看器：${asset.name}`}
-  >
-    <header class="gallery-viewer__bar">
-      <button type="button" class="gallery-viewer__back" onclick={onClose}>返回</button>
-      <span class="gallery-viewer__title" title={asset.relative_path}>{asset.name}</span>
-      <span class="gallery-viewer__position">{snapshot.viewerIndex + 1} / {assetCount}</span>
-      <span class="gallery-viewer__zoom">
-        <button type="button" onclick={resetToFit} aria-label="适应画布（0）">适应</button>
-        <button type="button" onclick={resetToOneToOne} aria-label="原始尺寸（1）">1:1</button>
-        <span class="gallery-viewer__zoom-value">{Math.round(viewport.scale * 100)}%</span>
-      </span>
-    </header>
-
-    <div class="gallery-viewer__main">
-      <div
-        class="gallery-viewer__canvas"
-        bind:this={canvasElement}
-        role="application"
-        aria-label={`图片 ${asset.name}；方向键切换，0 适应画布，1 原始尺寸，滚轮缩放，拖拽平移`}
-        onwheel={onCanvasWheel}
-        onpointerdown={onPointerDown}
-        onpointermove={onPointerMove}
-        onpointerup={onPointerUp}
-        onpointercancel={onPointerUp}
-        use:observeCanvas
-      >
-        <img
-          src={service.contentUrl(asset.asset_id)}
-          alt={asset.name}
-          draggable="false"
-          style={`width: ${imageSize.width * viewport.scale}px; height: ${imageSize.height * viewport.scale}px; transform: translate(${viewport.offsetX}px, ${viewport.offsetY}px);`}
-          onload={(event) => {
-            const image = event.currentTarget as HTMLImageElement;
-            if (image.naturalWidth > 0 && image.naturalHeight > 0 && asset !== null) {
-              imageSize = { width: image.naturalWidth, height: image.naturalHeight };
-              viewport = fitViewport();
-            }
-          }}
-        />
+<div
+  class="gallery-viewer"
+  class:gallery-viewer--focus={chromeHidden}
+  role="dialog"
+  aria-modal="true"
+  aria-label={currentAsset ? `查看 ${currentAsset.name}` : "图片查看器"}
+  tabindex="-1"
+  bind:this={viewerRoot}
+  onkeydown={onKeydown}
+  style={`--gallery-viewer-panel-width: ${panelWidth}px`}
+>
+  {#if !chromeHidden}
+    <header
+      class="gallery-viewer__toolbar"
+      inert={snapshot.viewerPendingAction !== null ? true : undefined}
+      aria-hidden={snapshot.viewerPendingAction !== null ? "true" : undefined}
+    >
+      <div class="gallery-viewer__identity">
+        <strong>{currentAsset?.name ?? "图片"}</strong>
+        <span>{snapshot.viewerIndex + 1} / {snapshot.viewerAssets.length}{snapshot.viewerAssetCursor ? "+" : ""}{currentAsset?.dedup_visibility === "candidate" ? " · 待去重候选" : ""}</span>
       </div>
+      <div class="gallery-viewer__actions">
+        <button
+          type="button"
+          class="gallery-viewer__button gallery-viewer__button--danger"
+          disabled={!currentAsset || interactionBusy}
+          onclick={onTrash}
+        >{snapshot.viewerOperationPhase === "trashing" ? "正在移入…" : "移入回收区"}</button>
+        <button type="button" class="gallery-viewer__button" onclick={toggleChrome}>专注模式 <kbd>F</kbd></button>
+        <button type="button" class="gallery-viewer__button" bind:this={closeButton} onclick={onClose}>关闭 <kbd>Esc</kbd></button>
+      </div>
+    </header>
+  {/if}
 
-      <aside class="gallery-viewer__txt" aria-label="同名 TXT 标注">
-        <div class="gallery-viewer__txt-head">
-          <span class="gallery-viewer__txt-title">TXT 标注</span>
-          <span class="gallery-viewer__txt-state" data-state={annotation?.txt_state ?? asset.txt_state}>
-            {GALLERY_TXT_STATE_LABELS[annotation?.txt_state ?? asset.txt_state]}
-          </span>
-          <span class="gallery-viewer__txt-toggle">
-            <button
-              type="button"
-              aria-pressed={snapshot.txtViewMode === "raw"}
-              onclick={() => store.setTxtViewMode("raw")}
-            >原文</button>
-            <button
-              type="button"
-              aria-pressed={snapshot.txtViewMode === "tags"}
-              onclick={() => store.setTxtViewMode("tags")}
-            >标签</button>
-          </span>
-        {#if isEditing}
-          <div class="gallery-viewer__txt-actions">
-            <button
-              type="button"
-              class="gallery-viewer__txt-save"
-              disabled={snapshot.txtSavePhase === "saving" || !isDirty}
-              onclick={() => void saveTxt(false)}
-            >保存（Ctrl+S）</button>
-            <button
-              type="button"
-              class="gallery-viewer__txt-save-next"
-              disabled={snapshot.txtSavePhase === "saving"}
-              onclick={() => void saveTxt(true)}
-            >保存并下一张（Ctrl+Enter）</button>
-            <button
-              type="button"
-              disabled={snapshot.txtSavePhase === "saving"}
-              onclick={discardDraft}
-            >放弃修改</button>
-          </div>
-        {:else}
-          <div class="gallery-viewer__txt-actions">
-            <button
-              type="button"
-              disabled={annotation === null || snapshot.viewerPhase !== "ready"}
-              onclick={enterEditMode}
-            >编辑（Enter）</button>
-          </div>
-        {/if}
-        {#if snapshot.txtSavePhase === "saving"}
-          <p class="gallery-viewer__txt-banner" role="status">正在保存…</p>
-        {:else if snapshot.txtSavePhase === "saved"}
-          <p class="gallery-viewer__txt-banner" role="status">已保存。</p>
-        {:else if snapshot.txtSavePhase === "conflict"}
-          <p class="gallery-viewer__txt-banner gallery-viewer__txt-banner--error" role="alert">
-            TXT 已被外部修改（{snapshot.txtSaveErrorCode ?? "txt_version_conflict"}），请重新加载后再试。
-          </p>
-        {:else if snapshot.txtSavePhase === "error"}
-          <p class="gallery-viewer__txt-banner gallery-viewer__txt-banner--error" role="alert">
-            保存失败（{snapshot.txtSaveErrorCode ?? "unknown"}）。草稿已保留。
-          </p>
-        {/if}
-        {#if unsavedGuardVisible}
-          <div class="gallery-viewer__txt-guard" role="alertdialog" aria-label="有未保存的 TXT 修改">
-            <p>TXT 有未保存的修改。</p>
-            <div class="gallery-viewer__txt-guard-actions">
-              <button type="button" disabled={snapshot.txtSavePhase === "saving"} onclick={() => void saveTxt(false)}>保存</button>
-              <button type="button" onclick={discardDraft}>放弃</button>
-              <button type="button" onclick={() => (unsavedGuardVisible = false)}>取消</button>
-            </div>
-          </div>
-        {/if}
+  {#if snapshot.viewerOperationPhase === "error"}
+    <p class="gallery-viewer__banner gallery-viewer__banner--error" role="alert">
+      移入回收区失败：{snapshot.viewerOperationErrorCode ?? "gallery_request_failed"}。原文件未从当前视图移除。
+    </p>
+  {/if}
+  {#if snapshot.viewerPagePhase === "error"}
+    <p class="gallery-viewer__banner gallery-viewer__banner--error" role="alert">
+      无法继续加载结果：{snapshot.viewerPageErrorCode ?? "gallery_request_failed"}。可以再次使用下一张重试。
+    </p>
+  {/if}
+
+  <div
+    class="gallery-viewer__body"
+    inert={snapshot.viewerPendingAction !== null ? true : undefined}
+    aria-hidden={snapshot.viewerPendingAction !== null ? "true" : undefined}
+  >
+    <div
+      class="gallery-viewer__stage"
+      class:gallery-viewer__stage--dragging={dragging}
+      role="group"
+      aria-label="图片画布；滚轮缩放，拖动平移"
+      onwheel={onWheel}
+      onpointerdown={onPointerDown}
+      onpointermove={onPointerMove}
+      onpointerup={stopDragging}
+      onpointercancel={stopDragging}
+    >
+      {#if currentAsset && currentAsset.read_state === "ok" && !imageFailed}
+        <img
+          src={contentUrl(currentAsset.asset_id)}
+          alt=""
+          draggable="false"
+          onerror={() => (imageFailed = true)}
+          style={`transform: translate(${offsetX}px, ${offsetY}px) scale(${scale})`}
+        />
+      {:else if currentAsset}
+        <div class="gallery-viewer__stage-error" role="alert">
+          <strong>无法显示 {currentAsset.name}</strong>
+          <span>{currentAsset.error_code || "image_decode_failed"}</span>
         </div>
+      {/if}
+      <div class="gallery-viewer__zoom" aria-live="polite">{Math.round(scale * 100)}%</div>
+      {#if chromeHidden}
+        <button type="button" class="gallery-viewer__focus-exit" bind:this={focusExitButton} onclick={toggleChrome}>显示工具 <kbd>F</kbd></button>
+      {/if}
+    </div>
+
+    {#if !chromeHidden}
+      <button
+        type="button"
+        class="gallery-viewer__panel-resizer"
+        aria-label={`调整 TXT 面板宽度；当前 ${panelWidth} 像素`}
+        role="slider"
+        aria-orientation="horizontal"
+        aria-valuemin="300"
+        aria-valuemax="680"
+        aria-valuenow={panelWidth}
+        onpointerdown={startPanelResize}
+        onkeydown={(event) => {
+          if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+            event.preventDefault();
+            event.stopPropagation();
+            panelWidth = Math.min(680, Math.max(300, panelWidth + (event.key === "ArrowLeft" ? 20 : -20)));
+          }
+        }}
+      ></button>
+      <aside class="gallery-viewer__txt" aria-label="TXT 标注面板">
+        <div class="gallery-viewer__txt-head">
+          <div>
+            <strong>同名 TXT</strong>
+            <span>{currentAnnotation?.txt_state ?? currentAsset?.txt_state ?? "missing"}</span>
+          </div>
+          <div class="gallery-viewer__mode" role="group" aria-label="TXT 展示方式">
+            <button type="button" class:active={snapshot.txtViewMode === "raw"} aria-pressed={snapshot.txtViewMode === "raw"} onclick={() => onSetTxtViewMode("raw")}>原文</button>
+            <button type="button" class:active={snapshot.txtViewMode === "tags"} aria-pressed={snapshot.txtViewMode === "tags"} onclick={() => onSetTxtViewMode("tags")}>逗号标签</button>
+          </div>
+        </div>
+
         {#if snapshot.viewerPhase === "loading"}
-          <p class="gallery-viewer__txt-hint">正在读取 TXT…</p>
+          <p class="gallery-viewer__status" role="status">正在读取 TXT…</p>
         {:else if snapshot.viewerPhase === "error"}
-          <p class="gallery-viewer__txt-hint gallery-viewer__txt-hint--error" role="alert">
-            TXT 读取失败（{snapshot.viewerErrorCode ?? "unknown"}）
-          </p>
-        {:else if annotation === null}
-          <p class="gallery-viewer__txt-hint">暂无 TXT 数据。</p>
-        {:else if annotation.content === null}
-          <p class="gallery-viewer__txt-hint">该图片没有可显示的 TXT 内容。</p>
-        {:else if snapshot.txtViewMode === "raw"}
-          {#if isEditing}
+          <p class="gallery-viewer__status gallery-viewer__status--error" role="alert">TXT 读取失败：{snapshot.viewerErrorCode}</p>
+        {:else if currentAnnotation}
+          {#if snapshot.txtDraft !== null}
             <textarea
               class="gallery-viewer__txt-editor"
-              bind:this={textareaElement}
-              value={displayContent}
-              oninput={onDraftInput}
+              aria-label="TXT 原文编辑器"
+              value={draftContent}
+              oninput={(event) => onSetTxtDraft(event.currentTarget.value)}
+              onkeydown={onTextareaKeydown}
               spellcheck="false"
-              aria-label="TXT 标注原文编辑"
             ></textarea>
+            <div class="gallery-viewer__save-row">
+              <button type="button" disabled={snapshot.txtSavePhase === "saving"} onclick={() => onSave(false)}>保存 <kbd>Ctrl/⌘ S</kbd></button>
+              <button type="button" disabled={snapshot.txtSavePhase === "saving"} onclick={() => onSave(true)}>保存并下一张 <kbd>Ctrl/⌘ ↵</kbd></button>
+              <button type="button" disabled={snapshot.txtSavePhase === "saving"} onclick={onDiscard}>放弃编辑</button>
+            </div>
+          {:else if snapshot.txtViewMode === "raw"}
+            <pre class="gallery-viewer__raw">{rawDisplayContent}</pre>
+            {#if annotationEditable}
+              <button type="button" class="gallery-viewer__edit" onclick={() => onSetTxtDraft(currentAnnotation.content ?? "")}>编辑原文</button>
+            {/if}
           {:else}
-            <pre class="gallery-viewer__txt-raw" ondblclick={enterEditMode}>{annotation.content}</pre>
+            <div class="gallery-viewer__tag-view" aria-label="逗号标签辅助视图">
+              {#if tagView.tags.length === 0}
+                <p>没有可显示的标签。</p>
+              {:else}
+                <div class="gallery-viewer__tags">
+                  {#each tagView.tags as tag, index (`${index}:${tag.raw}`)}
+                    <span
+                      class:gallery-viewer__tag--warning={tag.empty || tag.duplicate || tag.excess_whitespace}
+                      title={tag.empty ? "空标签" : tag.duplicate ? "重复标签" : tag.excess_whitespace ? "含多余空白" : tag.value}
+                    >{tag.empty ? "（空标签）" : tag.value}</span>
+                  {/each}
+                </div>
+                {#if tagView.empty_count || tagView.duplicate_count || tagView.whitespace_count}
+                  <p class="gallery-viewer__tag-warning" role="status">
+                    仅提示，不会改写原文：空标签 {tagView.empty_count}，重复 {tagView.duplicate_count}，含多余空白 {tagView.whitespace_count}。
+                  </p>
+                {/if}
+              {/if}
+            </div>
+            {#if annotationEditable}
+              <button type="button" class="gallery-viewer__edit" onclick={() => onSetTxtDraft(currentAnnotation.content ?? "")}>编辑原文</button>
+            {/if}
           {/if}
-        {:else}
-          <ul class="gallery-viewer__txt-tags">
-            {#each tags as tag (tag)}
-              <li class="gallery-viewer__txt-tag">{tag}</li>
-            {/each}
-          </ul>
-          {#if tags.length === 0}
-            <p class="gallery-viewer__txt-hint">TXT 中没有可解析的逗号标签。</p>
+
+          {#if snapshot.txtSavePhase === "saved"}
+            <p class="gallery-viewer__save-status" role="status">已保存。</p>
+          {:else if snapshot.txtSavePhase === "conflict" || snapshot.txtSavePhase === "error"}
+            <p class="gallery-viewer__save-status gallery-viewer__status--error" role="alert">
+              保存失败：{snapshot.txtSaveErrorCode ?? "gallery_request_failed"}。草稿仍保留。
+            </p>
           {/if}
         {/if}
       </aside>
-    </div>
-
-    <footer class="gallery-viewer__strip" bind:this={stripElement} aria-label="缩略图片带">
-      {#each snapshot.viewerAssets as stripAsset, index (stripAsset.asset_id)}
-        <button
-          type="button"
-          class="gallery-viewer__thumb"
-          data-strip-index={index}
-          aria-current={index === snapshot.viewerIndex}
-          aria-label={`第 ${index + 1} 张：${stripAsset.name}`}
-          onclick={() => jumpTo(index)}
-        >
-          <img src={service.thumbnailUrl(stripAsset.asset_id)} alt="" loading="lazy" decoding="async" />
-        </button>
-      {/each}
-    </footer>
+    {/if}
   </div>
-{/if}
+
+  {#if !chromeHidden}
+    <nav
+      class="gallery-viewer__strip"
+      aria-label="当前结果图片导航"
+      inert={snapshot.viewerPendingAction !== null ? true : undefined}
+      aria-hidden={snapshot.viewerPendingAction !== null ? "true" : undefined}
+    >
+      <button type="button" disabled={!hasPrevious || interactionBusy} onclick={() => onMove(-1)} aria-label="上一张">←</button>
+      <div class="gallery-viewer__thumbs">
+        {#each snapshot.viewerAssets as asset, index (asset.asset_id)}
+          <button
+            type="button"
+            data-gallery-viewer-thumbnail
+            class:active={index === snapshot.viewerIndex}
+            aria-current={index === snapshot.viewerIndex ? "true" : undefined}
+            aria-label={`查看 ${asset.name}`}
+            disabled={interactionBusy}
+            onclick={() => onJump(index)}
+          >
+            {#if failedThumbnailIds.has(asset.asset_id)}
+              <span class="gallery-thumbnail-fallback" aria-hidden="true">!</span>
+            {:else}
+              <img src={thumbnailUrl(asset.asset_id)} alt="" loading="lazy" onerror={() => markThumbnailFailed(asset.asset_id)} />
+            {/if}
+          </button>
+        {/each}
+        {#if snapshot.viewerPagePhase === "loading"}
+          <span class="gallery-viewer__strip-status" role="status">正在加载更多…</span>
+        {/if}
+      </div>
+      <button type="button" disabled={!hasNext || interactionBusy} onclick={() => onMove(1)} aria-label="下一张">→</button>
+    </nav>
+  {/if}
+
+  {#if snapshot.viewerPendingAction !== null}
+    <div class="gallery-viewer__guard-backdrop">
+      <div class="gallery-viewer__guard" role="alertdialog" aria-modal="true" aria-labelledby="gallery-viewer-guard-title">
+        <strong id="gallery-viewer-guard-title">TXT 有未保存更改</strong>
+        <p>要先保存再{pendingActionLabel()}吗？保存失败时草稿会继续保留。</p>
+        <div>
+          <button type="button" disabled={snapshot.txtSavePhase === "saving"} onclick={() => onResolvePending("save")}>保存后继续</button>
+          <button type="button" disabled={snapshot.txtSavePhase === "saving"} onclick={() => onResolvePending("discard")}>放弃更改</button>
+          <button type="button" bind:this={pendingCancelButton} disabled={snapshot.txtSavePhase === "saving"} onclick={() => onResolvePending("cancel")}>取消</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+</div>

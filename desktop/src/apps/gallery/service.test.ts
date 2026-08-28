@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../core/api/client";
-import { createGalleryService, GALLERY_ENDPOINTS } from "./service";
+import { createGalleryService, GALLERY_ENDPOINTS, searchAssetsPath } from "./service";
 
 function operation(state: "copying" | "completed" | "failed" | "cancelled" = "copying") {
   return {
@@ -97,6 +97,73 @@ describe("Gallery directory export service", () => {
       service.startDirectoryExport(["dir-alpha"], "bad\npath"),
     ).rejects.toThrow(TypeError);
     expect(mock.post).not.toHaveBeenCalled();
+  });
+});
+
+describe("Gallery search service", () => {
+  it("builds bounded scope-aware search paths", () => {
+    expect(
+      searchAssetsPath({
+        query: "  red hat ",
+        scope: "directory",
+        sourceId: null,
+        directoryId: "dir-root",
+        includeDescendants: true,
+        txtState: "missing",
+        assetCursor: "cursor/1",
+      }),
+    ).toBe(
+      "/api/v1/gallery/search?view=desktop&scope=directory&query=red%20hat&directory_id=dir-root&include_descendants=true&txt_state=missing&asset_cursor=cursor%2F1",
+    );
+    expect(() => searchAssetsPath({
+      query: "hat",
+      scope: "directory",
+      sourceId: null,
+      directoryId: null,
+      includeDescendants: false,
+      txtState: null,
+      assetCursor: null,
+    })).toThrow("gallery_search_directory_required");
+    expect(() => searchAssetsPath({
+      query: " ",
+      scope: "library",
+      sourceId: null,
+      directoryId: null,
+      includeDescendants: false,
+      txtState: null,
+      assetCursor: null,
+    })).toThrow("invalid_gallery_search_query");
+  });
+
+  it("sanitizes the search page before exposing it", async () => {
+    const page = {
+      scope: "library",
+      assets: [{
+        asset_id: "asset-1",
+        name: "1.jpg",
+        relative_path: "1.jpg",
+        txt_state: "normal",
+      }],
+      asset_cursor: null,
+      limit: 200,
+    };
+    const get = vi.fn(async () => page);
+    const service = createGalleryService({ get } as unknown as ApiClient);
+    const abort = new AbortController();
+
+    await expect(service.searchAssets({
+      query: "image",
+      scope: "library",
+      sourceId: null,
+      directoryId: null,
+      includeDescendants: false,
+      txtState: null,
+      assetCursor: null,
+    }, abort.signal)).resolves.toMatchObject({ scope: "library", assets: [{ asset_id: "asset-1" }] });
+    expect(get).toHaveBeenCalledWith(
+      "/api/v1/gallery/search?view=desktop&scope=library&query=image",
+      { signal: abort.signal },
+    );
   });
 });
 

@@ -730,6 +730,13 @@ export interface GalleryDirectoryPage {
   readonly limit: number;
 }
 
+export interface GallerySearchPage {
+  readonly scope: GallerySearchScope;
+  readonly assets: readonly GalleryAssetEntry[];
+  readonly asset_cursor: string | null;
+  readonly limit: number;
+}
+
 const SOURCE_PAGE_KEYS = new Set(["sources"]);
 const DIRECTORY_PAGE_KEYS = new Set([
   "directory",
@@ -740,6 +747,7 @@ const DIRECTORY_PAGE_KEYS = new Set([
   "include_descendants",
   "limit",
 ]);
+const SEARCH_PAGE_KEYS = new Set(["scope", "assets", "asset_cursor", "limit"]);
 
 
 export function sanitizeGallerySourcePage(raw: unknown): GallerySourcePage {
@@ -759,6 +767,17 @@ export function sanitizeGalleryDirectoryPage(raw: unknown): GalleryDirectoryPage
     directory_cursor: optionalText(value.directory_cursor, "gallery_directory_cursor", 512),
     asset_cursor: optionalText(value.asset_cursor, "gallery_asset_cursor", 512),
     include_descendants: booleanValue(value.include_descendants, "gallery_include_descendants", false),
+    limit: countValue(value.limit, "gallery_page_limit", 0),
+  });
+}
+
+export function sanitizeGallerySearchPage(raw: unknown): GallerySearchPage {
+  const value = strictRecord(raw, SEARCH_PAGE_KEYS, "gallery_search_page");
+  if (!Array.isArray(value.assets)) throw new TypeError("invalid_gallery_assets");
+  return Object.freeze({
+    scope: vocabularyValue(value.scope, GALLERY_SEARCH_SCOPES, "gallery_search_scope"),
+    assets: Object.freeze(value.assets.map(sanitizeGalleryAssetEntry)),
+    asset_cursor: optionalText(value.asset_cursor, "gallery_asset_cursor", 512),
     limit: countValue(value.limit, "gallery_page_limit", 0),
   });
 }
@@ -809,6 +828,7 @@ export const GALLERY_SOURCE_KIND_LABELS: Readonly<Record<GallerySourceKind, stri
 
 export type GallerySearchScope = "directory" | "source" | "library";
 
+const GALLERY_SEARCH_SCOPES = new Set<GallerySearchScope>(["directory", "source", "library"]);
 export interface GalleryPathSegment {
   readonly directory_id: string;
   readonly name: string;
@@ -924,6 +944,63 @@ export function sanitizeGalleryAnnotation(raw: unknown): GalleryAnnotation {
     content: optionalText(value.content, "gallery_annotation_content", 2_000_000),
     txt_version: countValue(value.txt_version, "gallery_txt_version", 0),
     disk_version: idText(value.disk_version, "gallery_disk_version"),
+  });
+}
+
+export interface GalleryTxtTagViewItem {
+  readonly raw: string;
+  readonly value: string;
+  readonly empty: boolean;
+  readonly duplicate: boolean;
+  readonly excess_whitespace: boolean;
+}
+
+export interface GalleryTxtTagView {
+  readonly tags: readonly GalleryTxtTagViewItem[];
+  readonly empty_count: number;
+  readonly duplicate_count: number;
+  readonly whitespace_count: number;
+}
+
+/**
+ * 标签视图只投影原文，不丢弃、不去重、不改写任何逗号位置。
+ * warning 计数供 UI 明示原始数据问题。
+ */
+export function parseGalleryTxtTagView(content: string | null): GalleryTxtTagView {
+  if (content === null) {
+    return Object.freeze({
+      tags: Object.freeze([]),
+      empty_count: 0,
+      duplicate_count: 0,
+      whitespace_count: 0,
+    });
+  }
+  const seen = new Set<string>();
+  let emptyCount = 0;
+  let duplicateCount = 0;
+  let whitespaceCount = 0;
+  const tags = content.split(",").map((raw): GalleryTxtTagViewItem => {
+    const value = raw.trim();
+    const empty = value.length === 0;
+    const duplicate = !empty && seen.has(value);
+    const excessWhitespace = raw !== value;
+    if (empty) emptyCount += 1;
+    if (duplicate) duplicateCount += 1;
+    if (excessWhitespace) whitespaceCount += 1;
+    if (!empty) seen.add(value);
+    return Object.freeze({
+      raw,
+      value,
+      empty,
+      duplicate,
+      excess_whitespace: excessWhitespace,
+    });
+  });
+  return Object.freeze({
+    tags: Object.freeze(tags),
+    empty_count: emptyCount,
+    duplicate_count: duplicateCount,
+    whitespace_count: whitespaceCount,
   });
 }
 

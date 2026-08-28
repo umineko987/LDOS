@@ -70,6 +70,7 @@ function makeService(
     | "listSources"
     | "listDirectoryEntries"
     | "startSourceScan"
+    | "searchAssets"
     | "getSourceScan"
     | "retrySourceReconciliation"
     | "renameSource"
@@ -89,6 +90,14 @@ function makeService(
         assets: [],
         directory_cursor: null,
         asset_cursor: null,
+      })),
+    searchAssets:
+      overrides.searchAssets ??
+      vi.fn(async () => ({
+        scope: "library",
+        assets: [],
+        asset_cursor: null,
+        limit: 120,
       })),
     startSourceScan:
       overrides.startSourceScan ?? vi.fn(() => new Promise(() => undefined)),
@@ -570,6 +579,135 @@ describe("gallery selection controller (G2-3 多选)", () => {
 
     expect(controller.clickAsset("missing", { additive: false, range: false })).toBe(false);
   });
+
+  it("keeps the browsed directory while source-scoped search and viewer paging run", async () => {
+    const nestedDirectory = {
+      ...rootDirectory,
+      directory_id: "dir-nested",
+      parent_id: "dir-root",
+      relative_path: "nested",
+      name: "nested",
+    } as GalleryDirectoryEntry;
+    const first = {
+      ...assets[0],
+      asset_id: "asset-source-search-1",
+      directory_id: "dir-nested",
+      relative_path: "nested/cat-1.jpg",
+      name: "cat-1.jpg",
+    } as GalleryAssetEntry;
+    const second = {
+      ...first,
+      asset_id: "asset-source-search-2",
+      relative_path: "other/cat-2.jpg",
+      name: "cat-2.jpg",
+    } as GalleryAssetEntry;
+    const searchAssets = vi
+      .fn()
+      .mockResolvedValueOnce({ scope: "source", assets: [first], asset_cursor: "source-next", limit: 120 })
+      .mockResolvedValueOnce({ scope: "source", assets: [second], asset_cursor: null, limit: 120 });
+    const service = { ...makeSelectionService(), searchAssets } as GalleryService;
+    const store = createGalleryStore();
+    const controller = createGalleryController({ store, service });
+    controller.activate();
+    await controller.refreshSources();
+    await controller.openSource("source-1");
+    store.applyDirectoryPage({
+      directory: nestedDirectory,
+      directories: [],
+      assets: [assets[0]],
+      directory_cursor: null,
+      asset_cursor: null,
+    });
+
+    await expect(controller.setSearchScope("source")).resolves.toBe(true);
+    expect(searchAssets).not.toHaveBeenCalled();
+    expect(store.getState().currentDirectory?.directory_id).toBe("dir-nested");
+
+    await expect(controller.submitQuery("cat")).resolves.toBe(true);
+    expect(searchAssets).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        scope: "source",
+        sourceId: "source-1",
+        directoryId: null,
+        includeDescendants: true,
+        assetCursor: null,
+      }),
+      expect.any(AbortSignal),
+    );
+    expect(store.getState().currentDirectory?.directory_id).toBe("dir-nested");
+
+    expect(controller.openViewer("asset-source-search-1")).toBe(true);
+    await expect(controller.viewerNext()).resolves.toBe(true);
+    expect(searchAssets).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ scope: "source", sourceId: "source-1", assetCursor: "source-next" }),
+      expect.any(AbortSignal),
+    );
+    expect(store.getState().viewerAssets[store.getState().viewerIndex]?.asset_id).toBe(
+      "asset-source-search-2",
+    );
+    controller.destroy();
+  });
+
+  it("searches the whole library and continues viewer navigation through search cursors", async () => {
+    const first = {
+      asset_id: "asset-search-1",
+      source_id: "source-1",
+      directory_id: "dir-root",
+      relative_path: "nested/cat-1.jpg",
+      name: "cat-1.jpg",
+    } as GalleryAssetEntry;
+    const second = {
+      ...first,
+      asset_id: "asset-search-2",
+      source_id: "source-2",
+      directory_id: "dir-other",
+      relative_path: "other/cat-2.jpg",
+      name: "cat-2.jpg",
+    } as GalleryAssetEntry;
+    const searchAssets = vi
+      .fn()
+      .mockResolvedValueOnce({ scope: "library", assets: [first], asset_cursor: "search-next", limit: 120 })
+      .mockResolvedValueOnce({ scope: "library", assets: [second], asset_cursor: null, limit: 120 });
+    const service = makeService({ searchAssets });
+    const store = createGalleryStore();
+    const controller = createGalleryController({ store, service });
+    controller.activate();
+    await vi.waitFor(() => expect(store.getState().sourcesPhase).toBe("ready"));
+    await controller.openSource("source-1");
+    await controller.setSearchScope("library");
+    await controller.submitQuery("cat");
+
+    expect(searchAssets).toHaveBeenNthCalledWith(
+      1,
+      {
+        query: "cat",
+        scope: "library",
+        sourceId: null,
+        directoryId: null,
+        includeDescendants: true,
+        txtState: null,
+        assetCursor: null,
+      },
+      expect.any(AbortSignal),
+    );
+    expect(store.getState().assets.map((asset) => asset.asset_id)).toEqual(["asset-search-1"]);
+
+    expect(controller.openViewer("asset-search-1")).toBe(true);
+    await expect(controller.viewerNext()).resolves.toBe(true);
+    expect(searchAssets).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ scope: "library", assetCursor: "search-next" }),
+      expect.any(AbortSignal),
+    );
+    expect(store.getState().viewerAssets.map((asset) => asset.asset_id)).toEqual([
+      "asset-search-1",
+      "asset-search-2",
+    ]);
+    expect(store.getState().viewerIndex).toBe(1);
+    controller.destroy();
+  });
 });
 
 describe("gallery file operations controller (G3-3 TXT 编辑/重命名/回收)", () => {
@@ -796,5 +934,110 @@ describe("gallery file operations controller (G3-3 TXT 编辑/重命名/回收)"
 
     controller.closeTrashPanel();
     expect(store.getState().trashPanelPhase).toBe("closed");
+  });
+
+  it("guards dirty viewer exits, executes Save or Discard, and ignores no-op navigation", async () => {
+    const { store, controller, service } = await openReady();
+    controller.openViewer("asset-1");
+    await vi.waitFor(() => expect(store.getState().viewerPhase).toBe("ready"));
+    controller.setTxtDraft("saved before leaving");
+
+    await expect(controller.viewerPrevious()).resolves.toBe(false);
+    await expect(controller.viewerJump(0)).resolves.toBe(false);
+    expect(store.getState().viewerPendingAction).toBeNull();
+
+    await expect(controller.viewerNext()).resolves.toBe(false);
+    expect(store.getState().viewerPendingAction).toEqual({ kind: "next" });
+    await expect(controller.resolveViewerPendingAction("cancel")).resolves.toBe(true);
+    expect(store.getState().viewerIndex).toBe(0);
+    expect(store.getState().txtDraft).toBe("saved before leaving");
+
+    await controller.viewerNext();
+    await expect(controller.resolveViewerPendingAction("save")).resolves.toBe(true);
+    expect(service.saveAnnotation).toHaveBeenCalledWith(
+      "asset-1",
+      "saved before leaving",
+      1,
+      "disk-version-1",
+    );
+    expect(store.getState().viewerIndex).toBe(1);
+    await vi.waitFor(() => expect(store.getState().viewerPhase).toBe("ready"));
+    controller.setTxtDraft("discard before close");
+
+    await expect(controller.viewerNext()).resolves.toBe(false);
+    await expect(controller.viewerJump(Number.NaN)).resolves.toBe(false);
+    expect(store.getState().viewerPendingAction).toBeNull();
+
+    expect(controller.closeViewer()).toBe(false);
+    expect(store.getState().viewerPendingAction).toEqual({ kind: "close" });
+    await expect(controller.resolveViewerPendingAction("discard")).resolves.toBe(true);
+    expect(store.getState().viewerIndex).toBe(-1);
+    expect(store.getState().txtDraft).toBeNull();
+  });
+
+  it("guards viewer trash, then advances and exposes the paired-item undo count", async () => {
+    let trashed = false;
+    const listDirectoryEntries = vi.fn(async () => ({
+      directory: rootDirectory,
+      directories: [],
+      assets: trashed ? [assetB] : [assetA, assetB],
+      directory_cursor: null,
+      asset_cursor: null,
+    }));
+    const trashAssets = vi.fn(async () => {
+      trashed = true;
+      return operationResult;
+    });
+    const { store, controller } = await openReady({ listDirectoryEntries, trashAssets });
+    controller.openViewer("asset-1");
+    await vi.waitFor(() => expect(store.getState().viewerPhase).toBe("ready"));
+    controller.setTxtDraft("discard me");
+
+    await expect(controller.trashViewerAsset()).resolves.toBe(false);
+    expect(store.getState().viewerPendingAction).toEqual({ kind: "trash", assetId: "asset-1" });
+    await expect(controller.resolveViewerPendingAction("discard")).resolves.toBe(true);
+
+    expect(trashAssets).toHaveBeenCalledWith(["asset-1"]);
+    expect(store.getState().viewerAssets[store.getState().viewerIndex]?.asset_id).toBe("asset-2");
+    expect(store.getState().undoToastVisible).toBe(true);
+    expect(store.getState().undoItemCount).toBe(2);
+  });
+
+  it("loads the next cursor page before a viewer-boundary delete advances", async () => {
+    let trashed = false;
+    const listDirectoryEntries = vi.fn(async (request: { assetCursor: string | null }) => {
+      if (request.assetCursor === "next-page") {
+        return {
+          directory: rootDirectory,
+          directories: [],
+          assets: [assetB],
+          directory_cursor: null,
+          asset_cursor: null,
+        };
+      }
+      return {
+        directory: rootDirectory,
+        directories: [],
+        assets: trashed ? [assetB] : [assetA],
+        directory_cursor: null,
+        asset_cursor: trashed ? null : "next-page",
+      };
+    });
+    const trashAssets = vi.fn(async () => {
+      trashed = true;
+      return operationResult;
+    });
+    const { store, controller } = await openReady({ listDirectoryEntries, trashAssets });
+    controller.openViewer("asset-1");
+    await vi.waitFor(() => expect(store.getState().viewerPhase).toBe("ready"));
+
+    await expect(controller.trashViewerAsset()).resolves.toBe(true);
+
+    expect(listDirectoryEntries).toHaveBeenCalledWith(
+      expect.objectContaining({ assetCursor: "next-page" }),
+      expect.any(AbortSignal),
+    );
+    expect(store.getState().viewerAssets.map((asset) => asset.asset_id)).toEqual(["asset-2"]);
+    expect(store.getState().viewerAssets[store.getState().viewerIndex]?.asset_id).toBe("asset-2");
   });
 });

@@ -393,6 +393,47 @@ def create_gallery_router() -> APIRouter:
                 raise ApiError(422, "invalid_page_limit", "分页大小超出范围") from None
             raise ApiError(422, "invalid_gallery_request", "请求参数无效") from None
 
+    @router.get("/gallery/search")
+    async def search_gallery_assets(
+        query: str = Query(..., min_length=1, max_length=256),
+        scope: Literal["directory", "source", "library"] = Query(...),
+        view: Literal["desktop"] = "desktop",
+        source_id: str | None = Query(default=None, max_length=128),
+        directory_id: str | None = Query(default=None, max_length=128),
+        include_descendants: bool = Query(default=False),
+        txt_state: str | None = Query(default=None),
+        asset_cursor: str | None = Query(default=None, max_length=512),
+        limit: int = _PAGE_LIMITS,
+        container: Any = Depends(get_service),
+    ) -> Any:
+        if txt_state is not None and txt_state not in TXT_STATES:
+            raise ApiError(422, "invalid_txt_state", "未知的 TXT 状态筛选")
+        try:
+            result = container.db.gallery.search_assets(
+                scope="gallery" if scope == "library" else scope,
+                source_id=source_id,
+                directory_id=directory_id,
+                include_descendants=include_descendants,
+                txt_state=txt_state,
+                query=query,
+                cursor=asset_cursor,
+                limit=limit,
+            )
+        except GalleryCursorError:
+            raise ApiError(422, "invalid_gallery_cursor", "分页游标无效") from None
+        except ValueError as exc:
+            code = str(exc)
+            if code == "gallery_search_directory_required":
+                raise ApiError(422, code, "当前目录搜索缺少目录") from None
+            if code == "gallery_search_source_required":
+                raise ApiError(422, code, "当前来源搜索缺少来源") from None
+            if code == "gallery_search_query_required":
+                raise ApiError(422, code, "搜索词不能为空") from None
+            raise ApiError(422, "invalid_gallery_search", "搜索参数无效") from None
+        result["scope"] = scope
+        return result
+
+
     # ---- §7.2 资产、TXT 与缩略图 ----
 
     @router.get("/gallery/assets/{asset_id}")

@@ -63,7 +63,7 @@ describe("desktop API response-budget contract", () => {
   });
   it("fails when an application adds an unclassified transport call", () => {
     const inventory = [
-      ["gallery", galleryServiceSource, 21],
+      ["gallery", galleryServiceSource, 22],
       ["crawl", crawlServiceSource, 3],
       ["tasks", tasksServiceSource, 5],
       ["review", reviewServiceSource, 4],
@@ -75,7 +75,7 @@ describe("desktop API response-budget contract", () => {
     for (const [application, source, expectedCalls] of inventory) {
       expect(count(source, /api\.(?:get|post|put|delete|request)\(/g), application).toBe(expectedCalls);
     }
-    expect(count(galleryServiceSource, /view=desktop/g)).toBe(6);
+    expect(count(galleryServiceSource, /view=desktop/g)).toBe(7);
     expect(count(crawlServiceSource, /view=desktop/g)).toBe(2);
     expect(count(tasksServiceSource, /view=(?:desktop|tasks)/g)).toBe(5);
     expect(count(reviewServiceSource, /view=desktop/g)).toBe(4);
