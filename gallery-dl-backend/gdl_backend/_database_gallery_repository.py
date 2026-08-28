@@ -1214,21 +1214,36 @@ class GalleryRepository:
             restrictions.append("txt_state=?")
             params.append(txt_state)
         if query:
-            matched = self._search_asset_ids(conn, query, source_id)
-            if not matched:
+            terms = [term for term in _fts_terms(query) if term]
+            if not terms:
                 return [], None
-            placeholders = ",".join("?" for _ in matched)
-            restrictions.append(f"id IN ({placeholders})")
-            params.extend(matched)
+            match = " ".join(f'"{term}"*' for term in terms)
+            if source_id is None:
+                restrictions.append(
+                    "id IN (SELECT asset_id FROM gallery_search_index "
+                    "WHERE gallery_search_index MATCH ?)"
+                )
+                params.append(match)
+            else:
+                restrictions.append(
+                    "id IN (SELECT asset_id FROM gallery_search_index "
+                    "WHERE gallery_search_index MATCH ? AND source_id=?)"
+                )
+                params.extend([match, source_id])
         if directory_id is not None:
-            directory_ids = self._directory_scope_ids(
-                conn, directory_id, include_descendants
-            )
-            if not directory_ids:
-                return [], None
-            placeholders = ",".join("?" for _ in directory_ids)
-            restrictions.append(f"directory_id IN ({placeholders})")
-            params.extend(directory_ids)
+            if include_descendants:
+                restrictions.append(
+                    "directory_id IN ("
+                    "WITH RECURSIVE subtree(id) AS ("
+                    "SELECT id FROM gallery_directories WHERE id=? "
+                    "UNION ALL "
+                    "SELECT child.id FROM gallery_directories AS child "
+                    "JOIN subtree ON child.parent_id=subtree.id"
+                    ") SELECT id FROM subtree)"
+                )
+            else:
+                restrictions.append("directory_id=?")
+            params.append(directory_id)
         elif source_id is not None:
             restrictions.append("source_id=?")
             params.append(source_id)
@@ -1254,44 +1269,6 @@ class GalleryRepository:
                 {"sort_key": last["sort_key"], "name": last["name"], "id": last["id"]},
             )
         return [self._project_asset_row(row) for row in rows], next_cursor
-
-    def _directory_scope_ids(
-        self, conn: Any, directory_id: str, include_descendants: bool
-    ) -> list[str]:
-        if not include_descendants:
-            return [directory_id]
-        rows = conn.execute(
-            """
-            WITH RECURSIVE subtree(id) AS (
-                SELECT id FROM gallery_directories WHERE id=?
-                UNION ALL
-                SELECT child.id FROM gallery_directories child
-                JOIN subtree ON child.parent_id = subtree.id
-            )
-            SELECT id FROM subtree
-            """,
-            (directory_id,),
-        ).fetchall()
-        return [row["id"] for row in rows]
-
-    def _search_asset_ids(
-        self, conn: Any, query: str, source_id: str | None
-    ) -> list[str]:
-        # FTS 查询词按空格切分为 AND 前缀匹配；引号等语法字符全部剥离。
-        terms = [term for term in _fts_terms(query) if term]
-        if not terms:
-            return []
-        match = " ".join(f'"{term}"*' for term in terms)
-        sql = (
-            "SELECT asset_id FROM gallery_search_index "
-            "WHERE gallery_search_index MATCH ?"
-        )
-        params: list[Any] = [match]
-        if source_id is not None:
-            sql += " AND source_id=?"
-            params.append(source_id)
-        rows = conn.execute(sql, params).fetchall()
-        return [row["asset_id"] for row in rows]
 
     def search_assets(
         self,

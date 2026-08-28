@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import unittest
 
 from gdl_backend._database_gallery_repository import (
@@ -369,6 +370,53 @@ class GalleryPaginationAndSearchTest(GalleryRepositoryTestBase):
         # 不在 FTS 内的状态（missing/blank）不参与内容搜索。
         result = self.repo.search_assets(scope="gallery", query="8")
         self.assertEqual(len(result["assets"]), 0)
+
+    def test_large_fts_and_recursive_scope_are_paged_inside_sqlite(self) -> None:
+        self.repo.commit_scan(
+            self.source["source_id"],
+            **self.scan_payload(
+                directories=[
+                    ("", None),
+                    *[(f"branch-{index:03d}", "") for index in range(40)],
+                ],
+                assets=[
+                    {
+                        "relative_path": (
+                            f"branch-{index:03d}/asset-{index:03d}.jpg"
+                        ),
+                        "txt_relative_path": (
+                            f"branch-{index:03d}/asset-{index:03d}.txt"
+                        ),
+                        "txt_content": "bulk match",
+                    }
+                    for index in range(40)
+                ]
+            ),
+        )
+
+        reader = self.db._reader()  # noqa: SLF001
+        if not hasattr(reader, "setlimit") or not hasattr(
+            sqlite3, "SQLITE_LIMIT_VARIABLE_NUMBER"
+        ):
+            self.skipTest("当前 Python 不支持降低 SQLite 变量上限")
+        reader.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 8)
+        names: list[str] = []
+        cursor: str | None = None
+        while True:
+            page = self.repo.search_assets(
+                scope="directory",
+                directory_id=self.root_id,
+                include_descendants=True,
+                query="bulk",
+                cursor=cursor,
+                limit=7,
+            )
+            names.extend(asset["name"] for asset in page["assets"])
+            cursor = page["asset_cursor"]
+            if cursor is None:
+                break
+
+        self.assertEqual(names, [f"asset-{index:03d}.jpg" for index in range(40)])
 
     def test_search_requires_query_and_valid_scope(self) -> None:
         with self.assertRaises(ValueError):

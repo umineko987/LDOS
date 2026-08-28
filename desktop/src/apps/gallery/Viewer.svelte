@@ -11,7 +11,7 @@
     snapshot: GalleryBrowseState;
     currentAsset: GalleryAssetEntry | null;
     contentUrl: (assetId: string) => string;
-    thumbnailUrl: (assetId: string) => string;
+    thumbnailUrl: (assetId: string, size: 256 | 512) => string;
     onMove: (delta: number) => void;
     onJump: (index: number) => void;
     onClose: () => void;
@@ -454,7 +454,7 @@
             {#if failedThumbnailIds.has(asset.asset_id)}
               <span class="gallery-thumbnail-fallback" aria-hidden="true">!</span>
             {:else}
-              <img src={thumbnailUrl(asset.asset_id)} alt="" loading="lazy" onerror={() => markThumbnailFailed(asset.asset_id)} />
+              <img src={thumbnailUrl(asset.asset_id, 256)} alt="" loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
             {/if}
           </button>
         {/each}

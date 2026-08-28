@@ -610,16 +610,20 @@ class ApiTests(unittest.TestCase):
         )
 
     def test_desktop_distribution_can_omit_the_backend_static_frontend(self):
-        app = create_app(
-            self.settings,
-            container=ServiceContainer(self.settings),
-            start_background=False,
-            include_webui=False,
-        )
-
-        self.assertFalse(
-            any(getattr(route, "path", None) == "/ui" for route in app.routes)
-        )
+        extra_container = ServiceContainer(self.settings)
+        try:
+            app = create_app(
+                self.settings,
+                container=extra_container,
+                start_background=False,
+                include_webui=False,
+            )
+            self.assertFalse(
+                any(getattr(route, "path", None) == "/ui" for route in app.routes)
+            )
+        finally:
+            extra_container.gallery_catalog.stop()
+            extra_container.db.close()
 
     def test_webui_serves_only_the_canonical_desktop_build(self):
         root = self.client.get("/")

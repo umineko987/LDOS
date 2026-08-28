@@ -36,6 +36,7 @@ class GalleryFileOperationsTestBase(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.container.gallery_catalog.stop()
+        self.container.db.close()
         self.temp.cleanup()
 
     def scan_source(self, files: dict[str, bytes | str]) -> dict:

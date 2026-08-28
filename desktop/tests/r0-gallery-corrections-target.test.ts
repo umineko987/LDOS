@@ -131,6 +131,19 @@ describe("R0 single Gallery product contract", () => {
     expect(thumbnailUrl("asset-1", 256)).toContain("size=256");
     expect(thumbnailUrl("asset-1", 512)).toContain("size=512");
   });
+  it("keeps thumbnail tiers tied to each rendered Gallery surface", () => {
+    const galleryPath = fileURLToPath(new URL("../src/apps/gallery/Gallery.svelte", import.meta.url));
+    const viewerPath = fileURLToPath(new URL("../src/apps/gallery/Viewer.svelte", import.meta.url));
+    const gallerySource = readFileSync(galleryPath, "utf8");
+    const viewerSource = readFileSync(viewerPath, "utf8");
+
+    expect(gallerySource).toContain("service.thumbnailUrl(coverId, 256)");
+    expect(gallerySource).toContain("service.thumbnailUrl(asset.asset_id, 512)");
+    expect(gallerySource).toContain("service.thumbnailUrl(asset.asset_id, 256)");
+    expect(gallerySource).not.toMatch(/service\.thumbnailUrl\([^,\n]+\)/);
+    expect(viewerSource).toContain("thumbnailUrl(asset.asset_id, 256)");
+    expect(viewerSource).not.toMatch(/thumbnailUrl\([^,\n]+\)/);
+  });
 });
 
 describe("R0 TXT tag presentation contract", () => {

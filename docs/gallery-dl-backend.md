@@ -116,9 +116,8 @@ block 512 且不主动改变 Torch 线程；CPU 服务器应明确使用 `device
 IndexedDB delete-only 兼容 seam 清理，失败不阻断桌面启动。低于 `1180 × 720` CSS 像素时只显示
 桌面环境 blocker。
 
-**图片库、数据集导出**是 2 个独立 preview controller/model/view。正式运行只进入
-“后端能力尚未接入”状态，写操作禁用，合计发送 0 个对应业务 API 请求；loading/empty/content/error
-及进度等布局只由 tests-only fixture host 驱动，不进入生产依赖闭包，也不代表后端能力存在。
+**图片库与目录导出**属于同一个 Gallery 工作区：来源/目录浏览、搜索、TXT 查看与编辑、文件回收，以及按允许扩展名复制完整目录均由 Gallery 负责。
+正式桌面通过 `/api/v1/gallery/...` 访问这些能力；不存在独立 Export 应用或旧 `/api/v1/dataset-exports` 运行时入口。浏览器模式没有本机目录选择能力时，仅禁用相应目标选择，不建立第二套页面。
 “授权管理”不提供后端不存在的手工 Cookie/Token、浏览器导入、文件路径导入或远端验证按钮；来源
 勾选/排序、每请求路由和 EH 标签 include/exclude 过滤只属于“图片采集”。
 
@@ -290,10 +289,11 @@ legacy API 契约保持兼容。
 
 manifest 为每个 HTML、hashed asset 和静态资源记录相对路径、size 与 SHA-256。`npm --prefix desktop run verify:artifacts` 必须证明 canonical dist 与后端发布副本逐字节一致、Tauri 配置解析到同一 dist；给定 wheel 时还要证明 `gdl_backend/webui_dist/` 成员与 manifest/`RECORD` 一致，并拒绝任何 `gdl_backend/webui/` legacy 成员。`pyproject.toml` package-data 只覆盖 `webui_dist/*.html`、manifest JSON 与 `webui_dist/assets/*`。
 
-正式 `/ui/` 根与 trailing-slash redirect 沿用 Starlette mount 语义；构建产物中的相对 hashed asset 返回正确 MIME。HTML 与 asset 响应均为 `Cache-Control: no-cache`，同时保留 ETag/Last-Modified；条件请求返回 304，业务 API 不继承该 header。缺失静态资源返回 404，hash fragment 仍由同一 `index.html` 和 desktop hash router 解释。Gallery/Export 只由 desktop component tree 提供明确 preview/unavailable 状态，不存在 tests-only fixture host、隐藏 URL 或对应业务请求。
-夜航视觉交付没有修改后端业务契约：正式基线仍为 OpenAPI 50 paths/61 operations、61 条业务
-APIRoute 和唯一 `/ui` 静态挂载；ServiceContainer、数据库、任务状态机、抓取、代理、授权与 Review
-schema/语义保持不变。更完整的前端模块和合成边界见 [架构与开发约定](ARCHITECTURE.md)。
+正式 `/ui/` 根与 trailing-slash redirect 沿用 Starlette mount 语义；构建产物中的相对 hashed asset 返回正确 MIME。HTML 与 asset 响应均为 `Cache-Control: no-cache`，同时保留 ETag/Last-Modified；条件请求返回 304，业务 API 不继承该 header。缺失静态资源返回 404，hash fragment 仍由同一 `index.html` 和 desktop hash router 解释。
+Gallery 是唯一的图库与目录导出桌面入口：正式界面直接调用 `/api/v1/gallery/...`，包含来源、目录、搜索、资产内容/缩略图、TXT、文件操作、回收区和短生命周期目录导出；浏览器仅在平台不具备本机目录选择时禁用目标选择。旧 `/api/v1/dataset-exports` 与独立 Export 应用均不注册。
+当前正式 API 基线为 OpenAPI 70 paths/87 operations、递归展开 87 条 APIRoute 和唯一 `/ui` 静态挂载；
+路径、方法、operation ID、响应集合及路由模块所有权由 `gallery-dl-backend/tests/test_app_routing_contract.py` 精确固定。
+更完整的前端模块和合成边界见 [架构与开发约定](ARCHITECTURE.md)。
 
 ### 桌面分发与写路径
 

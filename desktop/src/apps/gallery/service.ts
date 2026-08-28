@@ -80,7 +80,7 @@ export interface GalleryService {
     signal?: AbortSignal,
   ): Promise<GalleryDirectoryExportOperation>;
   cancelDirectoryExport(operationId: string): Promise<GalleryDirectoryExportOperation>;
-  thumbnailUrl(assetId: string): string;
+  thumbnailUrl(assetId: string, size: 256 | 512): string;
   contentUrl(assetId: string): string;
   getAnnotation(assetId: string, signal: AbortSignal): Promise<GalleryAnnotation>;
   saveAnnotation(
@@ -273,9 +273,11 @@ export function createGalleryService(api: ApiClient): GalleryService {
         ),
       );
     },
-    thumbnailUrl(assetId) {
-      // 后端只支持 256/512 两档（SUPPORTED_THUMBNAIL_SIZES）。
-      return api.resourceUrl(`/api/v1/gallery/assets/${endpointId(assetId)}/thumbnail?size=512`);
+    thumbnailUrl(assetId, size) {
+      if (size !== 256 && size !== 512) throw new TypeError("invalid_gallery_thumbnail_size");
+      return api.resourceUrl(
+        `/api/v1/gallery/assets/${endpointId(assetId)}/thumbnail?size=${size}`,
+      );
     },
     contentUrl(assetId) {
       return api.resourceUrl(`/api/v1/gallery/assets/${endpointId(assetId)}/content`);
