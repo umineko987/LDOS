@@ -84,6 +84,20 @@ class GalleryRenameRequest(BaseModel):
 class GalleryTrashRequest(BaseModel):
     asset_ids: list[str] = Field(min_length=1, max_length=2000)
 
+
+class GalleryFileOperationResponse(BaseModel):
+    operation_id: str = Field(min_length=1, max_length=128)
+    kind: Literal["rename", "trash", "restore", "purge"]
+    status: Literal["committed"]
+    item_count: int = Field(ge=0)
+    has_txt_count: int = Field(ge=0)
+
+
+class GalleryPurgeAllTrashResponse(BaseModel):
+    purged_operations: int = Field(ge=0)
+    purged_items: int = Field(ge=0)
+
+
 GalleryDirectoryExportId = Annotated[
     str,
     Field(min_length=1, max_length=MAX_DIRECTORY_EXPORT_ID_LENGTH),
@@ -106,6 +120,7 @@ def _asset_not_found(asset_id: str) -> ApiError:
 
 _FILE_OPERATION_ERROR_STATUS: dict[str, int] = {
     "asset_not_found": 404,
+    "asset_not_active": 409,
     "operation_not_found": 404,
     "source_not_found": 404,
     "source_offline": 409,
@@ -590,7 +605,10 @@ def create_gallery_router() -> APIRouter:
                 raise ApiError(500, error.code, "TXT 与索引一致性恢复失败") from None
             raise ApiError(422, error.code, "TXT 保存失败") from None
         return result
-    @router.post("/gallery/assets/{asset_id}/rename")
+    @router.post(
+        "/gallery/assets/{asset_id}/rename",
+        response_model=GalleryFileOperationResponse,
+    )
     async def rename_asset(
         asset_id: str,
         request: GalleryRenameRequest,
@@ -604,7 +622,10 @@ def create_gallery_router() -> APIRouter:
         except GalleryFileOperationError as error:
             raise _file_operation_api_error(error, asset_id=asset_id) from None
 
-    @router.post("/gallery/file-operations/trash")
+    @router.post(
+        "/gallery/file-operations/trash",
+        response_model=GalleryFileOperationResponse,
+    )
     async def trash_assets(
         request: GalleryTrashRequest,
         container: Any = Depends(get_service),
@@ -627,7 +648,10 @@ def create_gallery_router() -> APIRouter:
         engine: GalleryFileOperations = container.gallery_file_operations
         return engine.list_trash(cursor=cursor, limit=limit)
 
-    @router.post("/gallery/trash/{operation_id}/restore")
+    @router.post(
+        "/gallery/trash/{operation_id}/restore",
+        response_model=GalleryFileOperationResponse,
+    )
     async def restore_trash(
         operation_id: str,
         container: Any = Depends(get_service),
@@ -640,7 +664,10 @@ def create_gallery_router() -> APIRouter:
         except GalleryFileOperationError as error:
             raise _file_operation_api_error(error, operation_id=operation_id) from None
 
-    @router.post("/gallery/file-operations/{operation_id}/undo")
+    @router.post(
+        "/gallery/file-operations/{operation_id}/undo",
+        response_model=GalleryFileOperationResponse,
+    )
     async def undo_trash(
         operation_id: str,
         container: Any = Depends(get_service),
@@ -653,7 +680,10 @@ def create_gallery_router() -> APIRouter:
         except GalleryFileOperationError as error:
             raise _file_operation_api_error(error, operation_id=operation_id) from None
 
-    @router.delete("/gallery/trash/{operation_id}")
+    @router.delete(
+        "/gallery/trash/{operation_id}",
+        response_model=GalleryFileOperationResponse,
+    )
     async def purge_trash(
         operation_id: str,
         container: Any = Depends(get_service),
@@ -667,7 +697,10 @@ def create_gallery_router() -> APIRouter:
             raise _file_operation_api_error(error, operation_id=operation_id) from None
 
 
-    @router.delete("/gallery/trash")
+    @router.delete(
+        "/gallery/trash",
+        response_model=GalleryPurgeAllTrashResponse,
+    )
     async def purge_all_trash(
         container: Any = Depends(get_service),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),

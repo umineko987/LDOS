@@ -776,7 +776,7 @@ describe("gallery file operations controller (G3-3 TXT 编辑/重命名/回收)"
       undoTrash: vi.fn(async () => ({ ...operationResult, kind: "restore" })),
       restoreTrash: vi.fn(async () => ({ ...operationResult, kind: "restore" })),
       purgeTrash: vi.fn(async () => ({ ...operationResult, kind: "purge" })),
-      purgeAllTrash: vi.fn(async () => ({ ...operationResult, kind: "purge" })),
+      purgeAllTrash: vi.fn(async () => ({ purged_operations: 1, purged_items: 1 })),
       listTrash: vi.fn(async () => ({
         operations: [
           {

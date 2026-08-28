@@ -1390,6 +1390,38 @@ export function sanitizeGalleryFileOperationResult(
   });
 }
 
+export interface GalleryPurgeAllTrashResult {
+  readonly purged_operations: number;
+  readonly purged_items: number;
+}
+
+const PURGE_ALL_TRASH_RESULT_KEYS = new Set([
+  "purged_operations",
+  "purged_items",
+]);
+
+export function sanitizeGalleryPurgeAllTrashResult(
+  raw: unknown,
+): GalleryPurgeAllTrashResult {
+  const value = strictRecord(
+    raw,
+    PURGE_ALL_TRASH_RESULT_KEYS,
+    "gallery_purge_all_trash",
+  );
+  return Object.freeze({
+    purged_operations: countValue(
+      value.purged_operations,
+      "gallery_purge_all_trash_operations",
+      0,
+    ),
+    purged_items: countValue(
+      value.purged_items,
+      "gallery_purge_all_trash_items",
+      0,
+    ),
+  });
+}
+
 export interface GalleryTrashOperation {
   readonly operation_id: string;
   readonly created_at: number;

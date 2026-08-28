@@ -100,6 +100,39 @@ describe("Gallery directory export service", () => {
   });
 });
 
+describe("Gallery file operation service", () => {
+  const operationProjection = {
+    operation_id: "operation-1",
+    kind: "trash",
+    status: "committed",
+    item_count: 1,
+    has_txt_count: 0,
+  };
+
+  it("accepts the bounded operation and purge-all response projections", async () => {
+    const post = vi.fn(async () => operationProjection);
+    const remove = vi.fn(async () => ({ purged_operations: 2, purged_items: 3 }));
+    const service = createGalleryService({ post, delete: remove } as unknown as ApiClient);
+
+    await expect(service.trashAssets(["asset-1"])).resolves.toEqual(operationProjection);
+    await expect(service.purgeAllTrash()).resolves.toEqual({
+      purged_operations: 2,
+      purged_items: 3,
+    });
+    expect(remove).toHaveBeenCalledWith(GALLERY_ENDPOINTS.trash);
+  });
+
+  it("rejects internal backend fields leaked by a mutation response", async () => {
+    const post = vi.fn(async () => ({
+      ...operationProjection,
+      source_ids: ["source-1"],
+    }));
+    const service = createGalleryService({ post } as unknown as ApiClient);
+
+    await expect(service.trashAssets(["asset-1"])).rejects.toThrow(TypeError);
+  });
+});
+
 describe("Gallery search service", () => {
   it("builds bounded scope-aware search paths", () => {
     expect(

@@ -613,6 +613,20 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
         )
         return {a["name"]: a for a in response.json()["assets"]}
 
+    def _assert_file_operation_projection(
+        self, value: dict[str, object]
+    ) -> None:
+        self.assertEqual(
+            set(value),
+            {
+                "operation_id",
+                "kind",
+                "status",
+                "item_count",
+                "has_txt_count",
+            },
+        )
+
     def test_rename_route(self) -> None:
         asset_id = self.assets["pic.jpg"]["asset_id"]
         response = self.client.post(
@@ -621,6 +635,7 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
+        self._assert_file_operation_projection(body)
         self.assertEqual(body["status"], "committed")
         self.assertTrue(
             (self.root / "src-a" / "renamed.jpg").exists(),
@@ -645,13 +660,23 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         operation = response.json()
+        self._assert_file_operation_projection(operation)
         self.assertEqual(operation["status"], "committed")
         self.assertFalse((self.root / "src-a" / "pic.jpg").exists())
+        repeated = self.client.post(
+            "/api/v1/gallery/file-operations/trash",
+            json={"asset_ids": [asset_id]},
+        )
+        self.assertEqual(repeated.status_code, 409, repeated.text)
+        self.assertEqual(
+            repeated.json()["error"]["code"], "asset_not_active"
+        )
         # 撤销。
         undo = self.client.post(
             f"/api/v1/gallery/file-operations/{operation['operation_id']}/undo"
         )
         self.assertEqual(undo.status_code, 200, undo.text)
+        self._assert_file_operation_projection(undo.json())
         self.assertTrue((self.root / "src-a" / "pic.jpg").exists())
 
     def test_trash_list_and_purge(self) -> None:
@@ -668,8 +693,23 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
             f"/api/v1/gallery/trash/{operation['operation_id']}"
         )
         self.assertEqual(purge.status_code, 200, purge.text)
+        self._assert_file_operation_projection(purge.json())
         self.assertIsNone(
             self.container.db.gallery.get_asset(asset_id)
+        )
+
+    def test_purge_all_projection(self) -> None:
+        asset_id = self.assets["pic.jpg"]["asset_id"]
+        trashed = self.client.post(
+            "/api/v1/gallery/file-operations/trash",
+            json={"asset_ids": [asset_id]},
+        )
+        self.assertEqual(trashed.status_code, 200, trashed.text)
+        purged = self.client.delete("/api/v1/gallery/trash")
+        self.assertEqual(purged.status_code, 200, purged.text)
+        self.assertEqual(
+            purged.json(),
+            {"purged_operations": 1, "purged_items": 1},
         )
 
     def test_restore_conflict_409(self) -> None:

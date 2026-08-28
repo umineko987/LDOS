@@ -989,15 +989,15 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       return;
     }
     if (url.pathname === "/api/v1/gallery/trash" && request.method() === "DELETE") {
-      const itemCount = [...galleryTrashOperations.values()].reduce((total, item) => total + item.item_count, 0);
-      const txtCount = [...galleryTrashOperations.values()].reduce((total, item) => total + item.has_txt_count, 0);
+      const purgedOperations = galleryTrashOperations.size;
+      const purgedItems = [...galleryTrashOperations.values()].reduce(
+        (total, item) => total + item.item_count,
+        0,
+      );
       galleryTrashOperations.clear();
       await respond(route, {
-        operation_id: "gal-purge-all",
-        kind: "purge",
-        status: "committed",
-        item_count: itemCount,
-        has_txt_count: txtCount,
+        purged_operations: purgedOperations,
+        purged_items: purgedItems,
       });
       return;
     }

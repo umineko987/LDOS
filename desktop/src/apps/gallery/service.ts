@@ -3,6 +3,7 @@ import {
   sanitizeGalleryAnnotation,
   sanitizeGalleryDirectoryPage,
   sanitizeGalleryFileOperationResult,
+  sanitizeGalleryPurgeAllTrashResult,
   sanitizeGalleryDirectoryExportOperation,
   sanitizeGallerySourceSummary,
   sanitizeGalleryScanOperation,
@@ -14,6 +15,7 @@ import {
   type GalleryDirectoryPage,
   type GalleryDirectoryExportOperation,
   type GalleryFileOperationResult,
+  type GalleryPurgeAllTrashResult,
   type GallerySearchPage,
   type GallerySearchScope,
   type GallerySourceSummary,
@@ -94,7 +96,7 @@ export interface GalleryService {
   undoTrash(operationId: string): Promise<GalleryFileOperationResult>;
   restoreTrash(operationId: string): Promise<GalleryFileOperationResult>;
   purgeTrash(operationId: string): Promise<GalleryFileOperationResult>;
-  purgeAllTrash(): Promise<GalleryFileOperationResult>;
+  purgeAllTrash(): Promise<GalleryPurgeAllTrashResult>;
   listTrash(
     cursor: string | null,
     signal: AbortSignal,
@@ -329,7 +331,7 @@ export function createGalleryService(api: ApiClient): GalleryService {
       );
     },
     async purgeAllTrash() {
-      return sanitizeGalleryFileOperationResult(
+      return sanitizeGalleryPurgeAllTrashResult(
         await api.delete(GALLERY_ENDPOINTS.trash),
       );
     },
