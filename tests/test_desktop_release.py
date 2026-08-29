@@ -416,5 +416,19 @@ class DesktopReleaseTests(unittest.TestCase):
             release.ensure_clean_tracked_checkout()
 
 
+    def test_prebuilt_frontend_env_verifies_without_rebuilding(self) -> None:
+        with mock.patch.dict(os.environ, {"IMAGEWEAVE_PREBUILT_FRONTEND": "1"}):
+            commands = release.frontend_build_commands("npm")
+        self.assertEqual(commands, [["npm", "run", "verify:artifacts"]])
+
+    def test_default_frontend_path_builds_then_verifies(self) -> None:
+        env = {k: v for k, v in os.environ.items() if k != "IMAGEWEAVE_PREBUILT_FRONTEND"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            commands = release.frontend_build_commands("npm")
+        self.assertEqual(
+            commands,
+            [["npm", "run", "build"], ["npm", "run", "verify:artifacts"]],
+        )
+
 if __name__ == "__main__":
     unittest.main()

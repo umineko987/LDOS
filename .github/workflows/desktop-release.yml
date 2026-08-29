@@ -36,8 +36,40 @@ permissions:
   contents: read
 
 jobs:
+  frontend:
+    name: Canonical frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.13.0"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Build canonical frontend and sync webui_dist
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build
+      - name: Verify tracked checkout stayed clean
+        shell: bash
+        run: |
+          git diff --check
+          test -z "$(git status --short --untracked-files=no)"
+      - name: Upload canonical frontend
+        uses: actions/upload-artifact@v7
+        with:
+          name: canonical-frontend
+          path: desktop/dist
+          if-no-files-found: error
+          retention-days: 3
   bundle:
     name: ${{ matrix.name }} unsigned bundle
+    needs: frontend
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
@@ -94,7 +126,14 @@ jobs:
           rustup toolchain install 1.98.0 --component rustfmt
           rustup default 1.98.0
           rustc -Vv
+      - name: Restore canonical frontend dist
+        uses: actions/download-artifact@v7
+        with:
+          name: canonical-frontend
+          path: desktop/dist
       - name: Build and statically verify canonical bundle
+        env:
+          IMAGEWEAVE_PREBUILT_FRONTEND: "1"
         run: python scripts/desktop_release.py build --cache-dir .release-cache
       - name: Verify tracked checkout stayed clean
         shell: bash

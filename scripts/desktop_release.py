@@ -1114,13 +1114,22 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
         raise
 
 
+def frontend_build_commands(npm: str) -> list[list[str]]:
+    """vite 构建产物并非跨平台字节一致（原生工具链差异），因此 canonical
+    前端只在 Linux 构建一次；其余平台设置 IMAGEWEAVE_PREBUILT_FRONTEND=1
+    后仅校验下载到的 canonical dist，不重新生成。"""
+    if os.environ.get("IMAGEWEAVE_PREBUILT_FRONTEND"):
+        return [[npm, "run", "verify:artifacts"]]
+    return [[npm, "run", "build"], [npm, "run", "verify:artifacts"]]
+
+
 def build_release(cache_dir: Path) -> dict[str, Any]:
     ensure_clean_tracked_checkout()
     desktop = ROOT / "desktop"
     npm = "npm.cmd" if os.name == "nt" else "npm"
     run([npm, "ci"], cwd=desktop)
-    run([npm, "run", "build"], cwd=desktop)
-    run([npm, "run", "verify:artifacts"], cwd=desktop)
+    for command in frontend_build_commands(npm):
+        run(command, cwd=desktop)
     target = host_target()
     assemble(target, DEFAULT_OUTPUT, cache_dir)
     runtime_result = verify_runtime(DEFAULT_OUTPUT)
