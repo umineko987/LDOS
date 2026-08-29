@@ -229,6 +229,68 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         self.assertTrue((target / "empty-output").is_dir())
         self.assertEqual(list((target / "empty-output").iterdir()), [])
 
+    def test_windows_style_scandir_stats_without_file_index_copy_completes(self) -> None:
+        # Windows 的 DirEntry.stat() 来自 WIN32_FIND_DATA，st_dev/st_ino 恒为
+        # 0；_copy_file 的源版本比较不得因此把未变化的文件判成 source_changed。
+        _source, _root, directory_id = self._source(
+            "sources", "alpha", {"nested/one.jpg": b"source"}
+        )
+        target = self.root / "target"
+        target.mkdir()
+
+        def zero_index(metadata: os.stat_result) -> os.stat_result:
+            return os.stat_result(
+                (
+                    metadata.st_mode,
+                    0,
+                    0,
+                    metadata.st_nlink,
+                    metadata.st_uid,
+                    metadata.st_gid,
+                    metadata.st_size,
+                    metadata.st_atime,
+                    metadata.st_mtime,
+                    metadata.st_ctime,
+                ),
+                {
+                    "st_atime_ns": metadata.st_atime_ns,
+                    "st_mtime_ns": metadata.st_mtime_ns,
+                    "st_ctime_ns": metadata.st_ctime_ns,
+                },
+            )
+
+        original_iter_subtree = SafeSourceRoot.iter_subtree
+
+        def windows_style_iter_subtree(self, relative_directory, **kwargs):
+            for entry in original_iter_subtree(self, relative_directory, **kwargs):
+                zeroed = tuple(
+                    (name, zero_index(metadata))
+                    for name, metadata in entry.files
+                )
+                yield safe_paths.SafeDirectoryEntry(
+                    entry.relative_path, entry.name, zeroed
+                )
+
+        manager = self._manager()
+        with mock.patch.object(
+            SafeSourceRoot, "iter_subtree", windows_style_iter_subtree
+        ):
+            record = self._wait(
+                manager,
+                manager.start(
+                    directory_ids=[directory_id], target_path=str(target)
+                )["operation_id"],
+            )
+        self.assertEqual(
+            record["state"],
+            "completed",
+            f"error_code={record.get('error_code')} details={record.get('details')}",
+        )
+        self.assertEqual(
+            (target / "alpha" / "nested" / "one.jpg").read_bytes(),
+            b"source",
+        )
+
     def test_only_top_level_name_conflicts_block_preflight(self) -> None:
         _source, _root, directory_id = self._source(
             "sources", "alpha", {"one.jpg": b"x"}
