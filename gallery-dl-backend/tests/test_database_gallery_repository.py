@@ -134,7 +134,12 @@ class GallerySourceRegistrationTest(GalleryRepositoryTestBase):
         with self.assertRaises(GallerySourceConflictError):
             self.repo.relink_source(source["source_id"], "/tmp/gallery-b/sub")
         relinked = self.repo.relink_source(source["source_id"], "/tmp/gallery-c")
-        self.assertEqual(relinked["canonical_root_key"], os.path.realpath("/tmp/gallery-c"))
+        # canonical_root_key 应用 normcase（Windows 归一化盘符大小写与分隔符），
+        # 期望值必须经过同样的归一化，不能用裸 realpath。
+        self.assertEqual(
+            relinked["canonical_root_key"],
+            os.path.normcase(os.path.realpath("/tmp/gallery-c")),
+        )
         with self.assertRaises(ValueError):
             self.repo.relink_source("missing", "/tmp/gallery-d")
         self.assertEqual(other["source_id"], other["source_id"])

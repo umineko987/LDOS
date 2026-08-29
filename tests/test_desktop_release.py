@@ -472,5 +472,36 @@ class DesktopReleaseTests(unittest.TestCase):
             ):
                 release.scan_for_local_paths(root, [Path(tmp)])
 
+    def test_scan_exempts_upstream_site_packages_but_not_our_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / release.MANIFEST_NAME).write_text("{}", encoding="utf-8")
+            (root / release.FILES_NAME).write_text("", encoding="utf-8")
+            leak = os.fspath(Path(tmp).resolve()).encode()
+            # 上游 wheel（如 numpy __config__.py）内嵌的构建机路径不受本仓库控制。
+            upstream = root / "runtime" / "python" / "Lib" / "site-packages" / "numpy"
+            upstream.mkdir(parents=True)
+            (upstream / "__config__.py").write_bytes(
+                b"build_machine = r'" + leak + b"\\wheel\\numpy'")
+            release.scan_for_local_paths(root, [Path(tmp)])
+
+            ours = root / "runtime" / "python" / "Lib" / "site-packages" / "gdl_backend"
+            ours.mkdir(parents=True)
+            (ours / "config.py").write_bytes(b"PATH = r'" + leak + b"'")
+            with self.assertRaisesRegex(
+                release.ReleaseError, "forbidden local path"
+            ):
+                release.scan_for_local_paths(root, [Path(tmp)])
+
+            # 凭据与私钥模式对豁免路径针的第三方文件同样生效。
+            (upstream / "__config__.py").write_bytes(
+                b"-----BEGIN OPENSSH PRIVATE KEY-----\nmock"
+            )
+            (ours / "config.py").unlink()
+            with self.assertRaisesRegex(
+                release.ReleaseError, "private key"
+            ):
+                release.scan_for_local_paths(root, [Path(tmp)])
+
 if __name__ == "__main__":
     unittest.main()

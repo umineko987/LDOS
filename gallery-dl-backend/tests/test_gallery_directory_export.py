@@ -1166,6 +1166,26 @@ class SafeSourceRootDescriptorlessTest(unittest.TestCase):
                     root.open()
                 self.assertEqual(ctx.exception.reason, "source_root_unavailable")
 
+    def test_descriptorless_open_binary_reports_missing_file(self) -> None:
+        # Windows 上扫描 sidecar（a.txt）与 rename 目标探测都会对不存在的
+        # 文件调用 open_binary：必须翻译为 UnsafeSourcePathError("file_missing")
+        # 而不是裸 FileNotFoundError，否则扫描线程直接崩溃。
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "keep.jpg").write_bytes(b"x")
+            root = SafeSourceRoot(Path(tmp))
+            with (
+                mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False),
+                mock.patch.object(safe_paths, "_HAS_DIR_FD", False),
+            ):
+                root.open()
+                self.assertFalse(root.exists_regular("missing.txt"))
+                with self.assertRaises(UnsafeSourcePathError) as ctx:
+                    root.open_binary("missing.txt")
+                self.assertEqual(ctx.exception.reason, "file_missing")
+                handle = root.open_binary("keep.jpg")
+                handle.close()
+                root.close()
+
 
 
 if __name__ == "__main__":

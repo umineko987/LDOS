@@ -643,11 +643,19 @@ def scan_for_local_paths(root: Path, forbidden: Iterable[Path]) -> None:
         if path.is_symlink() or path.stat().st_size > 16 * 1024 * 1024:
             continue
         data = path.read_bytes()
-        # 上游 wheel 自带的 SBOM（*.dist-info/sboms/）记录的是上游构建机路径
-        # （pydantic 等同样在 GitHub Actions 的 /home/runner 上构建），属于公开
-        # 的上游构建元数据而非本机泄漏：仅豁免路径针，凭据模式仍然全量扫描。
+        # 上游 wheel 内嵌的构建机路径不受本仓库控制：SBOM（*.dist-info/sboms/）
+        # 与构建配置残留（如 numpy 的 __config__.py）都记录了上游 GitHub Actions
+        # runner 的家目录，与我们的 CI 用户名（runner / runneradmin）恰好同名。
+        # 这类路径针误伤只豁免第三方 site-packages 与 SBOM；本仓库自己的
+        # gdl_backend 包及其余所有产物仍全量扫描，凭据/私钥模式对一切文件生效。
+        parts = path.parts
+        in_site_packages = "site-packages" in parts
+        upstream_package = in_site_packages and not any(
+            part == "gdl_backend" or part.startswith("gdl_backend-")
+            for part in parts[parts.index("site-packages") + 1 :]
+        )
         path_needles = (
-            () if path.parent.name == "sboms" else forbidden_path_needles
+            () if path.parent.name == "sboms" or upstream_package else forbidden_path_needles
         )
         for needle in (*path_needles, *private_key_needles):
             if needle and needle in data:

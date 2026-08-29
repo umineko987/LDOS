@@ -255,7 +255,7 @@ class GalleryScanTest(GalleryServiceTestBase):
         source = self.make_source({"a.jpg": _png_bytes(), "a.txt": "t"})
         self.service.scan_source(source["source_id"])
         moved = self.root / "moved"
-        moved.mkdir()
+        # POSIX 允许 rename 覆盖已存在的空目录，Windows 拒绝：目标名直接选不存在的。
         os.rename(self.root / "src-a", moved)
         stats = self.service.scan_source(source["source_id"])
         self.assertTrue(stats["offline"])

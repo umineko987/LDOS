@@ -348,7 +348,16 @@ class SafeSourceRoot:
     def open_binary(self, relative_path: str) -> BinaryIO:
         if not _HAS_DIR_FD:
             target = self._fallback_path(relative_path)
-            handle = target.open("rb")
+            try:
+                handle = target.open("rb")
+            except FileNotFoundError as error:
+                raise UnsafeSourcePathError(
+                    relative_path, "file_missing"
+                ) from error
+            except OSError as error:
+                raise UnsafeSourcePathError(
+                    relative_path, "file_unavailable"
+                ) from error
             metadata = os.fstat(handle.fileno())
             try:
                 verified_target = self._fallback_path(relative_path)
