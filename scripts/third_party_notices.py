@@ -390,9 +390,10 @@ def _write_markdown(
     ]
     for item in components:
         files = "<br>".join(f"`{path}`" for path in item["license_files"])
+        license_text = item["license"].replace("|", "\\|")
         lines.append(
             f"| {item['ecosystem']} | `{item['name']}` | `{item['version']}` | "
-            f"{item['license'].replace('|', '\\|')} | {item['source']} | {files} |"
+            f"{license_text} | {item['source']} | {files} |"
         )
     lines.append("")
     destination.write_text("\n".join(lines), encoding="utf-8", newline="\n")
