@@ -569,7 +569,11 @@ def ensure_clean_tracked_checkout() -> None:
         ["git", "status", "--porcelain", "--untracked-files=no"], capture=True
     )
     if status:
-        raise ReleaseError("desktop release assembly requires a clean tracked checkout")
+        # 把脏文件列进错误信息：定位是哪一步写脏了跟踪文件。
+        dirty = "; ".join(line.strip() for line in status.splitlines())
+        raise ReleaseError(
+            f"desktop release assembly requires a clean tracked checkout: {dirty}"
+        )
 
 
 def write_release_manifest(
@@ -694,7 +698,11 @@ def verify_tree(
             allow_materialized_symlinks and kind == "L" and actual_kind == "F"
         )
         if not kind_matches or expected != actual:
-            raise ReleaseError(f"release file mismatch: {relative}")
+            raise ReleaseError(
+                f"release file mismatch: {relative}: manifest kind={kind} "
+                f"digest={expected[:12]} but tree kind={actual_kind} "
+                f"digest={actual[:12]}"
+            )
     actual_entries = {
         path.relative_to(root).as_posix() for path in relative_entries(root)
     }

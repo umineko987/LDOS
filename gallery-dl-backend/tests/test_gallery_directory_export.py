@@ -1186,6 +1186,28 @@ class SafeSourceRootDescriptorlessTest(unittest.TestCase):
                 handle.close()
                 root.close()
 
+    def test_descriptorless_exists_regular_treats_missing_parent_as_absent(self) -> None:
+        # trash/rename 的目标探测会对父目录尚未创建的目标调用 exists_regular：
+        # 父组件缺失必须是 parent_missing（视为不存在），不能是 unsafe_parent。
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "keep.jpg").write_bytes(b"x")
+            root = SafeSourceRoot(Path(tmp))
+            with (
+                mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False),
+                mock.patch.object(safe_paths, "_HAS_DIR_FD", False),
+            ):
+                root.open()
+                self.assertFalse(
+                    root.exists_regular(".imageweave-trash/op-1/files/keep.jpg")
+                )
+                self.assertEqual(
+                    root.disk_version(
+                        ".imageweave-trash/op-1/files/keep.jpg", allow_missing=True
+                    ),
+                    safe_paths._MISSING_DISK_VERSION,
+                )
+                root.close()
+
 
 
 if __name__ == "__main__":

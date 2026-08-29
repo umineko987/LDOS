@@ -313,6 +313,10 @@ class SafeSourceRoot:
             current = current / component
             if create_parents and not current.exists():
                 current.mkdir()
+            if not current.exists():
+                # 与描述符分支对齐：父组件不存在是 parent_missing（调用方如
+                # exists_regular/disk_version 视为"文件不存在"），而不是路径不安全。
+                raise UnsafeSourcePathError(relative_path, "parent_missing")
             if _is_reparse_path(current) or not current.is_dir():
                 raise UnsafeSourcePathError(relative_path, "unsafe_parent")
         try:
