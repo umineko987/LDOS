@@ -661,9 +661,11 @@ class DesktopDistributionConfigTests(unittest.TestCase):
                 settings.allowed_cookie_roots,
                 [(data_root / "credentials").resolve()],
             )
+            # _managed_path 刻意只做 abspath（见其 docstring：解引用叶节点
+            # 会绕过创建前的符号链接检查），保留 Windows 8.3 短路径形式。
             self.assertEqual(
                 settings.proxy.allowed_node_roots,
-                [(data_root / "subscriptions").resolve()],
+                [Path(os.path.abspath(os.fspath(data_root / "subscriptions")))],
             )
             self.assertTrue(settings.proxy.enabled)
             self.assertFalse(settings.gallery.migrate_default_auth)

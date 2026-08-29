@@ -109,7 +109,7 @@ class GalleryDirectoryExportApiTest(unittest.TestCase):
         )
         self.assertEqual(missing_view.status_code, 422, missing_view.text)
         record = self._wait(operation_id)
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
         self.assertEqual(record["copied_file_count"], 2)
         self.assertEqual(record["successful_directory_names"], ["alpha"])
         self.assertEqual(self._legacy_row_counts(), before)

@@ -145,7 +145,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
             directory_ids=[directory_id], target_path=str(target)
         )
         record = self._wait(manager, started["operation_id"])
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
         self.assertEqual(record["completed_directory_count"], 1)
         self.assertEqual(record["copied_file_count"], 7)
 
@@ -199,7 +199,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 directory_ids=[selected_id], target_path=str(target)
             )["operation_id"],
         )
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
         output = target / "chosen"
         self.assertEqual(
             sorted(
@@ -224,7 +224,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 directory_ids=[directory_id], target_path=str(target)
             )["operation_id"],
         )
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
         self.assertEqual(record["copied_file_count"], 0)
         self.assertTrue((target / "empty-output").is_dir())
         self.assertEqual(list((target / "empty-output").iterdir()), [])
@@ -243,7 +243,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 directory_ids=[directory_id], target_path=str(target)
             )["operation_id"],
         )
-        self.assertEqual(completed["state"], "completed")
+        self.assertEqual(completed["state"], "completed", f"error_code={completed.get('error_code')} details={completed.get('details')}")
 
         self._assert_error(
             "target_name_conflict",
@@ -312,7 +312,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 directory_ids=[directory_id], target_path=str(target)
             )["operation_id"],
         )
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
         self.assertEqual((target / "chosen" / "one.jpg").read_bytes(), b"x")
 
     def test_target_may_be_inside_an_unselected_gallery_source(self) -> None:
@@ -331,7 +331,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 directory_ids=[directory_id], target_path=str(target)
             )["operation_id"],
         )
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
         self.assertEqual((target / "alpha" / "one.jpg").read_bytes(), b"x")
 
     def test_target_root_replacement_after_preflight_is_rejected(self) -> None:
@@ -460,7 +460,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                     directory_ids=[directory_id], target_path=str(target)
                 )["operation_id"],
             )
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
         self.assertEqual(
             (target / "alpha" / "nested" / "one.jpg").read_bytes(),
             b"source",
@@ -666,7 +666,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 directory_ids=[directory_id], target_path=str(target)
             )["operation_id"],
         )
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
         self.assertEqual((target / "alpha" / "one.jpg").read_bytes(), b"original")
         self.assertEqual((source_root / "one.jpg").read_bytes(), b"changed")
 
@@ -692,7 +692,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 directory_ids=[directory_id], target_path=str(target)
             )["operation_id"],
         )
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
         self.assertEqual((target / "alpha" / "one.jpg").read_bytes(), b"original")
         self.assertFalse((target / "alpha" / "late.txt").exists())
         self.assertEqual((source_root / "late.txt").read_bytes(), b"late")
@@ -719,7 +719,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 directory_ids=[directory_id], target_path=str(target)
             )["operation_id"],
         )
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
         self.assertEqual((target / "alpha" / "one.jpg").read_bytes(), b"original")
         self.assertFalse((target / "alpha" / "late-empty").exists())
         self.assertTrue((source_root / "late-empty").is_dir())
@@ -1006,8 +1006,11 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         started = manager.start(
             directory_ids=[directory_id], target_path=str(target)
         )
+        record = self._wait(manager, started["operation_id"])
         self.assertEqual(
-            self._wait(manager, started["operation_id"])["state"], "completed"
+            record["state"],
+            "completed",
+            f"error_code={record.get('error_code')} details={record.get('details')}",
         )
 
     def test_cancel_removes_the_current_temporary_directory(self) -> None:
@@ -1089,7 +1092,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         self.assertFalse(mutation_thread.is_alive())
         self.assertEqual(rename_errors, [])
         record = self._wait(manager, started["operation_id"])
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
         self.assertTrue((target / "alpha" / "one.jpg").is_file())
         self.assertTrue((_root / "renamed.jpg").is_file())
 
@@ -1121,7 +1124,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 directory_ids=[directory_id], target_path=str(target)
             )["operation_id"],
         )
-        self.assertEqual(record["state"], "completed")
+        self.assertEqual(record["state"], "completed", f"error_code={record.get('error_code')} details={record.get('details')}")
 
         with self.container.db.gallery._read() as connection:  # noqa: SLF001
             after = {

@@ -811,6 +811,7 @@ class SafeSourceRoot:
             if _is_reparse_path(target) or not stat.S_ISDIR(metadata.st_mode):
                 raise UnsafeSourcePathError(relative_path, "leaf_not_directory")
             self._remove_fallback_directory(target, relative_path)
+            target.rmdir()
             return
         with self._parent_fd(relative_path) as (parent_fd, name):
             try:
