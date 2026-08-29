@@ -4,10 +4,8 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import json
 import os
-import platform
 import re
 import shlex
 import subprocess
@@ -36,44 +34,7 @@ COMPONENTS = {
         "source_description": "all repository-root dedup_*.py files",
         "omissions": [],
     },
-    "proxy": {
-        "cwd": ROOT / "Proxy_pool",
-        "coverage_args": [
-            "--source=.",
-            "--omit=*/tests/*,*/.venv/*,*/scripts/demo_pool.py",
-        ],
-        "report_args": [],
-        "test_args": ["-m", "unittest", "discover", "-s", "tests", "-v"],
-        "source_description": "all top-level Proxy_pool library modules",
-        "omissions": [
-            "Proxy_pool/tests (test code)",
-            "Proxy_pool/.venv (generated dependency environment)",
-            "Proxy_pool/scripts/demo_pool.py (manual demo CLI; not a library module)",
-        ],
-    },
 }
-
-
-def _minimum_for_environment(
-    component_baseline: dict,
-    *,
-    system_name: str | None = None,
-    python_version: tuple[int, int] | None = None,
-) -> tuple[dict, str]:
-    """Select an exact measured floor without comparing unlike OS paths."""
-
-    current_system = system_name or platform.system()
-    major, minor = python_version or (
-        sys.version_info.major,
-        sys.version_info.minor,
-    )
-    profile_name = f"{current_system}-py{major}.{minor}"
-    profile = component_baseline.get("minimum_by_environment", {}).get(
-        profile_name
-    )
-    if profile is None:
-        return copy.deepcopy(component_baseline["minimum"]), "default"
-    return copy.deepcopy(profile["minimum"]), profile_name
 
 
 def _display_command(arguments: list[str]) -> str:
@@ -115,7 +76,7 @@ def _expected_sources(component: str) -> set[str]:
         }
     if component == "dedup":
         return {path.name for path in ROOT.glob("dedup_*.py")}
-    return {path.name for path in (ROOT / "Proxy_pool").glob("*.py")}
+    raise ValueError(f"unknown component: {component}")
 
 
 def _normalized_report_sources(report: dict, cwd: Path) -> set[str]:
@@ -165,7 +126,6 @@ def _write_summary(path: Path, result: dict) -> str:
         f"## {result['component']} Python coverage",
         "",
         f"- tests: {result['tests']['count']}; skipped: {result['tests']['skipped']}",
-        f"- minimum profile: {result['minimum_profile']}",
     ]
     for reason in result["tests"]["skip_reasons"]:
         lines.append(f"  - skip: {reason}")
@@ -267,9 +227,7 @@ def main() -> int:
         )
 
     baselines = json.loads(BASELINES_PATH.read_text(encoding="utf-8"))
-    minimum, minimum_profile = _minimum_for_environment(
-        baselines["python"][component]
-    )
+    minimum = baselines["python"][component]["minimum"]
     totals = report["totals"]
     metrics = {
         "line": _metric(totals["covered_lines"], totals["num_statements"]),
@@ -295,7 +253,6 @@ def main() -> int:
         "tests": tests,
         "metrics": metrics,
         "minimum": minimum,
-        "minimum_profile": minimum_profile,
         "status": "MEASURED" if args.measure_only else ("FAIL" if failed else "PASS"),
         "failed_metrics": failed,
     }

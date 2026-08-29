@@ -23,17 +23,11 @@ dependencies = [
   "Pillow==12.1.1",
 ]
 
-# 后端、去重、Proxy_pool 与测试工具的直接依赖只在本文件维护；
+# 后端、去重与测试工具的直接依赖只在本文件维护；
 # requirements*.txt 均由 scripts/lock-dependencies.sh 生成，禁止手工改锁文件。
 [dependency-groups]
 test = [
   "coverage[toml]>=7.13,<8",
-]
-proxy-pool = [
-  "filelock>=3.12",
-  "PyYAML>=6.0",
-  "orjson>=3.9 ; platform_python_implementation == 'CPython'",
-  "aiohttp>=3.9",
 ]
 dedup-common = [
   "numpy==2.4.2",

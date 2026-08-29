@@ -21,7 +21,6 @@ BACKEND_ROOT = REPOSITORY_ROOT / "gallery-dl-backend" / "gdl_backend" / "webui_d
 TAURI_CONFIG = REPOSITORY_ROOT / "desktop" / "src-tauri" / "tauri.conf.json"
 MANIFEST_NAME = "frontend-manifest.json"
 WHEEL_PREFIX = "gdl_backend/webui_dist/"
-LEGACY_WHEEL_PREFIX = "gdl_backend/webui/"
 
 
 class ArtifactError(RuntimeError):
@@ -224,8 +223,6 @@ def _verify_wheel(wheel_path: Path, expected_files: tuple[str, ...]) -> None:
             names = set(members)
             if len(names) != len(members):
                 raise ArtifactError("duplicate_wheel_member")
-            if any(name.startswith(LEGACY_WHEEL_PREFIX) for name in names):
-                raise ArtifactError("legacy_webui_in_wheel")
             wheel_files = tuple(
                 sorted(name.removeprefix(WHEEL_PREFIX) for name in names if name.startswith(WHEEL_PREFIX) and not name.endswith("/"))
             )

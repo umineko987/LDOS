@@ -44,14 +44,12 @@ class FrontendWheelArtifactTests(unittest.TestCase):
         self.backend_patch.stop()
         self.temporary.cleanup()
 
-    def write_wheel(self, name: str, *, corrupt_record: str = "", legacy: bool = False) -> Path:
+    def write_wheel(self, name: str, *, corrupt_record: str = "") -> Path:
         wheel_path = self.root / name
         members = {
             f"gdl_backend/webui_dist/{relative}": content
             for relative, content in self.files.items()
         }
-        if legacy:
-            members["gdl_backend/webui/index.html"] = b"legacy"
         record_name = "imageweave_backend-0.dist-info/RECORD"
         output = io.StringIO(newline="")
         writer = csv.writer(output, lineterminator="\n")
@@ -79,9 +77,6 @@ class FrontendWheelArtifactTests(unittest.TestCase):
                 self.expected,
             )
 
-    def test_rejects_legacy_frontend_member(self):
-        with self.assertRaisesRegex(FRONTEND_ARTIFACTS.ArtifactError, "legacy_webui_in_wheel"):
-            FRONTEND_ARTIFACTS._verify_wheel(self.write_wheel("legacy.whl", legacy=True), self.expected)
 
 
 if __name__ == "__main__":

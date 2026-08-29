@@ -55,63 +55,6 @@
           "total": 588
         }
       }
-    },
-    "proxy": {
-      "command": "Proxy_pool/.venv/bin/python scripts/run-python-coverage.py proxy --output artifacts/coverage/proxy",
-      "measured_environment": "Linux x86_64, CPython 3.14.6, coverage.py 7.15.4",
-      "source": "all top-level Proxy_pool library modules; tests, generated venv, and the manual demo CLI are explicit non-library omissions",
-      "baseline": {
-        "line": {
-          "covered": 1698,
-          "total": 2869,
-          "percent": 59.18438480306727
-        },
-        "branch": {
-          "covered": 439,
-          "total": 1096,
-          "percent": 40.05474452554745
-        }
-      },
-      "minimum": {
-        "line": {
-          "covered": 1698,
-          "total": 2869
-        },
-        "branch": {
-          "covered": 439,
-          "total": 1096
-        }
-      },
-      "minimum_by_environment": {
-        "Windows-py3.11": {
-          "measured_environment": "GitHub Actions windows-2025, CPython 3.11.9, coverage.py 7.15.4",
-          "reason": "Windows does not execute POSIX permission and /proc cleanup paths; its platform-specific coverage is gated independently rather than compared with Linux.",
-          "minimum": {
-            "line": {
-              "covered": 1662,
-              "total": 2869
-            },
-            "branch": {
-              "covered": 424,
-              "total": 1096
-            }
-          }
-        },
-        "Windows-py3.14": {
-          "measured_environment": "GitHub Actions windows-2025, CPython 3.14.6, coverage.py 7.15.4",
-          "reason": "Windows does not execute POSIX permission and /proc cleanup paths; its platform-specific coverage is gated independently rather than compared with Linux.",
-          "minimum": {
-            "line": {
-              "covered": 1660,
-              "total": 2869
-            },
-            "branch": {
-              "covered": 424,
-              "total": 1096
-            }
-          }
-        }
-      }
     }
   }
 }
