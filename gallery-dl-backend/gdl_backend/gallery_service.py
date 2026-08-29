@@ -825,74 +825,78 @@ class GalleryCatalogService:
             return {"asset_count": 0, "directory_count": 0, "offline": True}
         self._repo.set_source_availability(source_id, "available")
 
-        existing = self._repo.get_source_asset_stats(source_id)
-        directories: list[dict[str, Any]] = []
-        assets: list[dict[str, Any]] = []
-        skipped = {"temporary": 0, "unsupported": 0}
-        try:
-            for directory in safe_root.iter_tree(
-                excluded_directories=frozenset({IMAGEWEAVE_RESERVED_DIR}),
-                excluded_directory_prefixes=IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES,
-            ):
-                relative_path = directory.relative_path
-                directories.append(
-                    {
-                        "relative_path": relative_path,
-                        "name": directory.name,
-                        "parent_relative_path": (
-                            relative_path.rpartition("/")[0] if relative_path else None
-                        ),
-                    }
-                )
-                image_names: list[str] = []
-                file_entries: list[tuple[str, os.stat_result]] = []
-                for file_name, file_stat in directory.files:
-                    if is_supported_image_name(file_name):
-                        image_names.append(file_name)
-                        file_entries.append((file_name, file_stat))
-                    elif file_name.lower().endswith(_TEMP_FILE_SUFFIXES):
-                        skipped["temporary"] += 1
-                    else:
-                        skipped["unsupported"] += 1
-                conflicts = _pair_conflicts(image_names)
-                for file_name, file_stat in file_entries:
-                    assets.append(
-                        self._asset_record(
-                            safe_root,
-                            relative_path,
-                            file_name,
-                            file_stat,
-                            existing,
-                            pair_conflict=file_name in conflicts,
-                        )
+        # 文件操作（rename/trash/…）与来源删除都持有 source:{id} 文件系统锁；
+        # 扫描的遍历+提交必须走同一协议，否则扫描线程会把操作中途的新磁盘名
+        # 当作新文件插入，与操作的索引提交相撞（UNIQUE(source_id, relative_path)）。
+        with self._filesystem_locks.hold(f"source:{source_id}"):
+            existing = self._repo.get_source_asset_stats(source_id)
+            directories: list[dict[str, Any]] = []
+            assets: list[dict[str, Any]] = []
+            skipped = {"temporary": 0, "unsupported": 0}
+            try:
+                for directory in safe_root.iter_tree(
+                    excluded_directories=frozenset({IMAGEWEAVE_RESERVED_DIR}),
+                    excluded_directory_prefixes=IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES,
+                ):
+                    relative_path = directory.relative_path
+                    directories.append(
+                        {
+                            "relative_path": relative_path,
+                            "name": directory.name,
+                            "parent_relative_path": (
+                                relative_path.rpartition("/")[0] if relative_path else None
+                            ),
+                        }
                     )
-        finally:
-            safe_root.close()
-        try:
-            commit = self._repo.commit_scan(
-                source_id,
-                directories=directories,
-                assets=assets,
-                expected_indexed_version=expected_indexed_version,
-            )
-        except GalleryScanSnapshotConflict:
-            if _snapshot_retries < 1:
-                raise
-            return self.scan_source(
-                source_id, _snapshot_retries=_snapshot_retries - 1
-            )
-        return {
-            "asset_count": commit["asset_count"],
-            "candidate_count": commit["candidate_count"],
-            "kept_count": commit["kept_count"],
-            "removed_count": commit["removed_count"],
-            "directory_count": commit["directory_count"],
-            "content_changed": commit["content_changed"],
-            "annotation_changed": commit["annotation_changed"],
-            "indexed_version": commit["indexed_version"],
-            "offline": False,
-            **{"skipped_" + key: value for key, value in skipped.items()},
-        }
+                    image_names: list[str] = []
+                    file_entries: list[tuple[str, os.stat_result]] = []
+                    for file_name, file_stat in directory.files:
+                        if is_supported_image_name(file_name):
+                            image_names.append(file_name)
+                            file_entries.append((file_name, file_stat))
+                        elif file_name.lower().endswith(_TEMP_FILE_SUFFIXES):
+                            skipped["temporary"] += 1
+                        else:
+                            skipped["unsupported"] += 1
+                    conflicts = _pair_conflicts(image_names)
+                    for file_name, file_stat in file_entries:
+                        assets.append(
+                            self._asset_record(
+                                safe_root,
+                                relative_path,
+                                file_name,
+                                file_stat,
+                                existing,
+                                pair_conflict=file_name in conflicts,
+                            )
+                        )
+            finally:
+                safe_root.close()
+            try:
+                commit = self._repo.commit_scan(
+                    source_id,
+                    directories=directories,
+                    assets=assets,
+                    expected_indexed_version=expected_indexed_version,
+                )
+            except GalleryScanSnapshotConflict:
+                if _snapshot_retries < 1:
+                    raise
+                return self.scan_source(
+                    source_id, _snapshot_retries=_snapshot_retries - 1
+                )
+            return {
+                "asset_count": commit["asset_count"],
+                "candidate_count": commit["candidate_count"],
+                "kept_count": commit["kept_count"],
+                "removed_count": commit["removed_count"],
+                "directory_count": commit["directory_count"],
+                "content_changed": commit["content_changed"],
+                "annotation_changed": commit["annotation_changed"],
+                "indexed_version": commit["indexed_version"],
+                "offline": False,
+                **{"skipped_" + key: value for key, value in skipped.items()},
+            }
 
     def _asset_record(
         self,

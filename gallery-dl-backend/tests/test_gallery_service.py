@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import threading
 import tempfile
 import time
 import unittest
@@ -19,6 +20,7 @@ from gdl_backend._database_gallery_repository import (
 from gdl_backend.database import Database
 from gdl_backend.gallery_service import (
     GalleryCatalogService,
+    GalleryFilesystemLocks,
     GalleryRootMissing,
     GalleryScanInProgress,
     GallerySourceNotFound,
@@ -226,6 +228,28 @@ class GalleryScanTest(GalleryServiceTestBase):
         fifth = self.service.scan_source(source["source_id"])
         self.assertEqual(fifth["asset_count"], 2)
         self.assertTrue(fifth["content_changed"])
+
+    def test_scan_waits_for_source_filesystem_lock(self) -> None:
+        """扫描必须与持有 source:{id} 文件系统锁的文件操作互斥。"""
+        locks = GalleryFilesystemLocks()
+        service = GalleryCatalogService(self.repo, filesystem_locks=locks)
+        self.addCleanup(service.stop)
+        source = self.make_source({"a.jpg": _png_bytes()})
+
+        with locks.hold(f"source:{source['source_id']}"):
+            finished = threading.Event()
+
+            def run_scan() -> None:
+                service.scan_source(source["source_id"])
+                finished.set()
+
+            thread = threading.Thread(target=run_scan, daemon=True)
+            thread.start()
+            self.assertFalse(finished.wait(0.3), "scan must block on source lock")
+
+        self.assertTrue(finished.wait(5.0), "scan must finish after lock release")
+        refreshed = service.get_source(source["source_id"])
+        self.assertEqual(refreshed["asset_count"], 1)
 
     def test_scan_marks_offline_without_wiping_index(self) -> None:
         source = self.make_source({"a.jpg": _png_bytes(), "a.txt": "t"})

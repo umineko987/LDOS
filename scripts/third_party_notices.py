@@ -317,7 +317,9 @@ def _runtime_components(
             if root not in path.parents or not path.is_file():
                 continue
             files.append(path)
-        return _relative_files(sorted(set(files)), tree)
+        # files 全部经过 resolve()（长路径/符号链接规范形）；基准必须同样规范形，
+        # 否则 Windows 8.3 短路径（RUNNER~1）或 macOS /tmp 符号链接会让 relative_to 失败。
+        return _relative_files(sorted(set(files)), tree.resolve())
 
     artifact_source = (
         "https://github.com/astral-sh/python-build-standalone/releases/download/"
