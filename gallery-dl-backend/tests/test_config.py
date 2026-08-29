@@ -643,7 +643,12 @@ class DesktopDistributionConfigTests(unittest.TestCase):
                 data_root / "runtime" / "backend.sqlite3",
             )
             self.assertEqual(settings.gallery.python_executable, str(python))
-            self.assertEqual(settings.dedup.python_executable, python.resolve())
+            # _executable_path 刻意只做 abspath（不解引用 venv python 符号
+            # 链接，也保留 Windows 8.3 短路径）；worker_script 才走 _path() resolve。
+            self.assertEqual(
+                settings.dedup.python_executable,
+                Path(os.path.abspath(os.fspath(python))),
+            )
             self.assertEqual(
                 settings.gallery.repo_path,
                 (resource_root / "app" / "gallery-dl-codeberg").resolve(),

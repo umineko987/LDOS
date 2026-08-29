@@ -115,7 +115,13 @@ class _TargetRoot:
         return self._identity
 
     def open(self) -> None:
-        if self._fd is not None:
+        if self._fd is not None or self._identity is not None:
+            return
+        if not _HAS_DIR_FD:
+            # Windows CRT 无法以描述符锚定目录（os.open 打开目录直接
+            # PermissionError）：走组件级 lstat 校验，身份取根 lstat。
+            metadata = _validate_absolute_directory_components(self.path)
+            self._identity = (int(metadata.st_dev), int(metadata.st_ino))
             return
         descriptor = _open_absolute_directory(self.path)
         metadata = os.fstat(descriptor)
@@ -131,6 +137,11 @@ class _TargetRoot:
 
     def verify_identity(self) -> None:
         assert self._identity is not None
+        if not _HAS_DIR_FD:
+            metadata = _validate_absolute_directory_components(self.path)
+            if (int(metadata.st_dev), int(metadata.st_ino)) != self._identity:
+                raise GalleryDirectoryExportError("target_root_changed")
+            return
         descriptor = _open_absolute_directory(self.path)
         try:
             metadata = os.fstat(descriptor)
@@ -293,7 +304,7 @@ class _TargetRoot:
             if self.entry_exists(final_name):
                 raise FileExistsError(final_name)
             _rename_directory_noreplace(
-                parent_fd=self.fd,
+                parent_fd=self._fd if _HAS_DIR_FD else -1,
                 parent_path=self.path,
                 source_name=temporary_name,
                 target_name=final_name,
