@@ -1,0 +1,314 @@
+name: ImageWeave CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: imageweave-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_INPUT: "1"
+  FORCE_COLOR: "1"
+
+jobs:
+  linux-cpu:
+    name: Linux CPU / Python ${{ matrix.python }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
+    steps:
+      - name: Check out source and submodules
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            gallery-dl-backend/requirements.txt
+            gallery-dl-backend/requirements-test.txt
+            requirements-dedup-cpu.txt
+
+      - name: Check shell scripts and dependency locks
+        if: matrix.python == '3.14'
+        shell: bash
+        run: |
+          git ls-files '*.sh' | xargs -r -n1 bash -n
+          ./scripts/lock-dependencies.sh --check
+
+      - name: Deploy clean locked CPU environments
+        run: ./scripts/setup-linux.sh --python python --device cpu --skip-models --skip-mihomo
+
+      - name: Install locked test tools in both environments
+        shell: bash
+        run: |
+          for python_bin in ./.venv/bin/python ./gallery-dl-backend/.venv/bin/python; do
+            "$python_bin" -m pip install \
+              --disable-pip-version-check --no-input \
+              --require-hashes --only-binary=:all: \
+              -r gallery-dl-backend/requirements-test.txt
+          done
+
+      - name: Verify CPU environment and run repository tests
+        run: |
+          ./.venv/bin/python scripts/check-cpu-environment.py
+          ./.venv/bin/python -m unittest discover -s tests -v
+
+      - name: Run backend tests
+        working-directory: gallery-dl-backend
+        run: ./.venv/bin/python -m unittest discover -s tests -v
+
+      - name: Enforce Python branch-coverage floors
+        if: matrix.python == '3.14'
+        run: |
+          ./.venv/bin/python scripts/run-python-coverage.py \
+            dedup --output artifacts/coverage/dedup
+          ./gallery-dl-backend/.venv/bin/python scripts/run-python-coverage.py \
+            backend --output artifacts/coverage/backend
+
+      - name: Run Linux service smoke test
+        if: matrix.python == '3.14'
+        run: ./scripts/smoke-linux-service.sh
+
+      - name: Upload Python coverage reports
+        if: always() && matrix.python == '3.14'
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-python-coverage
+          path: artifacts/coverage
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Verify tracked checkout is clean
+        shell: bash
+        run: |
+          git diff --check
+          test -z "$(git status --short --untracked-files=no)"
+
+  windows-cpu:
+    name: Windows CPU / Python 3.14
+    runs-on: windows-2025
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out source and submodules
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            gallery-dl-backend/requirements.txt
+            gallery-dl-backend/requirements-test.txt
+            requirements-dedup-cpu.txt
+
+      - name: Check PowerShell scripts
+        run: |
+          $failed = $false
+          foreach ($path in (git ls-files '*.ps1')) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $path),
+              [ref]$tokens,
+              [ref]$parseErrors
+            ) | Out-Null
+            foreach ($parseError in $parseErrors) {
+              Write-Error "$path`: $($parseError.Message)" -ErrorAction Continue
+              $failed = $true
+            }
+          }
+          if ($failed) {
+            throw 'PowerShell syntax check failed.'
+          }
+
+      - name: Deploy clean locked backend environment
+        run: |
+          python -m venv .\gallery-dl-backend\.venv
+          if ($LASTEXITCODE -ne 0) { throw 'Creating backend virtualenv failed.' }
+          $backendPython = Join-Path $PWD 'gallery-dl-backend\.venv\Scripts\python.exe'
+          & $backendPython -m pip install `
+            --disable-pip-version-check --no-input `
+            --require-hashes --only-binary=:all: `
+            -r .\gallery-dl-backend\requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Installing backend dependencies failed.' }
+
+      - name: Deploy clean locked CPU dedup environment
+        run: .\setup-dedup.ps1 -Device cpu -SkipModels
+
+      - name: Install locked test tools in both environments
+        run: |
+          $pythonBins = @(
+            (Join-Path $PWD '.venv\Scripts\python.exe'),
+            (Join-Path $PWD 'gallery-dl-backend\.venv\Scripts\python.exe')
+          )
+          foreach ($pythonBin in $pythonBins) {
+            & $pythonBin -m pip install `
+              --disable-pip-version-check --no-input `
+              --require-hashes --only-binary=:all: `
+              -r .\gallery-dl-backend\requirements-test.txt
+            if ($LASTEXITCODE -ne 0) { throw "Installing test tools failed: $pythonBin" }
+          }
+
+      - name: Verify CPU environment and run repository tests
+        run: |
+          & .\.venv\Scripts\python.exe .\scripts\check-cpu-environment.py
+          if ($LASTEXITCODE -ne 0) { throw 'Windows CPU environment check failed.' }
+          & .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Root tests failed.' }
+
+      - name: Run backend tests
+        working-directory: gallery-dl-backend
+        run: |
+          & .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Backend tests failed.' }
+
+      - name: Run Windows service smoke test
+        run: .\scripts\smoke-windows-service.ps1
+
+      - name: Verify tracked checkout is clean
+        run: |
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
+          $status = git status --short --untracked-files=no
+          if ($LASTEXITCODE -ne 0) { throw 'git status failed.' }
+          if ($status) {
+            $status | Write-Host
+            throw 'Tests modified tracked files.'
+          }
+
+  frontend:
+    name: Frontend, browser, and wheel contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Check out source and submodules
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up Python for artifact tooling
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.13.0"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install locked frontend dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Check Svelte and TypeScript
+        working-directory: desktop
+        run: npm run check
+
+      - name: Run frontend unit tests
+        working-directory: desktop
+        run: npm test
+
+      - name: Measure frontend coverage
+        working-directory: desktop
+        run: npm run test:coverage
+
+      - name: Install Chromium, FFmpeg, and CJK fonts
+        working-directory: desktop
+        run: |
+          npx playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+
+      - name: Run browser, accessibility, and visual tests
+        working-directory: desktop
+        run: npm run test:e2e
+
+      - name: Build and verify canonical frontend artifacts
+        working-directory: desktop
+        run: |
+          npm run build
+          npm run verify:artifacts
+
+      - name: Build and verify backend wheel projection
+        shell: bash
+        run: |
+          mkdir -p artifacts/wheel
+          python -m pip wheel --disable-pip-version-check --no-deps \
+            --wheel-dir artifacts/wheel ./gallery-dl-backend
+          wheel_path="$(find artifacts/wheel -maxdepth 1 -type f -name '*.whl' -print -quit)"
+          test -n "$wheel_path"
+          python scripts/frontend_artifacts.py verify --wheel "$wheel_path"
+
+      - name: Upload frontend diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-diagnostics
+          path: |
+            desktop/coverage
+            desktop/playwright-report
+            desktop/test-results
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Verify tracked checkout is clean
+        shell: bash
+        run: |
+          git diff --check
+          test -z "$(git status --short --untracked-files=no)"
+
+  rust:
+    name: Rust desktop contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out source and submodules
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install Tauri Linux dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            libssl-dev libgtk-3-dev patchelf zstd
+
+      - name: Select locked Rust toolchain
+        shell: bash
+        run: |
+          rustup set profile minimal
+          rustup toolchain install 1.98.0 --component rustfmt
+          rustup default 1.98.0
+          rustc -Vv
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --all -- --check
+
+      - name: Check Rust dependencies and tests
+        run: cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml

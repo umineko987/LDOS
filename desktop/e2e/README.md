@@ -20,12 +20,11 @@ Linux 本机若已有 `/usr/bin/chromium`，配置会直接复用；也可设置
 - `accessibility.spec.ts`：桌面、应用中心和九个最大化应用的 WCAG 2 A/AA axe 扫描。
 - `visual.spec.ts`：应用中心和九个应用丰富状态的 Linux Chromium 截图基线。
 
-只更新视觉基线时先检查实际差异，再执行：
+视觉基线只能由 canonical 测试环境（ubuntu-24.04 + Playwright Chromium + fonts-noto-cjk）生成：本地机器的浏览器或字体栈渲染结果与 CI 字节不一致，直接提交本地基线会让视觉回归永久失败。更新基线的流程：
 
-```bash
-cd desktop
-npm run test:e2e -- visual.spec.ts --update-snapshots
-```
+1. 先检查实际差异：本地跑 `npm run test:e2e -- visual.spec.ts` 失败后查看 `test-results/` 的 diff 截图，确认变化来自真实 UI 演进。
+2. 在 GitHub Actions 手动触发 `视觉基线与前端产物刷新`（`.github/workflows/visual-baseline-refresh.yml`），在目标分支上生成新基线与 canonical 前端产物。
+3. 下载 `refreshed-baselines` 产物，将 `desktop/e2e/visual.spec.ts-snapshots` 与 `gallery-dl-backend/gdl_backend/webui_dist` 的内容替换进提交。
 
 ## 边界
 

@@ -115,7 +115,13 @@ class _TargetRoot:
         return self._identity
 
     def open(self) -> None:
-        if self._fd is not None:
+        if self._fd is not None or self._identity is not None:
+            return
+        if not _HAS_DIR_FD:
+            # Windows CRT 无法以描述符锚定目录（os.open 打开目录直接
+            # PermissionError）：走组件级 lstat 校验，身份取根 lstat。
+            metadata = _validate_absolute_directory_components(self.path)
+            self._identity = (int(metadata.st_dev), int(metadata.st_ino))
             return
         descriptor = _open_absolute_directory(self.path)
         metadata = os.fstat(descriptor)
@@ -131,6 +137,11 @@ class _TargetRoot:
 
     def verify_identity(self) -> None:
         assert self._identity is not None
+        if not _HAS_DIR_FD:
+            metadata = _validate_absolute_directory_components(self.path)
+            if (int(metadata.st_dev), int(metadata.st_ino)) != self._identity:
+                raise GalleryDirectoryExportError("target_root_changed")
+            return
         descriptor = _open_absolute_directory(self.path)
         try:
             metadata = os.fstat(descriptor)
@@ -293,7 +304,7 @@ class _TargetRoot:
             if self.entry_exists(final_name):
                 raise FileExistsError(final_name)
             _rename_directory_noreplace(
-                parent_fd=self.fd,
+                parent_fd=self._fd if _HAS_DIR_FD else -1,
                 parent_path=self.path,
                 source_name=temporary_name,
                 target_name=final_name,
@@ -860,10 +871,7 @@ class GalleryDirectoryExportService:
             _validate_leaf_name(name)
             try:
                 with SafeSourceRoot(source["root_path"]) as safe_root:
-                    source_metadata = os.fstat(safe_root.root_fd)
-                    source_root_identity = (
-                        int(source_metadata.st_dev), int(source_metadata.st_ino)
-                    )
+                    source_root_identity = safe_root.root_identity()
                     iterator = safe_root.iter_subtree(
                         relative,
                         excluded_directories=_EXCLUDED_DIRECTORY_NAMES,
@@ -1031,8 +1039,7 @@ class GalleryDirectoryExportService:
             target_root.create_owned_directory(temporary_name)
             temporary_created = True
             with SafeSourceRoot(selection.source_root_path) as safe_root:
-                source_metadata = os.fstat(safe_root.root_fd)
-                if (int(source_metadata.st_dev), int(source_metadata.st_ino)) != (
+                if safe_root.root_identity() != (
                     selection.source_root_identity
                 ):
                     raise GalleryDirectoryExportError("source_changed")
@@ -1093,11 +1100,9 @@ class GalleryDirectoryExportService:
             if cancel_event.is_set():
                 raise _CopyCancelled()
             with SafeSourceRoot(selection.source_root_path) as validation_root:
-                validation_metadata = os.fstat(validation_root.root_fd)
-                if (
-                    int(validation_metadata.st_dev),
-                    int(validation_metadata.st_ino),
-                ) != selection.source_root_identity:
+                if validation_root.root_identity() != (
+                    selection.source_root_identity
+                ):
                     raise GalleryDirectoryExportError("source_changed")
             self._validate_target_snapshot(
                 target_root,
@@ -1257,7 +1262,17 @@ class GalleryDirectoryExportService:
     ) -> tuple[int, _TargetFileSnapshot]:
         source_handle = safe_root.open_binary(source_relative)
         source_version = _file_version(os.fstat(source_handle.fileno()))
-        if source_version != _file_version(expected_metadata):
+        # Windows 的 DirEntry.stat() 来自 WIN32_FIND_DATA，没有文件索引，
+        # st_dev/st_ino 恒为 0，无法与 fstat 的真实身份比较；大小与时间戳
+        # 在两个 API 族之间一致，身份仅在枚举给出真实 st_ino 时才可比。
+        expected_version = _file_version(expected_metadata)
+        if (
+            source_version[2:] != expected_version[2:]
+            or (
+                expected_version[1] != 0
+                and source_version[:2] != expected_version[:2]
+            )
+        ):
             source_handle.close()
             raise GalleryDirectoryExportError("source_changed")
         copied = 0
@@ -1308,8 +1323,7 @@ class GalleryDirectoryExportService:
         seen_files: set[str] = set()
         try:
             with SafeSourceRoot(target_root.path / temporary_name) as staged_root:
-                root_metadata = os.fstat(staged_root.root_fd)
-                if (int(root_metadata.st_dev), int(root_metadata.st_ino)) != (
+                if staged_root.root_identity() != (
                     expected_root_identity
                 ):
                     raise GalleryDirectoryExportError("target_path_changed")

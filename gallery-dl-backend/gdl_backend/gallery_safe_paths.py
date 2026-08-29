@@ -90,6 +90,9 @@ _OPEN_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NO_FOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _CLOSE_ON_EXEC = getattr(os, "O_CLOEXEC", 0)
 _HAS_DIR_FD = os.open in os.supports_dir_fd and os.stat in os.supports_dir_fd
+# Windows 的 CRT 无法以 O_RDONLY 打开目录（PermissionError），也没有 dir_fd 语义；
+# SafeSourceRoot 在此类平台退化为纯路径校验模式（见 SafeSourceRoot.open）。
+_DESCRIPTOR_ANCHORED = os.name == "posix"
 
 
 def validate_relative_path(relative_path: str, *, allow_root: bool = False) -> tuple[str, ...]:
@@ -170,6 +173,8 @@ class SafeSourceRoot:
         self.path = Path(root_path)
         self._canonical = self.path.resolve(strict=False)
         self._root_fd: int | None = None
+        self._root_identity: tuple[int, int] | None = None
+        self._descriptorless = False
 
     def __enter__(self) -> "SafeSourceRoot":
         self.open()
@@ -179,7 +184,23 @@ class SafeSourceRoot:
         self.close()
 
     def open(self) -> None:
-        if self._root_fd is not None:
+        if self._root_fd is not None or self._descriptorless:
+            return
+        if not _DESCRIPTOR_ANCHORED:
+            # Windows 的 CRT 无法以描述符锚定目录（os.open 打开目录直接
+            # PermissionError，也不存在 dir_fd 语义）。此平台走文档化的
+            # 纯路径回退模式：reparse/目录类型校验仍然生效，仅失去描述符
+            # 级 TOCTOU 防护——与 _HAS_DIR_FD 回退分支的既定弱点一致。
+            if _is_reparse_path(self.path):
+                raise UnsafeSourcePathError("", "source_root_reparse_point")
+            try:
+                observed = self.path.lstat()
+            except OSError as error:
+                raise UnsafeSourcePathError("", "source_root_unavailable") from error
+            if not stat.S_ISDIR(observed.st_mode):
+                raise UnsafeSourcePathError("", "source_root_not_directory")
+            self._root_identity = (int(observed.st_dev), int(observed.st_ino))
+            self._descriptorless = True
             return
         if _is_reparse_path(self.path):
             raise UnsafeSourcePathError("", "source_root_reparse_point")
@@ -209,6 +230,8 @@ class SafeSourceRoot:
 
     def close(self) -> None:
         descriptor, self._root_fd = self._root_fd, None
+        self._root_identity = None
+        self._descriptorless = False
         if descriptor is not None:
             os.close(descriptor)
 
@@ -217,6 +240,17 @@ class SafeSourceRoot:
         self.open()
         assert self._root_fd is not None
         return self._root_fd
+
+    def root_identity(self) -> tuple[int, int]:
+        """根目录身份 (st_dev, st_ino)：描述符模式锚定在已打开的描述符，
+        无描述符平台保存 open 时的 lstat 身份并在每次路径操作前复核。"""
+        self.open()
+        if self._root_fd is not None:
+            metadata = os.fstat(self._root_fd)
+            return (int(metadata.st_dev), int(metadata.st_ino))
+        self._verify_fallback_root("")
+        assert self._root_identity is not None
+        return self._root_identity
 
     @contextlib.contextmanager
     def _parent_fd(
@@ -259,18 +293,25 @@ class SafeSourceRoot:
             os.close(descriptor)
 
     def _verify_fallback_root(self, relative_path: str) -> None:
+        self.open()
         try:
             observed_root = self.path.lstat()
         except OSError as error:
             raise UnsafeSourcePathError(
                 relative_path, "source_root_changed"
             ) from error
-        opened_root = os.fstat(self.root_fd)
+        if self._descriptorless:
+            opened_identity = self._root_identity
+            if opened_identity is None:
+                raise UnsafeSourcePathError(relative_path, "source_root_changed")
+        else:
+            opened_root = os.fstat(self.root_fd)
+            opened_identity = (int(opened_root.st_dev), int(opened_root.st_ino))
         if (
             _is_reparse_path(self.path)
             or not stat.S_ISDIR(observed_root.st_mode)
             or (int(observed_root.st_dev), int(observed_root.st_ino))
-            != (int(opened_root.st_dev), int(opened_root.st_ino))
+            != opened_identity
         ):
             raise UnsafeSourcePathError(relative_path, "source_root_changed")
 
@@ -289,6 +330,10 @@ class SafeSourceRoot:
             current = current / component
             if create_parents and not current.exists():
                 current.mkdir()
+            if not current.exists():
+                # 与描述符分支对齐：父组件不存在是 parent_missing（调用方如
+                # exists_regular/disk_version 视为"文件不存在"），而不是路径不安全。
+                raise UnsafeSourcePathError(relative_path, "parent_missing")
             if _is_reparse_path(current) or not current.is_dir():
                 raise UnsafeSourcePathError(relative_path, "unsafe_parent")
         try:
@@ -324,7 +369,16 @@ class SafeSourceRoot:
     def open_binary(self, relative_path: str) -> BinaryIO:
         if not _HAS_DIR_FD:
             target = self._fallback_path(relative_path)
-            handle = target.open("rb")
+            try:
+                handle = target.open("rb")
+            except FileNotFoundError as error:
+                raise UnsafeSourcePathError(
+                    relative_path, "file_missing"
+                ) from error
+            except OSError as error:
+                raise UnsafeSourcePathError(
+                    relative_path, "file_unavailable"
+                ) from error
             metadata = os.fstat(handle.fileno())
             try:
                 verified_target = self._fallback_path(relative_path)
@@ -392,7 +446,13 @@ class SafeSourceRoot:
     ) -> bool:
         """Return whether a managed relative path is a real directory."""
         if not _HAS_DIR_FD:
-            target = self._fallback_path(relative_path)
+            try:
+                target = self._fallback_path(relative_path)
+            except UnsafeSourcePathError as error:
+                # 与描述符分支一致：父目录缺失时 allow_missing 视为不存在。
+                if allow_missing and error.reason == "parent_missing":
+                    return False
+                raise
             try:
                 metadata = target.lstat()
             except FileNotFoundError:
@@ -758,6 +818,7 @@ class SafeSourceRoot:
             if _is_reparse_path(target) or not stat.S_ISDIR(metadata.st_mode):
                 raise UnsafeSourcePathError(relative_path, "leaf_not_directory")
             self._remove_fallback_directory(target, relative_path)
+            target.rmdir()
             return
         with self._parent_fd(relative_path) as (parent_fd, name):
             try:

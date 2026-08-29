@@ -33,7 +33,11 @@ impl BackendDistribution {
         let python_executable = backend_root
             .join("runtime")
             .join("python")
-            .join(if windows { "python.exe" } else { "bin/python3" });
+            .join(if windows {
+                "python.exe"
+            } else {
+                "bin/python3.13"
+            });
         let required = [
             python_executable.clone(),
             app_root.join("gdl_backend/__init__.py"),
@@ -190,7 +194,7 @@ mod tests {
             backend.join(if windows {
                 "runtime/python/python.exe"
             } else {
-                "runtime/python/bin/python3"
+                "runtime/python/bin/python3.13"
             }),
             backend.join("app/gdl_backend/__init__.py"),
             backend.join("app/gallery-dl-codeberg/gallery_dl/__init__.py"),

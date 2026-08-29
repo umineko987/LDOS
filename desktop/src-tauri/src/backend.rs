@@ -541,7 +541,7 @@ mod tests {
             endpoint: Endpoint::new("127.0.0.1", 8787).expect("endpoint"),
             environment: vec![(
                 OsString::from("IMAGEWEAVE_DESKTOP_PYTHON"),
-                OsString::from("backend/runtime/python/bin/python3"),
+                OsString::from("backend/runtime/python/bin/python3.13"),
             )],
         };
         let command = spec.command();
@@ -562,7 +562,10 @@ mod tests {
         }));
         assert!(command.get_envs().any(|(name, value)| {
             name == "IMAGEWEAVE_DESKTOP_PYTHON"
-                && value == Some(std::ffi::OsStr::new("backend/runtime/python/bin/python3"))
+                && value
+                    == Some(std::ffi::OsStr::new(
+                        "backend/runtime/python/bin/python3.13",
+                    ))
         }));
         assert!(command.get_envs().any(|(name, value)| {
             name == "IMAGEWEAVE_DESKTOP_ORIGIN"

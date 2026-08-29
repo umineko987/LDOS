@@ -101,7 +101,6 @@ def load_lock() -> dict[str, Any]:
     if (
         not str(distribution.get("license_source", "")).startswith("https://")
         or len(distribution.get("license_sha256", "")) != 64
-        or len(distribution.get("python_license_sha256", "")) != 64
     ):
         raise ReleaseError("runtime license evidence is not locked")
     for target, item in data.get("targets", {}).items():
@@ -109,6 +108,9 @@ def load_lock() -> dict[str, Any]:
             not target
             or len(item.get("sha256", "")) != 64
             or len(item.get("metadata_sha256", "")) != 64
+            # 各平台的 CPython LICENSE.txt 并不相同：Windows 构建在 PSF 文本后
+            # 追加了 Microsoft Distributable Code 附加条款，哈希按 target 锁定。
+            or len(item.get("python_license_sha256", "")) != 64
             or not item.get("metadata_archive")
         ):
             raise ReleaseError(f"invalid runtime lock target: {target!r}")
@@ -415,7 +417,7 @@ def make_linux_wheels_relocatable(
 def remove_generated_launchers(runtime: Path, target: str) -> None:
     if target.startswith("linux"):
         bin_dir = runtime / "python" / "bin"
-        keep = {"python", "python3", "python3.13"}
+        keep = {"python3.13"}
         for item in bin_dir.iterdir():
             if item.name not in keep:
                 if item.is_dir() and not item.is_symlink():
@@ -567,7 +569,11 @@ def ensure_clean_tracked_checkout() -> None:
         ["git", "status", "--porcelain", "--untracked-files=no"], capture=True
     )
     if status:
-        raise ReleaseError("desktop release assembly requires a clean tracked checkout")
+        # 把脏文件列进错误信息：定位是哪一步写脏了跟踪文件。
+        dirty = "; ".join(line.strip() for line in status.splitlines())
+        raise ReleaseError(
+            f"desktop release assembly requires a clean tracked checkout: {dirty}"
+        )
 
 
 def write_release_manifest(
@@ -625,8 +631,8 @@ def write_release_manifest(
 
 
 def scan_for_local_paths(root: Path, forbidden: Iterable[Path]) -> None:
-    needles = {os.fspath(path.resolve()).encode() for path in forbidden}
-    needles.update(
+    forbidden_path_needles = {os.fspath(path.resolve()).encode() for path in forbidden}
+    private_key_needles = frozenset(
         {
             b"-----BEGIN PRIVATE KEY-----",
             b"-----BEGIN OPENSSH PRIVATE KEY-----",
@@ -641,7 +647,21 @@ def scan_for_local_paths(root: Path, forbidden: Iterable[Path]) -> None:
         if path.is_symlink() or path.stat().st_size > 16 * 1024 * 1024:
             continue
         data = path.read_bytes()
-        for needle in needles:
+        # 上游 wheel 内嵌的构建机路径不受本仓库控制：SBOM（*.dist-info/sboms/）
+        # 与构建配置残留（如 numpy 的 __config__.py）都记录了上游 GitHub Actions
+        # runner 的家目录，与我们的 CI 用户名（runner / runneradmin）恰好同名。
+        # 这类路径针误伤只豁免第三方 site-packages 与 SBOM；本仓库自己的
+        # gdl_backend 包及其余所有产物仍全量扫描，凭据/私钥模式对一切文件生效。
+        parts = path.parts
+        in_site_packages = "site-packages" in parts
+        upstream_package = in_site_packages and not any(
+            part == "gdl_backend" or part.startswith("gdl_backend-")
+            for part in parts[parts.index("site-packages") + 1 :]
+        )
+        path_needles = (
+            () if path.parent.name == "sboms" or upstream_package else forbidden_path_needles
+        )
+        for needle in (*path_needles, *private_key_needles):
             if needle and needle in data:
                 raise ReleaseError(f"forbidden local path or private key in {path.relative_to(root)}")
         if any(pattern.search(data) for pattern in secret_patterns):
@@ -678,7 +698,11 @@ def verify_tree(
             allow_materialized_symlinks and kind == "L" and actual_kind == "F"
         )
         if not kind_matches or expected != actual:
-            raise ReleaseError(f"release file mismatch: {relative}")
+            raise ReleaseError(
+                f"release file mismatch: {relative}: manifest kind={kind} "
+                f"digest={expected[:12]} but tree kind={actual_kind} "
+                f"digest={actual[:12]}"
+            )
     actual_entries = {
         path.relative_to(root).as_posix() for path in relative_entries(root)
     }
@@ -1059,7 +1083,8 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
             path
             for path in (staging / "runtime" / "python").rglob("LICENSE.txt")
             if "site-packages" not in path.parts
-            and sha256_file(path) == distribution["python_license_sha256"]
+            and sha256_file(path)
+            == lock["targets"][target]["python_license_sha256"]
         ]
         if len(python_license_candidates) != 1:
             raise ReleaseError(
@@ -1114,19 +1139,28 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
         raise
 
 
+def frontend_build_commands(npm: str) -> list[list[str]]:
+    """vite 构建产物并非跨平台字节一致（原生工具链差异），因此 canonical
+    前端只在 Linux 构建一次；其余平台设置 IMAGEWEAVE_PREBUILT_FRONTEND=1
+    后仅校验下载到的 canonical dist，不重新生成。"""
+    if os.environ.get("IMAGEWEAVE_PREBUILT_FRONTEND"):
+        return [[npm, "run", "verify:artifacts"]]
+    return [[npm, "run", "build"], [npm, "run", "verify:artifacts"]]
+
+
 def build_release(cache_dir: Path) -> dict[str, Any]:
     ensure_clean_tracked_checkout()
     desktop = ROOT / "desktop"
     npm = "npm.cmd" if os.name == "nt" else "npm"
     run([npm, "ci"], cwd=desktop)
-    run([npm, "run", "build"], cwd=desktop)
-    run([npm, "run", "verify:artifacts"], cwd=desktop)
+    for command in frontend_build_commands(npm):
+        run(command, cwd=desktop)
     target = host_target()
     assemble(target, DEFAULT_OUTPUT, cache_dir)
     runtime_result = verify_runtime(DEFAULT_OUTPUT)
     tauri = desktop / "src-tauri"
     run(["cargo", "fmt", "--check"], cwd=tauri)
-    run(["cargo", "test"], cwd=tauri)
+    run(["cargo", "test", "--locked"], cwd=tauri)
     run(
         [
             npm,
@@ -1137,6 +1171,8 @@ def build_release(cache_dir: Path) -> dict[str, Any]:
             "--ci",
             "--config",
             os.fspath(TAURI_RELEASE_CONFIG),
+            "--",
+            "--locked",
         ],
         cwd=desktop,
         env=tauri_bundle_env(target),

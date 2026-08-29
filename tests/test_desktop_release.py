@@ -30,7 +30,7 @@ def temporary_path():
 
 
 def minimal_tree(root: Path) -> dict[str, object]:
-    python = root / "runtime" / "python" / "bin" / "python3"
+    python = root / "runtime" / "python" / "bin" / "python3.13"
     python.parent.mkdir(parents=True)
     python.write_bytes(b"python")
     app = root / "app"
@@ -68,7 +68,7 @@ def minimal_tree(root: Path) -> dict[str, object]:
         "source_commit": "0" * 40,
         "target": "linux-x86_64",
         "runtime": {
-            "python": "runtime/python/bin/python3",
+            "python": "runtime/python/bin/python3.13",
             "archive_sha256": "1" * 64,
         },
         "files": {"path": release.FILES_NAME, "count": count, "sha256": digest},
@@ -101,13 +101,20 @@ class DesktopReleaseTests(unittest.TestCase):
                 "license": "MPL-2.0",
                 "license_source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20260807/LICENSE",
                 "license_sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
-                "python_license_sha256": "78b12c3a81360b357002334f0e70ea0e92eebf7a9b358805c03c48484945f3bb",
             },
         )
         self.assertEqual(set(lock["targets"]), {"linux-x86_64", "windows-x86_64"})
+        self.assertEqual(
+            lock["targets"]["linux-x86_64"]["python"],
+            "runtime/python/bin/python3.13",
+        )
         self.assertTrue(
             all(
-                len(item["sha256"]) == 64 and len(item["metadata_sha256"]) == 64
+                len(item["sha256"]) == 64
+                and len(item["metadata_sha256"]) == 64
+                # 各平台的 CPython LICENSE.txt 不同（Windows 追加 Microsoft
+                # Distributable Code 条款），哈希必须按 target 分别锁定。
+                and len(item["python_license_sha256"]) == 64
                 for item in lock["targets"].values()
             )
         )
@@ -120,6 +127,20 @@ class DesktopReleaseTests(unittest.TestCase):
             },
         )
 
+    def test_linux_runtime_keeps_only_the_locked_real_interpreter(self) -> None:
+        with temporary_path() as tmp_path:
+            bin_dir = tmp_path / "python" / "bin"
+            bin_dir.mkdir(parents=True)
+            for name in ("python", "python3", "python3.13", "pip"):
+                (bin_dir / name).write_bytes(name.encode())
+
+            release.remove_generated_launchers(tmp_path, "linux-x86_64")
+
+            self.assertEqual(
+                {path.name for path in bin_dir.iterdir()},
+                {"python3.13"},
+            )
+
     def test_tauri_release_resources_are_opt_in(self) -> None:
         base = json.loads(
             (ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
@@ -130,6 +151,10 @@ class DesktopReleaseTests(unittest.TestCase):
         self.assertFalse(base["bundle"]["active"])
         self.assertNotIn("resources", base["bundle"])
         self.assertNotIn("beforeBundleCommand", base["build"])
+        self.assertEqual(
+            release_config["build"]["beforeBuildCommand"],
+            "npm run verify:artifacts",
+        )
         self.assertTrue(release_config["bundle"]["active"])
         self.assertEqual(
             release_config["bundle"]["resources"],
@@ -415,6 +440,89 @@ class DesktopReleaseTests(unittest.TestCase):
         ):
             release.ensure_clean_tracked_checkout()
 
+    def test_prebuilt_frontend_env_verifies_without_rebuilding(self) -> None:
+        with mock.patch.dict(os.environ, {"IMAGEWEAVE_PREBUILT_FRONTEND": "1"}):
+            commands = release.frontend_build_commands("npm")
+        self.assertEqual(commands, [["npm", "run", "verify:artifacts"]])
+
+    def test_default_frontend_path_builds_then_verifies(self) -> None:
+        env = {k: v for k, v in os.environ.items() if k != "IMAGEWEAVE_PREBUILT_FRONTEND"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            commands = release.frontend_build_commands("npm")
+        self.assertEqual(
+            commands,
+            [["npm", "run", "build"], ["npm", "run", "verify:artifacts"]],
+        )
+
+    def test_scan_exempts_upstream_sbom_paths_but_not_credentials(self) -> None:
+        # 用真实存在的路径作禁用针，避免 Windows 把 "/home/..." 解析成
+        # 盘符相对路径导致针与内容永不匹配。
+        with tempfile.TemporaryDirectory() as build_machine:
+            upstream_path = os.fspath(Path(build_machine).resolve()).encode()
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / release.MANIFEST_NAME).write_text("{}", encoding="utf-8")
+                (root / release.FILES_NAME).write_text("", encoding="utf-8")
+                sbom_dir = root / "pydantic_core-2.46.4.dist-info" / "sboms"
+                sbom_dir.mkdir(parents=True)
+                (sbom_dir / "pydantic-core.cyclonedx.json").write_bytes(
+                    b'{"metadata": {"path": "' + upstream_path + b'/pydantic-core"}}'
+                )
+                # 上游 SBOM 中的构建机路径不视为本机泄漏。
+                release.scan_for_local_paths(root, [Path(build_machine)])
+                # 但藏进 SBOM 的私钥仍然拦截。
+                (sbom_dir / "pydantic-core.cyclonedx.json").write_bytes(
+                    b"-----BEGIN PRIVATE KEY-----\n"
+                )
+                with self.assertRaisesRegex(
+                    release.ReleaseError, "private key"
+                ):
+                    release.scan_for_local_paths(root, [Path(build_machine)])
+
+    def test_scan_flags_local_path_outside_sboms(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / release.MANIFEST_NAME).write_text("{}", encoding="utf-8")
+            (root / release.FILES_NAME).write_text("", encoding="utf-8")
+            leak = os.fspath(Path(tmp).resolve()).encode()
+            (root / "config.json").write_bytes(
+                b'{"path": "' + leak + b'/secret"}'
+            )
+            with self.assertRaisesRegex(
+                release.ReleaseError, "forbidden local path"
+            ):
+                release.scan_for_local_paths(root, [Path(tmp)])
+
+    def test_scan_exempts_upstream_site_packages_but_not_our_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / release.MANIFEST_NAME).write_text("{}", encoding="utf-8")
+            (root / release.FILES_NAME).write_text("", encoding="utf-8")
+            leak = os.fspath(Path(tmp).resolve()).encode()
+            # 上游 wheel（如 numpy __config__.py）内嵌的构建机路径不受本仓库控制。
+            upstream = root / "runtime" / "python" / "Lib" / "site-packages" / "numpy"
+            upstream.mkdir(parents=True)
+            (upstream / "__config__.py").write_bytes(
+                b"build_machine = r'" + leak + b"\\wheel\\numpy'")
+            release.scan_for_local_paths(root, [Path(tmp)])
+
+            ours = root / "runtime" / "python" / "Lib" / "site-packages" / "gdl_backend"
+            ours.mkdir(parents=True)
+            (ours / "config.py").write_bytes(b"PATH = r'" + leak + b"'")
+            with self.assertRaisesRegex(
+                release.ReleaseError, "forbidden local path"
+            ):
+                release.scan_for_local_paths(root, [Path(tmp)])
+
+            # 凭据与私钥模式对豁免路径针的第三方文件同样生效。
+            (upstream / "__config__.py").write_bytes(
+                b"-----BEGIN OPENSSH PRIVATE KEY-----\nmock"
+            )
+            (ours / "config.py").unlink()
+            with self.assertRaisesRegex(
+                release.ReleaseError, "private key"
+            ):
+                release.scan_for_local_paths(root, [Path(tmp)])
 
 if __name__ == "__main__":
     unittest.main()

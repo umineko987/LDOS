@@ -1,2 +1,11 @@
 *.sh text eol=lf
 tests/fixtures/real_variant_pairs/*.json text eol=lf
+
+# Tauri CLI 会重写依赖 feature 并用 LF 序列化 Cargo.toml；Windows checkout
+# 同样固定为 LF，避免 release 的 clean-tree gate 将等价重写判为源码污染。
+desktop/src-tauri/Cargo.toml text eol=lf
+
+# webui_dist 是字节精确的已提交构建产物（frontend-manifest.json 记录 sha256），
+# 任何平台 checkout 都不得做行尾转换，否则 Windows（autocrlf=true）下字节
+# 校验必然失败。
+gallery-dl-backend/gdl_backend/webui_dist/** -text

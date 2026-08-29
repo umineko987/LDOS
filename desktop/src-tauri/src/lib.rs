@@ -5,8 +5,8 @@ mod process_tree;
 
 use backend::{BackendManager, BackendStatus, RuntimeMetadata};
 use tauri::{plugin::TauriPlugin, Manager, RunEvent, Runtime, State, Url};
-use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command]
 fn backend_status(manager: State<'_, BackendManager>) -> BackendStatus {
@@ -29,7 +29,9 @@ async fn select_directory(app: tauri::AppHandle) -> Result<Option<String>, &'sta
         None => Ok(None),
         Some(picked) => {
             let path = picked.into_path().map_err(|_| "dialog_path_unavailable")?;
-            path.to_str().map(|s| Some(s.to_owned())).ok_or("dialog_path_not_utf8")
+            path.to_str()
+                .map(|s| Some(s.to_owned()))
+                .ok_or("dialog_path_not_utf8")
         }
     }
 }

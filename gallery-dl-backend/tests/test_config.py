@@ -611,7 +611,7 @@ class DesktopDistributionConfigTests(unittest.TestCase):
             resource_root = root / "install" / "backend"
             data_root = root / "data"
             python = resource_root / "runtime" / "python" / (
-                "python.exe" if os.name == "nt" else "bin/python3"
+                "python.exe" if os.name == "nt" else "bin/python3.13"
             )
             config_path = root / "config" / "backend.json"
             config_path.parent.mkdir()
@@ -635,14 +635,38 @@ class DesktopDistributionConfigTests(unittest.TestCase):
             with patch.dict(os.environ, environment):
                 settings = AppSettings.load(config_path)
 
+            # 桌面分发环境只做 abspath（保留 Windows 8.3 短路径形式），
+            # 不 resolve 成规范长路径；其余配置路径经 _path() 会 resolve。
             self.assertEqual(settings.runtime_dir, data_root / "runtime")
-            self.assertEqual(settings.database_path, data_root / "runtime" / "backend.sqlite3")
+            self.assertEqual(
+                settings.database_path,
+                data_root / "runtime" / "backend.sqlite3",
+            )
             self.assertEqual(settings.gallery.python_executable, str(python))
-            self.assertEqual(settings.dedup.python_executable, python)
-            self.assertEqual(settings.gallery.repo_path, resource_root / "app" / "gallery-dl-codeberg")
-            self.assertEqual(settings.dedup.worker_script, resource_root / "app" / "dedup_review_worker.py")
-            self.assertEqual(settings.allowed_cookie_roots, [data_root / "credentials"])
-            self.assertEqual(settings.proxy.allowed_node_roots, [data_root / "subscriptions"])
+            # _executable_path 刻意只做 abspath（不解引用 venv python 符号
+            # 链接，也保留 Windows 8.3 短路径）；worker_script 才走 _path() resolve。
+            self.assertEqual(
+                settings.dedup.python_executable,
+                Path(os.path.abspath(os.fspath(python))),
+            )
+            self.assertEqual(
+                settings.gallery.repo_path,
+                (resource_root / "app" / "gallery-dl-codeberg").resolve(),
+            )
+            self.assertEqual(
+                settings.dedup.worker_script,
+                (resource_root / "app" / "dedup_review_worker.py").resolve(),
+            )
+            self.assertEqual(
+                settings.allowed_cookie_roots,
+                [(data_root / "credentials").resolve()],
+            )
+            # _managed_path 刻意只做 abspath（见其 docstring：解引用叶节点
+            # 会绕过创建前的符号链接检查），保留 Windows 8.3 短路径形式。
+            self.assertEqual(
+                settings.proxy.allowed_node_roots,
+                [Path(os.path.abspath(os.fspath(data_root / "subscriptions")))],
+            )
             self.assertTrue(settings.proxy.enabled)
             self.assertFalse(settings.gallery.migrate_default_auth)
 

@@ -12,6 +12,7 @@ from PIL import Image
 
 from gdl_backend._database_gallery_repository import GalleryRepository
 from gdl_backend.database import Database
+from gdl_backend.gallery_safe_paths import GalleryFilesystemLocks
 from gdl_backend.gallery_file_operations import GalleryFileOperations
 from gdl_backend.gallery_service import GalleryCatalogService
 
@@ -31,8 +32,11 @@ class DedupReconciliationTestBase(unittest.TestCase):
         self.db = Database(self.root / "db.sqlite3")
         self.addCleanup(self.db.close)
         self.repo: GalleryRepository = self.db.gallery
-        self.service = GalleryCatalogService(self.repo)
-        self.operations = GalleryFileOperations(self.repo)
+        # 与 app.py 相同：目录服务与文件操作必须共享同一文件系统锁注册表，
+        # 否则 on_review_applied 的后台重扫会与 rename/trash 竞争索引提交。
+        self.locks = GalleryFilesystemLocks()
+        self.service = GalleryCatalogService(self.repo, filesystem_locks=self.locks)
+        self.operations = GalleryFileOperations(self.repo, filesystem_locks=self.locks)
         self.addCleanup(self.service.stop)
 
     def make_batch_source(self, files: dict[str, bytes]) -> tuple[dict, Path]:

@@ -198,7 +198,7 @@ def _desktop_distribution_data(data: dict[str, Any]) -> dict[str, Any]:
     if not resource_root.is_absolute() or not data_root.is_absolute() or not python.is_absolute():
         raise ValueError("桌面分发路径必须是绝对路径")
     expected_python = resource_root / "runtime" / "python" / (
-        "python.exe" if os.name == "nt" else "bin/python3"
+        "python.exe" if os.name == "nt" else "bin/python3.13"
     )
     if os.path.normcase(os.fspath(python)) != os.path.normcase(os.fspath(expected_python)):
         raise ValueError("桌面后端、gallery worker 与去重 worker 必须使用同一受控 Python")
