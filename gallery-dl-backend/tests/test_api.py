@@ -3101,6 +3101,69 @@ class ApiTests(unittest.TestCase):
             4 * 1024 * 1024,
         )
 
+    def test_desktop_crawls_hide_terminal_batches_with_missing_directories(self):
+        output_dir = Path(self.temp.name) / "terminal-output"
+        output_dir.mkdir()
+        terminal = {
+            "id": "batch-terminal-output",
+            "status": "succeeded",
+            "created_at": 2.0,
+            "output_dir": str(output_dir),
+        }
+        running = {
+            "id": "batch-running-output",
+            "status": "running",
+            "created_at": 1.0,
+            "output_dir": str(Path(self.temp.name) / "missing-running-output"),
+        }
+        batches = [terminal, running]
+
+        def list_batches(*, limit: int, offset: int):
+            return batches[offset : offset + limit]
+
+        with (
+            patch.object(
+                self.container.db, "list_crawl_batches", side_effect=list_batches
+            ),
+            patch.object(
+                self.container.db, "get_crawl_batch", return_value=terminal
+            ),
+        ):
+            before = self.client.get(
+                "/api/v1/crawls?limit=1&view=desktop", headers=self.headers
+            )
+            output_dir.rmdir()
+            after = self.client.get(
+                "/api/v1/crawls?limit=1&view=desktop", headers=self.headers
+            )
+            after_offset = self.client.get(
+                "/api/v1/crawls?limit=1&offset=1&view=desktop",
+                headers=self.headers,
+            )
+            legacy = self.client.get(
+                "/api/v1/crawls?limit=1", headers=self.headers
+            )
+            missing_detail = self.client.get(
+                f"/api/v1/crawls/{terminal['id']}?view=desktop",
+                headers=self.headers,
+            )
+            legacy_detail = self.client.get(
+                f"/api/v1/crawls/{terminal['id']}", headers=self.headers
+            )
+
+        self.assertEqual(
+            [item["id"] for item in before.json()["items"]],
+            [terminal["id"]],
+        )
+        self.assertEqual(
+            [item["id"] for item in after.json()["items"]],
+            [running["id"]],
+        )
+        self.assertEqual(after_offset.json()["items"], [])
+        self.assertEqual(legacy.json()["items"][0]["id"], terminal["id"])
+        self.assertEqual(missing_detail.status_code, 404, missing_detail.text)
+        self.assertEqual(legacy_detail.status_code, 200, legacy_detail.text)
+
     def test_ordered_crawl_probes_each_new_address_for_its_site(self):
         import asyncio
 

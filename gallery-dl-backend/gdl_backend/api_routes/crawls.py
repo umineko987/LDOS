@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query
@@ -82,6 +83,42 @@ _DESKTOP_REVIEW_FIELDS = (
     "total_group_count",
 )
 _DESKTOP_CRAWL_ADDRESS_ROWS = 2_000
+_TERMINAL_CRAWL_STATUSES = frozenset(
+    {"succeeded", "completed_with_errors", "cancelled"}
+)
+
+
+def _desktop_crawl_visible(batch: dict[str, Any]) -> bool:
+    if str(batch.get("status") or "") not in _TERMINAL_CRAWL_STATUSES:
+        return True
+    output_dir = str(batch.get("output_dir") or "")
+    return bool(output_dir) and Path(output_dir).is_dir()
+
+
+def _list_desktop_crawls(
+    database: Any, *, limit: int, offset: int
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    cursor = 0
+    remaining_offset = offset
+    page_limit = min(500, max(30, limit + offset))
+    while len(items) < limit:
+        page = database.list_crawl_batches(limit=page_limit, offset=cursor)
+        if not page:
+            break
+        cursor += len(page)
+        for batch in page:
+            if not _desktop_crawl_visible(batch):
+                continue
+            if remaining_offset:
+                remaining_offset -= 1
+            else:
+                items.append(batch)
+                if len(items) == limit:
+                    break
+        if len(page) < page_limit:
+            break
+    return items[:limit]
 
 
 def _desktop_recent_crawl(batch: dict[str, Any]) -> dict[str, Any]:
@@ -380,9 +417,13 @@ def create_crawls_router() -> APIRouter:
         view: CrawlResponseView = Query("legacy"),
         container: Any = Depends(get_service),
     ):
-        items = container.db.list_crawl_batches(limit=limit, offset=offset)
         if view == "desktop":
+            items = _list_desktop_crawls(
+                container.db, limit=limit, offset=offset
+            )
             items = [_desktop_recent_crawl(batch) for batch in items]
+        else:
+            items = container.db.list_crawl_batches(limit=limit, offset=offset)
         return {
             "items": items,
             "limit": limit,
@@ -396,7 +437,9 @@ def create_crawls_router() -> APIRouter:
         container: Any = Depends(get_service),
     ):
         batch = container.db.get_crawl_batch(batch_id)
-        if batch is None:
+        if batch is None or (
+            view == "desktop" and not _desktop_crawl_visible(batch)
+        ):
             raise ApiError(404, "crawl_not_found", "爬取批次不存在")
         if (
             batch["status"] in {"succeeded", "completed_with_errors", "cancelled"}
