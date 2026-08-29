@@ -7,8 +7,7 @@
     "source": "https://github.com/astral-sh/python-build-standalone/releases/tag/20260807",
     "license": "MPL-2.0",
     "license_source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20260807/LICENSE",
-    "license_sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
-    "python_license_sha256": "78b12c3a81360b357002334f0e70ea0e92eebf7a9b358805c03c48484945f3bb"
+    "license_sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
   },
   "targets": {
     "linux-x86_64": {
@@ -17,7 +16,8 @@
       "sha256": "faae10a9faa9bec06da009ac69326cc1d9691dc138fec6a1b69159dff1781f35",
       "metadata_archive": "cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst",
       "metadata_sha256": "032fd7a39df2cf2570af8d8601e38f8d5e379a36670bce9cd94d796287351648",
-      "python": "runtime/python/bin/python3"
+      "python": "runtime/python/bin/python3",
+      "python_license_sha256": "78b12c3a81360b357002334f0e70ea0e92eebf7a9b358805c03c48484945f3bb"
     },
     "windows-x86_64": {
       "tauri_target": "x86_64-pc-windows-msvc",
@@ -25,7 +25,8 @@
       "sha256": "44bf9ae71f4b45e3ba3104ae331c6eff3f7002593c26fd12453eb9310c4f259a",
       "metadata_archive": "cpython-3.13.15+20260807-x86_64-pc-windows-msvc-pgo-full.tar.zst",
       "metadata_sha256": "8a9768d5481a83b264d9878f9092eb97fd3e272453153396fce00838d6ce241a",
-      "python": "runtime/python/python.exe"
+      "python": "runtime/python/python.exe",
+      "python_license_sha256": "76900732e5f075b725f754000ad5cab1b2cf89e355c1570138476956b6413cd3"
     }
   },
   "requirements": [

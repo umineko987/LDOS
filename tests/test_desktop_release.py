@@ -101,13 +101,16 @@ class DesktopReleaseTests(unittest.TestCase):
                 "license": "MPL-2.0",
                 "license_source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20260807/LICENSE",
                 "license_sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
-                "python_license_sha256": "78b12c3a81360b357002334f0e70ea0e92eebf7a9b358805c03c48484945f3bb",
             },
         )
         self.assertEqual(set(lock["targets"]), {"linux-x86_64", "windows-x86_64"})
         self.assertTrue(
             all(
-                len(item["sha256"]) == 64 and len(item["metadata_sha256"]) == 64
+                len(item["sha256"]) == 64
+                and len(item["metadata_sha256"]) == 64
+                # 各平台的 CPython LICENSE.txt 不同（Windows 追加 Microsoft
+                # Distributable Code 条款），哈希必须按 target 分别锁定。
+                and len(item["python_license_sha256"]) == 64
                 for item in lock["targets"].values()
             )
         )
@@ -431,36 +434,43 @@ class DesktopReleaseTests(unittest.TestCase):
         )
 
     def test_scan_exempts_upstream_sbom_paths_but_not_credentials(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / release.MANIFEST_NAME).write_text("{}", encoding="utf-8")
-            (root / release.FILES_NAME).write_text("", encoding="utf-8")
-            sbom_dir = root / "pydantic_core-2.46.4.dist-info" / "sboms"
-            sbom_dir.mkdir(parents=True)
-            (sbom_dir / "pydantic-core.cyclonedx.json").write_bytes(
-                b'{"metadata": {"path": "/home/runner/work/pydantic-core"}}'
-            )
-            # 上游 SBOM 中的构建机路径不视为本机泄漏。
-            release.scan_for_local_paths(root, [Path("/home/runner")])
-            # 但藏进 SBOM 的私钥仍然拦截。
-            (sbom_dir / "pydantic-core.cyclonedx.json").write_bytes(
-                b"-----BEGIN PRIVATE KEY-----\n"
-            )
-            with self.assertRaisesRegex(
-                release.ReleaseError, "private key"
-            ):
-                release.scan_for_local_paths(root, [Path("/home/runner")])
+        # 用真实存在的路径作禁用针，避免 Windows 把 "/home/..." 解析成
+        # 盘符相对路径导致针与内容永不匹配。
+        with tempfile.TemporaryDirectory() as build_machine:
+            upstream_path = os.fspath(Path(build_machine).resolve()).encode()
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / release.MANIFEST_NAME).write_text("{}", encoding="utf-8")
+                (root / release.FILES_NAME).write_text("", encoding="utf-8")
+                sbom_dir = root / "pydantic_core-2.46.4.dist-info" / "sboms"
+                sbom_dir.mkdir(parents=True)
+                (sbom_dir / "pydantic-core.cyclonedx.json").write_bytes(
+                    b'{"metadata": {"path": "' + upstream_path + b'/pydantic-core"}}'
+                )
+                # 上游 SBOM 中的构建机路径不视为本机泄漏。
+                release.scan_for_local_paths(root, [Path(build_machine)])
+                # 但藏进 SBOM 的私钥仍然拦截。
+                (sbom_dir / "pydantic-core.cyclonedx.json").write_bytes(
+                    b"-----BEGIN PRIVATE KEY-----\n"
+                )
+                with self.assertRaisesRegex(
+                    release.ReleaseError, "private key"
+                ):
+                    release.scan_for_local_paths(root, [Path(build_machine)])
 
     def test_scan_flags_local_path_outside_sboms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / release.MANIFEST_NAME).write_text("{}", encoding="utf-8")
             (root / release.FILES_NAME).write_text("", encoding="utf-8")
-            (root / "config.json").write_bytes(b'{"path": "/home/runner/secret"}')
+            leak = os.fspath(Path(tmp).resolve()).encode()
+            (root / "config.json").write_bytes(
+                b'{"path": "' + leak + b'/secret"}'
+            )
             with self.assertRaisesRegex(
                 release.ReleaseError, "forbidden local path"
             ):
-                release.scan_for_local_paths(root, [Path("/home/runner")])
+                release.scan_for_local_paths(root, [Path(tmp)])
 
 if __name__ == "__main__":
     unittest.main()

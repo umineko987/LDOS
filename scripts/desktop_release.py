@@ -101,7 +101,6 @@ def load_lock() -> dict[str, Any]:
     if (
         not str(distribution.get("license_source", "")).startswith("https://")
         or len(distribution.get("license_sha256", "")) != 64
-        or len(distribution.get("python_license_sha256", "")) != 64
     ):
         raise ReleaseError("runtime license evidence is not locked")
     for target, item in data.get("targets", {}).items():
@@ -109,6 +108,9 @@ def load_lock() -> dict[str, Any]:
             not target
             or len(item.get("sha256", "")) != 64
             or len(item.get("metadata_sha256", "")) != 64
+            # 各平台的 CPython LICENSE.txt 并不相同：Windows 构建在 PSF 文本后
+            # 追加了 Microsoft Distributable Code 附加条款，哈希按 target 锁定。
+            or len(item.get("python_license_sha256", "")) != 64
             or not item.get("metadata_archive")
         ):
             raise ReleaseError(f"invalid runtime lock target: {target!r}")
@@ -1065,7 +1067,8 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
             path
             for path in (staging / "runtime" / "python").rglob("LICENSE.txt")
             if "site-packages" not in path.parts
-            and sha256_file(path) == distribution["python_license_sha256"]
+            and sha256_file(path)
+            == lock["targets"][target]["python_license_sha256"]
         ]
         if len(python_license_candidates) != 1:
             raise ReleaseError(
