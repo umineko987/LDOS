@@ -625,8 +625,8 @@ def write_release_manifest(
 
 
 def scan_for_local_paths(root: Path, forbidden: Iterable[Path]) -> None:
-    needles = {os.fspath(path.resolve()).encode() for path in forbidden}
-    needles.update(
+    forbidden_path_needles = {os.fspath(path.resolve()).encode() for path in forbidden}
+    private_key_needles = frozenset(
         {
             b"-----BEGIN PRIVATE KEY-----",
             b"-----BEGIN OPENSSH PRIVATE KEY-----",
@@ -641,7 +641,13 @@ def scan_for_local_paths(root: Path, forbidden: Iterable[Path]) -> None:
         if path.is_symlink() or path.stat().st_size > 16 * 1024 * 1024:
             continue
         data = path.read_bytes()
-        for needle in needles:
+        # 上游 wheel 自带的 SBOM（*.dist-info/sboms/）记录的是上游构建机路径
+        # （pydantic 等同样在 GitHub Actions 的 /home/runner 上构建），属于公开
+        # 的上游构建元数据而非本机泄漏：仅豁免路径针，凭据模式仍然全量扫描。
+        path_needles = (
+            () if path.parent.name == "sboms" else forbidden_path_needles
+        )
+        for needle in (*path_needles, *private_key_needles):
             if needle and needle in data:
                 raise ReleaseError(f"forbidden local path or private key in {path.relative_to(root)}")
         if any(pattern.search(data) for pattern in secret_patterns):

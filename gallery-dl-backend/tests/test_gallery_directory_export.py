@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from gdl_backend._database_gallery_repository import gallery_directory_id
 from gdl_backend.app import ServiceContainer
+from gdl_backend import gallery_safe_paths as safe_paths
 from gdl_backend.gallery_safe_paths import SafeSourceRoot, UnsafeSourcePathError
 from tests.helpers import make_settings
 
@@ -1130,6 +1131,41 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 for table in tables
             }
         self.assertEqual(after, before)
+
+
+class SafeSourceRootDescriptorlessTest(unittest.TestCase):
+    """无描述符平台（Windows）回退模式：SafeSourceRoot.open 走纯路径校验。"""
+
+    def test_descriptorless_mode_opens_and_validates_via_lstat(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = SafeSourceRoot(Path(tmp))
+            with mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False):
+                root.open()
+                self.assertTrue(root._descriptorless)
+                self.assertIsNone(root._root_fd)
+                # 幂等：重复 open 不再尝试描述符。
+                root.open()
+                root.close()
+                self.assertFalse(root._descriptorless)
+
+    def test_descriptorless_mode_rejects_non_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "file.txt"
+            target.write_text("x", encoding="utf-8")
+            root = SafeSourceRoot(target)
+            with mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False):
+                with self.assertRaises(UnsafeSourcePathError) as ctx:
+                    root.open()
+                self.assertEqual(ctx.exception.reason, "source_root_not_directory")
+
+    def test_descriptorless_mode_rejects_missing_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = SafeSourceRoot(Path(tmp) / "absent")
+            with mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False):
+                with self.assertRaises(UnsafeSourcePathError) as ctx:
+                    root.open()
+                self.assertEqual(ctx.exception.reason, "source_root_unavailable")
+
 
 
 if __name__ == "__main__":

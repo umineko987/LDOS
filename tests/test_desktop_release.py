@@ -430,5 +430,37 @@ class DesktopReleaseTests(unittest.TestCase):
             [["npm", "run", "build"], ["npm", "run", "verify:artifacts"]],
         )
 
+    def test_scan_exempts_upstream_sbom_paths_but_not_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / release.MANIFEST_NAME).write_text("{}", encoding="utf-8")
+            (root / release.FILES_NAME).write_text("", encoding="utf-8")
+            sbom_dir = root / "pydantic_core-2.46.4.dist-info" / "sboms"
+            sbom_dir.mkdir(parents=True)
+            (sbom_dir / "pydantic-core.cyclonedx.json").write_bytes(
+                b'{"metadata": {"path": "/home/runner/work/pydantic-core"}}'
+            )
+            # 上游 SBOM 中的构建机路径不视为本机泄漏。
+            release.scan_for_local_paths(root, [Path("/home/runner")])
+            # 但藏进 SBOM 的私钥仍然拦截。
+            (sbom_dir / "pydantic-core.cyclonedx.json").write_bytes(
+                b"-----BEGIN PRIVATE KEY-----\n"
+            )
+            with self.assertRaisesRegex(
+                release.ReleaseError, "private key"
+            ):
+                release.scan_for_local_paths(root, [Path("/home/runner")])
+
+    def test_scan_flags_local_path_outside_sboms(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / release.MANIFEST_NAME).write_text("{}", encoding="utf-8")
+            (root / release.FILES_NAME).write_text("", encoding="utf-8")
+            (root / "config.json").write_bytes(b'{"path": "/home/runner/secret"}')
+            with self.assertRaisesRegex(
+                release.ReleaseError, "forbidden local path"
+            ):
+                release.scan_for_local_paths(root, [Path("/home/runner")])
+
 if __name__ == "__main__":
     unittest.main()

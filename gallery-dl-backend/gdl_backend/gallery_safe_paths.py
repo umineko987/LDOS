@@ -90,6 +90,9 @@ _OPEN_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NO_FOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _CLOSE_ON_EXEC = getattr(os, "O_CLOEXEC", 0)
 _HAS_DIR_FD = os.open in os.supports_dir_fd and os.stat in os.supports_dir_fd
+# Windows 的 CRT 无法以 O_RDONLY 打开目录（PermissionError），也没有 dir_fd 语义；
+# SafeSourceRoot 在此类平台退化为纯路径校验模式（见 SafeSourceRoot.open）。
+_DESCRIPTOR_ANCHORED = os.name == "posix"
 
 
 def validate_relative_path(relative_path: str, *, allow_root: bool = False) -> tuple[str, ...]:
@@ -170,6 +173,7 @@ class SafeSourceRoot:
         self.path = Path(root_path)
         self._canonical = self.path.resolve(strict=False)
         self._root_fd: int | None = None
+        self._descriptorless = False
 
     def __enter__(self) -> "SafeSourceRoot":
         self.open()
@@ -179,7 +183,22 @@ class SafeSourceRoot:
         self.close()
 
     def open(self) -> None:
-        if self._root_fd is not None:
+        if self._root_fd is not None or self._descriptorless:
+            return
+        if not _DESCRIPTOR_ANCHORED:
+            # Windows 的 CRT 无法以描述符锚定目录（os.open 打开目录直接
+            # PermissionError，也不存在 dir_fd 语义）。此平台走文档化的
+            # 纯路径回退模式：reparse/目录类型校验仍然生效，仅失去描述符
+            # 级 TOCTOU 防护——与 _HAS_DIR_FD 回退分支的既定弱点一致。
+            if _is_reparse_path(self.path):
+                raise UnsafeSourcePathError("", "source_root_reparse_point")
+            try:
+                observed = self.path.lstat()
+            except OSError as error:
+                raise UnsafeSourcePathError("", "source_root_unavailable") from error
+            if not stat.S_ISDIR(observed.st_mode):
+                raise UnsafeSourcePathError("", "source_root_not_directory")
+            self._descriptorless = True
             return
         if _is_reparse_path(self.path):
             raise UnsafeSourcePathError("", "source_root_reparse_point")
@@ -209,6 +228,7 @@ class SafeSourceRoot:
 
     def close(self) -> None:
         descriptor, self._root_fd = self._root_fd, None
+        self._descriptorless = False
         if descriptor is not None:
             os.close(descriptor)
 
@@ -265,7 +285,11 @@ class SafeSourceRoot:
             raise UnsafeSourcePathError(
                 relative_path, "source_root_changed"
             ) from error
-        opened_root = os.fstat(self.root_fd)
+        if self._descriptorless:
+            # 无描述符锚定：根身份以 lstat 为准（TOCTOU 防护弱于描述符模式）。
+            opened_root = observed_root
+        else:
+            opened_root = os.fstat(self.root_fd)
         if (
             _is_reparse_path(self.path)
             or not stat.S_ISDIR(observed_root.st_mode)

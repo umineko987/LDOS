@@ -1,2 +1,7 @@
 *.sh text eol=lf
 tests/fixtures/real_variant_pairs/*.json text eol=lf
+
+# webui_dist 是字节精确的已提交构建产物（frontend-manifest.json 记录 sha256），
+# 任何平台 checkout 都不得做行尾转换，否则 Windows（autocrlf=true）下字节
+# 校验必然失败。
+gallery-dl-backend/gdl_backend/webui_dist/** -text
