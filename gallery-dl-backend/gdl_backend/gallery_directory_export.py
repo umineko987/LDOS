@@ -358,6 +358,19 @@ def _file_version(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
 
 _TargetFileSnapshot = tuple[int, int, int, int, int]
 
+
+def _file_versions_match(
+    observed: _TargetFileSnapshot, expected: _TargetFileSnapshot
+) -> bool:
+    """Compare an enumerated file with its safely opened handle."""
+    # Python 3.14 Windows uses different st_ctime meanings for DirEntry.stat
+    # (WIN32_FIND_DATA) and fstat (handle metadata).  Size and mtime remain
+    # comparable; the full handle-to-handle version check below still includes
+    # ctime for detecting changes during the copy.
+    if observed[2:4] != expected[2:4]:
+        return False
+    return expected[:2] == (0, 0) or observed[:2] == expected[:2]
+
 def _portable_name_key(name: str) -> str:
     return unicodedata.normalize("NFC", name).casefold()
 
@@ -1266,13 +1279,7 @@ class GalleryDirectoryExportService:
         # st_dev/st_ino 恒为 0，无法与 fstat 的真实身份比较；大小与时间戳
         # 在两个 API 族之间一致，身份仅在枚举给出真实 st_ino 时才可比。
         expected_version = _file_version(expected_metadata)
-        if (
-            source_version[2:] != expected_version[2:]
-            or (
-                expected_version[1] != 0
-                and source_version[:2] != expected_version[:2]
-            )
-        ):
+        if not _file_versions_match(source_version, expected_version):
             source_handle.close()
             raise GalleryDirectoryExportError("source_changed")
         copied = 0

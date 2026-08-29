@@ -180,7 +180,6 @@ mod tests {
         assert_eq!(
             release["bundle"]["resources"],
             serde_json::json!({
-                "release/backend/": "backend/",
                 "../../gallery-dl-backend/gdl_backend/webui_dist/frontend-manifest.json":
                     "frontend-manifest.json"
             })

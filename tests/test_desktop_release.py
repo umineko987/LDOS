@@ -141,12 +141,22 @@ class DesktopReleaseTests(unittest.TestCase):
                 {"python3.13"},
             )
 
-    def test_tauri_release_resources_are_opt_in(self) -> None:
+    def test_tauri_release_resources_are_platform_specific(self) -> None:
         base = json.loads(
             (ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
         )
         release_config_path = ROOT / "desktop" / release.TAURI_RELEASE_CONFIG
         release_config = json.loads(release_config_path.read_text(encoding="utf-8"))
+        linux_config = json.loads(
+            (ROOT / "desktop/src-tauri/tauri.linux.conf.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        windows_config = json.loads(
+            (ROOT / "desktop/src-tauri/tauri.windows.conf.json").read_text(
+                encoding="utf-8"
+            )
+        )
 
         self.assertFalse(base["bundle"]["active"])
         self.assertNotIn("resources", base["bundle"])
@@ -159,10 +169,21 @@ class DesktopReleaseTests(unittest.TestCase):
         self.assertEqual(
             release_config["bundle"]["resources"],
             {
-                "release/backend/": "backend/",
                 "../../gallery-dl-backend/gdl_backend/webui_dist/frontend-manifest.json":
                     "frontend-manifest.json",
             },
+        )
+        self.assertEqual(
+            linux_config["bundle"]["linux"]["deb"]["files"],
+            {"/usr/lib/ImageWeave/backend": "release/backend"},
+        )
+        self.assertEqual(
+            linux_config["bundle"]["linux"]["appimage"]["files"],
+            {"/usr/share/ImageWeave/backend": "release/backend"},
+        )
+        self.assertEqual(
+            windows_config["bundle"]["resources"],
+            {"release/backend/": "backend/"},
         )
 
     def test_backend_projection_omits_the_duplicate_frontend(self) -> None:

@@ -9,6 +9,24 @@ const RESOURCE_ENV: &str = "IMAGEWEAVE_DESKTOP_RESOURCE_ROOT";
 const DATA_ENV: &str = "IMAGEWEAVE_DESKTOP_DATA_ROOT";
 const PYTHON_ENV: &str = "IMAGEWEAVE_DESKTOP_PYTHON";
 
+fn packaged_backend_root(resource_dir: &Path, windows: bool) -> PathBuf {
+    let standard = resource_dir.join("backend");
+    if windows || standard.join("release-manifest.json").is_file() {
+        return standard;
+    }
+
+    let appimage = resource_dir
+        .parent()
+        .and_then(Path::parent)
+        .map(|usr| usr.join("share/ImageWeave/backend"));
+    if let Some(appimage) = appimage {
+        if appimage.join("release-manifest.json").is_file() {
+            return appimage;
+        }
+    }
+    standard
+}
+
 #[derive(Clone, Debug)]
 pub struct BackendDistribution {
     pub backend_root: PathBuf,
@@ -28,7 +46,7 @@ impl BackendDistribution {
         data_dir: &Path,
         windows: bool,
     ) -> io::Result<Self> {
-        let backend_root = resource_dir.join("backend");
+        let backend_root = packaged_backend_root(resource_dir, windows);
         let app_root = backend_root.join("app");
         let python_executable = backend_root
             .join("runtime")
@@ -258,6 +276,27 @@ mod tests {
                 .mode()
                 & 0o777,
             0o600
+        );
+        fs::remove_dir_all(root).expect("clean fixture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn appimage_uses_backend_payload_outside_usr_lib() {
+        let root = test_root("appimage-backend");
+        let resource_dir = root.join("usr/lib/ImageWeave");
+        let appimage_root = root.join("usr/share/ImageWeave");
+        let config = root.join("config");
+        let data = root.join("data");
+        fake_resources(&appimage_root, false);
+
+        let distribution =
+            BackendDistribution::prepare_for_platform(&resource_dir, &config, &data, false)
+                .expect("prepare AppImage distribution");
+        assert_eq!(distribution.backend_root, appimage_root.join("backend"),);
+        assert_eq!(
+            distribution.python_executable,
+            appimage_root.join("backend/runtime/python/bin/python3.13"),
         );
         fs::remove_dir_all(root).expect("clean fixture");
     }

@@ -1,5 +1,17 @@
 {
   "bundle": {
-    "targets": ["deb", "appimage"]
+    "targets": ["deb", "appimage"],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/ImageWeave/backend": "release/backend"
+        }
+      },
+      "appimage": {
+        "files": {
+          "/usr/share/ImageWeave/backend": "release/backend"
+        }
+      }
+    }
   }
 }
