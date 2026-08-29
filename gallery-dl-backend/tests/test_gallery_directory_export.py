@@ -1208,6 +1208,39 @@ class SafeSourceRootDescriptorlessTest(unittest.TestCase):
                 )
                 root.close()
 
+    def test_descriptorless_directory_probes_and_root_identity(self) -> None:
+        # 目录 trash 在目标目录尚未创建时探测 exists_directory：
+        # 父目录缺失 + allow_missing 必须返回 False；root_identity 在无描述符
+        # 平台退化为 lstat（此前裸用 root_fd 会直接 AssertionError）。
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "whole").mkdir()
+            (Path(tmp) / "whole" / "a.jpg").write_bytes(b"x")
+            root = SafeSourceRoot(Path(tmp))
+            with (
+                mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False),
+                mock.patch.object(safe_paths, "_HAS_DIR_FD", False),
+            ):
+                root.open()
+                self.assertEqual(
+                    root.root_identity(),
+                    (int(os.stat(tmp).st_dev), int(os.stat(tmp).st_ino)),
+                )
+                self.assertFalse(
+                    root.exists_directory(
+                        ".imageweave/trash/op-1/files/whole", allow_missing=True
+                    )
+                )
+                self.assertTrue(
+                    root.exists_directory("whole", allow_missing=True)
+                )
+                root.move_directory(
+                    "whole", ".imageweave/trash/op-1/files/whole"
+                )
+                self.assertTrue(
+                    (Path(tmp) / ".imageweave/trash/op-1/files/whole/a.jpg").is_file()
+                )
+                root.close()
+
 
 
 if __name__ == "__main__":

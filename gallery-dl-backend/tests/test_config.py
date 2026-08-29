@@ -635,12 +635,12 @@ class DesktopDistributionConfigTests(unittest.TestCase):
             with patch.dict(os.environ, environment):
                 settings = AppSettings.load(config_path)
 
-            # 设置层统一 .resolve()：Windows 8.3 短路径（RUNNER~1）会展开为
-            # 规范长路径，断言必须按解析后的形式比较，避免依赖平台路径形式。
-            self.assertEqual(settings.runtime_dir, (data_root / "runtime").resolve())
+            # 桌面分发环境只做 abspath（保留 Windows 8.3 短路径形式），
+            # 不 resolve 成规范长路径；其余配置路径经 _path() 会 resolve。
+            self.assertEqual(settings.runtime_dir, data_root / "runtime")
             self.assertEqual(
                 settings.database_path,
-                (data_root / "runtime" / "backend.sqlite3").resolve(),
+                data_root / "runtime" / "backend.sqlite3",
             )
             self.assertEqual(settings.gallery.python_executable, str(python))
             self.assertEqual(settings.dedup.python_executable, python.resolve())

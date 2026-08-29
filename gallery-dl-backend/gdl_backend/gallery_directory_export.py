@@ -860,10 +860,7 @@ class GalleryDirectoryExportService:
             _validate_leaf_name(name)
             try:
                 with SafeSourceRoot(source["root_path"]) as safe_root:
-                    source_metadata = os.fstat(safe_root.root_fd)
-                    source_root_identity = (
-                        int(source_metadata.st_dev), int(source_metadata.st_ino)
-                    )
+                    source_root_identity = safe_root.root_identity()
                     iterator = safe_root.iter_subtree(
                         relative,
                         excluded_directories=_EXCLUDED_DIRECTORY_NAMES,
@@ -1031,8 +1028,7 @@ class GalleryDirectoryExportService:
             target_root.create_owned_directory(temporary_name)
             temporary_created = True
             with SafeSourceRoot(selection.source_root_path) as safe_root:
-                source_metadata = os.fstat(safe_root.root_fd)
-                if (int(source_metadata.st_dev), int(source_metadata.st_ino)) != (
+                if safe_root.root_identity() != (
                     selection.source_root_identity
                 ):
                     raise GalleryDirectoryExportError("source_changed")
@@ -1093,11 +1089,9 @@ class GalleryDirectoryExportService:
             if cancel_event.is_set():
                 raise _CopyCancelled()
             with SafeSourceRoot(selection.source_root_path) as validation_root:
-                validation_metadata = os.fstat(validation_root.root_fd)
-                if (
-                    int(validation_metadata.st_dev),
-                    int(validation_metadata.st_ino),
-                ) != selection.source_root_identity:
+                if validation_root.root_identity() != (
+                    selection.source_root_identity
+                ):
                     raise GalleryDirectoryExportError("source_changed")
             self._validate_target_snapshot(
                 target_root,
@@ -1308,8 +1302,7 @@ class GalleryDirectoryExportService:
         seen_files: set[str] = set()
         try:
             with SafeSourceRoot(target_root.path / temporary_name) as staged_root:
-                root_metadata = os.fstat(staged_root.root_fd)
-                if (int(root_metadata.st_dev), int(root_metadata.st_ino)) != (
+                if staged_root.root_identity() != (
                     expected_root_identity
                 ):
                     raise GalleryDirectoryExportError("target_path_changed")

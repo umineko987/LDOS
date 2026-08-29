@@ -238,6 +238,16 @@ class SafeSourceRoot:
         assert self._root_fd is not None
         return self._root_fd
 
+    def root_identity(self) -> tuple[int, int]:
+        """根目录身份 (st_dev, st_ino)：描述符模式锚定在已打开的描述符，
+        无描述符平台退化为根路径 lstat（TOCTOU 防护弱于描述符模式）。"""
+        self.open()
+        if self._root_fd is not None:
+            metadata = os.fstat(self._root_fd)
+        else:
+            metadata = self.path.lstat()
+        return (int(metadata.st_dev), int(metadata.st_ino))
+
     @contextlib.contextmanager
     def _parent_fd(
         self,
@@ -429,7 +439,13 @@ class SafeSourceRoot:
     ) -> bool:
         """Return whether a managed relative path is a real directory."""
         if not _HAS_DIR_FD:
-            target = self._fallback_path(relative_path)
+            try:
+                target = self._fallback_path(relative_path)
+            except UnsafeSourcePathError as error:
+                # 与描述符分支一致：父目录缺失时 allow_missing 视为不存在。
+                if allow_missing and error.reason == "parent_missing":
+                    return False
+                raise
             try:
                 metadata = target.lstat()
             except FileNotFoundError:
