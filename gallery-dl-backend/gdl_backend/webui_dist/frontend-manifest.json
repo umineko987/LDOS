@@ -3,14 +3,14 @@
   "entrypoint": "index.html",
   "files": [
     {
-      "path": "assets/index-Ce9FoIex.css",
-      "sha256": "4d15cc906b03e130ab83aa2ced66982862ab0d5917a9fb3b0c8222dbb335d635",
-      "size": 131977
+      "path": "assets/index-CWIlMnd-.css",
+      "sha256": "3904dff538a37e49430991ae4745fa191a394e010c4210c75c217295ca9d59e6",
+      "size": 133632
     },
     {
-      "path": "assets/index-auSb_znI.js",
-      "sha256": "33aa93504ce76f3c7bf1eedb7f7488da470756c3d571ee5aba19b56fd37fc6e1",
-      "size": 543620
+      "path": "assets/index-nHbQ63qt.js",
+      "sha256": "183ea72662800abe71088e0bd95734c35db3e1c741e4d2c0c947433d11501a68",
+      "size": 668882
     },
     {
       "path": "assets/noise-DI1T15ao.svg",
@@ -24,7 +24,7 @@
     },
     {
       "path": "index.html",
-      "sha256": "bc2eb67a53964bf95f75765327c84c9c0e7493c77ffa049b8b3d9fc51919773e",
+      "sha256": "fdcf22db954f6a12f544aac691c78520bbfd3a6a0570e70efbbde19274513ba9",
       "size": 503
     }
   ],

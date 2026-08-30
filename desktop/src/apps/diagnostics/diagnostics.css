@@ -61,6 +61,8 @@
 .diagnostics-boundary-note::before { content: "◆ 状态 · "; color: var(--ldos-accent-highlight); }
 .diagnostics-stale-marker { border: var(--ldos-border-strong-width) solid var(--ldos-state-warning); background: var(--ldos-glass-surface-default); }
 .diagnostics-stale-marker::before { content: "△ 陈旧 · "; color: var(--ldos-state-warning); }
+html[lang="en"] .diagnostics-boundary-note::before { content: "◆ Status · "; }
+html[lang="en"] .diagnostics-stale-marker::before { content: "△ Stale · "; }
 .diagnostics-app .diagnostics-panel,
 .diagnostics-domain { margin-top: 14px; padding: 14px 0; border: 0; border-bottom: var(--ldos-border-width) solid var(--ldos-border-weak); background: transparent; box-shadow: none; }
 .diagnostics-panel:first-child { margin-top: 0; }

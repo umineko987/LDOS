@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
 
   import { ApiError, createApiClient, type ApiClient } from "./core/api/client";
+  import { localizeUi } from "./core/i18n";
   import { createPersistenceAdapter } from "./core/persistence/adapter";
   import { createPersistenceService } from "./core/persistence/service";
   import { createPlatformAdapter } from "./core/platform/adapter";
@@ -103,7 +104,7 @@
 {#if phase === "ready" && api}
   <Desktop {shell} {persistence} {polling} {api} />
 {:else}
-  <main class="startup-gate" data-startup-phase={phase} aria-labelledby="startup-title" aria-live="polite">
+  <main use:localizeUi class="startup-gate" data-startup-phase={phase} aria-labelledby="startup-title" aria-live="polite">
     <section>
       <p>LDOS Desktop</p>
       <h1 id="startup-title">{phase === "failed" ? "桌面宿主暂时不可用" : "正在准备夜航桌面"}</h1>

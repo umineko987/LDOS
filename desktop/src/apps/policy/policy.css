@@ -96,6 +96,10 @@
 .policy-dirty-live[data-dirty="true"]::before { content: "△ 未保存 · "; color: var(--ldos-state-warning); }
 .policy-operation-live::before { content: "◆ 状态 · "; color: var(--ldos-accent-highlight); }
 .policy-actions { flex-wrap: wrap; margin-top: 12px; }
+html[lang="en"] .policy-proof::before { content: "◆ Current site · "; }
+html[lang="en"] .policy-impact::before { content: "◆ Scope · "; }
+html[lang="en"] .policy-dirty-live[data-dirty="true"]::before { content: "△ Unsaved · "; }
+html[lang="en"] .policy-operation-live::before { content: "◆ Status · "; }
 .policy-button { min-height: 42px; }
 .policy-button--primary { border-color: var(--ldos-accent); background: var(--ldos-glass-surface-button); }
 .policy-button--dangerous { border: 2px solid var(--ldos-state-danger); color: var(--ldos-state-danger); }

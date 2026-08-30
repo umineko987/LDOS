@@ -160,6 +160,26 @@
   font-size: 0.78rem;
 }
 
+.menu-bar__language {
+  min-width: 38px;
+  min-height: 26px;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-color: var(--ldos-border-weak);
+  border-radius: 10px;
+  background: var(--ldos-glass-surface-button);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+.menu-bar__language:hover {
+  border-color: var(--ldos-border-default);
+  background: var(--ldos-interaction-surface);
+  transform: none;
+}
+
 .menu-popover {
   position: absolute;
   top: calc(100% + 8px);

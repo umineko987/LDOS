@@ -60,6 +60,11 @@
 .personalization-save-status[data-personalization-status="saving"]::before { content: "▶ 保存中 · "; color: var(--ldos-state-running); }
 .personalization-save-status[data-personalization-status="error"] { border: var(--ldos-border-strong-width) solid var(--ldos-state-danger); }
 .personalization-save-status[data-personalization-status="error"]::before { content: "! 保存失败 · "; color: var(--ldos-state-danger); }
+html[lang="en"] .personalization-save-status[data-personalization-status="clean"]::before { content: "✓ Saved · "; }
+html[lang="en"] .personalization-save-status[data-personalization-status="success"]::before { content: "✓ Complete · "; }
+html[lang="en"] .personalization-save-status[data-personalization-status="dirty"]::before { content: "△ Not applied · "; }
+html[lang="en"] .personalization-save-status[data-personalization-status="saving"]::before { content: "▶ Saving · "; }
+html[lang="en"] .personalization-save-status[data-personalization-status="error"]::before { content: "! Save failed · "; }
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .personalization-column, .personalization-choice, .personalization-preview-desktop { background: var(--ldos-fallback-elevated-solid); }

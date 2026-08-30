@@ -136,6 +136,7 @@
 .proxy-node { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 8px; }
 .proxy-node[data-leased="true"] { border-color: var(--ldos-state-running); background: var(--ldos-glass-surface-secondary); }
 .proxy-node[data-leased="true"]::before { content: "◆ 正在使用"; grid-column: 1 / -1; color: var(--ldos-state-running); font-size: 0.72rem; }
+html[lang="en"] .proxy-node[data-leased="true"]::before { content: "◆ In use"; }
 .proxy-node > div:first-child { display: grid; min-width: 0; gap: 4px; }
 .proxy-node code { overflow-wrap: anywhere; color: var(--ldos-text-muted); }
 .proxy-node dl { grid-column: 1 / -1; }

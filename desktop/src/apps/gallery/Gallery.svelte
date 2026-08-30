@@ -3,6 +3,7 @@
 
   import { ApiError, type ApiClient } from "../../core/api/client";
   import { restoreFocus, trappedTabIndex, type FocusTarget } from "../../core/a11y/focus";
+  import { translateCurrentUiText } from "../../core/i18n";
   import {
     createPlatformAdapter,
     type PlatformDirectoryPurpose,
@@ -361,7 +362,7 @@
     const message = isBatch
       ? "删除批次会递归删除批次下所有文件。\n\n确定删除这个批次吗？"
       : `解除导入目录“${source.display_name}”？\n\n只会移除 LDOS 的来源索引，不会删除原目录中的任何文件。`;
-    if (!window.confirm(message)) return;
+    if (!window.confirm(translateCurrentUiText(message))) return;
     batchDeleteError = null;
     batchDeleteSourceId = source.source_id;
     const request = isBatch

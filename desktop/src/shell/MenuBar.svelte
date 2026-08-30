@@ -7,6 +7,7 @@
     type ApplicationId,
   } from "../core/applications/definitions";
   import { isActivationKey, nextDirectionalIndex, restoreFocus } from "../core/a11y/focus";
+  import { language, toggleLanguage } from "../core/i18n";
   import { deriveWindowMenu } from "../core/state/projections";
   import type { ShellMenuId, ShellStore } from "../core/state/shell";
   import Icon from "./Icon.svelte";
@@ -198,7 +199,7 @@
           aria-controls="menu-panel-{menuId}"
           onclick={() => onTriggerClick(menuId)}
           onkeydown={(event) => onTriggerKeydown(event, menuId)}
-        >{MENU_LABELS[menuId]}</button>
+        >{menuId === "view" && $language === "en" ? "View" : MENU_LABELS[menuId]}</button>
         {#if snapshot.openMenu === menuId}
           <div
             class="menu-popover"
@@ -231,4 +232,12 @@
     <span class="menu-bar__ready"><span aria-hidden="true">◆</span> 本地服务已连接</span>
     <span class="menu-bar__clock"><Icon name="clock" size={15} /> <time>{clock}</time></span>
   </div>
+  <button
+    type="button"
+    class="menu-bar__language"
+    data-language-toggle
+    aria-label={$language === "zh" ? "切换到英文" : "Switch to Chinese"}
+    title={$language === "zh" ? "切换到英文" : "Switch to Chinese"}
+    onclick={() => toggleLanguage($language)}
+  >{$language === "zh" ? "EN" : "ZH"}</button>
 </header>

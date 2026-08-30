@@ -1,4 +1,5 @@
 import type { PollingHandle, PollingRegistration, PollingService } from "../../core/polling/service";
+import { translateCurrentUiText } from "../../core/i18n";
 import {
   buildDiagnosticsSnapshot,
   createDiagnosticsRequestGate,
@@ -157,7 +158,7 @@ export function createDiagnosticsController({
         return false;
       }
       try {
-        await clipboard.writeText(diagnosticsCopyText(snapshot));
+        await clipboard.writeText(translateCurrentUiText(diagnosticsCopyText(snapshot)));
         if (!active || destroyed) return false;
         store.setMessage("诊断摘要已复制，敏感信息已隐藏。");
         return true;
