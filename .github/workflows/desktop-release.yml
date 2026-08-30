@@ -221,3 +221,114 @@ jobs:
             desktop/src-tauri/release/backend/release-files.sha256
           if-no-files-found: error
           retention-days: 14
+
+  publish:
+    name: Publish GitHub Release
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Check out release metadata
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Verify tag matches the desktop version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - "$RELEASE_TAG" <<'PY'
+          import json
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          root = Path.cwd()
+          versions = {
+              "Cargo.toml": tomllib.loads(
+                  (root / "desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")
+              )["package"]["version"],
+              "package.json": json.loads(
+                  (root / "desktop/package.json").read_text(encoding="utf-8")
+              )["version"],
+              "tauri.conf.json": json.loads(
+                  (root / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+              )["version"],
+          }
+          if len(set(versions.values())) != 1:
+              raise SystemExit(f"desktop versions do not match: {versions}")
+          version = next(iter(versions.values()))
+          expected_tag = f"v{version}"
+          if sys.argv[1] != expected_tag:
+              raise SystemExit(
+                  f"release tag {sys.argv[1]!r} does not match {expected_tag!r}"
+              )
+          PY
+
+      - name: Download verified Linux bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: ldos-linux-x86_64
+          path: release-assets/linux
+
+      - name: Download verified Windows bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: ldos-windows-x86_64
+          path: release-assets/windows
+
+      - name: Collect installers and checksums
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          root = Path("release-assets")
+          upload = root / "upload"
+          upload.mkdir()
+          patterns = {
+              "Linux DEB": "linux/**/bundle/deb/*.deb",
+              "Linux AppImage": "linux/**/bundle/appimage/*.AppImage",
+              "Windows NSIS": "windows/**/bundle/nsis/*.exe",
+          }
+          installers = []
+          for label, pattern in patterns.items():
+              matches = list(root.glob(pattern))
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"expected one {label} installer, found {len(matches)}"
+                  )
+              destination = upload / matches[0].name
+              matches[0].replace(destination)
+              installers.append(destination)
+
+          lines = []
+          for installer in sorted(installers):
+              digest = hashlib.sha256()
+              with installer.open("rb") as stream:
+                  for block in iter(lambda: stream.read(1024 * 1024), b""):
+                      digest.update(block)
+              lines.append(f"{digest.hexdigest()}  {installer.name}\n")
+          (upload / "SHA256SUMS.txt").write_text("".join(lines), encoding="utf-8")
+          PY
+
+      - name: Create or repair the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/upload/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/upload/* \
+              --verify-tag \
+              --title "LDOS $GITHUB_REF_NAME" \
+              --generate-notes \
+              --latest
+          fi

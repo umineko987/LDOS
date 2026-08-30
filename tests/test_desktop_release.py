@@ -186,6 +186,24 @@ class DesktopReleaseTests(unittest.TestCase):
             {"release/backend/": "backend/"},
         )
 
+    def test_release_workflow_publishes_only_version_tags(self) -> None:
+        workflow = (ROOT / ".github/workflows/desktop-release.yml").read_text(
+            encoding="utf-8"
+        )
+        before_publish, publish = workflow.split("\n  publish:\n", maxsplit=1)
+
+        self.assertIn("permissions:\n  contents: read", before_publish)
+        self.assertIn(
+            "if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')",
+            publish,
+        )
+        self.assertIn("needs: bundle", publish)
+        self.assertIn("permissions:\n      contents: write", publish)
+        self.assertIn("name: ldos-linux-x86_64", publish)
+        self.assertIn("name: ldos-windows-x86_64", publish)
+        self.assertIn("gh release create", publish)
+        self.assertIn("gh release upload", publish)
+
     def test_backend_projection_omits_the_duplicate_frontend(self) -> None:
         with temporary_path() as tmp_path:
             app = tmp_path / "app"
