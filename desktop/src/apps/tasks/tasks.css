@@ -9,7 +9,7 @@
   min-width: 0;
   height: 100%;
   min-height: 0;
-  color: var(--imageweave-text-body);
+  color: var(--ldos-text-body);
 }
 
 .tasks-header,
@@ -25,8 +25,8 @@
 
 .tasks-header {
   padding: 18px 24px;
-  border-bottom: 1px solid var(--imageweave-border-weak);
-  background: var(--imageweave-glass-surface-weak);
+  border-bottom: 1px solid var(--ldos-border-weak);
+  background: var(--ldos-glass-surface-weak);
 }
 
 .tasks-header p,
@@ -44,7 +44,7 @@
 
 .tasks-header p,
 .tasks-column > header p {
-  color: var(--imageweave-accent-highlight);
+  color: var(--ldos-accent-highlight);
   font-size: 0.76rem;
 }
 
@@ -56,9 +56,9 @@
 .tasks-error {
   margin: 14px 24px 0;
   padding: 14px;
-  border: 2px solid var(--imageweave-state-danger);
-  border-radius: var(--imageweave-radius-control);
-  background: var(--imageweave-glass-surface-default);
+  border: 2px solid var(--ldos-state-danger);
+  border-radius: var(--ldos-radius-control);
+  background: var(--ldos-glass-surface-default);
 }
 
 .tasks-error small,
@@ -68,7 +68,7 @@
 .tasks-active-card p,
 .tasks-action-card p,
 .tasks-recovery-card p {
-  color: var(--imageweave-text-muted);
+  color: var(--ldos-text-muted);
 }
 
 .tasks-workspace {
@@ -98,20 +98,20 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--imageweave-border-default);
-  border-radius: var(--imageweave-radius-card);
-  background: var(--imageweave-glass-surface-input);
+  border: 1px solid var(--ldos-border-default);
+  border-radius: var(--ldos-radius-card);
+  background: var(--ldos-glass-surface-input);
   box-shadow: none;
 }
 
 .tasks-column--recent {
-  background: var(--imageweave-glass-surface-secondary);
+  background: var(--ldos-glass-surface-secondary);
 }
 
 .tasks-column > header {
   padding: 18px;
-  border-bottom: 1px solid var(--imageweave-border-weak);
-  background: var(--imageweave-glass-surface-weak);
+  border-bottom: 1px solid var(--ldos-border-weak);
+  background: var(--ldos-glass-surface-weak);
 }
 
 
@@ -149,7 +149,7 @@
 
 .tasks-field > span,
 .tasks-progress-label > span {
-  color: var(--imageweave-text-body);
+  color: var(--ldos-text-body);
   font-size: 0.8rem;
   font-weight: 700;
 }
@@ -158,15 +158,15 @@
   width: 100%;
   min-height: 44px;
   padding: 8px 10px;
-  border: 1px solid var(--imageweave-border-button);
-  border-radius: var(--imageweave-radius-control);
-  color: var(--imageweave-text-heading);
-  background: var(--imageweave-fallback-elevated-solid);
+  border: 1px solid var(--ldos-border-button);
+  border-radius: var(--ldos-radius-control);
+  color: var(--ldos-text-heading);
+  background: var(--ldos-fallback-elevated-solid);
 }
 
 .tasks-recent-list {
   min-height: 230px !important;
-  font-family: var(--imageweave-font-mono);
+  font-family: var(--ldos-font-mono);
   font-size: 0.76rem;
 }
 
@@ -185,13 +185,13 @@
 }
 
 .tasks-primary {
-  border-color: var(--imageweave-accent) !important;
+  border-color: var(--ldos-accent) !important;
 }
 
 .tasks-danger {
   border-width: 2px !important;
-  border-color: var(--imageweave-state-danger) !important;
-  color: var(--imageweave-state-danger) !important;
+  border-color: var(--ldos-state-danger) !important;
+  color: var(--ldos-state-danger) !important;
 }
 
 .tasks-active-card,
@@ -201,9 +201,9 @@
 .tasks-empty {
   margin-top: 18px;
   padding: 16px;
-  border: 1px solid var(--imageweave-border-weak);
-  border-radius: var(--imageweave-radius-control);
-  background: var(--imageweave-glass-surface-weak);
+  border: 1px solid var(--ldos-border-weak);
+  border-radius: var(--ldos-radius-control);
+  background: var(--ldos-glass-surface-weak);
   box-shadow: none;
 }
 
@@ -222,20 +222,20 @@
 
 .tasks-workspace-state[data-phase="loading"],
 .tasks-workspace-state[data-phase="writing"] {
-  border-left-color: var(--imageweave-state-running);
+  border-left-color: var(--ldos-state-running);
 }
 
 .tasks-workspace-state[data-phase="content"] {
-  border-left-color: var(--imageweave-state-success);
+  border-left-color: var(--ldos-state-success);
 }
 
 .tasks-workspace-state[data-phase="partial"],
 .tasks-workspace-state[data-phase="terminal"] {
-  border-left-color: var(--imageweave-state-warning);
+  border-left-color: var(--ldos-state-warning);
 }
 
 .tasks-workspace-state[data-phase="error"] {
-  border: 2px solid var(--imageweave-state-danger);
+  border: 2px solid var(--ldos-state-danger);
 }
 
 .tasks-workspace-state p,
@@ -249,19 +249,19 @@
   align-items: center;
   padding: 3px 9px;
   border: 1px solid currentColor;
-  border-radius: var(--imageweave-radius-pill);
-  color: var(--imageweave-text-body);
-  background: var(--imageweave-glass-surface-weak);
+  border-radius: var(--ldos-radius-pill);
+  color: var(--ldos-text-body);
+  background: var(--ldos-glass-surface-weak);
   font-size: 0.75rem;
   font-weight: 700;
   white-space: nowrap;
 }
 
-.tasks-status[data-status-kind="ready"] { color: var(--imageweave-state-success); }
-.tasks-status[data-status-kind="running"] { color: var(--imageweave-state-running); }
-.tasks-status[data-status-kind="warning"] { color: var(--imageweave-state-warning); }
-.tasks-status[data-status-kind="error"] { color: var(--imageweave-state-danger); }
-.tasks-status[data-status-kind="disabled"] { color: var(--imageweave-text-muted); }
+.tasks-status[data-status-kind="ready"] { color: var(--ldos-state-success); }
+.tasks-status[data-status-kind="running"] { color: var(--ldos-state-running); }
+.tasks-status[data-status-kind="warning"] { color: var(--ldos-state-warning); }
+.tasks-status[data-status-kind="error"] { color: var(--ldos-state-danger); }
+.tasks-status[data-status-kind="disabled"] { color: var(--ldos-text-muted); }
 
 .tasks-metrics,
 .tasks-file-metrics,
@@ -279,23 +279,23 @@
   gap: 5px;
   min-width: 0;
   padding: 12px;
-  border: 1px solid var(--imageweave-border-weak);
-  border-radius: var(--imageweave-radius-control);
-  background: var(--imageweave-glass-surface-secondary);
+  border: 1px solid var(--ldos-border-weak);
+  border-radius: var(--ldos-radius-control);
+  background: var(--ldos-glass-surface-secondary);
   box-shadow: none;
 }
 
 .tasks-metrics span,
 .tasks-file-metrics span {
-  color: var(--imageweave-text-muted);
+  color: var(--ldos-text-muted);
   font-size: 0.74rem;
 }
 
 .tasks-metrics strong,
 .tasks-file-metrics strong {
   overflow-wrap: anywhere;
-  color: var(--imageweave-text-heading);
-  font-family: var(--imageweave-font-mono);
+  color: var(--ldos-text-heading);
+  font-family: var(--ldos-font-mono);
 }
 
 .tasks-progress-label {
@@ -310,7 +310,7 @@
 .tasks-app progress {
   width: 100%;
   height: 14px;
-  accent-color: var(--imageweave-accent);
+  accent-color: var(--ldos-accent);
 }
 
 .tasks-section-heading {
@@ -345,9 +345,9 @@
   min-width: 0;
   max-width: 100%;
   overflow: auto;
-  border: 1px solid var(--imageweave-border-weak);
-  border-radius: var(--imageweave-radius-control);
-  background: var(--imageweave-glass-surface-weak);
+  border: 1px solid var(--ldos-border-weak);
+  border-radius: var(--ldos-radius-control);
+  background: var(--ldos-glass-surface-weak);
   box-shadow: none;
 }
 
@@ -361,7 +361,7 @@
 .tasks-table th,
 .tasks-table td {
   padding: 9px 10px;
-  border-bottom: 1px solid var(--imageweave-border-weak);
+  border-bottom: 1px solid var(--ldos-border-weak);
   text-align: left;
   vertical-align: top;
 }
@@ -370,12 +370,12 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  color: var(--imageweave-text-heading);
-  background: var(--imageweave-fallback-elevated-solid);
+  color: var(--ldos-text-heading);
+  background: var(--ldos-fallback-elevated-solid);
 }
 
 .tasks-table tbody tr:hover {
-  background: var(--imageweave-glass-surface-default);
+  background: var(--ldos-glass-surface-default);
 }
 
 .tasks-table td > span,
@@ -384,7 +384,7 @@
 }
 
 .tasks-table td > span:not(.tasks-status) {
-  color: var(--imageweave-text-muted);
+  color: var(--ldos-text-muted);
 }
 
 .tasks-pagination {
@@ -392,15 +392,15 @@
 }
 
 .tasks-pagination span {
-  color: var(--imageweave-text-body);
+  color: var(--ldos-text-body);
   font-size: 0.8rem;
 }
 
 .tasks-operation-live {
   padding: 12px;
-  border: 1px solid var(--imageweave-border-weak);
-  border-radius: var(--imageweave-radius-control);
-  background: var(--imageweave-glass-surface-weak);
+  border: 1px solid var(--ldos-border-weak);
+  border-radius: var(--ldos-radius-control);
+  background: var(--ldos-glass-surface-weak);
 }
 
 .tasks-recovery-card {
@@ -412,11 +412,11 @@
   max-height: calc(100dvh - 28px);
   padding: 0;
   overflow: auto;
-  border: 1px solid var(--imageweave-border-default);
-  border-radius: var(--imageweave-radius-window);
-  color: var(--imageweave-text-heading);
-  background: var(--imageweave-fallback-elevated-solid);
-  box-shadow: var(--imageweave-shadow-window);
+  border: 1px solid var(--ldos-border-default);
+  border-radius: var(--ldos-radius-window);
+  color: var(--ldos-text-heading);
+  background: var(--ldos-fallback-elevated-solid);
+  box-shadow: var(--ldos-shadow-window);
 }
 
 .tasks-confirmation::backdrop {
@@ -429,9 +429,9 @@
 
 .tasks-confirmation__warning {
   padding: 12px;
-  border: 2px solid var(--imageweave-state-danger);
-  border-radius: var(--imageweave-radius-control);
-  background: var(--imageweave-glass-surface-secondary);
+  border: 2px solid var(--ldos-state-danger);
+  border-radius: var(--ldos-radius-control);
+  background: var(--ldos-glass-surface-secondary);
 }
 
 .tasks-confirmation > section > div {

@@ -1,4 +1,4 @@
-name: ImageWeave desktop deployment
+name: LDOS desktop deployment
 
 on:
   push:
@@ -25,7 +25,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: imageweave-desktop-${{ github.ref }}
+  group: ldos-desktop-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -91,11 +91,11 @@ jobs:
           - name: Linux x86_64
             os: ubuntu-24.04
             platform: linux
-            artifact: imageweave-linux-x86_64
+            artifact: ldos-linux-x86_64
           - name: Windows x86_64
             os: windows-2025
             platform: windows
-            artifact: imageweave-windows-x86_64
+            artifact: ldos-windows-x86_64
     steps:
       - name: Check out source and submodules
         uses: actions/checkout@v7
@@ -188,7 +188,7 @@ jobs:
 
       - name: Build, run, and statically verify the bundle
         env:
-          IMAGEWEAVE_PREBUILT_FRONTEND: "1"
+          LDOS_PREBUILT_FRONTEND: "1"
         run: python scripts/desktop_release.py build --cache-dir .release-cache
 
       - name: Verify tracked checkout stayed clean

@@ -100,7 +100,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("failed to build ImageWeave desktop host");
+        .expect("failed to build LDOS desktop host");
 
     app.run(|app, event| {
         if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
@@ -188,7 +188,7 @@ mod tests {
             release["build"]["beforeBundleCommand"]["script"],
             "python ../../scripts/desktop_release.py verify-tree --tree release/backend"
         );
-        assert_eq!(config["identifier"], "dev.imageweave.desktop");
+        assert_eq!(config["identifier"], "dev.ldos.desktop");
         let linux: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.linux.conf.json"))
                 .expect("valid Linux Tauri config JSON");

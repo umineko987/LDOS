@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
 
-const configuredExecutable = process.env.IMAGEWEAVE_CHROMIUM_PATH;
+const configuredExecutable = process.env.LDOS_CHROMIUM_PATH;
 const localChromium = process.platform === "linux" && existsSync("/usr/bin/chromium")
   ? "/usr/bin/chromium"
   : undefined;

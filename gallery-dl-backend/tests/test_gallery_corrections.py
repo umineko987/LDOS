@@ -172,7 +172,7 @@ class GalleryPathAndAnnotationRegressionTest(GalleryApiTestBase):
         self.assertTrue(
             (
                 source_root
-                / ".imageweave"
+                / ".ldos"
                 / "trash"
                 / operation_id
                 / "files"

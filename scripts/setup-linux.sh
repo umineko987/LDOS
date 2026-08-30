@@ -151,7 +151,7 @@ case "$proxy_mode" in
         ;;
 esac
 
-printf 'ImageWeave Linux 安装：device=%s，Python=%s，下载代理=%s\n' \
+printf 'LDOS Linux 安装：device=%s，Python=%s，下载代理=%s\n' \
     "$device" "$python_version" "$(proxy_description)"
 
 if [[ $skip_submodule -eq 0 ]]; then

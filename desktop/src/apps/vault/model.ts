@@ -660,7 +660,7 @@ const ERROR_GUIDANCE: Readonly<Record<string, Readonly<{ title: string; message:
   auth_cache_clear_failed: Object.freeze({ title: "授权凭证清理失败", message: "服务未确认授权凭证已删除。" }),
   browser_profile_reset_active: Object.freeze({ title: "正在清除授权浏览器数据", message: "已有一个浏览器数据清理操作正在执行。" }),
   invalid_browser_profile_path: Object.freeze({ title: "授权浏览器数据路径校验失败", message: "服务拒绝清理超出私有目录范围的授权浏览器数据。" }),
-  network_error: Object.freeze({ title: "服务连接中断", message: "授权管理无法连接到 ImageWeave 服务。" }),
+  network_error: Object.freeze({ title: "服务连接中断", message: "授权管理无法连接到 LDOS 服务。" }),
   invalid_response: Object.freeze({ title: "授权状态数据无效", message: "页面无法读取服务返回的授权状态。" }),
 });
 
@@ -683,13 +683,13 @@ export function vaultErrorPresentation(error: unknown): VaultErrorPresentation {
   if (code === "request_failed" && error instanceof TypeError) code = "invalid_response";
   const statusValue = errorField(error, "status");
   const status = typeof statusValue === "number" && Number.isInteger(statusValue) ? statusValue : 0;
-  const nextStep = ERROR_NEXT_STEPS[code] ?? (status === 401 || status === 403 ? "请从 ImageWeave 桌面重新打开，并检查服务访问策略。" : status === 409 ? "请刷新授权状态，完成当前授权后再重试。" : status === 422 ? "请检查当前输入格式后重试。" : status >= 500 ? "已加载状态会继续保留，请稍后刷新；必要时打开系统诊断。" : "请刷新授权状态后重试。");
+  const nextStep = ERROR_NEXT_STEPS[code] ?? (status === 401 || status === 403 ? "请从 LDOS 桌面重新打开，并检查服务访问策略。" : status === 409 ? "请刷新授权状态，完成当前授权后再重试。" : status === 422 ? "请检查当前输入格式后重试。" : status >= 500 ? "已加载状态会继续保留，请稍后刷新；必要时打开系统诊断。" : "请刷新授权状态后重试。");
   const requestId = errorField(error, "requestId");
   return Object.freeze({
     code,
     status,
     title: ERROR_GUIDANCE[code]?.title ?? (status === 422 ? "授权请求格式无效" : status === 409 ? "授权操作冲突" : status >= 500 ? "授权服务暂时不可用" : "授权操作失败"),
-    message: ERROR_GUIDANCE[code]?.message ?? (status === 0 ? "无法连接到 ImageWeave 服务。" : "服务未接受本次授权操作。"),
+    message: ERROR_GUIDANCE[code]?.message ?? (status === 0 ? "无法连接到 LDOS 服务。" : "服务未接受本次授权操作。"),
     nextStep,
     requestId: typeof requestId === "string" && REQUEST_ID_PATTERN.test(requestId) ? requestId : "",
   });

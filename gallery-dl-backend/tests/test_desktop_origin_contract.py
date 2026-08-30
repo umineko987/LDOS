@@ -49,7 +49,7 @@ class DesktopOriginConfigTests(unittest.TestCase):
             )
             with patch.dict(
                 os.environ,
-                {"IMAGEWEAVE_DESKTOP_ORIGIN": VITE_ORIGIN},
+                {"LDOS_DESKTOP_ORIGIN": VITE_ORIGIN},
             ):
                 settings = AppSettings.load(config_path)
 
@@ -57,7 +57,7 @@ class DesktopOriginConfigTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"IMAGEWEAVE_DESKTOP_ORIGIN": "https://evil.example.com"},
+                {"LDOS_DESKTOP_ORIGIN": "https://evil.example.com"},
             ):
                 with self.assertRaisesRegex(ValueError, r"server\.cors_origins"):
                     AppSettings.load(config_path)

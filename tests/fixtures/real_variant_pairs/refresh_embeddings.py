@@ -114,7 +114,7 @@ def _write_manifest() -> None:
         "schema_version": 1,
         "license": {
             "spdx": "MIT",
-            "notice": "Copyright (c) 2026 ImageWeave contributors; see ../../../LICENSE",
+            "notice": "Copyright (c) 2026 LDOS contributors; see ../../../LICENSE",
         },
         "origin": (
             "All four images are original deterministic drawings rendered by generate.py. "

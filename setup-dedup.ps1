@@ -30,7 +30,7 @@ $env:TORCH_HOME = Join-Path $root ".models\torch"
 
 python -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)"
 if ($LASTEXITCODE -ne 0) {
-    throw "ImageWeave 支持 Python 3.11–3.14。"
+    throw "LDOS 支持 Python 3.11–3.14。"
 }
 if (-not (Test-Path -LiteralPath $venvPython)) {
     python -m venv (Join-Path $root ".venv")

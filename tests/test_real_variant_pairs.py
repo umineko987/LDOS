@@ -54,9 +54,9 @@ class RealVariantPairTests(unittest.TestCase):
         committed_vectors = cls.embedding_document["vectors"]
         vectors = committed_vectors
 
-        real_model_mode = os.environ.get("IMAGEWEAVE_REAL_MODELS", "").strip()
+        real_model_mode = os.environ.get("LDOS_REAL_MODELS", "").strip()
         if real_model_mode not in {"", "0", "1"}:
-            raise AssertionError("IMAGEWEAVE_REAL_MODELS 只接受 0、1 或未设置")
+            raise AssertionError("LDOS_REAL_MODELS 只接受 0、1 或未设置")
         if real_model_mode == "1":
             from dedup_models import DeepEmbeddingExtractor
 

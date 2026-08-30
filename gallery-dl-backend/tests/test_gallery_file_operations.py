@@ -163,17 +163,17 @@ class TrashTest(GalleryFileOperationsTestBase):
         self.assertEqual(result["status"], "committed")
         self.assertEqual(result["item_count"], 1)
         self.assertEqual(result["has_txt_count"], 1)
-        # 文件移入 .imageweave/trash/<op>/files/。
+        # 文件移入 .ldos/trash/<op>/files/。
         op_id = result["operation_id"]
-        trash_img = self.root / ".imageweave" / "trash" / op_id / "files" / "a.jpg"
-        trash_txt = self.root / ".imageweave" / "trash" / op_id / "files" / "a.txt"
+        trash_img = self.root / ".ldos" / "trash" / op_id / "files" / "a.jpg"
+        trash_txt = self.root / ".ldos" / "trash" / op_id / "files" / "a.txt"
         self.assertTrue(trash_img.exists())
         self.assertTrue(trash_txt.exists())
         self.assertFalse((self.root / "a.jpg").exists())
         self.assertFalse((self.root / "a.txt").exists())
         # operation.json 元数据。
         manifest = (
-            self.root / ".imageweave" / "trash" / op_id / "operation.json"
+            self.root / ".ldos" / "trash" / op_id / "operation.json"
         )
         self.assertTrue(manifest.exists())
         data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -204,7 +204,7 @@ class TrashTest(GalleryFileOperationsTestBase):
         self.assertEqual(result["item_count"], 1)
         op_id = result["operation_id"]
         trash_directory = (
-            self.root / ".imageweave" / "trash" / op_id / "files" / "sub"
+            self.root / ".ldos" / "trash" / op_id / "files" / "sub"
         )
         self.assertTrue((trash_directory / "unindexed.bin").exists())
         self.assertTrue((trash_directory / "nested" / "notes.dat").exists())
@@ -251,10 +251,10 @@ class TrashTest(GalleryFileOperationsTestBase):
         self.assertEqual(result["item_count"], 2)
         operation_id = result["operation_id"]
         self.assertTrue(
-            (self.root / ".imageweave" / "trash" / operation_id / "files" / "a.jpg").exists()
+            (self.root / ".ldos" / "trash" / operation_id / "files" / "a.jpg").exists()
         )
         self.assertTrue(
-            (self.root / ".imageweave" / "trash" / operation_id / "files" / "sub").is_dir()
+            (self.root / ".ldos" / "trash" / operation_id / "files" / "sub").is_dir()
         )
         self.assertFalse((self.root / "a.jpg").exists())
         self.assertFalse((self.root / "sub").exists())
@@ -281,7 +281,7 @@ class TrashTest(GalleryFileOperationsTestBase):
         self.assertEqual(purge["status"], "committed")
         self.assertFalse((self.root / "sub").exists())
         self.assertFalse(
-            (self.root / ".imageweave" / "trash" / op_id / "files" / "sub").exists()
+            (self.root / ".ldos" / "trash" / op_id / "files" / "sub").exists()
         )
         self.assertIsNone(self.db.gallery.get_asset(asset_c["asset_id"]))
         with self.db.gallery._read() as conn:  # noqa: SLF001
@@ -332,7 +332,7 @@ class TrashTest(GalleryFileOperationsTestBase):
         # 回收区文件仍在。
         op_id = result["operation_id"]
         self.assertTrue(
-            (self.root / ".imageweave" / "trash" / op_id / "files" / "a.jpg").exists()
+            (self.root / ".ldos" / "trash" / op_id / "files" / "a.jpg").exists()
         )
 
     def test_purge_removes_permanently(self) -> None:
@@ -343,7 +343,7 @@ class TrashTest(GalleryFileOperationsTestBase):
         self.assertEqual(purge["status"], "committed")
         # 物理文件与资产记录全部消失。
         self.assertFalse(
-            (self.root / ".imageweave" / "trash" / op_id / "files" / "a.jpg").exists()
+            (self.root / ".ldos" / "trash" / op_id / "files" / "a.jpg").exists()
         )
         self.assertIsNone(self.db.gallery.get_asset(asset_a["asset_id"]))
 
@@ -406,7 +406,7 @@ class RecoveryTest(GalleryFileOperationsTestBase):
     def test_recover_applying_operation(self) -> None:
         # 模拟崩溃：操作处于 applying，文件已移动但状态未推进。
         op_id = "op-crashed"
-        trash_dir = self.root / ".imageweave" / "trash" / op_id / "files"
+        trash_dir = self.root / ".ldos" / "trash" / op_id / "files"
         trash_dir.mkdir(parents=True)
         (self.root / "a.jpg").rename(trash_dir / "a.jpg")
         (self.root / "a.txt").rename(trash_dir / "a.txt")
@@ -438,7 +438,7 @@ class RecoveryTest(GalleryFileOperationsTestBase):
     def test_recover_rolling_back_operation(self) -> None:
         # 模拟崩溃在回滚中：文件在回收区，操作状态 rolling_back。
         op_id = "op-rollback"
-        trash_dir = self.root / ".imageweave" / "trash" / op_id / "files"
+        trash_dir = self.root / ".ldos" / "trash" / op_id / "files"
         trash_dir.mkdir(parents=True)
         (self.root / "a.jpg").rename(trash_dir / "a.jpg")
         (self.root / "a.txt").rename(trash_dir / "a.txt")

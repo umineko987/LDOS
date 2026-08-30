@@ -125,8 +125,8 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
                 "db.sqlite3": b"db",
                 "run.log": b"log",
                 "partial.jpg.part": b"partial",
-                ".imageweave/trash/op/hidden.jpg": b"hidden",
-                ".imageweave/copy-tmp/hidden.txt": b"hidden",
+                ".ldos/trash/op/hidden.jpg": b"hidden",
+                ".ldos/copy-tmp/hidden.txt": b"hidden",
             },
         )
         (source_root / "empty-nested").mkdir()
@@ -565,7 +565,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         self.assertEqual(outside.read_bytes(), b"outside")
         self.assertFalse((target / "alpha").exists())
         self.assertFalse(
-            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+            any(path.name.startswith(".ldos-copy-") for path in target.iterdir())
         )
 
     def test_descriptor_target_rejects_an_injected_link_before_commit(self) -> None:
@@ -602,7 +602,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         self.assertEqual(outside.read_bytes(), b"outside")
         self.assertFalse((target / "alpha").exists())
         self.assertFalse(
-            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+            any(path.name.startswith(".ldos-copy-") for path in target.iterdir())
         )
 
     def test_injected_regular_file_is_not_committed(self) -> None:
@@ -656,7 +656,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
             temporary = next(
                 path
                 for path in target.iterdir()
-                if path.name.startswith(".imageweave-copy-")
+                if path.name.startswith(".ldos-copy-")
             )
             copied = temporary / "one.jpg"
             copied.unlink()
@@ -704,7 +704,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         self.assertEqual(record["results"][0]["error_code"], "source_changed")
         self.assertFalse((target / "alpha").exists())
         self.assertFalse(
-            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+            any(path.name.startswith(".ldos-copy-") for path in target.iterdir())
         )
 
     def test_source_replacement_after_copy_does_not_claim_a_frozen_snapshot(self) -> None:
@@ -795,7 +795,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         )
         target = self.root / "target-preexisting-probe"
         target.mkdir()
-        probe = target / ".imageweave-copy-probe-deadbeef"
+        probe = target / ".ldos-copy-probe-deadbeef"
         probe.mkdir()
         sentinel = probe / "sentinel.txt"
         sentinel.write_bytes(b"external")
@@ -821,7 +821,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         fixed_uuid = module.uuid.UUID("00000000-0000-4000-8000-000000000001")
         temporary = (
             target
-            / ".imageweave-copy-00000000-0000-4000-8000-000000000001-0-deadbeef"
+            / ".ldos-copy-00000000-0000-4000-8000-000000000001-0-deadbeef"
         )
         temporary.mkdir()
         sentinel = temporary / "sentinel.txt"
@@ -867,7 +867,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         self.assertEqual(record["results"][0]["error_code"], "target_name_conflict")
         self.assertEqual((target / "alpha" / "sentinel.txt").read_bytes(), b"external")
         self.assertFalse(
-            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+            any(path.name.startswith(".ldos-copy-") for path in target.iterdir())
         )
 
     def test_unexpected_copy_failure_is_sanitized_and_cleans_temporary_output(
@@ -901,7 +901,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         self.assertEqual(record["results"][0]["error_code"], "internal_error")
         self.assertNotIn(str(self.root), "\n".join(captured.output))
         self.assertFalse(
-            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+            any(path.name.startswith(".ldos-copy-") for path in target.iterdir())
         )
 
     def test_cleanup_failure_is_reported_instead_of_claiming_cancellation(self) -> None:
@@ -943,7 +943,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
             record["results"][0]["error_code"], "temporary_cleanup_failed"
         )
         self.assertTrue(
-            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+            any(path.name.startswith(".ldos-copy-") for path in target.iterdir())
         )
 
     def test_prior_directories_remain_after_a_later_directory_fails(self) -> None:
@@ -1103,7 +1103,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         self.assertEqual(record["state"], "cancelled")
         self.assertFalse((target / "alpha").exists())
         self.assertFalse(
-            any(path.name.startswith(".imageweave-copy-") for path in target.iterdir())
+            any(path.name.startswith(".ldos-copy-") for path in target.iterdir())
         )
 
     def test_shared_source_lock_serializes_copy_with_file_mutation(self) -> None:
@@ -1266,11 +1266,11 @@ class SafeSourceRootDescriptorlessTest(unittest.TestCase):
             ):
                 root.open()
                 self.assertFalse(
-                    root.exists_regular(".imageweave-trash/op-1/files/keep.jpg")
+                    root.exists_regular(".ldos-trash/op-1/files/keep.jpg")
                 )
                 self.assertEqual(
                     root.disk_version(
-                        ".imageweave-trash/op-1/files/keep.jpg", allow_missing=True
+                        ".ldos-trash/op-1/files/keep.jpg", allow_missing=True
                     ),
                     safe_paths._MISSING_DISK_VERSION,
                 )
@@ -1295,17 +1295,17 @@ class SafeSourceRootDescriptorlessTest(unittest.TestCase):
                 )
                 self.assertFalse(
                     root.exists_directory(
-                        ".imageweave/trash/op-1/files/whole", allow_missing=True
+                        ".ldos/trash/op-1/files/whole", allow_missing=True
                     )
                 )
                 self.assertTrue(
                     root.exists_directory("whole", allow_missing=True)
                 )
                 root.move_directory(
-                    "whole", ".imageweave/trash/op-1/files/whole"
+                    "whole", ".ldos/trash/op-1/files/whole"
                 )
                 self.assertTrue(
-                    (Path(tmp) / ".imageweave/trash/op-1/files/whole/a.jpg").is_file()
+                    (Path(tmp) / ".ldos/trash/op-1/files/whole/a.jpg").is_file()
                 )
                 root.close()
 

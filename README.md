@@ -1,10 +1,18 @@
+# LDOS
+
+**LoRA Dataset Operating System**
+
+*The operating workspace for LoRA datasets.*
+
+面向 LoRA 数据集采集、整理与去重审核的一站式桌面工作流。
+
 ## 1. 获取源码
 
 需要完整检出 `gallery-dl-codeberg` 子模块：
 
 ```bash
-git clone --recurse-submodules https://github.com/KKKneko/ImageWeave.git
-cd ImageWeave
+git clone --recurse-submodules https://github.com/KKKneko/LDOS.git
+cd LDOS
 ```
 
 已有源码但子模块不完整时，在仓库根目录执行：
@@ -231,7 +239,7 @@ Windows 使用其他配置文件或端口：
 
 ```json
 {
-  "default_output_root": "/data/imageweave",
-  "allowed_output_roots": ["/data/imageweave"]
+  "default_output_root": "/data/ldos",
+  "allowed_output_roots": ["/data/ldos"]
 }
 ```

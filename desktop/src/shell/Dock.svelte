@@ -78,7 +78,7 @@
 </script>
 
 {#if !hidden}
-  <nav class="dock" data-dock aria-label="ImageWeave Dock" bind:this={dock}>
+  <nav class="dock" data-dock aria-label="LDOS Dock" bind:this={dock}>
     <div class="dock__surface">
       <div class="dock__primary" data-dock-primary role="group" aria-label="常用和运行中的应用">
         {#each model.visible as item (item.key)}

@@ -11,7 +11,7 @@
   inset: 0;
   z-index: 0;
   overflow: hidden;
-  background: var(--imageweave-background-deepest);
+  background: var(--ldos-background-deepest);
   pointer-events: none;
   user-select: none;
 }
@@ -79,11 +79,11 @@
   z-index: 80;
   display: flex;
   align-items: center;
-  height: var(--imageweave-menubar-height);
+  height: var(--ldos-menubar-height);
   padding: 0 12px;
-  border-bottom: 1px solid var(--imageweave-border-weak);
-  color: var(--imageweave-text-body);
-  background: var(--imageweave-glass-surface-default);
+  border-bottom: 1px solid var(--ldos-border-weak);
+  color: var(--ldos-text-body);
+  background: var(--ldos-glass-surface-default);
   box-shadow:
     0 14px 36px rgb(2 6 16 / 0.48),
     inset 0 1px 0 rgb(255 255 255 / 0.22),
@@ -100,7 +100,7 @@
 .menu-bar__identity {
   gap: 10px;
   margin-right: 8px;
-  color: var(--imageweave-text-heading);
+  color: var(--ldos-text-heading);
   white-space: nowrap;
 }
 
@@ -111,7 +111,7 @@
 .menu-bar__current::before {
   content: "·";
   margin-right: 10px;
-  color: var(--imageweave-text-muted);
+  color: var(--ldos-text-muted);
 }
 
 .menu-bar__menus {
@@ -133,8 +133,8 @@
 
 .menu-bar__trigger:hover,
 .menu-bar__trigger[aria-expanded="true"] {
-  border-color: var(--imageweave-border-weak);
-  background: var(--imageweave-glass-surface-button);
+  border-color: var(--ldos-border-weak);
+  background: var(--ldos-glass-surface-button);
   transform: none;
 }
 
@@ -145,12 +145,12 @@
 }
 
 .menu-bar__ready {
-  color: var(--imageweave-text-body);
+  color: var(--ldos-text-body);
   font-size: 0.75rem;
 }
 
 .menu-bar__ready > span {
-  color: var(--imageweave-state-success);
+  color: var(--ldos-state-success);
 }
 
 .menu-bar__clock {
@@ -172,10 +172,10 @@
   max-height: calc(100dvh - 110px);
   padding: 8px;
   overflow: auto;
-  border: 1px solid var(--imageweave-border-default);
-  border-radius: var(--imageweave-radius-card);
-  background: var(--imageweave-glass-surface-default);
-  box-shadow: var(--imageweave-shadow-window);
+  border: 1px solid var(--ldos-border-default);
+  border-radius: var(--ldos-radius-card);
+  background: var(--ldos-glass-surface-default);
+  box-shadow: var(--ldos-shadow-window);
 }
 
 .menu-popover__item {
@@ -184,30 +184,30 @@
   gap: 16px;
   min-height: 44px;
   border-color: transparent;
-  background: var(--imageweave-glass-surface-weak);
+  background: var(--ldos-glass-surface-weak);
   box-shadow: none;
   text-align: left;
 }
 
 .menu-popover__item:hover:not(:disabled),
 .menu-popover__item:focus-visible {
-  background: var(--imageweave-glass-surface-environment);
+  background: var(--ldos-glass-surface-environment);
   transform: none;
 }
 
 .menu-popover__item[role="menuitemcheckbox"][aria-checked="true"] {
-  border-color: var(--imageweave-accent);
+  border-color: var(--ldos-accent);
 }
 
 .menu-popover__item small {
-  color: var(--imageweave-text-muted);
+  color: var(--ldos-text-muted);
 }
 
 .window-layer {
   position: absolute;
-  top: var(--imageweave-menubar-height);
+  top: var(--ldos-menubar-height);
   right: 0;
-  bottom: calc(var(--imageweave-dock-height) + 28px);
+  bottom: calc(var(--ldos-dock-height) + 28px);
   left: 0;
   z-index: 4;
   overflow: hidden;
@@ -225,24 +225,24 @@
   min-width: 360px;
   min-height: 240px;
   overflow: hidden;
-  border: 1px solid var(--imageweave-border-default);
-  border-radius: var(--imageweave-radius-window);
-  color: var(--imageweave-text-heading);
-  background: var(--imageweave-glass-surface-default);
-  box-shadow: var(--imageweave-shadow-window);
+  border: 1px solid var(--ldos-border-default);
+  border-radius: var(--ldos-radius-window);
+  color: var(--ldos-text-heading);
+  background: var(--ldos-glass-surface-default);
+  box-shadow: var(--ldos-shadow-window);
   pointer-events: auto;
   transition:
-    border-color var(--imageweave-transition-standard),
-    border-radius var(--imageweave-transition-standard),
-    box-shadow var(--imageweave-transition-standard);
+    border-color var(--ldos-transition-standard),
+    border-radius var(--ldos-transition-standard),
+    box-shadow var(--ldos-transition-standard);
 }
 
 .app-window[data-window-focused] {
-  border-color: var(--imageweave-border-focus);
+  border-color: var(--ldos-border-focus);
   box-shadow:
     0 24px 72px rgb(1 4 12 / 0.72),
-    0 0 30px var(--imageweave-focus-glow),
-    0 0 0 1px var(--imageweave-border-button),
+    0 0 30px var(--ldos-focus-glow),
+    0 0 0 1px var(--ldos-border-button),
     inset 0 1px 0 rgb(255 255 255 / 0.25),
     inset 0 -1px 0 rgb(2 6 16 / 0.45);
 }
@@ -259,10 +259,10 @@
   flex: 0 0 auto;
   align-items: center;
   min-width: 0;
-  min-height: var(--imageweave-window-title-height);
+  min-height: var(--ldos-window-title-height);
   padding: 6px 8px;
-  border-bottom: 1px solid var(--imageweave-border-weak);
-  background: var(--imageweave-glass-surface-weak);
+  border-bottom: 1px solid var(--ldos-border-weak);
+  background: var(--ldos-glass-surface-weak);
   cursor: move;
   touch-action: none;
   user-select: none;
@@ -371,7 +371,7 @@
 }
 
 .resize-handle--right {
-  top: var(--imageweave-window-title-height);
+  top: var(--ldos-window-title-height);
   right: 0;
   bottom: 16px;
   width: 12px;
@@ -391,14 +391,14 @@
   bottom: 0;
   width: 18px;
   height: 18px;
-  border-top: 1px solid var(--imageweave-accent);
-  border-left: 1px solid var(--imageweave-accent);
+  border-top: 1px solid var(--ldos-accent);
+  border-left: 1px solid var(--ldos-accent);
   cursor: nwse-resize;
 }
 
 .resize-handle:focus-visible {
   outline-offset: -4px;
-  background: var(--imageweave-focus-glow);
+  background: var(--ldos-focus-glow);
 }
 
 .app-window[data-maximized] .resize-handle {
@@ -407,7 +407,7 @@
 
 .application-center-host {
   position: fixed;
-  inset: var(--imageweave-menubar-height) 0 0;
+  inset: var(--ldos-menubar-height) 0 0;
   z-index: 100;
   display: grid;
   overflow: auto;
@@ -419,7 +419,7 @@
 
 .application-center__backdrop {
   position: fixed;
-  inset: var(--imageweave-menubar-height) 0 0;
+  inset: var(--ldos-menubar-height) 0 0;
   z-index: 0;
   width: auto;
   min-width: 0;
@@ -441,14 +441,14 @@
   position: relative;
   z-index: 1;
   width: min(940px, calc(100vw - 64px));
-  height: min(720px, calc(100dvh - var(--imageweave-menubar-height) - 48px));
-  max-height: calc(100dvh - var(--imageweave-menubar-height) - 48px);
+  height: min(720px, calc(100dvh - var(--ldos-menubar-height) - 48px));
+  max-height: calc(100dvh - var(--ldos-menubar-height) - 48px);
   padding: 24px;
   overflow: auto;
-  border: 1px solid var(--imageweave-border-default);
-  border-radius: var(--imageweave-radius-window);
-  background: var(--imageweave-glass-surface-default);
-  box-shadow: var(--imageweave-shadow-window);
+  border: 1px solid var(--ldos-border-default);
+  border-radius: var(--ldos-radius-window);
+  background: var(--ldos-glass-surface-default);
+  box-shadow: var(--ldos-shadow-window);
 }
 
 .application-center__header {
@@ -457,7 +457,7 @@
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid var(--imageweave-border-weak);
+  border-bottom: 1px solid var(--ldos-border-weak);
 }
 
 .application-center__header p,
@@ -466,7 +466,7 @@
 }
 
 .application-center__header p {
-  color: var(--imageweave-text-body);
+  color: var(--ldos-text-body);
   font-size: 0.8rem;
 }
 
@@ -499,14 +499,14 @@
   min-height: 78px;
   padding: 12px;
   border-color: transparent;
-  background: var(--imageweave-glass-surface-weak);
+  background: var(--ldos-glass-surface-weak);
   box-shadow: none;
   text-align: left;
 }
 
 .application-center__item:hover,
 .application-center__item:focus-visible {
-  background: var(--imageweave-glass-surface-environment);
+  background: var(--ldos-glass-surface-environment);
   transform: none;
 }
 
@@ -516,9 +516,9 @@
   height: 42px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid var(--imageweave-border-weak);
-  border-radius: var(--imageweave-radius-control);
-  color: var(--imageweave-accent-highlight);
+  border: 1px solid var(--ldos-border-weak);
+  border-radius: var(--ldos-radius-control);
+  color: var(--ldos-accent-highlight);
 }
 
 .application-center__copy {
@@ -530,19 +530,76 @@
 
 .application-center__copy small {
   overflow: hidden;
-  color: var(--imageweave-text-body);
+  color: var(--ldos-text-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .availability {
   flex: 0 0 auto;
-  color: var(--imageweave-state-success);
+  color: var(--ldos-state-success);
   font-size: 0.75rem;
 }
 
 .availability[data-availability="preview"] {
-  color: var(--imageweave-state-warning);
+  color: var(--ldos-state-warning);
+}
+
+.about-dialog {
+  width: min(560px, calc(100vw - 64px));
+  height: auto;
+  max-height: calc(100dvh - var(--ldos-menubar-height) - 48px);
+}
+
+.about-dialog__body {
+  display: grid;
+  gap: 20px;
+  padding-top: 28px;
+}
+
+.about-dialog__identity {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+
+.about-dialog__mark {
+  display: grid;
+  width: 68px;
+  height: 68px;
+  flex: 0 0 68px;
+  place-items: center;
+  border: 1px solid var(--ldos-border-default);
+  border-radius: var(--ldos-radius-card);
+  color: var(--ldos-accent-highlight);
+  background: var(--ldos-glass-surface-secondary);
+  font-family: var(--ldos-font-mono);
+  font-size: 1.2rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.about-dialog__identity h2,
+.about-dialog__identity p,
+.about-dialog__tagline,
+.about-dialog__summary {
+  margin: 0;
+}
+
+.about-dialog__identity h2 {
+  font-size: 2rem;
+  letter-spacing: 0.08em;
+}
+
+.about-dialog__identity p,
+.about-dialog__summary {
+  color: var(--ldos-text-body);
+}
+
+.about-dialog__tagline {
+  color: var(--ldos-text-heading);
+  font-size: 1.08rem;
+  font-weight: 700;
 }
 
 .dock {
@@ -560,10 +617,10 @@
   gap: 6px;
   align-items: flex-end;
   padding: 8px;
-  border: 1px solid var(--imageweave-border-default);
-  border-radius: calc(var(--imageweave-radius-window) + 4px);
-  background: var(--imageweave-glass-surface-button);
-  box-shadow: var(--imageweave-shadow-window);
+  border: 1px solid var(--ldos-border-default);
+  border-radius: calc(var(--ldos-radius-window) + 4px);
+  background: var(--ldos-glass-surface-button);
+  box-shadow: var(--ldos-shadow-window);
 }
 
 .dock__primary {
@@ -589,14 +646,14 @@
 
 .dock__item:hover,
 .dock__item:focus-visible {
-  border-color: var(--imageweave-border-weak);
-  background: var(--imageweave-glass-surface-button);
+  border-color: var(--ldos-border-weak);
+  background: var(--ldos-glass-surface-button);
   transform: none;
 }
 
 .dock__item[data-dock-state="focused"] {
-  border-color: var(--imageweave-accent);
-  box-shadow: inset 0 -2px 0 var(--imageweave-accent);
+  border-color: var(--ldos-accent);
+  box-shadow: inset 0 -2px 0 var(--ldos-accent);
 }
 
 .dock__item[data-dock-state="background"]::after,
@@ -611,7 +668,7 @@
 }
 
 .dock__item[data-dock-state="background"]::after {
-  background: var(--imageweave-state-running);
+  background: var(--ldos-state-running);
 }
 
 .dock__item[data-dock-state="minimized"]::after {
@@ -632,7 +689,7 @@
 }
 
 .dock__state {
-  color: var(--imageweave-text-muted);
+  color: var(--ldos-text-muted);
   font-size: 0.62rem;
 }
 
@@ -655,10 +712,10 @@
   max-height: 420px;
   padding: 8px;
   overflow: auto;
-  border: 1px solid var(--imageweave-border-default);
-  border-radius: var(--imageweave-radius-card);
-  background: var(--imageweave-glass-surface-default);
-  box-shadow: var(--imageweave-shadow-window);
+  border: 1px solid var(--ldos-border-default);
+  border-radius: var(--ldos-radius-card);
+  background: var(--ldos-glass-surface-default);
+  box-shadow: var(--ldos-shadow-window);
 }
 
 .dock__overflow-item {
@@ -668,13 +725,13 @@
   align-items: center;
   min-height: 48px;
   border-color: transparent;
-  background: var(--imageweave-glass-surface-weak);
+  background: var(--ldos-glass-surface-weak);
   box-shadow: none;
   text-align: left;
 }
 
 .dock__overflow-item small {
-  color: var(--imageweave-text-muted);
+  color: var(--ldos-text-muted);
 }
 
 .shell-dialog {
@@ -682,12 +739,12 @@
   max-height: calc(100dvh - 28px);
   padding: 0;
   overflow: auto;
-  border: 1px solid var(--imageweave-border-default);
-  border-radius: var(--imageweave-radius-window);
-  color: var(--imageweave-text-heading);
-  background-color: var(--imageweave-glass-surface-default);
+  border: 1px solid var(--ldos-border-default);
+  border-radius: var(--ldos-radius-window);
+  color: var(--ldos-text-heading);
+  background-color: var(--ldos-glass-surface-default);
   background-image: linear-gradient(to bottom, rgb(255 255 255 / 0.12), transparent 50%);
-  box-shadow: var(--imageweave-shadow-window);
+  box-shadow: var(--ldos-shadow-window);
 }
 
 .shell-dialog::backdrop {
@@ -700,24 +757,24 @@
 }
 
 .shell-dialog__panel > p {
-  color: var(--imageweave-text-body);
+  color: var(--ldos-text-body);
 }
 
 .shell-dialog__warning {
   padding: 12px;
-  border: 2px solid var(--imageweave-state-danger);
-  border-radius: var(--imageweave-radius-control);
-  background: var(--imageweave-glass-surface-secondary);
+  border: 2px solid var(--ldos-state-danger);
+  border-radius: var(--ldos-radius-control);
+  background: var(--ldos-glass-surface-secondary);
 }
 
 .shell-dialog__warning strong,
 .shell-dialog .dangerous {
-  color: var(--imageweave-state-danger);
+  color: var(--ldos-state-danger);
 }
 
 .shell-dialog .dangerous {
   border-width: 2px;
-  border-color: var(--imageweave-state-danger);
+  border-color: var(--ldos-state-danger);
 }
 
 .shell-dialog__actions {
@@ -729,8 +786,8 @@
 
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .menu-bar {
-    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(var(--imageweave-glass-saturation));
-    backdrop-filter: blur(var(--imageweave-glass-blur-environment)) saturate(var(--imageweave-glass-saturation));
+    -webkit-backdrop-filter: blur(var(--ldos-glass-blur-environment)) saturate(var(--ldos-glass-saturation));
+    backdrop-filter: blur(var(--ldos-glass-blur-environment)) saturate(var(--ldos-glass-saturation));
   }
 
   .app-window,
@@ -739,14 +796,14 @@
   .dock__surface,
   .dock__overflow,
   .shell-dialog {
-    -webkit-backdrop-filter: blur(var(--imageweave-glass-blur-window)) saturate(var(--imageweave-glass-saturation));
-    backdrop-filter: blur(var(--imageweave-glass-blur-window)) saturate(var(--imageweave-glass-saturation));
+    -webkit-backdrop-filter: blur(var(--ldos-glass-blur-window)) saturate(var(--ldos-glass-saturation));
+    backdrop-filter: blur(var(--ldos-glass-blur-window)) saturate(var(--ldos-glass-saturation));
   }
 }
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .app-window {
-    background: var(--imageweave-fallback-window-solid) !important;
+    background: var(--ldos-fallback-window-solid) !important;
   }
 
   .menu-bar,
@@ -755,13 +812,13 @@
   .dock__surface,
   .dock__overflow,
   .shell-dialog {
-    background: var(--imageweave-fallback-elevated-solid) !important;
+    background: var(--ldos-fallback-elevated-solid) !important;
     background-image: none !important;
   }
 }
 
 .app-window[data-window-interacting] {
-  background: var(--imageweave-interaction-surface) !important;
+  background: var(--ldos-interaction-surface) !important;
   box-shadow: none !important;
   transition: none !important;
   -webkit-backdrop-filter: none !important;

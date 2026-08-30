@@ -6,7 +6,7 @@ This directory replaces the former dependency on a developer's
 - The four PNG files are original deterministic drawings produced by
   `generate.py`; no downloaded artwork or user data is included.
 - The fixture, generator, manifest, and model-output vectors are copyright
-  2026 ImageWeave contributors and licensed under the repository's
+  2026 LDOS contributors and licensed under the repository's
   [MIT License](../../../LICENSE).
 - `embeddings.json` contains only numerical outputs for these drawings. The
   SSCD and DINOv2 model weights are **not** redistributed. Their immutable

@@ -132,9 +132,9 @@ class GalleryScanTest(GalleryServiceTestBase):
                 "download.part": b"partial",
                 "sub/7.jpg": _png_bytes(8, 8),
                 "sub/7.txt": "sub tag",
-                ".imageweave/trash/op-1/x.jpg": _png_bytes(1, 1),
-                ".imageweave-copy-op/partial.jpg": _png_bytes(1, 1),
-                ".imageweave-copy-op/partial.txt": "must stay hidden",
+                ".ldos/trash/op-1/x.jpg": _png_bytes(1, 1),
+                ".ldos-copy-op/partial.jpg": _png_bytes(1, 1),
+                ".ldos-copy-op/partial.txt": "must stay hidden",
             }
         )
         stats = self.service.scan_source(source["source_id"])

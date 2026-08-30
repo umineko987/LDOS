@@ -1,4 +1,4 @@
-name: ImageWeave CI
+name: LDOS CI
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: imageweave-ci-${{ github.ref }}
+  group: ldos-ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:

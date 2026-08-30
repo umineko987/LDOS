@@ -399,7 +399,7 @@ export function createDiagnosticsRequestGate() {
 export function diagnosticsCopyText(snapshot: DiagnosticsSnapshot): string {
   validateDiagnosticsSnapshot(snapshot);
   const lines = [
-    "ImageWeave 诊断摘要（敏感信息已隐藏）",
+    "LDOS 诊断摘要（敏感信息已隐藏）",
     `连接：${snapshot.offline ? "离线" : snapshot.stale ? "部分状态未更新" : "在线"}`,
     `服务状态：${snapshot.health?.ok ? "正常" : "异常或未知"}`,
     `功能状态：${snapshot.readiness?.ready ? "已就绪" : "未完全就绪"}`,

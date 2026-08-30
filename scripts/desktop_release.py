@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble and verify the relocatable ImageWeave desktop Python backend."""
+"""Assemble and verify the relocatable LDOS desktop Python backend."""
 
 from __future__ import annotations
 
@@ -129,14 +129,14 @@ def host_target() -> str:
 
 
 def default_cache_dir() -> Path:
-    configured = os.environ.get("IMAGEWEAVE_RELEASE_CACHE")
+    configured = os.environ.get("LDOS_RELEASE_CACHE")
     if configured:
         return Path(configured).expanduser().resolve()
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     else:
         base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return base / "imageweave" / "release"
+    return base / "ldos" / "release"
 
 
 def ensure_submodule() -> str:
@@ -173,7 +173,7 @@ def download_locked_file(url: str, expected: str, destination: Path, label: str)
     destination.unlink(missing_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".part")
     temporary.unlink(missing_ok=True)
-    request = urllib.request.Request(url, headers={"User-Agent": "ImageWeave-release/1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "LDOS-release/1"})
     try:
         with urllib.request.urlopen(request, timeout=120) as response, temporary.open(
             "wb"
@@ -317,7 +317,7 @@ def extract_deb(bundle: Path, destination: Path) -> None:
                 temporary_path: Path | None = None
                 try:
                     with tempfile.NamedTemporaryFile(
-                        dir=destination.parent, prefix="imageweave-data-", delete=False
+                        dir=destination.parent, prefix="ldos-data-", delete=False
                     ) as temporary:
                         temporary_path = Path(temporary.name)
                         remaining = size
@@ -776,10 +776,10 @@ def _runtime_environment(root: Path, data_root: Path, python: Path) -> dict[str,
     env = controlled_env()
     env.update(
         {
-            "IMAGEWEAVE_DESKTOP_DISTRIBUTION": "1",
-            "IMAGEWEAVE_DESKTOP_RESOURCE_ROOT": os.fspath(root),
-            "IMAGEWEAVE_DESKTOP_DATA_ROOT": os.fspath(data_root),
-            "IMAGEWEAVE_DESKTOP_PYTHON": os.fspath(python),
+            "LDOS_DESKTOP_DISTRIBUTION": "1",
+            "LDOS_DESKTOP_RESOURCE_ROOT": os.fspath(root),
+            "LDOS_DESKTOP_DATA_ROOT": os.fspath(data_root),
+            "LDOS_DESKTOP_PYTHON": os.fspath(python),
         }
     )
     return env
@@ -813,7 +813,7 @@ def verify_runtime(root: Path) -> dict[str, Any]:
     verify_release_identity(manifest)
     python = root / manifest["runtime"]["python"]
     app = root / "app"
-    with tempfile.TemporaryDirectory(prefix="imageweave-runtime-smoke-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="ldos-runtime-smoke-") as temporary:
         temporary_root = Path(temporary)
         data_root = temporary_root / "data"
         config_root = temporary_root / "config"
@@ -824,7 +824,7 @@ def verify_runtime(root: Path) -> dict[str, Any]:
 import json, os, sys
 import cv2, fastapi, PIL, torch, torchvision, uvicorn
 import dedup_core, dedup_review_worker, gdl_backend
-expected = os.environ['IMAGEWEAVE_DESKTOP_PYTHON']
+expected = os.environ['LDOS_DESKTOP_PYTHON']
 if not os.path.samefile(sys.executable, expected):
     raise SystemExit('unexpected runtime interpreter')
 print(json.dumps({
@@ -1028,7 +1028,7 @@ def verify_bundle_tree(extracted: Path) -> dict[str, Any]:
 def verify_bundle(bundle: Path) -> dict[str, Any]:
     if not bundle.is_file():
         raise ReleaseError(f"desktop bundle is missing: {bundle}")
-    with tempfile.TemporaryDirectory(prefix="imageweave-bundle-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="ldos-bundle-") as temporary:
         extracted = extract_bundle(bundle, Path(temporary))
         result = verify_bundle_tree(extracted)
     result["bundle"] = bundle.name
@@ -1068,7 +1068,7 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
         copy_gallery_source(app)
         licenses = staging / "licenses"
         licenses.mkdir()
-        shutil.copy2(ROOT / "LICENSE", licenses / "ImageWeave-MIT.txt")
+        shutil.copy2(ROOT / "LICENSE", licenses / "LDOS-MIT.txt")
         shutil.copy2(GALLERY_SOURCE / "LICENSE", licenses / "gallery-dl-GPL-2.0.txt")
         distribution = lock["distribution"]
         runtime_license = download_locked_file(
@@ -1141,9 +1141,9 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
 
 def frontend_build_commands(npm: str) -> list[list[str]]:
     """vite 构建产物并非跨平台字节一致（原生工具链差异），因此 canonical
-    前端只在 Linux 构建一次；其余平台设置 IMAGEWEAVE_PREBUILT_FRONTEND=1
+    前端只在 Linux 构建一次；其余平台设置 LDOS_PREBUILT_FRONTEND=1
     后仅校验下载到的 canonical dist，不重新生成。"""
-    if os.environ.get("IMAGEWEAVE_PREBUILT_FRONTEND"):
+    if os.environ.get("LDOS_PREBUILT_FRONTEND"):
         return [[npm, "run", "verify:artifacts"]]
     return [[npm, "run", "build"], [npm, "run", "verify:artifacts"]]
 

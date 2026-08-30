@@ -1,4 +1,4 @@
-# ImageWeave GUI E2E
+# LDOS GUI E2E
 
 这组测试通过 Playwright 驱动 canonical Svelte GUI。浏览器访问的 API 由 `fixtures/mock-api.ts` 确定性模拟，因此可以稳定覆盖成功、空结果和错误状态，不读取或修改真实下载、凭据、代理及审核数据。
 
@@ -11,7 +11,7 @@ npx playwright install chromium   # 首次运行或 CI
 npm run test:e2e
 ```
 
-Linux 本机若已有 `/usr/bin/chromium`，配置会直接复用；也可设置 `IMAGEWEAVE_CHROMIUM_PATH=/path/to/chromium`。调试可运行 `npm run test:e2e:headed` 或 `npm run test:e2e:ui`。
+Linux 本机若已有 `/usr/bin/chromium`，配置会直接复用；也可设置 `LDOS_CHROMIUM_PATH=/path/to/chromium`。调试可运行 `npm run test:e2e:headed` 或 `npm run test:e2e:ui`。
 
 ## 测试层
 

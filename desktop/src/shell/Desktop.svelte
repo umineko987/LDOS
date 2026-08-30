@@ -9,6 +9,7 @@
   import { createHashRouter, type HashRouter, type RouteChange } from "../core/routing/hash";
   import type { DockItemProjection } from "../core/state/projections";
   import type { ShellStore } from "../core/state/shell";
+  import About from "./About.svelte";
   import ApplicationCenter from "./ApplicationCenter.svelte";
   import Dialog from "./Dialog.svelte";
   import Dock from "./Dock.svelte";
@@ -23,6 +24,7 @@
     api: ApiClient;
   } = $props();
   let desktop = $state<HTMLElement>();
+  let aboutOpen = $state(false);
   let router: HashRouter | null = null;
   let routeGeneration = 0;
   const preferences = $derived(persistence.readUiPreferences());
@@ -54,7 +56,7 @@
           return;
         }
       }
-      announce(change.malformed ? "无法识别该地址，已返回 ImageWeave 桌面。" : "已返回 ImageWeave 桌面。");
+      announce(change.malformed ? "无法识别该地址，已返回 LDOS 桌面。" : "已返回 LDOS 桌面。");
       return;
     }
 
@@ -164,6 +166,7 @@
   <MenuBar
     {shell}
     onOpenApplicationCenter={() => shell.setApplicationCenter(true)}
+    onOpenAbout={() => { aboutOpen = true; }}
     onNavigate={navigate}
     {onWindowCommand}
   />
@@ -178,6 +181,7 @@
     onToggleMaximized={toggleMaximized}
     onClose={(appId) => void closeWindow(appId)}
   />
+  <About open={aboutOpen} onClose={() => { aboutOpen = false; }} />
   <ApplicationCenter {shell} onLaunch={navigate} />
   <Dock {shell} onActivate={onDockActivate} />
   <Dialog {shell} />
@@ -188,6 +192,6 @@
 <section class="desktop-size-blocker" role="alert" aria-labelledby="desktop-size-title">
   <div>
     <h1 id="desktop-size-title">请使用更大的桌面窗口</h1>
-    <p>ImageWeave 需要至少 1180 × 720 CSS 像素。请扩大窗口后继续。</p>
+    <p>LDOS 需要至少 1180 × 720 CSS 像素。请扩大窗口后继续。</p>
   </div>
 </section>

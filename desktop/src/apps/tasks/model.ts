@@ -630,7 +630,7 @@ export function tasksErrorPresentation(error: unknown): TasksErrorPresentation {
     missing,
     targetApp: auth ? "vault" : proxy ? "proxy" : "diagnostics",
     title: missing ? "批次不存在" : conflict ? "批次状态已变化" : validation ? "批次参数无效" : "批次操作失败",
-    message: status === 0 ? "无法连接到 ImageWeave 服务。" : validation ? "服务拒绝了本次批次参数。" : "服务未接受本次批次操作。",
+    message: status === 0 ? "无法连接到 LDOS 服务。" : validation ? "服务拒绝了本次批次参数。" : "服务未接受本次批次操作。",
     nextStep: missing
       ? "请选择其他最近批次。"
       : conflict

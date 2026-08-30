@@ -27,7 +27,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 WORKSPACE_DIR = PROJECT_DIR.parent
 
 AUTH_PROXY_SCHEMES = ("http", "https", "socks4", "socks5", "socks5h")
-DESKTOP_ORIGIN_ENV = "IMAGEWEAVE_DESKTOP_ORIGIN"
+DESKTOP_ORIGIN_ENV = "LDOS_DESKTOP_ORIGIN"
 
 
 def normalize_authorization_proxy(value: Any) -> str:
@@ -183,9 +183,9 @@ def _paths(values: list[str] | None, base: Path, defaults: list[Path]) -> list[P
     return [_path(value, base, base) for value in cleaned]
 
 def _desktop_distribution_data(data: dict[str, Any]) -> dict[str, Any]:
-    resource_value = os.environ.get("IMAGEWEAVE_DESKTOP_RESOURCE_ROOT")
-    data_value = os.environ.get("IMAGEWEAVE_DESKTOP_DATA_ROOT")
-    python_value = os.environ.get("IMAGEWEAVE_DESKTOP_PYTHON")
+    resource_value = os.environ.get("LDOS_DESKTOP_RESOURCE_ROOT")
+    data_value = os.environ.get("LDOS_DESKTOP_DATA_ROOT")
+    python_value = os.environ.get("LDOS_DESKTOP_PYTHON")
     values = (resource_value, data_value, python_value)
     if not any(values):
         return data

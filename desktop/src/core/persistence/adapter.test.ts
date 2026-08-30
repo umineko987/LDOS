@@ -30,11 +30,11 @@ class MemoryStorage implements StorageLike {
 describe("the one persistence adapter", () => {
   it("keeps the five legacy keys in their exact session/local scopes", () => {
     expect(PERSISTENCE_KEYS).toEqual({
-      currentApp: "imageweave.ui:current-app",
-      activeBatch: "imageweave.ui:active-batch",
-      windowLayout: "imageweave.window-layout.v1",
-      windowPlacements: "imageweave.window-placements.v2",
-      uiPreferences: "imageweave.ui:ui-preferences",
+      currentApp: "ldos.ui:current-app",
+      activeBatch: "ldos.ui:active-batch",
+      windowLayout: "ldos.window-layout.v1",
+      windowPlacements: "ldos.window-placements.v2",
+      uiPreferences: "ldos.ui:ui-preferences",
     });
     const local = new MemoryStorage();
     const session = new MemoryStorage();

@@ -136,7 +136,7 @@ describe("Svelte Review integration", () => {
     ]) expect(css).toContain(marker);
     expect(css).not.toMatch(/^\s*(?:-webkit-)?backdrop-filter\s*:(?!\s*none)/m);
     expect(css).not.toMatch(/^\s*filter\s*:(?!\s*none)/m);
-    expect(css).not.toMatch(/--imageweave-state-[a-z-]+-surface/);
+    expect(css).not.toMatch(/--ldos-state-[a-z-]+-surface/);
     expect(css).not.toMatch(/border(?:-style)?\s*:\s*(?:double|dashed|dotted)/);
     expect(css).not.toMatch(/transition\s*:\s*(?:100|120|150|180)ms/);
   });

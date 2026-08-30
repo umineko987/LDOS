@@ -92,7 +92,7 @@
     >
       <header class="application-center__header">
         <div>
-          <p>ImageWeave</p>
+          <p>LDOS</p>
           <h2 id="application-center-title">应用中心</h2>
         </div>
         <button type="button" aria-label="关闭应用中心" onclick={() => close()}>关闭</button>

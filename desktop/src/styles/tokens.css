@@ -5,78 +5,78 @@
   color: rgb(255 255 255 / 0.84);
   background: #060a13;
 
-  --imageweave-font-display: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif;
-  --imageweave-font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  --ldos-font-display: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif;
+  --ldos-font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
 
-  --imageweave-background-deepest: #060a13;
-  --imageweave-background-default: #0b1322;
-  --imageweave-fallback-window-solid: #0b1322;
-  --imageweave-fallback-elevated-solid: #111a29;
-  --imageweave-interaction-surface: rgb(11 19 34 / 0.96);
+  --ldos-background-deepest: #060a13;
+  --ldos-background-default: #0b1322;
+  --ldos-fallback-window-solid: #0b1322;
+  --ldos-fallback-elevated-solid: #111a29;
+  --ldos-interaction-surface: rgb(11 19 34 / 0.96);
 
-  --imageweave-text-heading: rgb(255 255 255 / 1);
-  --imageweave-text-body: rgb(255 255 255 / 0.84);
-  --imageweave-text-muted: rgb(255 255 255 / 0.62);
-  --imageweave-text-fact: rgb(255 255 255 / 0.88);
+  --ldos-text-heading: rgb(255 255 255 / 1);
+  --ldos-text-body: rgb(255 255 255 / 0.84);
+  --ldos-text-muted: rgb(255 255 255 / 0.62);
+  --ldos-text-fact: rgb(255 255 255 / 0.88);
 
-  --imageweave-accent: #e4b863;
-  --imageweave-accent-highlight: #f3dca8;
-  --imageweave-focus-glow: rgb(228 184 99 / 0.18);
-  --imageweave-state-danger: #ff8f88;
-  --imageweave-state-warning: #f3c66d;
-  --imageweave-state-success: #72d6a5;
-  --imageweave-state-running: #8cc8ff;
+  --ldos-accent: #e4b863;
+  --ldos-accent-highlight: #f3dca8;
+  --ldos-focus-glow: rgb(228 184 99 / 0.18);
+  --ldos-state-danger: #ff8f88;
+  --ldos-state-warning: #f3c66d;
+  --ldos-state-success: #72d6a5;
+  --ldos-state-running: #8cc8ff;
 
-  --imageweave-glass-surface-weak: rgb(255 255 255 / 0.04);
-  --imageweave-glass-surface-secondary: rgb(255 255 255 / 0.05);
-  --imageweave-glass-surface-input: rgb(255 255 255 / 0.06);
-  --imageweave-glass-surface-default: rgb(255 255 255 / 0.08);
-  --imageweave-glass-surface-button: rgb(255 255 255 / 0.10);
-  --imageweave-glass-surface-environment: rgb(255 255 255 / 0.12);
-  --imageweave-glass-surface-hover: rgb(255 255 255 / 0.15);
+  --ldos-glass-surface-weak: rgb(255 255 255 / 0.04);
+  --ldos-glass-surface-secondary: rgb(255 255 255 / 0.05);
+  --ldos-glass-surface-input: rgb(255 255 255 / 0.06);
+  --ldos-glass-surface-default: rgb(255 255 255 / 0.08);
+  --ldos-glass-surface-button: rgb(255 255 255 / 0.10);
+  --ldos-glass-surface-environment: rgb(255 255 255 / 0.12);
+  --ldos-glass-surface-hover: rgb(255 255 255 / 0.15);
 
-  --imageweave-border-weak: rgb(255 255 255 / 0.10);
-  --imageweave-border-default: rgb(255 255 255 / 0.15);
-  --imageweave-border-button: rgb(255 255 255 / 0.20);
-  --imageweave-border-focus: rgb(255 255 255 / 0.35);
-  --imageweave-border-width: 1px;
-  --imageweave-border-strong-width: 2px;
-  --imageweave-text-primary: rgb(255 255 255 / 1);
-  --imageweave-text-secondary: rgb(255 255 255 / 0.62);
-  --imageweave-text-code: rgb(255 255 255 / 0.88);
-  --imageweave-state-disabled: rgb(255 255 255 / 0.42);
-  --imageweave-glass-blur-environment: 40px;
-  --imageweave-glass-blur-window: 60px;
-  --imageweave-glass-saturation: 180%;
-  --imageweave-radius-window: 24px;
-  --imageweave-radius-card: 24px;
-  --imageweave-radius-control: 16px;
-  --imageweave-radius-pill: 999px;
+  --ldos-border-weak: rgb(255 255 255 / 0.10);
+  --ldos-border-default: rgb(255 255 255 / 0.15);
+  --ldos-border-button: rgb(255 255 255 / 0.20);
+  --ldos-border-focus: rgb(255 255 255 / 0.35);
+  --ldos-border-width: 1px;
+  --ldos-border-strong-width: 2px;
+  --ldos-text-primary: rgb(255 255 255 / 1);
+  --ldos-text-secondary: rgb(255 255 255 / 0.62);
+  --ldos-text-code: rgb(255 255 255 / 0.88);
+  --ldos-state-disabled: rgb(255 255 255 / 0.42);
+  --ldos-glass-blur-environment: 40px;
+  --ldos-glass-blur-window: 60px;
+  --ldos-glass-saturation: 180%;
+  --ldos-radius-window: 24px;
+  --ldos-radius-card: 24px;
+  --ldos-radius-control: 16px;
+  --ldos-radius-pill: 999px;
 
-  --imageweave-shadow-window:
+  --ldos-shadow-window:
     0 16px 48px rgb(3 7 18 / 0.55),
     0 0 0 1px rgb(255 255 255 / 0.08),
     inset 0 1px 0 rgb(255 255 255 / 0.25),
     inset 0 -1px 0 rgb(2 6 16 / 0.35);
-  --imageweave-shadow-control:
+  --ldos-shadow-control:
     0 4px 16px rgb(3 7 18 / 0.45),
     inset 0 1px 0 rgb(255 255 255 / 0.25),
     inset 0 -1px 0 rgb(2 6 16 / 0.30);
 
-  --imageweave-motion-duration: 500ms;
-  --imageweave-motion-easing: cubic-bezier(0.16, 1, 0.3, 1);
-  --imageweave-transition-standard: var(--imageweave-motion-duration) var(--imageweave-motion-easing);
-  --imageweave-menubar-height: 32px;
-  --imageweave-dock-height: 72px;
-  --imageweave-window-title-height: 44px;
+  --ldos-motion-duration: 500ms;
+  --ldos-motion-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --ldos-transition-standard: var(--ldos-motion-duration) var(--ldos-motion-easing);
+  --ldos-menubar-height: 32px;
+  --ldos-dock-height: 72px;
+  --ldos-window-title-height: 44px;
 }
 
 @media (prefers-contrast: more) {
   :root {
-    --imageweave-text-body: rgb(255 255 255 / 1);
-    --imageweave-text-muted: rgb(255 255 255 / 0.80);
-    --imageweave-border-weak: rgb(255 255 255 / 0.20);
-    --imageweave-border-default: rgb(255 255 255 / 0.35);
-    --imageweave-border-button: rgb(255 255 255 / 0.35);
+    --ldos-text-body: rgb(255 255 255 / 1);
+    --ldos-text-muted: rgb(255 255 255 / 0.80);
+    --ldos-border-weak: rgb(255 255 255 / 0.20);
+    --ldos-border-default: rgb(255 255 255 / 0.35);
+    --ldos-border-button: rgb(255 255 255 / 0.35);
   }
 }

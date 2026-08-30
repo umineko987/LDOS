@@ -8,8 +8,8 @@
 - 操作日志先落库（planned）再动磁盘（applying → committed）；
 - 任一项失败回滚整组（rolling_back → rolled_back）；
 - 回滚本身失败进入 recovery_required 并锁定来源；
-- trash 布局遵循 §3.5：`.imageweave/trash/<op>/files/<原相对路径>` + operation.json；
-- 资产 ID 在 ImageWeave 自己的 rename/trash/restore 中保持稳定。
+- trash 布局遵循 §3.5：`.ldos/trash/<op>/files/<原相对路径>` + operation.json；
+- 资产 ID 在 LDOS 自己的 rename/trash/restore 中保持稳定。
 """
 
 from __future__ import annotations
@@ -803,7 +803,7 @@ class GalleryFileOperations:
                 )
             self._bump_source_content_version(conn, item["asset_id"], now)
 
-    # trash：移入 `.imageweave/trash/<op>/files/…` + lifecycle='trashed'。
+    # trash：移入 `.ldos/trash/<op>/files/…` + lifecycle='trashed'。
 
     def _write_trash_manifest(
         self, safe_root: SafeSourceRoot, operation_id: str, item: Mapping[str, Any]

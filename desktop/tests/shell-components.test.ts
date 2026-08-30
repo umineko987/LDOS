@@ -6,6 +6,7 @@ import { createPersistenceAdapter } from "../src/core/persistence/adapter";
 import { createPersistenceService } from "../src/core/persistence/service";
 import type { PollingService } from "../src/core/polling/service";
 import { createShellStore } from "../src/core/state/shell";
+import About from "../src/shell/About.svelte";
 import Desktop from "../src/shell/Desktop.svelte";
 
 const componentSources = import.meta.glob<string>("../src/shell/*.svelte", {
@@ -53,6 +54,13 @@ describe("five-layer Svelte OS shell", () => {
     expect(body).toContain('data-availability="ready"');
   });
 
+  it("renders the LDOS identity and tagline in About", () => {
+    const body = render(About, { props: { open: true, onClose: () => {} } }).body;
+    expect(body).toContain("data-about-dialog");
+    expect(body).toContain("LoRA Dataset Operating System");
+    expect(body).toContain("The operating workspace for LoRA datasets.");
+  });
+
   it("does not render minimized or closed windows into the DOM", async () => {
     const { shell, persistence } = runtime();
     shell.openApplication("crawl");
@@ -80,7 +88,7 @@ describe("five-layer Svelte OS shell", () => {
     shell.openApplication("crawl");
     const backgroundMaximized = renderDesktop(shell, persistence);
     expect(backgroundMaximized).toContain('data-window-workspace="normal"');
-    expect(backgroundMaximized).toContain('data-dock="" aria-label="ImageWeave Dock"');
+    expect(backgroundMaximized).toContain('data-dock="" aria-label="LDOS Dock"');
   });
 
   it("uses one ARIA dialog for the unified unsaved boundary", async () => {
@@ -98,12 +106,13 @@ describe("five-layer Svelte OS shell", () => {
 
   it("keeps keyboard, focus-return, and listener cleanup paths in the components", () => {
     const menu = componentSources["../src/shell/MenuBar.svelte"];
+    const about = componentSources["../src/shell/About.svelte"];
     const center = componentSources["../src/shell/ApplicationCenter.svelte"];
     const dock = componentSources["../src/shell/Dock.svelte"];
     const dialog = componentSources["../src/shell/Dialog.svelte"];
     const layer = componentSources["../src/shell/WindowLayer.svelte"];
     const appWindow = componentSources["../src/shell/AppWindow.svelte"];
-    for (const source of [menu, center, dock, dialog]) {
+    for (const source of [menu, about, center, dock, dialog]) {
       expect(source).toContain("Escape");
       expect(source).toContain("onkeydown");
       expect(source).toContain("restoreFocus");
@@ -111,6 +120,7 @@ describe("five-layer Svelte OS shell", () => {
     expect(menu).toContain("ArrowDown");
     expect(menu).toContain("isActivationKey");
     expect(center).toContain("trappedTabIndex");
+    expect(about).toContain("trappedTabIndex");
     expect(dialog).toContain("trappedTabIndex");
     expect(dock).toContain("ArrowLeft");
     expect(menu).toContain('removeEventListener("keydown"');

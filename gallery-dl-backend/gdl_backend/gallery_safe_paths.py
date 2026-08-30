@@ -85,7 +85,7 @@ class GalleryFilesystemLocks:
                     else:
                         self._entries[key] = (lock, count - 1)
 
-_MISSING_DISK_VERSION = hashlib.sha256(b"imageweave:missing:v1").hexdigest()
+_MISSING_DISK_VERSION = hashlib.sha256(b"ldos:missing:v1").hexdigest()
 _OPEN_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NO_FOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _CLOSE_ON_EXEC = getattr(os, "O_CLOEXEC", 0)
@@ -152,7 +152,7 @@ def _is_reparse_entry(entry: os.DirEntry[str]) -> bool:
 
 def _opaque_disk_version(metadata: os.stat_result, payload_digest: bytes) -> str:
     digest = hashlib.sha256()
-    digest.update(b"imageweave:disk-version:v1\0")
+    digest.update(b"ldos:disk-version:v1\0")
     for value in (
         metadata.st_dev,
         metadata.st_ino,
@@ -532,7 +532,7 @@ class SafeSourceRoot:
                 relative_path, allow_missing_leaf=True, create_parents=True
             )
             temporary = target.with_name(
-                f".{target.name}.imageweave-{secrets.token_hex(8)}.tmp"
+                f".{target.name}.ldos-{secrets.token_hex(8)}.tmp"
             )
             try:
                 with temporary.open("xb") as handle:
@@ -546,7 +546,7 @@ class SafeSourceRoot:
                 temporary.unlink(missing_ok=True)
         else:
             with self._parent_fd(relative_path, create=True) as (parent_fd, name):
-                temporary_name = f".{name}.imageweave-{secrets.token_hex(8)}.tmp"
+                temporary_name = f".{name}.ldos-{secrets.token_hex(8)}.tmp"
                 descriptor = -1
                 try:
                     descriptor = os.open(
@@ -589,7 +589,7 @@ class SafeSourceRoot:
         parts = validate_relative_path(relative_directory, allow_root=True)
         if not parts:
             return
-        marker = "/".join((*parts, ".imageweave-directory-marker"))
+        marker = "/".join((*parts, ".ldos-directory-marker"))
         if not _HAS_DIR_FD:
             target = self.path
             for component in parts:
@@ -953,7 +953,7 @@ class SafeSourceRoot:
             )
             return
         if parts:
-            marker = f"{normalized}/.imageweave-subtree-anchor"
+            marker = f"{normalized}/.ldos-subtree-anchor"
             with self._parent_fd(marker) as (directory_fd, _marker_name):
                 start_fd = os.dup(directory_fd)
         else:
@@ -1044,9 +1044,9 @@ class SafeSourceRoot:
         while stack:
             current_relative, current_name = stack.pop()
             marker = (
-                f"{current_relative}/.imageweave-copy-scan-anchor"
+                f"{current_relative}/.ldos-copy-scan-anchor"
                 if current_relative
-                else ".imageweave-copy-scan-anchor"
+                else ".ldos-copy-scan-anchor"
             )
             absolute = self._fallback_path(marker, allow_missing_leaf=True).parent
             children: list[tuple[str, str]] = []

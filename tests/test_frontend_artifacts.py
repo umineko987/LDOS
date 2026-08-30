@@ -50,7 +50,7 @@ class FrontendWheelArtifactTests(unittest.TestCase):
             f"gdl_backend/webui_dist/{relative}": content
             for relative, content in self.files.items()
         }
-        record_name = "imageweave_backend-0.dist-info/RECORD"
+        record_name = "ldos_backend-0.dist-info/RECORD"
         output = io.StringIO(newline="")
         writer = csv.writer(output, lineterminator="\n")
         for member, content in sorted(members.items()):

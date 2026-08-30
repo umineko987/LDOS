@@ -240,11 +240,11 @@ impl LaunchSpec {
             .args(["-m", "gdl_backend", "--config"])
             .arg(&self.config_path)
             .env("GDL_BACKEND_PARENT_PIPE", "1")
-            .env("IMAGEWEAVE_DESKTOP_DISTRIBUTION", "1")
+            .env("LDOS_DESKTOP_DISTRIBUTION", "1")
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
         #[cfg(debug_assertions)]
-        command.env("IMAGEWEAVE_DESKTOP_ORIGIN", "http://localhost:1420");
+        command.env("LDOS_DESKTOP_ORIGIN", "http://localhost:1420");
         command.envs(self.environment.iter().map(|(key, value)| (key, value)));
         command
     }
@@ -286,7 +286,7 @@ impl BackendManager {
         let manager = self.clone();
         let thread_app = app.clone();
         if thread::Builder::new()
-            .name("imageweave-backend-monitor".into())
+            .name("ldos-backend-monitor".into())
             .spawn(move || manager.run(thread_app))
             .is_err()
         {
@@ -540,7 +540,7 @@ mod tests {
             config_path: PathBuf::from("backend/config.json"),
             endpoint: Endpoint::new("127.0.0.1", 8787).expect("endpoint"),
             environment: vec![(
-                OsString::from("IMAGEWEAVE_DESKTOP_PYTHON"),
+                OsString::from("LDOS_DESKTOP_PYTHON"),
                 OsString::from("backend/runtime/python/bin/python3.13"),
             )],
         };
@@ -558,17 +558,17 @@ mod tests {
             name == "GDL_BACKEND_PARENT_PIPE" && value == Some(std::ffi::OsStr::new("1"))
         }));
         assert!(command.get_envs().any(|(name, value)| {
-            name == "IMAGEWEAVE_DESKTOP_DISTRIBUTION" && value == Some(std::ffi::OsStr::new("1"))
+            name == "LDOS_DESKTOP_DISTRIBUTION" && value == Some(std::ffi::OsStr::new("1"))
         }));
         assert!(command.get_envs().any(|(name, value)| {
-            name == "IMAGEWEAVE_DESKTOP_PYTHON"
+            name == "LDOS_DESKTOP_PYTHON"
                 && value
                     == Some(std::ffi::OsStr::new(
                         "backend/runtime/python/bin/python3.13",
                     ))
         }));
         assert!(command.get_envs().any(|(name, value)| {
-            name == "IMAGEWEAVE_DESKTOP_ORIGIN"
+            name == "LDOS_DESKTOP_ORIGIN"
                 && value == Some(std::ffi::OsStr::new("http://localhost:1420"))
         }));
     }

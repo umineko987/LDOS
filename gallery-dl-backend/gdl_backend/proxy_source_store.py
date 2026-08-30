@@ -166,7 +166,7 @@ def configured_revision_for(
     """使用完整 SHA-256，避免截断 revision 导致错误等同。"""
 
     return hashlib.sha256(
-        b"imageweave-managed-proxy-sources-revision-v1\0"
+        b"ldos-managed-proxy-sources-revision-v1\0"
         + _snapshot_payload(subscription_urls, node_file, inline_nodes)
     ).hexdigest()
 
@@ -458,7 +458,7 @@ def read_proxy_node_file(
 
 def _source_id(prefix: Literal["sub", "node"], value: str) -> str:
     digest = hashlib.sha256(
-        f"imageweave-proxy-source-id-v1:{prefix}\0{value}".encode("utf-8")
+        f"ldos-proxy-source-id-v1:{prefix}\0{value}".encode("utf-8")
     ).hexdigest()
     return f"{prefix}_{digest}"
 

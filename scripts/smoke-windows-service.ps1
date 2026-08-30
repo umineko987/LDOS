@@ -16,7 +16,7 @@ $backendPython = Join-Path $backendDir ".venv\Scripts\python.exe"
 $dedupPython = Join-Path $root ".venv\Scripts\python.exe"
 $launcher = Join-Path $backendDir "run_backend.ps1"
 $exampleConfig = Join-Path $backendDir "config.example.json"
-$workDir = Join-Path ([System.IO.Path]::GetTempPath()) ("imageweave-windows-service-smoke." + [Guid]::NewGuid().ToString("N"))
+$workDir = Join-Path ([System.IO.Path]::GetTempPath()) ("ldos-windows-service-smoke." + [Guid]::NewGuid().ToString("N"))
 
 foreach ($required in @($backendPython, $dedupPython, $launcher, $exampleConfig)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {

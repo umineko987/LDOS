@@ -2,7 +2,7 @@
 
 本模块只包含无 I/O 的确定性合同函数：受支持扩展名、图片/TXT 配对、
 严格 UTF-8 解码与客观 TXT 状态、跨平台自然排序键、来源根目录规范化与
-路径安全、`.imageweave` 保留目录与回收区布局。扫描器、repository 和
+路径安全、`.ldos` 保留目录与回收区布局。扫描器、repository 和
 service 阶段（G1+）必须复用这里的定义，不得在 API 层重复实现。
 """
 
@@ -37,8 +37,8 @@ TXT_STATES: frozenset[str] = frozenset(
     }
 )
 
-IMAGEWEAVE_RESERVED_DIR = ".imageweave"
-IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES = (".imageweave-copy-",)
+LDOS_RESERVED_DIR = ".ldos"
+LDOS_TEMP_DIRECTORY_PREFIXES = (".ldos-copy-",)
 TRASH_DIR_NAME = "trash"
 
 _UTF8_BOM = b"\xef\xbb\xbf"
@@ -165,10 +165,10 @@ def is_safe_relative_path(relative_path: str | PurePosixPath) -> bool:
     return True
 
 
-def is_imageweave_reserved_path(relative_path: str | PurePosixPath) -> bool:
-    """任何一层等于 `.imageweave` 的相对路径都属于保留区（含自身）。"""
+def is_ldos_reserved_path(relative_path: str | PurePosixPath) -> bool:
+    """任何一层等于 `.ldos` 的相对路径都属于保留区（含自身）。"""
     text = str(relative_path)
-    return IMAGEWEAVE_RESERVED_DIR in PurePosixPath(text).parts
+    return LDOS_RESERVED_DIR in PurePosixPath(text).parts
 
 
 def canonical_root_key(path: str | Path) -> str:
@@ -207,7 +207,7 @@ def trash_files_relative_dir(operation_id: str) -> PurePosixPath:
     """来源根目录下回收操作目录中的 files/ 相对路径（§3.5）。"""
     if not operation_id or "/" in operation_id or "\\" in operation_id or ".." in operation_id:
         raise ValueError("invalid_operation_id")
-    return PurePosixPath(IMAGEWEAVE_RESERVED_DIR) / TRASH_DIR_NAME / operation_id / "files"
+    return PurePosixPath(LDOS_RESERVED_DIR) / TRASH_DIR_NAME / operation_id / "files"
 
 
 def trash_operation_manifest_relative_path(operation_id: str) -> PurePosixPath:
@@ -215,7 +215,7 @@ def trash_operation_manifest_relative_path(operation_id: str) -> PurePosixPath:
     if not operation_id or "/" in operation_id or "\\" in operation_id or ".." in operation_id:
         raise ValueError("invalid_operation_id")
     return (
-        PurePosixPath(IMAGEWEAVE_RESERVED_DIR)
+        PurePosixPath(LDOS_RESERVED_DIR)
         / TRASH_DIR_NAME
         / operation_id
         / "operation.json"

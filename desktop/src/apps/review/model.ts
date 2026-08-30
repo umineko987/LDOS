@@ -653,7 +653,7 @@ export function reviewErrorPresentation(error: unknown): ReviewErrorPresentation
     conflict,
     missing,
     title: missing ? "审核内容不存在" : conflict ? "审核状态已变化" : "审核请求失败",
-    message: safeStatus === 0 ? "无法连接到 ImageWeave 服务。" : "服务未接受本次审核操作。",
+    message: safeStatus === 0 ? "无法连接到 LDOS 服务。" : "服务未接受本次审核操作。",
     nextStep: missing
       ? "返回已结束批次列表并选择仍存在的批次。"
       : conflict

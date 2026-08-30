@@ -31,7 +31,7 @@ done
     exit 1
 }
 
-work_dir="$(mktemp -d "${TMPDIR:-/tmp}/imageweave-lock.XXXXXX")"
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/ldos-lock.XXXXXX")"
 cleanup() {
     rm -rf -- "$work_dir"
 }

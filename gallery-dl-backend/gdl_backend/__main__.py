@@ -24,7 +24,7 @@ def _watch_parent_pipe(server: uvicorn.Server, stream: BinaryIO) -> None:
 def _run_server(settings: AppSettings, parent_stream: BinaryIO | None = None) -> None:
     app = create_app(
         settings,
-        include_webui=os.environ.get("IMAGEWEAVE_DESKTOP_DISTRIBUTION") != "1",
+        include_webui=os.environ.get("LDOS_DESKTOP_DISTRIBUTION") != "1",
     )
     options = {
         "host": settings.server.host,

@@ -5,9 +5,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const RESOURCE_ENV: &str = "IMAGEWEAVE_DESKTOP_RESOURCE_ROOT";
-const DATA_ENV: &str = "IMAGEWEAVE_DESKTOP_DATA_ROOT";
-const PYTHON_ENV: &str = "IMAGEWEAVE_DESKTOP_PYTHON";
+const RESOURCE_ENV: &str = "LDOS_DESKTOP_RESOURCE_ROOT";
+const DATA_ENV: &str = "LDOS_DESKTOP_DATA_ROOT";
+const PYTHON_ENV: &str = "LDOS_DESKTOP_PYTHON";
 
 fn packaged_backend_root(resource_dir: &Path, windows: bool) -> PathBuf {
     let standard = resource_dir.join("backend");
@@ -18,7 +18,7 @@ fn packaged_backend_root(resource_dir: &Path, windows: bool) -> PathBuf {
     let appimage = resource_dir
         .parent()
         .and_then(Path::parent)
-        .map(|usr| usr.join("share/ImageWeave/backend"));
+        .map(|usr| usr.join("share/LDOS/backend"));
     if let Some(appimage) = appimage {
         if appimage.join("release-manifest.json").is_file() {
             return appimage;
@@ -201,7 +201,7 @@ mod tests {
             .expect("clock")
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "imageweave-distribution-{label}-{}-{nonce}",
+            "ldos-distribution-{label}-{}-{nonce}",
             std::process::id()
         ))
     }
@@ -284,8 +284,8 @@ mod tests {
     #[test]
     fn appimage_uses_backend_payload_outside_usr_lib() {
         let root = test_root("appimage-backend");
-        let resource_dir = root.join("usr/lib/ImageWeave");
-        let appimage_root = root.join("usr/share/ImageWeave");
+        let resource_dir = root.join("usr/lib/LDOS");
+        let appimage_root = root.join("usr/share/LDOS");
         let config = root.join("config");
         let data = root.join("data");
         fake_resources(&appimage_root, false);

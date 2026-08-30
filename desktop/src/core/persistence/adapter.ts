@@ -1,9 +1,9 @@
 export const PERSISTENCE_KEYS = Object.freeze({
-  currentApp: "imageweave.ui:current-app",
-  activeBatch: "imageweave.ui:active-batch",
-  windowLayout: "imageweave.window-layout.v1",
-  windowPlacements: "imageweave.window-placements.v2",
-  uiPreferences: "imageweave.ui:ui-preferences",
+  currentApp: "ldos.ui:current-app",
+  activeBatch: "ldos.ui:active-batch",
+  windowLayout: "ldos.window-layout.v1",
+  windowPlacements: "ldos.window-placements.v2",
+  uiPreferences: "ldos.ui:ui-preferences",
 } as const);
 
 export type PersistenceKey = typeof PERSISTENCE_KEYS[keyof typeof PERSISTENCE_KEYS];

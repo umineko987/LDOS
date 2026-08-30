@@ -907,7 +907,7 @@ def _print_doctor(snapshot: dict[str, Any]) -> None:
         "optional_missing": "可选缺失",
         "optional_warning": "提示",
     }
-    print("ImageWeave Linux doctor")
+    print("LDOS Linux doctor")
     for name, item in snapshot["components"].items():
         label = labels.get(str(item.get("status")), str(item.get("status")))
         print(f"[{label}] {name}: {item.get('summary', '')}")
@@ -925,7 +925,7 @@ def _print_doctor(snapshot: dict[str, Any]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="ImageWeave Linux 快速部署诊断")
+    parser = argparse.ArgumentParser(description="LDOS Linux 快速部署诊断")
     parser.add_argument("--config", type=Path, required=True, help="后端 config.json")
     parser.add_argument("--json", action="store_true", help="输出结构化 JSON")
     args = parser.parse_args()

@@ -4,12 +4,12 @@
     "linux": {
       "deb": {
         "files": {
-          "/usr/lib/ImageWeave/backend": "release/backend"
+          "/usr/lib/LDOS/backend": "release/backend"
         }
       },
       "appimage": {
         "files": {
-          "/usr/share/ImageWeave/backend": "release/backend"
+          "/usr/share/LDOS/backend": "release/backend"
         }
       }
     }

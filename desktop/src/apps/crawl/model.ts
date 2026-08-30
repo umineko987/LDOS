@@ -721,7 +721,7 @@ export function crawlErrorPresentation(error: unknown): CrawlErrorPresentation {
     requestId,
     targetApp: authentication ? "vault" : proxy ? "proxy" : "diagnostics",
     title: status === 409 ? "当前状态不允许此操作" : status === 422 ? "采集设置有误" : "采集请求失败",
-    message: status === 0 ? "无法连接到 ImageWeave 服务。" : "服务未接受本次请求。",
+    message: status === 0 ? "无法连接到 LDOS 服务。" : "服务未接受本次请求。",
     nextStep: authentication
       ? "打开授权管理，检查对应站点的授权后重试。"
       : proxy

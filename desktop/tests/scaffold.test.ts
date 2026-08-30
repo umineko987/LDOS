@@ -8,7 +8,7 @@ describe("desktop composition root", () => {
     const { body } = render(App);
 
     expect(body).toContain('data-startup-phase="starting"');
-    expect(body).toContain("ImageWeave Desktop");
+    expect(body).toContain("LDOS Desktop");
     expect(body).toContain("正在启动本地服务");
     expect(body).not.toContain("bootstrap-menu");
     expect(body).not.toContain("bootstrap-dock");

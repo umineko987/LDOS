@@ -141,7 +141,7 @@ class GalleryDirectoryExportApiTest(unittest.TestCase):
         self.assertNotIn(str(self.target), json.dumps(error))
         self.assertEqual(list((self.target / "alpha").iterdir()), [])
         self.assertFalse(
-            any(path.name.startswith(".imageweave-copy-") for path in self.target.iterdir())
+            any(path.name.startswith(".ldos-copy-") for path in self.target.iterdir())
         )
 
     def test_idempotency_key_is_optional_validated_and_process_local(self) -> None:
@@ -219,7 +219,7 @@ class GalleryDirectoryExportApiTest(unittest.TestCase):
         self.assertEqual(record["state"], "cancelled")
         self.assertFalse((self.target / "alpha").exists())
         self.assertFalse(
-            any(path.name.startswith(".imageweave-copy-") for path in self.target.iterdir())
+            any(path.name.startswith(".ldos-copy-") for path in self.target.iterdir())
         )
 
     def test_target_inside_selected_directory_is_rejected(self) -> None:

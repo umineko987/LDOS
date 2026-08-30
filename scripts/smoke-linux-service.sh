@@ -6,8 +6,8 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(CDPATH= cd -- "$script_dir/.." && pwd)"
 backend_dir="$root_dir/gallery-dl-backend"
 python_bin="$backend_dir/.venv/bin/python"
-port="${IMAGEWEAVE_SMOKE_PORT:-18787}"
-work_dir="$(mktemp -d "${TMPDIR:-/tmp}/imageweave-service-smoke.XXXXXX")"
+port="${LDOS_SMOKE_PORT:-18787}"
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/ldos-service-smoke.XXXXXX")"
 server_pid=""
 
 cleanup() {

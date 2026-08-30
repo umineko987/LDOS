@@ -21,7 +21,7 @@ from .gallery_catalog import (
 )
 
 
-GALLERY_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "imageweave:gallery")
+GALLERY_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "ldos:gallery")
 
 GALLERY_PAGE_DEFAULT_LIMIT = 100
 GALLERY_PAGE_MAX_LIMIT = 200

@@ -379,7 +379,7 @@ def _write_markdown(
     target: str, components: list[dict[str, Any]], destination: Path
 ) -> None:
     lines = [
-        "# ImageWeave desktop third-party notices",
+        "# LDOS desktop third-party notices",
         "",
         f"Target: `{target}`",
         "",

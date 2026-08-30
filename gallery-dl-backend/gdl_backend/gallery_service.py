@@ -1,7 +1,7 @@
 """图库目录服务：来源生命周期、递归扫描与异步扫描任务（§3.1–§3.3、§6.1）。
 
 `GalleryCatalogService` 组合 `GalleryRepository` 与磁盘扫描器。扫描遵守
-G0 合同：跳过符号链接、`.imageweave` 保留区与临时下载文件；只索引
+G0 合同：跳过符号链接、`.ldos` 保留区与临时下载文件；只索引
 受支持扩展名；TXT 只接受严格 UTF-8（允许 BOM 读取）；图片元数据经
 Pillow 有界探测，失败进入固定 error_code，不外泄原始异常文本。
 """
@@ -24,8 +24,8 @@ from ._database_gallery_repository import (
     GalleryVersionConflict,
 )
 from .gallery_catalog import (
-    IMAGEWEAVE_RESERVED_DIR,
-    IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES,
+    LDOS_RESERVED_DIR,
+    LDOS_TEMP_DIRECTORY_PREFIXES,
     classify_txt_state,
     decode_txt_bytes,
     is_supported_image_name,
@@ -835,8 +835,8 @@ class GalleryCatalogService:
             skipped = {"temporary": 0, "unsupported": 0}
             try:
                 for directory in safe_root.iter_tree(
-                    excluded_directories=frozenset({IMAGEWEAVE_RESERVED_DIR}),
-                    excluded_directory_prefixes=IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES,
+                    excluded_directories=frozenset({LDOS_RESERVED_DIR}),
+                    excluded_directory_prefixes=LDOS_TEMP_DIRECTORY_PREFIXES,
                 ):
                     relative_path = directory.relative_path
                     directories.append(

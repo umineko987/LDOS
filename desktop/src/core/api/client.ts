@@ -221,7 +221,7 @@ export function createApiClient(
       response = await fetchImpl(url, init);
     } catch (error) {
       if (isAbortError(error)) throw error;
-      throw new ApiError({ code: "network_error", message: "无法连接到 ImageWeave 服务" });
+      throw new ApiError({ code: "network_error", message: "无法连接到 LDOS 服务" });
     }
 
     const responseRequestId = normalizeRequestId(response.headers.get("X-Request-ID"));

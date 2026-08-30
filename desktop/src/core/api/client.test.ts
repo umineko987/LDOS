@@ -158,7 +158,7 @@ describe("API client", () => {
     await expect(networkClient.get("/offline", { requestId: "offline-1" })).rejects.toMatchObject({
       status: 0,
       code: "network_error",
-      message: "无法连接到 ImageWeave 服务",
+      message: "无法连接到 LDOS 服务",
     });
   });
 

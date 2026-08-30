@@ -21,7 +21,7 @@ async function openCurrentGalleryDirectoryExport(
   const directoryExport = gallery.getByRole("dialog", { name: "导出完整目录" });
   await expect(directoryExport).toBeVisible();
   await expect(directoryExport).toBeFocused();
-  await directoryExport.getByLabel("目标路径").fill("/tmp/imageweave-e2e-output");
+  await directoryExport.getByLabel("目标路径").fill("/tmp/ldos-e2e-output");
   return directoryExport;
 }
 
@@ -276,7 +276,7 @@ test.describe("可用应用关键旅程", () => {
 
     await window.getByRole("button", { name: "复制诊断摘要" }).click();
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clipboard).toContain("ImageWeave");
+    expect(clipboard).toContain("LDOS");
     expect(clipboard).not.toContain("password");
 
     await window.getByRole("button", { name: "打开批次管理" }).click();
@@ -331,7 +331,7 @@ test.describe("可用应用关键旅程", () => {
     await directoryExport.getByRole("button", { name: "添加此完整目录" }).click();
     await directoryExport.getByRole("button", { name: "返回导出设置" }).click();
     await expect(directoryExport.locator(".gallery-export-selection-list li")).toHaveCount(2);
-    await directoryExport.getByLabel("目标路径").fill("/tmp/imageweave-e2e-output");
+    await directoryExport.getByLabel("目标路径").fill("/tmp/ldos-e2e-output");
     await directoryExport.getByRole("button", { name: "开始复制" }).click();
     await expect(directoryExport.getByText("正在复制")).toBeVisible();
     await expect(directoryExport.getByText("复制完成")).toBeVisible();
@@ -340,7 +340,7 @@ test.describe("可用应用关键旅程", () => {
     );
     expect(request?.body).toEqual({
       directory_ids: ["gal-dir-sub", "gal-dir-root"],
-      target_path: "/tmp/imageweave-e2e-output",
+      target_path: "/tmp/ldos-e2e-output",
     });
     expect(api.count("GET", "/api/v1/gallery/directory-exports/gallery-export-op-01")).toBeGreaterThan(0);
     expect(api.unhandled).toEqual([]);

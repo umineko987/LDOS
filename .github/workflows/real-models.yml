@@ -1,4 +1,4 @@
-name: ImageWeave real-model CPU smoke
+name: LDOS real-model CPU smoke
 
 on:
   schedule:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: imageweave-real-models-${{ github.ref }}
+  group: ldos-real-models-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -44,7 +44,7 @@ jobs:
             .models/sscd_disc_mixup.torchscript.pt
             .models/torch/hub/checkpoints/dinov2_vits14_pretrain.pth
             .models/torch/hub/facebookresearch_dinov2_7764ea0f912e53c92e82eb78a2a1631e92725fc8
-          key: imageweave-linux-public-models-sscd-9f26bd4c-dino-b938bf1b-r7764ea0f
+          key: ldos-linux-public-models-sscd-9f26bd4c-dino-b938bf1b-r7764ea0f
 
       - name: Install locked CPU environment and verify models
         run: ./scripts/setup-linux.sh --python python --device cpu --skip-mihomo
@@ -54,7 +54,7 @@ jobs:
 
       - name: Verify pinned real-model fixture embeddings
         env:
-          IMAGEWEAVE_REAL_MODELS: "1"
+          LDOS_REAL_MODELS: "1"
         run: |
           ./.venv/bin/python -m unittest tests.test_real_variant_pairs -v
           ./.venv/bin/python tests/fixtures/real_variant_pairs/refresh_embeddings.py \
@@ -111,7 +111,7 @@ jobs:
             .models/sscd_disc_mixup.torchscript.pt
             .models/torch/hub/checkpoints/dinov2_vits14_pretrain.pth
             .models/torch/hub/facebookresearch_dinov2_7764ea0f912e53c92e82eb78a2a1631e92725fc8
-          key: imageweave-windows-public-models-sscd-9f26bd4c-dino-b938bf1b-r7764ea0f
+          key: ldos-windows-public-models-sscd-9f26bd4c-dino-b938bf1b-r7764ea0f
 
       - name: Install locked CPU environment and verify models
         run: .\setup-dedup.ps1 -Device cpu
@@ -123,7 +123,7 @@ jobs:
 
       - name: Verify pinned real-model fixture embeddings
         env:
-          IMAGEWEAVE_REAL_MODELS: "1"
+          LDOS_REAL_MODELS: "1"
         run: |
           & .\.venv\Scripts\python.exe -m unittest tests.test_real_variant_pairs -v
           if ($LASTEXITCODE -ne 0) { throw 'Windows real-model fixture check failed.' }

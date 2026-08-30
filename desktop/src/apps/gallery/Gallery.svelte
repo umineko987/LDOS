@@ -360,7 +360,7 @@
     const isBatch = source.kind === "crawl_batch";
     const message = isBatch
       ? "删除批次会递归删除批次下所有文件。\n\n确定删除这个批次吗？"
-      : `解除导入目录“${source.display_name}”？\n\n只会移除 ImageWeave 的来源索引，不会删除原目录中的任何文件。`;
+      : `解除导入目录“${source.display_name}”？\n\n只会移除 LDOS 的来源索引，不会删除原目录中的任何文件。`;
     if (!window.confirm(message)) return;
     batchDeleteError = null;
     batchDeleteSourceId = source.source_id;
@@ -1586,7 +1586,7 @@
     >
       <p class="gallery-source-dialog__eyebrow">原地导入</p>
       <h2 id="gallery-import-warning-title">导入后会管理原目录文件</h2>
-      <p>ImageWeave 不会复制所选目录。之后的 TXT 保存、重命名和删除会直接修改该目录；删除会移入目录内的 ImageWeave 回收区。</p>
+      <p>LDOS 不会复制所选目录。之后的 TXT 保存、重命名和删除会直接修改该目录；删除会移入目录内的 LDOS 回收区。</p>
       <p>解除挂载只移除图库索引，不会删除任何源文件。</p>
       <div class="gallery-source-dialog__actions">
         <button type="button" onclick={closeImportWarning}>取消</button>
@@ -1627,7 +1627,7 @@
       </div>
       <div class="gallery-source-dialog__section gallery-source-dialog__section--danger">
         <h3>解除挂载</h3>
-        <p>只删除 ImageWeave 的来源索引；绝不删除目录中的图片、TXT 或回收区文件。</p>
+        <p>只删除 LDOS 的来源索引；绝不删除目录中的图片、TXT 或回收区文件。</p>
         <button type="button" disabled={sourceManagerPhase !== "idle" || activeScan?.state === "running"} onclick={() => void unmountActiveSource()}>
           {sourceManagerPhase === "unmounting" ? "正在解除…" : "解除挂载（保留原文件）"}
         </button>

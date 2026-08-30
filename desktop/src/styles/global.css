@@ -15,8 +15,8 @@ body,
 
 body {
   min-width: 320px;
-  color: var(--imageweave-text-body);
-  background: var(--imageweave-background-deepest);
+  color: var(--ldos-text-body);
+  background: var(--ldos-background-deepest);
   font-size: 16px;
   line-height: 1.55;
   text-rendering: optimizeLegibility;
@@ -33,23 +33,23 @@ textarea {
 button {
   min-height: 44px;
   padding: 8px 14px;
-  border: 1px solid var(--imageweave-border-button);
-  border-radius: var(--imageweave-radius-control);
-  color: var(--imageweave-text-heading);
-  background: var(--imageweave-glass-surface-button);
-  box-shadow: var(--imageweave-shadow-control);
+  border: 1px solid var(--ldos-border-button);
+  border-radius: var(--ldos-radius-control);
+  color: var(--ldos-text-heading);
+  background: var(--ldos-glass-surface-button);
+  box-shadow: var(--ldos-shadow-control);
   cursor: pointer;
   transition:
-    color var(--imageweave-transition-standard),
-    background-color var(--imageweave-transition-standard),
-    border-color var(--imageweave-transition-standard),
-    box-shadow var(--imageweave-transition-standard),
-    transform var(--imageweave-transition-standard);
+    color var(--ldos-transition-standard),
+    background-color var(--ldos-transition-standard),
+    border-color var(--ldos-transition-standard),
+    box-shadow var(--ldos-transition-standard),
+    transform var(--ldos-transition-standard);
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--imageweave-border-focus);
-  background: var(--imageweave-glass-surface-hover);
+  border-color: var(--ldos-border-focus);
+  background: var(--ldos-glass-surface-hover);
   transform: translateY(-2px);
 }
 
@@ -59,16 +59,16 @@ button:active:not(:disabled) {
 
 button:disabled,
 button[aria-disabled="true"] {
-  color: var(--imageweave-text-muted);
+  color: var(--ldos-text-muted);
   cursor: not-allowed;
   text-decoration: line-through;
 }
 
 button:focus-visible,
 [tabindex]:focus-visible {
-  outline: 3px solid var(--imageweave-accent);
+  outline: 3px solid var(--ldos-accent);
   outline-offset: 3px;
-  box-shadow: 0 0 0 4px var(--imageweave-focus-glow);
+  box-shadow: 0 0 0 4px var(--ldos-focus-glow);
 }
 
 h1,
@@ -81,8 +81,8 @@ p {
 h1,
 h2,
 h3 {
-  color: var(--imageweave-text-heading);
-  font-family: var(--imageweave-font-display);
+  color: var(--ldos-text-heading);
+  font-family: var(--ldos-font-display);
   font-weight: 600;
 }
 
@@ -112,10 +112,10 @@ h3 {
 .startup-gate > section {
   width: min(540px, 100%);
   padding: 32px;
-  border: 1px solid var(--imageweave-border-default);
-  border-radius: var(--imageweave-radius-window);
-  background: var(--imageweave-fallback-elevated-solid);
-  box-shadow: var(--imageweave-shadow-window);
+  border: 1px solid var(--ldos-border-default);
+  border-radius: var(--ldos-radius-window);
+  background: var(--ldos-fallback-elevated-solid);
+  box-shadow: var(--ldos-shadow-window);
   text-align: center;
 }
 
@@ -126,16 +126,16 @@ h3 {
 
 .startup-gate > section > p:first-child {
   margin-bottom: 8px;
-  color: var(--imageweave-accent-highlight);
+  color: var(--ldos-accent-highlight);
 }
 
 .startup-gate__status {
-  color: var(--imageweave-text-body);
+  color: var(--ldos-text-body);
 }
 
 .startup-gate small {
-  color: var(--imageweave-text-muted);
-  font-family: var(--imageweave-font-mono);
+  color: var(--ldos-text-muted);
+  font-family: var(--ldos-font-mono);
 }
 
 .skip-link {
@@ -192,7 +192,7 @@ h3 {
     width: min(540px, 100%);
     padding: 28px;
     border: 2px solid CanvasText;
-    border-radius: var(--imageweave-radius-window);
+    border-radius: var(--ldos-radius-window);
     text-align: center;
   }
 }

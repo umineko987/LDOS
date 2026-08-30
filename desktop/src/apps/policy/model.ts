@@ -470,7 +470,7 @@ const ERROR_GUIDANCE: Readonly<Record<string, Readonly<{ title: string; message:
   policy_request_too_large: Object.freeze({ title: "提交内容太大", message: "服务拒绝了异常大的设置请求。", nextStep: "请刷新页面后重试。" }),
   policy_store_error: Object.freeze({ title: "暂时无法保存设置", message: "服务未确认本次修改已保存。", nextStep: "修改已保留，请稍后重试。" }),
   invalid_content_length: Object.freeze({ title: "请求格式不正确", message: "服务未接受请求大小信息。", nextStep: "请刷新页面后重试。" }),
-  network_error: Object.freeze({ title: "无法连接服务", message: "站点设置无法连接到 ImageWeave 服务。", nextStep: "请确认服务正在运行，然后重试。" }),
+  network_error: Object.freeze({ title: "无法连接服务", message: "站点设置无法连接到 LDOS 服务。", nextStep: "请确认服务正在运行，然后重试。" }),
   invalid_response: Object.freeze({ title: "设置数据无效", message: "页面未采用格式无效的服务数据。", nextStep: "请刷新页面；如果仍然出现，请更新服务和界面版本。" }),
 });
 
@@ -479,7 +479,7 @@ export function policyErrorPresentation(error: unknown): PolicyErrorPresentation
   if (code === "request_failed" && error instanceof PolicyValidationError) code = "invalid_policy_draft";
   if (code === "request_failed" && error instanceof TypeError) code = "invalid_response";
   const status = typeof errorField(error, "status") === "number" && Number.isInteger(errorField(error, "status")) ? errorField(error, "status") as number : 0;
-  const guidance = ERROR_GUIDANCE[code] ?? (status === 401 || status === 403 ? { title: "访问被拒绝", message: "本次站点设置请求未通过。", nextStep: "请从 ImageWeave 桌面重新打开。" } : status === 409 ? { title: "设置已更新", message: "服务未接受本次修改。", nextStep: "请刷新最新设置，核对后重新保存。" } : status === 413 ? ERROR_GUIDANCE.policy_request_too_large : status === 422 ? ERROR_GUIDANCE.invalid_policy : status >= 500 ? { title: "服务暂时不可用", message: "本次站点设置没有完成。", nextStep: "修改已保留，请稍后重试。" } : { title: "操作失败", message: "本次站点设置没有完成。", nextStep: "请稍后重试。" });
+  const guidance = ERROR_GUIDANCE[code] ?? (status === 401 || status === 403 ? { title: "访问被拒绝", message: "本次站点设置请求未通过。", nextStep: "请从 LDOS 桌面重新打开。" } : status === 409 ? { title: "设置已更新", message: "服务未接受本次修改。", nextStep: "请刷新最新设置，核对后重新保存。" } : status === 413 ? ERROR_GUIDANCE.policy_request_too_large : status === 422 ? ERROR_GUIDANCE.invalid_policy : status >= 500 ? { title: "服务暂时不可用", message: "本次站点设置没有完成。", nextStep: "修改已保留，请稍后重试。" } : { title: "操作失败", message: "本次站点设置没有完成。", nextStep: "请稍后重试。" });
   return Object.freeze({ code, status, title: guidance.title, message: guidance.message, nextStep: guidance.nextStep, detail: safePolicyErrorDetail(error), requestId: safeRequestId(errorField(error, "requestId")), conflict: status === 409 });
 }
 export const policyErrorGuidance = policyErrorPresentation;

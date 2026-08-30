@@ -89,6 +89,22 @@ test.describe("桌面壳层", () => {
     await expect(page.locator("[data-menu-trigger=\"edit\"]")).toBeFocused();
   });
 
+  test("About展示LDOS品牌信息并恢复菜单焦点", async ({ page }) => {
+    await bootDesktop(page);
+    const helpMenu = page.locator('[data-menu-trigger="help"]');
+    await helpMenu.click();
+    await page.getByRole("menuitem", { name: /关于 LDOS/ }).click();
+
+    const about = page.locator("[data-about-dialog]");
+    await expect(about).toBeVisible();
+    await expect(about).toContainText("LoRA Dataset Operating System");
+    await expect(about).toContainText("The operating workspace for LoRA datasets.");
+
+    await page.keyboard.press("Escape");
+    await expect(about).toHaveCount(0);
+    await expect(helpMenu).toBeFocused();
+  });
+
   test("窗口可拖动、键盘缩放、最大化、最小化、恢复和关闭", async ({ page }) => {
     await bootDesktop(page);
     await launchApp(page, "crawl");

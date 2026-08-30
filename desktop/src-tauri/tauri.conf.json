@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ImageWeave",
+  "productName": "LDOS",
   "version": "0.1.0",
-  "identifier": "dev.imageweave.desktop",
+  "identifier": "dev.ldos.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "ImageWeave",
+        "title": "LDOS",
         "width": 1280,
         "height": 800,
         "minWidth": 1180,
@@ -37,6 +37,6 @@
     "targets": "all",
     "icon": ["icons/icon.png", "icons/icon.ico"],
     "license": "MIT",
-    "shortDescription": "Local gallery workflow desktop application"
+    "shortDescription": "One-stop LoRA dataset workflow desktop application"
   }
 }

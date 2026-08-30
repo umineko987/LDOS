@@ -323,7 +323,7 @@ describe("Tasks controller lifecycle", () => {
     runtime.polling.destroy();
   });
 
-  it("loads a persisted-style recent selection and writes imageweave active-batch through persistence", async () => {
+  it("loads a persisted-style recent selection and writes ldos active-batch through persistence", async () => {
     const recent = sanitizeRecentBatches({ items: [rawBatch()] });
     const runtime = harness({
       activeBatchId: "",

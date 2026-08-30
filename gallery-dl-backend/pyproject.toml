@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "gallery-dl-proxy-backend"
 version = "0.5.2"
 description = "FastAPI job backend for gallery-dl with a native subscription proxy pool"
-readme = { text = "ImageWeave gallery-dl 后端组件；项目介绍与使用说明见仓库根 README。", content-type = "text/markdown" }
+readme = { text = "LDOS gallery-dl 后端组件；项目介绍与使用说明见仓库根 README。", content-type = "text/markdown" }
 requires-python = ">=3.11,<3.15"
 dependencies = [
   "fastapi>=0.115",

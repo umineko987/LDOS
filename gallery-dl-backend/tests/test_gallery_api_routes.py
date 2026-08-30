@@ -908,7 +908,7 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
         self._assert_file_operation_projection(operation)
         self.assertFalse(directory_path.exists())
         self.assertTrue(
-            (self.root / "src-a" / ".imageweave" / "trash" / operation["operation_id"] / "files" / "whole" / "unindexed.bin").exists()
+            (self.root / "src-a" / ".ldos" / "trash" / operation["operation_id"] / "files" / "whole" / "unindexed.bin").exists()
         )
 
         undo = self.client.post(
@@ -966,7 +966,7 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
         trash_image = (
             self.root
             / "src-a"
-            / ".imageweave"
+            / ".ldos"
             / "trash"
             / trashed["operation_id"]
             / "files"

@@ -175,11 +175,11 @@ class DesktopReleaseTests(unittest.TestCase):
         )
         self.assertEqual(
             linux_config["bundle"]["linux"]["deb"]["files"],
-            {"/usr/lib/ImageWeave/backend": "release/backend"},
+            {"/usr/lib/LDOS/backend": "release/backend"},
         )
         self.assertEqual(
             linux_config["bundle"]["linux"]["appimage"]["files"],
-            {"/usr/share/ImageWeave/backend": "release/backend"},
+            {"/usr/share/LDOS/backend": "release/backend"},
         )
         self.assertEqual(
             windows_config["bundle"]["resources"],
@@ -263,7 +263,7 @@ class DesktopReleaseTests(unittest.TestCase):
             tar_payload = io.BytesIO()
             with tarfile.open(fileobj=tar_payload, mode="w:gz") as archive:
                 content = b"canonical"
-                member = tarfile.TarInfo("./usr/lib/imageweave/probe")
+                member = tarfile.TarInfo("./usr/lib/ldos/probe")
                 member.size = len(content)
                 archive.addfile(member, io.BytesIO(content))
 
@@ -275,7 +275,7 @@ class DesktopReleaseTests(unittest.TestCase):
                 self.assertEqual(len(header), 60)
                 return header + payload + (b"\n" if len(payload) % 2 else b"")
 
-            bundle = tmp_path / "ImageWeave.deb"
+            bundle = tmp_path / "LDOS.deb"
             bundle.write_bytes(
                 b"!<arch>\n"
                 + ar_member("debian-binary", b"2.0\n")
@@ -285,7 +285,7 @@ class DesktopReleaseTests(unittest.TestCase):
             release.extract_deb(bundle, destination)
 
             self.assertEqual(
-                (destination / "usr/lib/imageweave/probe").read_bytes(),
+                (destination / "usr/lib/ldos/probe").read_bytes(),
                 b"canonical",
             )
 
@@ -412,14 +412,14 @@ class DesktopReleaseTests(unittest.TestCase):
     def test_bundle_tree_requires_one_runtime_and_canonical_frontend(self) -> None:
         with temporary_path() as tmp_path:
             canonical, frontend_payload = use_test_frontend_manifest(tmp_path)
-            backend = tmp_path / "usr" / "lib" / "imageweave" / "backend"
+            backend = tmp_path / "usr" / "lib" / "ldos" / "backend"
             backend.mkdir(parents=True)
             minimal_tree(backend)
             frontend = (
                 tmp_path
                 / "usr"
                 / "lib"
-                / "imageweave"
+                / "ldos"
                 / "frontend-manifest.json"
             )
             frontend.write_bytes(frontend_payload)
@@ -431,11 +431,11 @@ class DesktopReleaseTests(unittest.TestCase):
                 result = release.verify_bundle_tree(tmp_path)
 
             self.assertEqual(
-                result["backend_relative"], "usr/lib/imageweave/backend"
+                result["backend_relative"], "usr/lib/ldos/backend"
             )
             self.assertEqual(
                 result["frontend_manifest_relative"],
-                "usr/lib/imageweave/frontend-manifest.json",
+                "usr/lib/ldos/frontend-manifest.json",
             )
 
     def test_bundle_tree_rejects_a_second_frontend(self) -> None:
@@ -462,12 +462,12 @@ class DesktopReleaseTests(unittest.TestCase):
             release.ensure_clean_tracked_checkout()
 
     def test_prebuilt_frontend_env_verifies_without_rebuilding(self) -> None:
-        with mock.patch.dict(os.environ, {"IMAGEWEAVE_PREBUILT_FRONTEND": "1"}):
+        with mock.patch.dict(os.environ, {"LDOS_PREBUILT_FRONTEND": "1"}):
             commands = release.frontend_build_commands("npm")
         self.assertEqual(commands, [["npm", "run", "verify:artifacts"]])
 
     def test_default_frontend_path_builds_then_verifies(self) -> None:
-        env = {k: v for k, v in os.environ.items() if k != "IMAGEWEAVE_PREBUILT_FRONTEND"}
+        env = {k: v for k, v in os.environ.items() if k != "LDOS_PREBUILT_FRONTEND"}
         with mock.patch.dict(os.environ, env, clear=True):
             commands = release.frontend_build_commands("npm")
         self.assertEqual(

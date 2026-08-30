@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from .gallery_catalog import (
-    IMAGEWEAVE_RESERVED_DIR,
-    IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES,
+    LDOS_RESERVED_DIR,
+    LDOS_TEMP_DIRECTORY_PREFIXES,
     SUPPORTED_IMAGE_EXTENSIONS,
     canonical_root_key,
     root_relation,
@@ -49,8 +49,8 @@ MAX_DIRECTORY_EXPORT_ID_LENGTH = 128
 _DIRECTORY_EXPORT_STATES: frozenset[str] = frozenset(
     {"copying", "completed", "failed", "cancelled"}
 )
-_EXCLUDED_DIRECTORY_NAMES = frozenset({IMAGEWEAVE_RESERVED_DIR})
-_TEMPORARY_PREFIX = IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES[0]
+_EXCLUDED_DIRECTORY_NAMES = frozenset({LDOS_RESERVED_DIR})
+_TEMPORARY_PREFIX = LDOS_TEMP_DIRECTORY_PREFIXES[0]
 _OPEN_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NO_FOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _CLOSE_ON_EXEC = getattr(os, "O_CLOEXEC", 0)
@@ -868,10 +868,10 @@ class GalleryDirectoryExportService:
             except UnsafeSourcePathError as error:
                 raise GalleryDirectoryExportError("unsafe_source_path") from error
             if any(
-                component == IMAGEWEAVE_RESERVED_DIR
+                component == LDOS_RESERVED_DIR
                 or any(
                     component.startswith(prefix)
-                    for prefix in IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES
+                    for prefix in LDOS_TEMP_DIRECTORY_PREFIXES
                 )
                 for component in relative_parts
             ):
@@ -888,7 +888,7 @@ class GalleryDirectoryExportService:
                     iterator = safe_root.iter_subtree(
                         relative,
                         excluded_directories=_EXCLUDED_DIRECTORY_NAMES,
-                        excluded_directory_prefixes=IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES,
+                        excluded_directory_prefixes=LDOS_TEMP_DIRECTORY_PREFIXES,
                     )
                     try:
                         next(iterator)
@@ -1059,7 +1059,7 @@ class GalleryDirectoryExportService:
                 for directory in safe_root.iter_subtree(
                     selection.directory_relative_path,
                     excluded_directories=_EXCLUDED_DIRECTORY_NAMES,
-                    excluded_directory_prefixes=IMAGEWEAVE_TEMP_DIRECTORY_PREFIXES,
+                    excluded_directory_prefixes=LDOS_TEMP_DIRECTORY_PREFIXES,
                 ):
                     output_directory = _relative_to_selection(
                         directory.relative_path, selection.directory_relative_path

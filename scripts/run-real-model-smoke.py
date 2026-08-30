@@ -101,7 +101,7 @@ def main() -> int:
         work_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         work_dir.chmod(0o700)
     else:
-        temporary = tempfile.TemporaryDirectory(prefix="imageweave-model-smoke-")
+        temporary = tempfile.TemporaryDirectory(prefix="ldos-model-smoke-")
         work_dir = Path(temporary.name)
 
     try:

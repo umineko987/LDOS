@@ -10,7 +10,7 @@ from gdl_backend.gallery_catalog import (
     classify_txt_state,
     decode_txt_bytes,
     image_extension,
-    is_imageweave_reserved_path,
+    is_ldos_reserved_path,
     is_safe_relative_path,
     is_supported_image_name,
     natural_sort_key,
@@ -141,12 +141,12 @@ class RelativePathSafetyContractTest(unittest.TestCase):
         ):
             self.assertFalse(is_safe_relative_path(bad), repr(bad))
 
-    def test_imageweave_tree_is_reserved_at_any_depth(self) -> None:
-        self.assertTrue(is_imageweave_reserved_path(".imageweave"))
-        self.assertTrue(is_imageweave_reserved_path(".imageweave/trash/op-1/files/a.jpg"))
-        self.assertTrue(is_imageweave_reserved_path("sub/.imageweave/exports/e.jsonl"))
-        self.assertFalse(is_imageweave_reserved_path("sub/normal.jpg"))
-        self.assertFalse(is_imageweave_reserved_path(".imageweave-lookalike/a.jpg"))
+    def test_ldos_tree_is_reserved_at_any_depth(self) -> None:
+        self.assertTrue(is_ldos_reserved_path(".ldos"))
+        self.assertTrue(is_ldos_reserved_path(".ldos/trash/op-1/files/a.jpg"))
+        self.assertTrue(is_ldos_reserved_path("sub/.ldos/exports/e.jsonl"))
+        self.assertFalse(is_ldos_reserved_path("sub/normal.jpg"))
+        self.assertFalse(is_ldos_reserved_path(".ldos-lookalike/a.jpg"))
 
 
 class SourceRootKeyContractTest(unittest.TestCase):
@@ -191,11 +191,11 @@ class TrashLayoutContractTest(unittest.TestCase):
     def test_trash_layout_uses_source_local_operation_dirs(self) -> None:
         self.assertEqual(
             str(trash_files_relative_dir("op-1")),
-            ".imageweave/trash/op-1/files",
+            ".ldos/trash/op-1/files",
         )
         self.assertEqual(
             str(trash_operation_manifest_relative_path("op-1")),
-            ".imageweave/trash/op-1/operation.json",
+            ".ldos/trash/op-1/operation.json",
         )
 
     def test_trash_layout_rejects_unsafe_operation_ids(self) -> None:

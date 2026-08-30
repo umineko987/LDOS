@@ -29,14 +29,14 @@ describe("night-flight glass visual contract", () => {
   });
 
   it("keeps the champagne accent, radii, glass strength, and dark root tokens", () => {
-    expect(tokensCss).toContain("--imageweave-accent: #e4b863");
-    expect(tokensCss).toContain("--imageweave-radius-window: 24px");
-    expect(tokensCss).toContain("--imageweave-radius-control: 16px");
-    expect(tokensCss).toContain("--imageweave-glass-blur-environment: 40px");
-    expect(tokensCss).toContain("--imageweave-glass-blur-window: 60px");
-    expect(tokensCss).toContain("--imageweave-glass-saturation: 180%");
+    expect(tokensCss).toContain("--ldos-accent: #e4b863");
+    expect(tokensCss).toContain("--ldos-radius-window: 24px");
+    expect(tokensCss).toContain("--ldos-radius-control: 16px");
+    expect(tokensCss).toContain("--ldos-glass-blur-environment: 40px");
+    expect(tokensCss).toContain("--ldos-glass-blur-window: 60px");
+    expect(tokensCss).toContain("--ldos-glass-saturation: 180%");
     expect(tokensCss).toContain("color-scheme: dark");
-    expect(globalCss).toContain("background: var(--imageweave-background-deepest)");
+    expect(globalCss).toContain("background: var(--ldos-background-deepest)");
   });
 
   it("uses one main backdrop per visible app window and none in app internals", () => {
@@ -51,7 +51,7 @@ describe("night-flight glass visual contract", () => {
 
   it("takes over the P0 direct-manipulation glass fallback", () => {
     const interaction = block(shellCss, ".app-window[data-window-interacting] {");
-    expect(interaction).toContain("background: var(--imageweave-interaction-surface) !important");
+    expect(interaction).toContain("background: var(--ldos-interaction-surface) !important");
     expect(interaction).toContain("transition: none !important");
     expect(interaction).toContain("backdrop-filter: none !important");
     expect(interaction).toContain("box-shadow: none !important");

@@ -502,7 +502,7 @@ export function proxyErrorPresentation(error: unknown): ProxyErrorPresentation {
     status,
     requestId,
     title: status === 409 ? "代理状态冲突" : status === 422 ? "代理输入无效" : "代理操作失败",
-    message: status === 0 ? "无法连接到 ImageWeave 服务。" : "服务未接受本次代理操作。",
+    message: status === 0 ? "无法连接到 LDOS 服务。" : "服务未接受本次代理操作。",
     nextStep: nextSteps[code] ?? (status === 413 ? "请减少本次节点数量后分批提交。" : "请刷新状态后重试。"),
     detail: index !== null ? `第 ${index + 1} 行${reason ? `：${reason}` : ""}` : reason ? `原因：${reason}` : "",
   });

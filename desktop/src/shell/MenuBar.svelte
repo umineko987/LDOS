@@ -14,6 +14,7 @@
   interface Props {
     shell: ShellStore;
     onOpenApplicationCenter: () => void;
+    onOpenAbout: () => void;
     onNavigate: (appId: ApplicationId) => void;
     onWindowCommand: (command: "minimize" | "focus" | "restore", appId: ApplicationId) => void;
   }
@@ -36,7 +37,7 @@
     help: "帮助",
   };
 
-  let { shell, onOpenApplicationCenter, onNavigate, onWindowCommand }: Props = $props();
+  let { shell, onOpenApplicationCenter, onOpenAbout, onNavigate, onWindowCommand }: Props = $props();
   let root = $state<HTMLElement>();
   let clock = $state("--:--");
   const snapshot = $derived($shell);
@@ -96,10 +97,13 @@
     }));
     return [{
       id: "about",
-      label: "ImageWeave 夜航玻璃桌面",
-      description: "P2 OS 壳层",
-      enabled: false,
-      action: () => {},
+      label: "关于 LDOS",
+      description: "LoRA Dataset Operating System",
+      enabled: true,
+      action: () => {
+        closeMenu(true);
+        queueMicrotask(onOpenAbout);
+      },
     }];
   }
 
@@ -175,9 +179,9 @@
   });
 </script>
 
-<header class="menu-bar" data-menu-bar aria-label="ImageWeave 菜单栏" bind:this={root}>
+<header class="menu-bar" data-menu-bar aria-label="LDOS 菜单栏" bind:this={root}>
   <div class="menu-bar__identity">
-    <strong>ImageWeave</strong>
+    <strong>LDOS</strong>
     {#if currentApplication}
       <span class="menu-bar__current">{currentApplication.title}</span>
     {/if}

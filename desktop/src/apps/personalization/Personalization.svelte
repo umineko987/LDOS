@@ -124,7 +124,7 @@
         <div class="personalization-column-scroll">
           <div class="personalization-preview-desktop wallpaper--{snapshot.draft.wallpaperColor}" role="img" aria-label="夜航玻璃桌面只读预览；场景、玻璃和动效均不可在预览内编辑" data-personalization-scene={snapshot.draft.wallpaperColor} data-personalization-motion={snapshot.motion.limitedBySystem ? "system-limited" : snapshot.draft.animations}>
             <span class={sceneCanvasClass(snapshot.draft.wallpaperColor)} aria-hidden="true"></span>
-            <div class="personalization-preview-menu"><strong>ImageWeave</strong><span>夜航</span></div><div class="personalization-preview-window"><span>夜航玻璃</span><i></i><i></i></div><div class="personalization-preview-dock"><i></i><i></i><i></i></div>
+            <div class="personalization-preview-menu"><strong>LDOS</strong><span>夜航</span></div><div class="personalization-preview-window"><span>夜航玻璃</span><i></i><i></i></div><div class="personalization-preview-dock"><i></i><i></i><i></i></div>
           </div>
           <p class="personalization-preview-fact" aria-live="polite">场景：{sceneLabel(snapshot.draft.wallpaperColor)}（{sceneDescription(snapshot.draft.wallpaperColor)}）</p><p class="personalization-preview-fact" aria-live="polite">外观：深色夜航玻璃；窗口使用固定低透明玻璃表面。</p><p class="personalization-preview-fact" aria-live="polite">动效：{snapshot.motion.limitedBySystem ? "已开启动效，但系统“减少动态效果”正在限制部分效果。" : snapshot.draft.animations === "on" ? "界面动效已开启并生效。" : "界面动效已关闭。"}</p>
           <form class="personalization-actions" autocomplete="off" onsubmit={(event) => { event.preventDefault(); void controller.commit(); }}>

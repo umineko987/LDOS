@@ -627,9 +627,9 @@ class DesktopDistributionConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
             environment = {
-                "IMAGEWEAVE_DESKTOP_RESOURCE_ROOT": str(resource_root),
-                "IMAGEWEAVE_DESKTOP_DATA_ROOT": str(data_root),
-                "IMAGEWEAVE_DESKTOP_PYTHON": str(python),
+                "LDOS_DESKTOP_RESOURCE_ROOT": str(resource_root),
+                "LDOS_DESKTOP_DATA_ROOT": str(data_root),
+                "LDOS_DESKTOP_PYTHON": str(python),
             }
 
             with patch.dict(os.environ, environment):
@@ -674,7 +674,7 @@ class DesktopDistributionConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with patch.dict(
                 os.environ,
-                {"IMAGEWEAVE_DESKTOP_RESOURCE_ROOT": str(Path(temporary) / "backend")},
+                {"LDOS_DESKTOP_RESOURCE_ROOT": str(Path(temporary) / "backend")},
             ):
                 with self.assertRaisesRegex(ValueError, "环境不完整"):
                     AppSettings.load(Path(temporary) / "missing.json")
