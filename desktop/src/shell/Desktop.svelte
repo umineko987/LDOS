@@ -4,7 +4,7 @@
   import type { ApplicationId } from "../core/applications/definitions";
   import type { ApiClient } from "../core/api/client";
   import { restoreFocus } from "../core/a11y/focus";
-  import { localizeUi } from "../core/i18n";
+  import { localizeUi } from "./localizeUi";
   import type { PersistenceService } from "../core/persistence/service";
   import type { PollingService } from "../core/polling/service";
   import { createHashRouter, type HashRouter, type RouteChange } from "../core/routing/hash";

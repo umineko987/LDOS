@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
 
   import { ApiError, createApiClient, type ApiClient } from "./core/api/client";
-  import { localizeUi } from "./core/i18n";
+  import { localizeUi } from "./shell/localizeUi";
   import { createPersistenceAdapter } from "./core/persistence/adapter";
   import { createPersistenceService } from "./core/persistence/service";
   import { createPlatformAdapter } from "./core/platform/adapter";
