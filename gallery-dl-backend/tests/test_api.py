@@ -799,6 +799,42 @@ class ApiTests(unittest.TestCase):
         self.assertIsNone(reset.json()["proxy_url"])
         self.assertEqual(reset.json()["source"], "none")
 
+    def test_browser_runtime_api_roundtrip(self):
+        executable = Path(self.temp.name) / (
+            "msedge.exe" if os.name == "nt" else "msedge"
+        )
+        executable.write_bytes(b"fixture-browser")
+        if os.name != "nt":
+            executable.chmod(0o700)
+
+        updated = self.client.put(
+            "/api/v1/auth/browser", json={"path": str(executable)}
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertTrue(updated.json()["available"])
+        self.assertEqual(updated.json()["name"], "Microsoft Edge")
+        self.assertEqual(updated.json()["source"], "configured")
+        self.assertNotIn("path", updated.json())
+
+        current = self.client.get("/api/v1/auth/browser")
+        self.assertEqual(current.status_code, 200, current.text)
+        self.assertEqual(current.json(), updated.json())
+
+        invalid = self.client.put(
+            "/api/v1/auth/browser",
+            json={"path": str(executable), "surprise": True},
+        )
+        self.assertEqual(invalid.status_code, 422, invalid.text)
+
+        with patch(
+            "gdl_backend.auth.discover_chrome_executable",
+            side_effect=FileNotFoundError,
+        ):
+            reset = self.client.delete("/api/v1/auth/browser")
+        self.assertEqual(reset.status_code, 200, reset.text)
+        self.assertFalse(reset.json()["available"])
+        self.assertEqual(reset.json()["source"], "none")
+
     def test_vault_auth_projection_and_sensitive_write_errors_are_redacted(self):
         secret = "VAULT_API_SECRET_7f3c1a"
         raw = self.container.auth.statuses()

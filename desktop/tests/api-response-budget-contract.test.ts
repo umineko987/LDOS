@@ -66,9 +66,9 @@ describe("desktop API response-budget contract", () => {
       ["gallery", galleryServiceSource, 23],
       ["crawl", crawlServiceSource, 3],
       ["tasks", tasksServiceSource, 5],
-      ["review", reviewServiceSource, 4],
+      ["review", reviewServiceSource, 6],
       ["proxy", proxyServiceSource, 11],
-      ["vault", vaultServiceSource, 9],
+      ["vault", vaultServiceSource, 12],
       ["policy", policyServiceSource, 3],
       ["diagnostics", diagnosticsServiceSource, 1],
     ] as const;

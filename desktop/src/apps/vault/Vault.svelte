@@ -4,6 +4,7 @@
   import type { ApiClient } from "../../core/api/client";
   import { restoreFocus, trappedTabIndex, type FocusTarget } from "../../core/a11y/focus";
   import type { PollingService } from "../../core/polling/service";
+  import { createPlatformAdapter } from "../../core/platform/adapter";
   import { createVaultController } from "./controller";
   import {
     deriveVaultControls,
@@ -12,6 +13,8 @@
     getVaultSiteDefinition,
     validateAuthorizationProxyInput,
     vaultSiteItems,
+    vaultErrorPresentation,
+    type VaultBrowserRuntime,
     type VaultSiteId,
   } from "./model";
   import { createVaultService } from "./service";
@@ -26,9 +29,11 @@
 
   const runtime = untrack(() => {
     const store = createVaultStore();
-    return { store, controller: createVaultController({ store, service: createVaultService(api), polling }) };
+    const service = createVaultService(api);
+    return { store, service, controller: createVaultController({ store, service, polling }) };
   });
-  const { store, controller } = runtime;
+  const platform = untrack(() => createPlatformAdapter());
+  const { store, service, controller } = runtime;
   const snapshot = $derived($store);
   const siteItems = $derived(vaultSiteItems(snapshot.snapshot));
   const selectedStatus = $derived(snapshot.snapshot?.sites[snapshot.selectedSite] ?? null);
@@ -37,6 +42,10 @@
   let workspace = $state<HTMLElement>();
   let confirmationDialog = $state<HTMLDialogElement>();
   let returnFocus: FocusTarget | null = null;
+  let browserRuntime = $state<VaultBrowserRuntime | null>(null);
+  let browserBusy = $state<"read" | "detect" | "select" | "">("");
+  let browserError = $state("");
+  let browserController: AbortController | null = null;
   const elements = { get workspace(): HTMLElement | undefined { return workspace; } };
 
   const proxyValidation = $derived(validateAuthorizationProxyInput(proxyDraft));
@@ -46,6 +55,7 @@
   }));
   const presentation = $derived(deriveVaultWorkspacePresentation(snapshot.snapshot, snapshot.selectedSite, snapshot.phase));
 
+  const browserChangeDisabled = $derived(Boolean(snapshot.busy || browserBusy || controls.activeSite));
   function statusKind(status: typeof selectedStatus): string {
     if (!status) return "error";
     if (status.session.active) return "running";
@@ -150,13 +160,90 @@
     void controller.authorize(snapshot.selectedSite);
   }
 
+  function browserFailure(error: unknown): void {
+    const failure = vaultErrorPresentation(error);
+    browserError = `${failure.message} ${failure.nextStep}`.trim();
+  }
+
+  async function readBrowser(): Promise<void> {
+    browserController?.abort();
+    const request = new AbortController();
+    browserController = request;
+    browserBusy = "read";
+    browserError = "";
+    try {
+      browserRuntime = await service.readBrowser(request.signal);
+    } catch (error) {
+      if (!request.signal.aborted) browserFailure(error);
+    } finally {
+      if (browserController === request) {
+        browserController = null;
+        browserBusy = "";
+      }
+    }
+  }
+
+  async function detectBrowser(): Promise<void> {
+    if (browserChangeDisabled) return;
+    const request = new AbortController();
+    browserController?.abort();
+    browserController = request;
+    browserBusy = "detect";
+    browserError = "";
+    try {
+      browserRuntime = await service.detectBrowser(request.signal);
+    } catch (error) {
+      if (!request.signal.aborted) browserFailure(error);
+    } finally {
+      if (browserController === request) {
+        browserController = null;
+        browserBusy = "";
+      }
+    }
+  }
+
+  async function selectBrowser(): Promise<void> {
+    if (browserChangeDisabled || !platform.capabilities.selectBrowserExecutable) return;
+    browserBusy = "select";
+    browserError = "";
+    let path: string | null;
+    try {
+      path = await platform.selectBrowserExecutable();
+    } catch {
+      browserBusy = "";
+      browserError = "无法打开文件选择器，请重试。";
+      return;
+    }
+    if (!path) {
+      browserBusy = "";
+      return;
+    }
+    const request = new AbortController();
+    browserController?.abort();
+    browserController = request;
+    try {
+      browserRuntime = await service.selectBrowser(path, request.signal);
+    } catch (error) {
+      if (!request.signal.aborted) browserFailure(error);
+    } finally {
+      path = null;
+      if (browserController === request) {
+        browserController = null;
+        browserBusy = "";
+      }
+    }
+  }
+
   onMount(() => {
     const unregisterUnsaved = registerUnsavedChanges?.(() => Boolean(proxyDraft), clearSensitiveInputs) ?? (() => {});
     controller.activate();
+    void readBrowser();
     return () => {
       unregisterUnsaved();
       controller.deactivate();
       proxyDraft = "";
+      browserController?.abort();
+      browserController = null;
       controller.destroy();
     };
   });
@@ -255,6 +342,17 @@
       <aside class="vault-column vault-column--recovery" aria-labelledby="vault-recovery-heading">
         <header><p>03 · 共享与恢复</p><h2 id="vault-recovery-heading">共享授权浏览器</h2><span>共享材料和登录代理只显示受控事实。</span></header>
         <div class="vault-column-scroll" tabindex="0" aria-label="共享授权与恢复内容；可滚动">
+          <section class="vault-browser-panel" aria-labelledby="vault-browser-heading" aria-busy={Boolean(browserBusy)}>
+            <div class="vault-section-heading"><h3 id="vault-browser-heading">授权浏览器</h3><span class="vault-status" data-kind={browserBusy ? "running" : browserRuntime?.available ? "ready" : browserError ? "error" : "warning"}>{browserBusy === "select" ? "正在保存" : browserBusy ? "正在检测" : browserRuntime?.available ? "可用" : "未就绪"}</span></div>
+            {#if browserRuntime}
+              <p class="vault-browser-fact">{browserRuntime.available ? browserRuntime.name : "未检测到支持的浏览器"}</p>
+              <p class="vault-proxy-note">{browserRuntime.message} · {browserRuntime.source === "configured" ? "手动选择" : browserRuntime.source === "auto" ? "自动检测" : "未配置"}</p>
+            {:else}<p class="empty-state">正在检测 Chrome、Chromium 和 Microsoft Edge。</p>{/if}
+            {#if browserError}<p class="vault-field-error" role="alert">{browserError}</p>{/if}
+            <div class="vault-actions"><button type="button" class="vault-button" disabled={browserChangeDisabled} onclick={() => void detectBrowser()}>{browserBusy === "detect" ? "正在检测…" : "自动检测"}</button><button type="button" class="vault-button vault-button--primary" disabled={browserChangeDisabled || !platform.capabilities.selectBrowserExecutable} onclick={() => void selectBrowser()}>{browserBusy === "select" ? "正在保存…" : "选择浏览器"}</button></div>
+            {#if !platform.capabilities.selectBrowserExecutable}<p class="vault-proxy-note">手动选择仅在桌面应用中可用。</p>{/if}
+          </section>
+
           <section class="vault-profile-status" aria-labelledby="vault-profile-heading">
             <h3 id="vault-profile-heading">共享授权浏览器数据</h3>
             {#if snapshot.snapshot?.browserProfile}

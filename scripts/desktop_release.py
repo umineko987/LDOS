@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import hashlib
 import json
 import os
@@ -20,6 +21,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
@@ -103,7 +105,18 @@ def load_lock() -> dict[str, Any]:
         or len(distribution.get("license_sha256", "")) != 64
     ):
         raise ReleaseError("runtime license evidence is not locked")
+    mihomo = data.get("mihomo", {})
+    if (
+        not str(mihomo.get("version", "")).strip()
+        or not str(mihomo.get("release_base_url", "")).startswith("https://")
+        or not str(mihomo.get("source", "")).startswith("https://")
+        or not str(mihomo.get("license_source", "")).startswith("https://")
+        or mihomo.get("license") != "GPL-3.0-only"
+        or len(mihomo.get("license_sha256", "")) != 64
+    ):
+        raise ReleaseError("mihomo release evidence is not locked")
     for target, item in data.get("targets", {}).items():
+        resource = item.get("mihomo", {})
         if (
             not target
             or len(item.get("sha256", "")) != 64
@@ -111,6 +124,10 @@ def load_lock() -> dict[str, Any]:
             # 各平台的 CPython LICENSE.txt 并不相同：Windows 构建在 PSF 文本后
             # 追加了 Microsoft Distributable Code 附加条款，哈希按 target 锁定。
             or len(item.get("python_license_sha256", "")) != 64
+            or len(resource.get("sha256", "")) != 64
+            or len(resource.get("binary_sha256", "")) != 64
+            or not resource.get("archive")
+            or not str(resource.get("binary", "")).startswith("app/bin/")
             or not item.get("metadata_archive")
         ):
             raise ReleaseError(f"invalid runtime lock target: {target!r}")
@@ -211,6 +228,13 @@ def download_runtime_metadata(
     )
 
 
+def download_mihomo(lock: dict[str, Any], target: str, cache_dir: Path) -> Path:
+    resource = lock["targets"][target]["mihomo"]
+    archive = cache_dir / resource["archive"]
+    url = f"{lock['mihomo']['release_base_url']}/{resource['archive']}"
+    return download_locked_file(url, resource["sha256"], archive, "mihomo archive")
+
+
 def extract_tar_archive(archive: Path, destination: Path, label: str) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     root = destination.resolve()
@@ -239,6 +263,41 @@ def safe_extract(archive: Path, destination: Path) -> None:
     extract_tar_archive(archive, destination, "runtime")
     if not (destination / "python").is_dir():
         raise ReleaseError("runtime archive does not contain the expected python directory")
+
+
+def install_mihomo(
+    archive: Path, staging: Path, lock: dict[str, Any], target: str
+) -> Path:
+    resource = lock["targets"][target]["mihomo"]
+    relative = PurePosixPath(resource["binary"])
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ReleaseError("unsafe mihomo destination")
+    destination = staging.joinpath(*relative.parts)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if archive.name.endswith(".gz"):
+        with gzip.open(archive, "rb") as source, destination.open("wb") as output:
+            shutil.copyfileobj(source, output)
+    elif archive.name.endswith(".zip"):
+        member = resource.get("member", "")
+        with zipfile.ZipFile(archive) as bundle:
+            if (
+                member not in bundle.namelist()
+                or bundle.getinfo(member).file_size > 100 * 1024 * 1024
+            ):
+                raise ReleaseError("mihomo archive does not contain the locked executable")
+            with bundle.open(member) as source, destination.open("wb") as output:
+                shutil.copyfileobj(source, output)
+    else:
+        raise ReleaseError("unsupported mihomo archive")
+    actual = sha256_file(destination)
+    if actual != resource["binary_sha256"]:
+        destination.unlink(missing_ok=True)
+        raise ReleaseError(
+            f"mihomo executable hash mismatch: expected {resource['binary_sha256']}, got {actual}"
+        )
+    if os.name != "nt":
+        destination.chmod(destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return destination
 
 
 def extract_runtime_metadata(
@@ -618,6 +677,16 @@ def write_release_manifest(
             "dedup_worker": "app/dedup_review_worker.py",
             "dedup_core": "app/dedup_core.py",
         },
+        "bundled_resources": {
+            "mihomo": {
+                "version": lock["mihomo"]["version"],
+                "binary": lock["targets"][target]["mihomo"]["binary"],
+                "archive_sha256": lock["targets"][target]["mihomo"]["sha256"],
+                "binary_sha256": lock["targets"][target]["mihomo"]["binary_sha256"],
+                "license": lock["mihomo"]["license"],
+                "source": lock["mihomo"]["source"],
+            }
+        },
         "optional_resources": lock["optional_resources"],
         "files": {
             "path": FILES_NAME,
@@ -719,6 +788,20 @@ def verify_tree(
         raise ReleaseError("backend worker package is missing")
     if not (app / "dedup_review_worker.py").is_file():
         raise ReleaseError("dedup worker is missing")
+    mihomo = manifest.get("bundled_resources", {}).get("mihomo", {})
+    binary_relative = mihomo.get("binary", "")
+    parsed_binary = PurePosixPath(binary_relative)
+    if parsed_binary.is_absolute() or ".." in parsed_binary.parts or not binary_relative:
+        raise ReleaseError("bundled mihomo path is invalid")
+    mihomo_binary = root.joinpath(*parsed_binary.parts)
+    if (
+        not mihomo_binary.is_file()
+        or sha256_file(mihomo_binary) != mihomo.get("binary_sha256")
+        or manifest.get("optional_resources", {}).get("mihomo") is not True
+    ):
+        raise ReleaseError("bundled mihomo executable is missing or invalid")
+    if manifest.get("target", "").startswith("linux") and not os.access(mihomo_binary, os.X_OK):
+        raise ReleaseError("bundled mihomo executable lacks execute permission")
     if (app / "gdl_backend" / "webui_dist").exists():
         raise ReleaseError("release tree contains a second frontend")
     forbidden_suffixes = {".pt", ".onnx", ".ckpt", ".safetensors"}
@@ -727,8 +810,13 @@ def verify_tree(
         for path in app.rglob("*")
     ):
         raise ReleaseError("unlocked application model resource found in release tree")
-    forbidden_names = {"mihomo", "mihomo.exe", "chrome", "chrome.exe"}
-    if any(path.name.lower() in forbidden_names for path in root.rglob("*")):
+    forbidden_names = {"chrome", "chrome.exe"}
+    mihomo_names = {"mihomo", "mihomo.exe"}
+    if any(
+        path.name.lower() in forbidden_names
+        or (path.name.lower() in mihomo_names and path != mihomo_binary)
+        for path in root.rglob("*")
+    ):
         raise ReleaseError("unlocked optional binary found in release tree")
     try:
         verify_notices(root, manifest.get("target"))
@@ -745,6 +833,8 @@ def verify_release_identity(manifest: dict[str, Any]) -> None:
         raise ReleaseError("release manifest target is not locked")
     expected_target = lock["targets"][target]
     runtime = manifest.get("runtime", {})
+    bundled_mihomo = manifest.get("bundled_resources", {}).get("mihomo", {})
+    expected_mihomo = expected_target["mihomo"]
     if (
         manifest.get("source_commit") != source_commit()
         or manifest.get("tauri_target") != expected_target["tauri_target"]
@@ -754,6 +844,12 @@ def verify_release_identity(manifest: dict[str, Any]) -> None:
         or runtime.get("metadata_archive_sha256")
         != expected_target["metadata_sha256"]
         or runtime.get("python") != expected_target["python"]
+        or bundled_mihomo.get("version") != lock["mihomo"]["version"]
+        or bundled_mihomo.get("binary") != expected_mihomo["binary"]
+        or bundled_mihomo.get("archive_sha256") != expected_mihomo["sha256"]
+        or bundled_mihomo.get("binary_sha256") != expected_mihomo["binary_sha256"]
+        or bundled_mihomo.get("license") != lock["mihomo"]["license"]
+        or bundled_mihomo.get("source") != lock["mihomo"]["source"]
     ):
         raise ReleaseError("release manifest does not match the tracked source and runtime lock")
     expected_requirements = {
@@ -867,6 +963,11 @@ print(json.dumps({
             env=env,
             capture=True,
         )
+        mihomo_binary = root / manifest["bundled_resources"]["mihomo"]["binary"]
+        mihomo_version = run([mihomo_binary, "-v"], cwd=app, env=env, capture=True)
+        if lock_version := manifest["bundled_resources"]["mihomo"].get("version"):
+            if lock_version not in mihomo_version:
+                raise ReleaseError("bundled mihomo version does not match the release manifest")
 
         port = _free_loopback_port()
         config_path = config_root / "backend.json"
@@ -958,6 +1059,7 @@ print(json.dumps({
         "torch_version": import_result["torch"],
         "torchvision_version": import_result["torchvision"],
         "gallery_version": gallery_version.strip(),
+        "mihomo_version": mihomo_version.splitlines()[0],
         "readyz_status": ready_status,
         "files_sha256": manifest["files"]["sha256"],
     }
@@ -1045,6 +1147,7 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
     gallery_commit = ensure_submodule()
     archive = download_runtime(lock, target, cache_dir)
     metadata_archive = download_runtime_metadata(lock, target, cache_dir)
+    mihomo_archive = download_mihomo(lock, target, cache_dir)
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{output.name}.{target}.", dir=output.parent))
@@ -1066,10 +1169,20 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
         copy_backend_sources(app)
         copy_application_scripts(app, lock)
         copy_gallery_source(app)
+        install_mihomo(mihomo_archive, staging, lock, target)
         licenses = staging / "licenses"
         licenses.mkdir()
         shutil.copy2(ROOT / "LICENSE", licenses / "LDOS-MIT.txt")
         shutil.copy2(GALLERY_SOURCE / "LICENSE", licenses / "gallery-dl-GPL-2.0.txt")
+        mihomo = lock["mihomo"]
+        mihomo_license = download_locked_file(
+            mihomo["license_source"],
+            mihomo["license_sha256"],
+            cache_dir / f"mihomo-{mihomo['version']}-LICENSE",
+            "mihomo license",
+        )
+        mihomo_license_target = licenses / "mihomo-GPL-3.0.txt"
+        shutil.copyfile(mihomo_license, mihomo_license_target)
         distribution = lock["distribution"]
         runtime_license = download_locked_file(
             distribution["license_source"],
@@ -1116,6 +1229,13 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
                 "gallery_source": (
                     "https://codeberg.org/mikf/gallery-dl/src/commit/" + gallery_commit
                 ),
+                "mihomo": {
+                    "version": mihomo["version"],
+                    "license": mihomo["license"],
+                    "source": mihomo["source"],
+                    "artifact_sha256": lock["targets"][target]["mihomo"]["sha256"],
+                    "license_file": mihomo_license_target.relative_to(staging).as_posix(),
+                },
             },
             python,
         )

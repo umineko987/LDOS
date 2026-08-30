@@ -428,6 +428,19 @@ def generate(
         },
     ]
     components.extend(_runtime_components(tree, target, distribution))
+    mihomo = distribution.get("mihomo")
+    if isinstance(mihomo, dict):
+        components.append(
+            {
+                "ecosystem": "bundled-tool",
+                "name": "Mihomo",
+                "version": mihomo["version"],
+                "license": mihomo["license"],
+                "source": mihomo["source"],
+                "artifact_sha256": mihomo["artifact_sha256"],
+                "license_files": [mihomo["license_file"]],
+            }
+        )
     components.append(_rust_component(tree))
     components.extend(_npm_components(tree))
     components.extend(_cargo_components(tree, target))

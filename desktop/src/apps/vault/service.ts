@@ -5,9 +5,11 @@ import {
   extractVaultSessionFromSnapshot,
   getVaultSiteDefinition,
   sanitizeAuthorizationProxy,
+  sanitizeVaultBrowserRuntime,
   sanitizeVaultSiteRead,
   sanitizeVaultSnapshot,
   type VaultAuthorizationProxy,
+  type VaultBrowserRuntime,
   type VaultFullRead,
   type VaultSessionReference,
   type VaultSiteId,
@@ -18,6 +20,7 @@ export const VAULT_ENDPOINTS = Object.freeze({
   status: "/api/v1/auth",
   proxy: "/api/v1/auth/proxy",
   browserProfile: "/api/v1/auth/browser-profile",
+  browserRuntime: "/api/v1/auth/browser",
   pixivOAuthStart: "/api/v1/auth/pixiv/oauth/start",
   pixivOAuthSession: "/api/v1/auth/pixiv/oauth/session",
 } as const);
@@ -32,6 +35,9 @@ export interface VaultService {
   cancel(reference: VaultSessionReference, signal: AbortSignal): Promise<unknown>;
   clearSite(site: VaultSiteId, signal: AbortSignal): Promise<unknown>;
   clearProfile(signal: AbortSignal): Promise<unknown>;
+  readBrowser(signal: AbortSignal): Promise<VaultBrowserRuntime>;
+  selectBrowser(path: string, signal: AbortSignal): Promise<VaultBrowserRuntime>;
+  detectBrowser(signal: AbortSignal): Promise<VaultBrowserRuntime>;
   saveProxy(value: string, signal: AbortSignal): Promise<VaultAuthorizationProxy>;
   resetProxy(signal: AbortSignal): Promise<unknown>;
 }
@@ -93,6 +99,16 @@ export function createVaultService(api: ApiClient): VaultService {
     },
     async clearProfile(signal) {
       return api.delete(viewUrl(VAULT_ENDPOINTS.browserProfile), { signal });
+    },
+    async readBrowser(signal) {
+      return sanitizeVaultBrowserRuntime(await api.get(viewUrl(VAULT_ENDPOINTS.browserRuntime), { signal }));
+    },
+    async selectBrowser(path, signal) {
+      if (typeof path !== "string" || !path.trim() || /[\u0000-\u001f]/.test(path) || path.length > 4096) throw new TypeError("invalid_browser_executable");
+      return sanitizeVaultBrowserRuntime(await api.put(viewUrl(VAULT_ENDPOINTS.browserRuntime), { path }, { signal }));
+    },
+    async detectBrowser(signal) {
+      return sanitizeVaultBrowserRuntime(await api.delete(viewUrl(VAULT_ENDPOINTS.browserRuntime), { signal }));
     },
     saveProxy(value, signal) {
       const request = api.put(viewUrl(VAULT_ENDPOINTS.proxy), buildAuthorizationProxyPayload(value), { signal });

@@ -93,7 +93,7 @@ describe("Svelte Vault integration", () => {
     expect(vaultSource).not.toContain('type="password"');
     expect(vaultSource).toContain('type="text"');
     expect(vaultSource).toContain('proxyDraft = ""');
-    expect((serviceSource.match(/"\/api\/v1\//g) ?? [])).toHaveLength(5);
+    expect((serviceSource.match(/"\/api\/v1\//g) ?? [])).toHaveLength(6);
     expect((serviceSource.match(/view=vault/g) ?? [])).toHaveLength(1);
   });
 

@@ -11,6 +11,7 @@ from gdl_backend.managed_browser import (
     MANAGED_BROWSER_SITES,
     _is_pixiv_oauth_callback,
     _page_websocket,
+    browser_name_for_executable,
     capture_pixiv_oauth_callback,
     discover_chrome_executable,
     managed_login_ready,
@@ -31,6 +32,17 @@ class ManagedBrowserTests(unittest.TestCase):
 
             with patch("gdl_backend.managed_browser.shutil.which", side_effect=which):
                 self.assertEqual(discover_chrome_executable(), executable.resolve())
+
+    def test_edge_is_discovered_and_named(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "msedge"
+            executable.write_bytes(b"fixture-browser")
+            if os.name != "nt":
+                executable.chmod(0o700)
+
+            discovered = discover_chrome_executable(str(executable))
+            self.assertEqual(discovered, executable.resolve())
+            self.assertEqual(browser_name_for_executable(discovered), "Microsoft Edge")
 
     def test_explicit_chrome_path_does_not_fall_back_to_system_browser(self):
         with patch(

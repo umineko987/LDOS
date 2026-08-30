@@ -36,6 +36,24 @@ async fn select_directory(app: tauri::AppHandle) -> Result<Option<String>, &'sta
     }
 }
 
+#[tauri::command]
+async fn select_browser_executable(app: tauri::AppHandle) -> Result<Option<String>, &'static str> {
+    match app
+        .dialog()
+        .file()
+        .set_title("选择 Chrome、Chromium 或 Microsoft Edge")
+        .blocking_pick_file()
+    {
+        None => Ok(None),
+        Some(picked) => {
+            let path = picked.into_path().map_err(|_| "dialog_path_unavailable")?;
+            path.to_str()
+                .map(|value| Some(value.to_owned()))
+                .ok_or("dialog_path_not_utf8")
+        }
+    }
+}
+
 /// 在系统文件管理器中定位结果（只读“显示”，不读取内容进 WebView）。
 #[tauri::command]
 fn reveal_in_file_manager(app: tauri::AppHandle, path: String) -> Result<(), &'static str> {
@@ -91,6 +109,7 @@ pub fn run() {
             backend_status,
             runtime_metadata,
             select_directory,
+            select_browser_executable,
             reveal_in_file_manager
         ])
         .setup(|app| {

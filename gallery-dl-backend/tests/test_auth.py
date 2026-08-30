@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import logging
+import os
 import pickle
 import sqlite3
 import tempfile
@@ -652,6 +653,35 @@ class AuthManagerTests(unittest.TestCase):
         self.assertIsNone(self.auth._browser_host)
         close_browser.assert_called_once_with("ws://browser")
         self.auth._cleanup_oauth_cache(session_cache)
+
+    def test_manual_browser_selection_is_validated_and_persisted(self):
+        executable = Path(self.temp.name) / (
+            "msedge.exe" if os.name == "nt" else "msedge"
+        )
+        executable.write_bytes(b"fixture-browser")
+        if os.name != "nt":
+            executable.chmod(0o700)
+
+        result = asyncio.run(self.auth.select_browser_executable(str(executable)))
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["source"], "configured")
+        self.assertEqual(result["name"], "Microsoft Edge")
+        saved = json.loads(self.settings.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["auth"]["chrome_executable"], str(executable.resolve()))
+
+    def test_browser_cannot_change_during_authorization(self):
+        executable = Path(self.temp.name) / (
+            "chromium.exe" if os.name == "nt" else "chromium"
+        )
+        executable.write_bytes(b"fixture-browser")
+        if os.name != "nt":
+            executable.chmod(0o700)
+        self.auth._active_authorization_id = "active-session"
+        with self.assertRaises(AuthError) as caught:
+            asyncio.run(self.auth.select_browser_executable(str(executable)))
+        self.assertEqual(caught.exception.code, "browser_busy")
+        self.assertFalse(self.settings.config_path.exists())
 
     def test_authorization_proxy_runtime_override_and_persistence(self):
         self.assertEqual(self.auth.authorization_proxy(), "")

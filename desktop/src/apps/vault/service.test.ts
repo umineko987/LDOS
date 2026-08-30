@@ -51,6 +51,22 @@ describe("Vault API service", () => {
     ]);
   });
 
+  it("reads, selects, and resets the authorization browser without exposing its path", async () => {
+    const client = api();
+    const service = createVaultService(client);
+    const signal = new AbortController().signal;
+    const detected = { available: true, name: "Chromium", source: "auto", message: "ready", path: "/private/chromium" };
+    client.get.mockResolvedValueOnce(detected);
+    await expect(service.readBrowser(signal)).resolves.toEqual({ available: true, name: "Chromium", source: "auto", message: "ready" });
+    client.put.mockResolvedValueOnce({ ...detected, name: "Microsoft Edge", source: "configured" });
+    await expect(service.selectBrowser("/usr/bin/microsoft-edge", signal)).resolves.toMatchObject({ name: "Microsoft Edge", source: "configured" });
+    client.delete.mockResolvedValueOnce(detected);
+    await expect(service.detectBrowser(signal)).resolves.toMatchObject({ name: "Chromium", source: "auto" });
+    expect(client.get).toHaveBeenCalledWith("/api/v1/auth/browser?view=vault", { signal });
+    expect(client.put).toHaveBeenCalledWith("/api/v1/auth/browser?view=vault", { path: "/usr/bin/microsoft-edge" }, { signal });
+    expect(client.delete).toHaveBeenCalledWith("/api/v1/auth/browser?view=vault", { signal });
+  });
+
   it("keeps authorization paths fixed and rejects untrusted session references before I/O", async () => {
     const client = api();
     const service = createVaultService(client);

@@ -190,7 +190,7 @@ test.describe("可用应用关键旅程", () => {
     const firstCard = window.locator('[data-review-engine-card="image-1"]');
     const secondCard = window.locator('[data-review-engine-card="image-2"]');
     await expect(firstCard).toBeFocused();
-    await window.getByRole("button", { name: "刷新" }).focus();
+    await window.getByRole("button", { name: "刷新", exact: true }).focus();
     await page.keyboard.press("ArrowRight");
     await expect(secondCard).toHaveAttribute("data-active", "true");
     await expect(secondCard).toBeFocused();

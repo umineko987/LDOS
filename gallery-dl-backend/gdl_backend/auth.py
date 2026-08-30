@@ -27,6 +27,7 @@ from .auth_projection import (
     VAULT_RESPONSE_PROFILE,
     chrome_proxy_server,
     vault_safe_browser_profile,
+    vault_safe_browser_runtime,
     vault_safe_proxy_status,
     vault_safe_session,
     vault_safe_status,
@@ -43,6 +44,7 @@ from .file_security import (
 from .managed_browser import (
     MANAGED_BROWSER_SITES,
     allocate_debug_port,
+    browser_name_for_executable,
     capture_pixiv_oauth_callback,
     close_browser,
     close_target,
@@ -63,6 +65,7 @@ from .pixiv_oauth_protocol import (
 )
 from .process_control import terminate_process
 from .proxy_runtime import mask_proxy
+from .runtime_config import RuntimeConfigStore
 
 
 COOKIE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
@@ -152,6 +155,7 @@ class AuthManager:
 
     def __init__(self, settings: AppSettings) -> None:
         self.settings = settings
+        self._runtime_config = RuntimeConfigStore(settings.config_path)
         self.managed_dir = Path(
             os.path.abspath(os.fspath(settings.allowed_cookie_roots[0] / "managed"))
         )
@@ -644,6 +648,75 @@ class AuthManager:
             "login": session.public_dict() if session else None,
             "actions": ["managed_browser_login", "clear"],
         }
+
+    def browser_runtime_status(self) -> dict[str, Any]:
+        configured = bool(self._browser_orchestrator.chrome_executable.strip())
+        try:
+            executable = discover_chrome_executable(
+                self._browser_orchestrator.chrome_executable
+            )
+        except FileNotFoundError:
+            return {
+                "available": False,
+                "name": None,
+                "source": "configured" if configured else "none",
+                "message": (
+                    "已选择的浏览器不可用，请重新选择"
+                    if configured
+                    else "未检测到 Chrome、Chromium 或 Microsoft Edge"
+                ),
+            }
+        return {
+            "available": True,
+            "name": browser_name_for_executable(executable) or "Chromium 浏览器",
+            "source": "configured" if configured else "auto",
+            "message": "浏览器可用于站点授权",
+        }
+
+    async def select_browser_executable(self, path: str) -> dict[str, Any]:
+        candidate = Path(path.strip())
+        if browser_name_for_executable(candidate) is None:
+            raise AuthError(
+                "invalid_browser_executable",
+                "请选择 Chrome、Chromium 或 Microsoft Edge 的可执行文件",
+            )
+        try:
+            executable = discover_chrome_executable(str(candidate))
+        except FileNotFoundError as error:
+            raise AuthError(
+                "invalid_browser_executable", "所选浏览器不可用，请重新选择"
+            ) from error
+        normalized = str(executable)
+        async with self._authorization_lock:
+            active_login = any(
+                session.state in {"starting", "awaiting_login"}
+                for session in self._browser_sessions.values()
+            )
+            if self._active_authorization_id or active_login or self._profile_resetting:
+                raise AuthError("browser_busy", "授权正在进行，请结束后再更换浏览器")
+            await self._stop_browser_host()
+            await self._runtime_config.update_section(
+                "auth", {"chrome_executable": normalized}
+            )
+            self.settings.auth.chrome_executable = normalized
+            self._browser_orchestrator.chrome_executable = normalized
+        return self.browser_runtime_status()
+
+    async def clear_browser_executable(self) -> dict[str, Any]:
+        async with self._authorization_lock:
+            active_login = any(
+                session.state in {"starting", "awaiting_login"}
+                for session in self._browser_sessions.values()
+            )
+            if self._active_authorization_id or active_login or self._profile_resetting:
+                raise AuthError("browser_busy", "授权正在进行，请结束后再更换浏览器")
+            await self._stop_browser_host()
+            await self._runtime_config.update_section(
+                "auth", {"chrome_executable": ""}
+            )
+            self.settings.auth.chrome_executable = ""
+            self._browser_orchestrator.chrome_executable = ""
+        return self.browser_runtime_status()
 
     def statuses(self) -> dict[str, Any]:
         return {

@@ -78,7 +78,7 @@ describe("P4 Review target ownership", () => {
     expect(controllerSource).toContain("splitReviewDecisionPayload(buildReviewDecisionPayload(snapshot))");
     expect(controllerSource).toContain("queueMicrotask(() =>");
     expect(controllerSource).toContain("beforeLeave: save");
-    expect(serviceSource.match(/"\/api\/v1\//g)).toHaveLength(1);
+    expect(serviceSource.match(/"\/api\/v1\//g)).toHaveLength(2);
     expect(serviceSource.match(/view=desktop/g)).toHaveLength(4);
     expect(serviceSource).toContain("REVIEW_PAGE_LIMIT = 50");
     expect(serviceSource).not.toContain("all=true");

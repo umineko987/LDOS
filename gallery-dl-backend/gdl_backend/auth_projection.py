@@ -183,6 +183,32 @@ def vault_safe_browser_profile(value: Any) -> dict[str, Any]:
     }
 
 
+def vault_safe_browser_runtime(value: Any) -> dict[str, Any]:
+    runtime = value if isinstance(value, dict) else {}
+    available = runtime.get("available") is True
+    name = runtime.get("name")
+    if name not in {
+        "Google Chrome",
+        "Chromium",
+        "Microsoft Edge",
+        "Chromium 浏览器",
+    }:
+        name = None
+    source = runtime.get("source")
+    if source not in {"auto", "configured", "none"}:
+        source = "none"
+    return {
+        "available": available,
+        "name": name if available else None,
+        "source": source,
+        "message": (
+            "浏览器可用于站点授权"
+            if available
+            else "未检测到支持的浏览器，请手动选择"
+        ),
+    }
+
+
 def vault_safe_statuses(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("授权状态快照不是对象")

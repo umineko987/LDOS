@@ -1153,6 +1153,8 @@ const TRANSLATION_FRAGMENT_SOURCES = [
   "[路径已隐藏]",
   "· 计划 ",
   "· 并发 ",
+  "页面无法读取服务返回的授权状态。",
+  "请刷新；若持续发生，请检查服务与桌面界面的版本是否匹配。",
   "授权状态已加载，可随时刷新。",
 ] as const;
 const TRANSLATION_FRAGMENTS = TRANSLATION_FRAGMENT_SOURCES

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import importlib.util
 import io
 import json
@@ -8,6 +9,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
@@ -37,6 +39,10 @@ def minimal_tree(root: Path) -> dict[str, object]:
     (app / "gdl_backend").mkdir(parents=True)
     (app / "gdl_backend" / "worker_entry.py").write_text("", encoding="utf-8")
     (app / "dedup_review_worker.py").write_text("", encoding="utf-8")
+    mihomo = app / "bin" / "mihomo"
+    mihomo.parent.mkdir()
+    mihomo.write_bytes(b"mihomo")
+    mihomo.chmod(0o755)
     licenses = root / "licenses"
     licenses.mkdir()
     (licenses / "test-license.txt").write_text("license\n", encoding="utf-8")
@@ -71,6 +77,13 @@ def minimal_tree(root: Path) -> dict[str, object]:
             "python": "runtime/python/bin/python3.13",
             "archive_sha256": "1" * 64,
         },
+        "bundled_resources": {
+            "mihomo": {
+                "binary": "app/bin/mihomo",
+                "binary_sha256": release.sha256_file(mihomo),
+            }
+        },
+        "optional_resources": {"mihomo": True},
         "files": {"path": release.FILES_NAME, "count": count, "sha256": digest},
     }
     (root / release.MANIFEST_NAME).write_text(
@@ -115,6 +128,8 @@ class DesktopReleaseTests(unittest.TestCase):
                 # 各平台的 CPython LICENSE.txt 不同（Windows 追加 Microsoft
                 # Distributable Code 条款），哈希必须按 target 分别锁定。
                 and len(item["python_license_sha256"]) == 64
+                and len(item["mihomo"]["sha256"]) == 64
+                and len(item["mihomo"]["binary_sha256"]) == 64
                 for item in lock["targets"].values()
             )
         )
@@ -122,7 +137,7 @@ class DesktopReleaseTests(unittest.TestCase):
             lock["optional_resources"],
             {
                 "dedup_models": False,
-                "mihomo": False,
+                "mihomo": True,
                 "browser_runtime": False,
             },
         )
@@ -275,6 +290,48 @@ class DesktopReleaseTests(unittest.TestCase):
                 release.ReleaseError, "unsafe runtime archive member"
             ):
                 release.safe_extract(archive, tmp_path / "output")
+
+    def test_install_mihomo_extracts_locked_platform_archives(self) -> None:
+        payload = b"locked mihomo executable"
+        with temporary_path() as tmp_path:
+            lock = release.load_lock()
+
+            gzip_archive = tmp_path / "mihomo.gz"
+            with gzip.open(gzip_archive, "wb") as archive:
+                archive.write(payload)
+            linux = lock["targets"]["linux-x86_64"]["mihomo"]
+            linux.update(
+                {
+                    "archive": gzip_archive.name,
+                    "sha256": release.sha256_file(gzip_archive),
+                    "binary": "app/bin/mihomo",
+                    "binary_sha256": release.sha256_bytes(payload),
+                }
+            )
+            linux_output = tmp_path / "linux"
+            installed = release.install_mihomo(
+                gzip_archive, linux_output, lock, "linux-x86_64"
+            )
+            self.assertEqual(installed.read_bytes(), payload)
+
+            zip_archive = tmp_path / "mihomo.zip"
+            with zipfile.ZipFile(zip_archive, "w") as archive:
+                archive.writestr("mihomo.exe", payload)
+            windows = lock["targets"]["windows-x86_64"]["mihomo"]
+            windows.update(
+                {
+                    "archive": zip_archive.name,
+                    "sha256": release.sha256_file(zip_archive),
+                    "member": "mihomo.exe",
+                    "binary": "app/bin/mihomo.exe",
+                    "binary_sha256": release.sha256_bytes(payload),
+                }
+            )
+            windows_output = tmp_path / "windows"
+            installed = release.install_mihomo(
+                zip_archive, windows_output, lock, "windows-x86_64"
+            )
+            self.assertEqual(installed.read_bytes(), payload)
 
     def test_extract_deb_reads_data_archive_without_system_tools(self) -> None:
         with temporary_path() as tmp_path:

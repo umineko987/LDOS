@@ -50,6 +50,16 @@ describe("Svelte Review integration", () => {
     for (const forbidden of ["relative_path", "private.invalid", "应用迁移将在后续阶段接入", "P2 Shell"]) expect(body).not.toContain(forbidden);
   });
 
+  it("keeps the model download dialog opaque with a visible validated proxy field", () => {
+    expect(reviewSource).toContain('type="text"');
+    expect(reviewSource).not.toContain('type="password"');
+    expect(reviewSource).toContain("代理地址格式不正确");
+    expect(reviewSource).toContain("normalizeModelProxyUrl(modelProxy)");
+    expect(reviewSource).toContain("aria-invalid={Boolean(modelProxyError)}");
+    expect(css).toContain(".review-model-confirmation { background: var(--ldos-fallback-elevated-solid); }");
+    expect(css).toContain(".review-model-confirmation::backdrop { background: rgb(3 7 18 / 0.68); }");
+  });
+
   it("routes Review through its only AppWindow branch", () => {
     const body = render(AppWindow, { props }).body;
     expect(body).toContain("data-review-app");
@@ -105,7 +115,7 @@ describe("Svelte Review integration", () => {
       /new Blob/,
       /data:image/,
     ]) expect(combined).not.toMatch(forbidden);
-    expect(serviceSource.match(/"\/api\/v1\//g)).toHaveLength(1);
+    expect(serviceSource.match(/"\/api\/v1\//g)).toHaveLength(2);
     expect(serviceSource.match(/view=desktop/g)).toHaveLength(4);
     expect(serviceSource).toContain("REVIEW_PAGE_LIMIT = 50");
     expect(serviceSource).not.toContain("all=true");

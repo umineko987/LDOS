@@ -35,6 +35,11 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("POST", "/api/v1/auth/pixiv/oauth/start"): ("auth_start_pixiv_api_v1_auth_pixiv_oauth_start_post", ("200", "422")),
     ("DELETE", "/api/v1/auth/pixiv/oauth/session"): ("auth_cancel_pixiv_api_v1_auth_pixiv_oauth_session_delete", ("200", "422")),
     ("DELETE", "/api/v1/auth/browser-profile"): ("auth_clear_browser_profile_api_v1_auth_browser_profile_delete", ("200", "422")),
+    ("GET", "/api/v1/auth/browser"): ("auth_browser_runtime_api_v1_auth_browser_get", ("200", "422")),
+    ("PUT", "/api/v1/auth/browser"): ("auth_select_browser_api_v1_auth_browser_put", ("200", "422")),
+    ("DELETE", "/api/v1/auth/browser"): ("auth_clear_browser_api_v1_auth_browser_delete", ("200", "422")),
+    ("GET", "/api/v1/setup/models"): ("model_status_api_v1_setup_models_get", ("200",)),
+    ("POST", "/api/v1/setup/models/install"): ("install_models_api_v1_setup_models_install_post", ("202", "422")),
     ("GET", "/api/v1/gallery/sources"): ("list_gallery_sources_api_v1_gallery_sources_get", ("200", "422")),
     ("GET", "/api/v1/gallery/sources/{source_id}"): ("get_gallery_source_api_v1_gallery_sources__source_id__get", ("200", "422")),
     ("POST", "/api/v1/gallery/imports"): ("import_gallery_source_api_v1_gallery_imports_post", ("201", "422")),
@@ -201,6 +206,7 @@ class AppRoutingContractTests(unittest.TestCase):
         expected_modules = {
             "diagnostics": "gdl_backend.api_routes.diagnostics",
             "auth": "gdl_backend.api_routes.auth",
+            "setup": "gdl_backend.api_routes.setup",
             "tasks": "gdl_backend.api_routes.tasks",
             "discovery": "gdl_backend.api_routes.discovery",
             "crawls": "gdl_backend.api_routes.crawls",
@@ -217,6 +223,8 @@ class AppRoutingContractTests(unittest.TestCase):
                 domain = "diagnostics"
             elif path.startswith("/api/v1/auth"):
                 domain = "auth"
+            elif path.startswith("/api/v1/setup"):
+                domain = "setup"
             elif path.startswith("/api/v1/tasks"):
                 domain = "tasks"
             elif path.startswith("/api/v1/search"):

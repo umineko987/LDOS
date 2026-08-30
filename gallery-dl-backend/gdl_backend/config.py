@@ -610,7 +610,7 @@ class AppSettings:
             scheduler=scheduler,
             dedup=dedup,
             default_site_policy=policy,
-            config_path=config_path if config_path.is_file() else None,
+            config_path=config_path,
         )
         settings.ensure_directories()
         settings.validate()

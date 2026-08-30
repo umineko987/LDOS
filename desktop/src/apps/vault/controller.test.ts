@@ -86,6 +86,9 @@ function harness(overrides: Partial<VaultService> = {}, activeSite: "" | "twitte
     cancel: vi.fn(async () => ({})),
     clearSite: vi.fn(async () => ({})),
     clearProfile: vi.fn(async () => ({})),
+    readBrowser: vi.fn(async () => ({ available: false, name: "", source: "none" as const, message: "未检测到浏览器" })),
+    selectBrowser: vi.fn(async () => ({ available: true, name: "Chrome", source: "configured" as const, message: "已选择 Chrome" })),
+    detectBrowser: vi.fn(async () => ({ available: false, name: "", source: "none" as const, message: "未检测到浏览器" })),
     saveProxy: vi.fn(async () => sanitizeAuthorizationProxy({ proxy_url: null, source: "none" })),
     resetProxy: vi.fn(async () => ({})),
   };

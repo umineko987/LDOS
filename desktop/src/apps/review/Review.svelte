@@ -5,7 +5,7 @@
   import type { ApplicationId } from "../../core/applications/definitions";
   import type { ApiClient } from "../../core/api/client";
   import type { PersistenceService } from "../../core/persistence/service";
-  import type { PollingService } from "../../core/polling/service";
+  import type { PollingHandle, PollingService } from "../../core/polling/service";
   import { createReviewController } from "./controller";
   import {
     REVIEW_DEFAULT_MAGNIFICATION,
@@ -15,8 +15,14 @@
     type ReviewEngine,
     type ReviewLoupeState,
   } from "./engine";
-  import { REVIEW_FILTERS, resolveReviewCommand, reviewCanList } from "./model";
-  import { createReviewService } from "./service";
+  import {
+    REVIEW_FILTERS,
+    resolveReviewCommand,
+    reviewCanList,
+    reviewErrorPresentation,
+    type ModelSetupSnapshot,
+  } from "./model";
+  import { createReviewService, normalizeModelProxyUrl } from "./service";
   import { createReviewStore, focusedReviewGroup, reviewGroupsFromState } from "./state";
   import "./review.css";
 
@@ -44,6 +50,15 @@
   let reviewDeck = $state<HTMLElement>();
   let confirmationDialog = $state<HTMLDialogElement>();
   let returnFocus: FocusTarget | null = null;
+  let modelConfirmationDialog = $state<HTMLDialogElement>();
+  let modelReturnFocus: FocusTarget | null = null;
+  let modelSetup = $state<ModelSetupSnapshot | null>(null);
+  let modelSetupError = $state("");
+  let modelProxy = $state("");
+  let modelProxyError = $state("");
+  let modelConfirmationOpen = $state(false);
+  let modelRequest = $state<AbortController | null>(null);
+  let modelPoll: PollingHandle | null = null;
   let loupeEnabled = $state(false);
   let loupeState = $state<ReviewLoupeState>({ active: false, pinned: false, magnification: REVIEW_DEFAULT_MAGNIFICATION });
   let engine: ReviewEngine | null = null;
@@ -102,6 +117,107 @@
   function focusableDialogItems(): HTMLElement[] {
     return [...(confirmationDialog?.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
   }
+  function modelDialogItems(): HTMLElement[] {
+    return [...(modelConfirmationDialog?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
+  }
+  function stopModelPolling(): void {
+    modelPoll?.stop();
+    modelPoll = null;
+  }
+  function describeSetupError(error: unknown): string {
+    const presentation = reviewErrorPresentation(error);
+    return `${presentation.message} ${presentation.nextStep}`.trim();
+  }
+  function syncModelPolling(): void {
+    stopModelPolling();
+    if (modelSetup?.phase !== "installing") return;
+    modelPoll = polling.start({
+      key: "review.model-setup",
+      scope: "app:review-model-setup",
+      intervalMs: 750,
+      immediate: false,
+      critical: false,
+      task: (signal) => service.readModelSetup(signal),
+      onResult: (status) => {
+        const completed = modelSetup?.phase === "installing" && status.phase === "ready";
+        modelSetup = status;
+        modelSetupError = "";
+        if (status.phase !== "installing") stopModelPolling();
+        if (completed) void controller.refresh();
+      },
+      onError: (error) => {
+        modelSetupError = describeSetupError(error);
+        stopModelPolling();
+      },
+    });
+  }
+  async function refreshModelSetup(): Promise<void> {
+    modelRequest?.abort();
+    const request = new AbortController();
+    modelRequest = request;
+    try {
+      modelSetup = await service.readModelSetup(request.signal);
+      modelSetupError = "";
+      syncModelPolling();
+    } catch (error) {
+      if (!request.signal.aborted) modelSetupError = describeSetupError(error);
+    } finally {
+      if (modelRequest === request) modelRequest = null;
+    }
+  }
+  function openModelConfirmation(): void {
+    if (modelSetup?.phase === "installing") return;
+    modelReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    modelProxyError = "";
+    modelConfirmationOpen = true;
+  }
+  function closeModelConfirmation(): void {
+    const target = modelReturnFocus;
+    modelReturnFocus = null;
+    modelConfirmationOpen = false;
+    modelProxy = "";
+    modelProxyError = "";
+    modelConfirmationDialog?.close();
+    void tick().then(() => restoreFocus(target));
+  }
+  async function installModels(): Promise<void> {
+    let proxyUrl: string;
+    try {
+      proxyUrl = normalizeModelProxyUrl(modelProxy);
+    } catch {
+      modelProxyError = "代理地址格式不正确，请输入带协议和端口的地址，例如 http://127.0.0.1:7890。";
+      return;
+    }
+    modelProxyError = "";
+    modelProxy = "";
+    modelConfirmationOpen = false;
+    modelConfirmationDialog?.close();
+    modelRequest?.abort();
+    const request = new AbortController();
+    modelRequest = request;
+    modelSetupError = "";
+    try {
+      modelSetup = await service.installModels(proxyUrl, request.signal);
+      syncModelPolling();
+    } catch (error) {
+      if (!request.signal.aborted) modelSetupError = describeSetupError(error);
+    } finally {
+      if (modelRequest === request) modelRequest = null;
+      const target = modelReturnFocus;
+      modelReturnFocus = null;
+      void tick().then(() => restoreFocus(target));
+    }
+  }
+  function onModelDialogKeydown(event: KeyboardEvent): void {
+    if (event.key === "Escape") { event.preventDefault(); closeModelConfirmation(); return; }
+    if (event.key !== "Tab") return;
+    const items = modelDialogItems();
+    const next = trappedTabIndex(items.indexOf(document.activeElement as HTMLElement), items.length, event.shiftKey);
+    if (next !== null) { event.preventDefault(); restoreFocus(items[next]); }
+  }
+  function formatMegabytes(bytes: number): string {
+    return `${Math.round(bytes / 1_000_000)} MB`;
+  }
   function resolveConfirmation(confirmed: boolean): void {
     const target = returnFocus;
     returnFocus = null;
@@ -155,6 +271,14 @@
     });
   });
 
+  $effect(() => {
+    if (!modelConfirmationOpen) return;
+    void tick().then(() => {
+      if (modelConfirmationDialog && !modelConfirmationDialog.open && typeof modelConfirmationDialog.showModal === "function") modelConfirmationDialog.showModal();
+      restoreFocus(modelDialogItems()[0] ?? modelConfirmationDialog);
+    });
+  });
+
   onMount(() => {
     if (!engineHost) return;
     engine = createReviewEngine({ host: engineHost, onLoupeState: (state) => { loupeState = state; } });
@@ -166,8 +290,11 @@
     ) ?? (() => {});
     globalThis.addEventListener("beforeunload", onBeforeUnload);
     controller.activate();
+    void refreshModelSetup();
     return () => {
       engineSequence += 1;
+      modelRequest?.abort();
+      stopModelPolling();
       unregister();
       unsubscribe();
       globalThis.removeEventListener("beforeunload", onBeforeUnload);
@@ -184,6 +311,27 @@
     <div><p>去重审核</p><h1 id="review-heading">比较、确认与文件整理</h1></div>
     <span class="review-status" data-kind={snapshot.presentation.kind}>{snapshot.presentation.label}</span>
   </header>
+
+  <section class="review-model-setup" data-phase={modelSetup?.phase ?? "loading"} aria-labelledby="review-model-heading" aria-busy={modelSetup?.phase === "installing"}>
+    <div class="review-model-copy">
+      <p>可选能力</p>
+      <h2 id="review-model-heading">相似图片模型</h2>
+      <span>{modelSetup?.phase === "ready" ? "已安装并启用" : modelSetup?.phase === "installing" ? "正在准备" : modelSetup?.installed ? "已安装，等待启用" : "需要下载后启用"}</span>
+      <p>{modelSetup?.phase === "ready" ? "SSCD 与 DINOv2 已就绪，新建抓取批次可使用相似图片审核。" : "下载约 190 MB 的 SSCD 与 DINOv2 模型；Release 版使用 CPU 分析。"}</p>
+    </div>
+    {#if modelSetup?.phase === "installing"}
+      <div class="review-model-progress" role="status" aria-live="polite">
+        <progress max={modelSetup.expectedBytes} value={modelSetup.downloadedBytes}></progress>
+        <span>{formatMegabytes(modelSetup.downloadedBytes)} / {formatMegabytes(modelSetup.expectedBytes)}{modelSetup.usingProxy ? " · 使用本次代理" : ""}</span>
+        <small>{modelSetup.message || "正在下载并检查模型"}</small>
+      </div>
+    {/if}
+    {#if modelSetupError || modelSetup?.phase === "failed"}<p class="review-model-error" role="alert">{modelSetupError || modelSetup?.message || "模型准备失败，请重试。"}</p>{/if}
+    <div class="review-model-actions">
+      {#if modelSetup?.phase !== "ready"}<button type="button" class="review-button review-button--primary" disabled={!modelSetup || modelSetup.phase === "installing"} onclick={openModelConfirmation}>{modelSetup?.installed ? "启用模型" : modelSetup?.phase === "failed" ? "重新下载" : "下载并启用"}</button>{/if}
+      <button type="button" disabled={Boolean(modelRequest)} onclick={() => void refreshModelSetup()}>刷新状态</button>
+    </div>
+  </section>
 
   {#if snapshot.error}
     <section class="review-error" role="alert" aria-labelledby="review-error-title">
@@ -248,6 +396,35 @@
     {/if}
   </section>
 </section>
+
+{#if modelConfirmationOpen}
+  <dialog class="review-confirmation review-model-confirmation" aria-modal="true" aria-labelledby="review-model-confirmation-title" aria-describedby="review-model-confirmation-message" bind:this={modelConfirmationDialog} oncancel={(event) => { event.preventDefault(); closeModelConfirmation(); }} onkeydown={onModelDialogKeydown} onclick={(event) => { if (event.target === event.currentTarget) closeModelConfirmation(); }}>
+    <section>
+      <h2 id="review-model-confirmation-title">下载并启用相似图片模型？</h2>
+      <p id="review-model-confirmation-message">将下载约 {formatMegabytes(modelSetup?.expectedBytes ?? 190_000_000)} 的 SSCD 与 DINOv2 模型。下载完成后自动启用，不需要重启 LDOS。</p>
+      <label class="review-model-proxy">
+        <span>本次下载代理（可选）</span>
+        <input
+          type="text"
+          maxlength="300"
+          autocomplete="off"
+          autocapitalize="none"
+          spellcheck={false}
+          inputmode="url"
+          aria-invalid={Boolean(modelProxyError)}
+          aria-describedby={modelProxyError ? "review-model-proxy-help review-model-proxy-error" : "review-model-proxy-help"}
+          placeholder="http://127.0.0.1:7890"
+          bind:value={modelProxy}
+          oninput={() => { modelProxyError = ""; }}
+        />
+        <small id="review-model-proxy-help">仅用于这次下载，不会保存。</small>
+        {#if modelProxyError}<small id="review-model-proxy-error" class="review-model-proxy-error" role="alert">{modelProxyError}</small>{/if}
+      </label>
+      <p class="review-confirmation-warning">Release 版使用 CPU 运行模型，首次分析可能需要一些时间。</p>
+      <div><button type="button" onclick={closeModelConfirmation}>取消</button><button type="button" class="review-button review-button--primary" onclick={() => void installModels()}>开始下载</button></div>
+    </section>
+  </dialog>
+{/if}
 
 {#if snapshot.confirmation}
   <dialog class="review-confirmation" data-review-confirmation={snapshot.confirmation.action} aria-modal="true" aria-labelledby="review-confirmation-title" aria-describedby="review-confirmation-message review-confirmation-warning" bind:this={confirmationDialog} oncancel={(event) => { event.preventDefault(); resolveConfirmation(false); }} onkeydown={onConfirmationKeydown} onclick={(event) => { if (event.target === event.currentTarget) resolveConfirmation(false); }}>

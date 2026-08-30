@@ -8,6 +8,7 @@ const REVIEW_GROUP_KIND_SET = new Set<string>(["duplicate", "single", "unreadabl
 const ACTIVE_STATUS_SET = new Set<string>(["pending", "analyzing", "auto_applying", "applying"]);
 const LISTABLE_STATUS_SET = new Set<string>(["ready", "applying", "applied", "apply_failed"]);
 const TERMINAL_BATCH_STATUS_SET = new Set<string>(["succeeded", "completed_with_errors", "cancelled"]);
+const MODEL_SETUP_PHASE_SET = new Set<string>(["idle", "installing", "ready", "failed"]);
 const DANGEROUS_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -92,6 +93,22 @@ export interface ReviewRecentBatch {
   readonly statusLabel: string;
   readonly createdAt: number | null;
   readonly terminal: boolean;
+}
+
+export type ModelSetupPhase = "idle" | "installing" | "ready" | "failed";
+
+export interface ModelSetupSnapshot {
+  readonly phase: ModelSetupPhase;
+  readonly enabled: boolean;
+  readonly installed: boolean;
+  readonly usingProxy: boolean;
+  readonly downloadedBytes: number;
+  readonly expectedBytes: number;
+  readonly message: string;
+  readonly models: Readonly<{
+    sscd: Readonly<{ installed: boolean }>;
+    dino: Readonly<{ installed: boolean }>;
+  }>;
 }
 
 export interface ReviewDecisionPayload {
@@ -246,6 +263,38 @@ function strictCount(value: unknown, code: string, maximum = 1_000_000_000): num
 function strictBoolean(value: unknown, code: string): boolean {
   if (typeof value !== "boolean") throw new TypeError(code);
   return value;
+}
+
+export function sanitizeModelSetup(value: unknown): ModelSetupSnapshot {
+  const record = requireRecord(value, "invalid_model_setup");
+  const models = requireRecord(own(record, "models"), "invalid_model_setup_models");
+  const sscd = requireRecord(own(models, "sscd"), "invalid_model_setup_sscd");
+  const dino = requireRecord(own(models, "dino"), "invalid_model_setup_dino");
+  const rawPhase = own(record, "phase");
+  const phase: ModelSetupPhase = typeof rawPhase === "string"
+    && MODEL_SETUP_PHASE_SET.has(rawPhase)
+    ? rawPhase as ModelSetupPhase
+    : "failed";
+  const expectedBytes = strictCount(own(record, "expected_bytes"), "invalid_model_setup_expected_bytes");
+  const downloadedBytes = strictCount(own(record, "downloaded_bytes"), "invalid_model_setup_downloaded_bytes");
+  if (!expectedBytes || downloadedBytes > expectedBytes) throw new TypeError("invalid_model_setup_progress");
+  const rawMessage = own(record, "message");
+  const message = typeof rawMessage === "string"
+    ? rawMessage.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 500)
+    : "";
+  return Object.freeze({
+    phase,
+    enabled: strictBoolean(own(record, "enabled"), "invalid_model_setup_enabled"),
+    installed: strictBoolean(own(record, "installed"), "invalid_model_setup_installed"),
+    usingProxy: strictBoolean(own(record, "using_proxy"), "invalid_model_setup_proxy"),
+    downloadedBytes,
+    expectedBytes,
+    message,
+    models: Object.freeze({
+      sscd: Object.freeze({ installed: strictBoolean(own(sscd, "installed"), "invalid_model_setup_sscd") }),
+      dino: Object.freeze({ installed: strictBoolean(own(dino, "installed"), "invalid_model_setup_dino") }),
+    }),
+  });
 }
 
 function safeTime(value: unknown): number | null {

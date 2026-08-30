@@ -39,6 +39,7 @@ const SESSION_STATES = new Set([
 const MANAGED_ACTIVE_STATES = new Set(["starting", "awaiting_login"]);
 const PIXIV_ACTIVE_STATES = new Set(["starting", "starting_browser", "awaiting_login", "awaiting_code", "exchanging"]);
 const PROXY_SOURCES = new Set(["runtime", "config", "none"]);
+const BROWSER_SOURCES = new Set(["auto", "configured", "none"]);
 const PROXY_SCHEMES = new Set(["http", "https", "socks4", "socks5", "socks5h"]);
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 const SESSION_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -102,6 +103,13 @@ export interface VaultAuthorizationProxy {
   readonly restartPending: boolean;
   readonly updatedAt: number | null;
   readonly valid: boolean;
+}
+
+export interface VaultBrowserRuntime {
+  readonly available: boolean;
+  readonly name: string;
+  readonly source: "auto" | "configured" | "none";
+  readonly message: string;
 }
 
 export interface VaultSnapshot {
@@ -418,6 +426,26 @@ export function formatVaultTime(value: number | null | undefined): string {
   }
 }
 
+export function sanitizeVaultBrowserRuntime(value: unknown): VaultBrowserRuntime {
+  const runtime = requireRecord(value, "invalid_vault_browser_runtime");
+  const available = own(runtime, "available");
+  const source = own(runtime, "source");
+  const name = own(runtime, "name");
+  const message = own(runtime, "message");
+  if (typeof available !== "boolean" || typeof source !== "string" || !BROWSER_SOURCES.has(source)) {
+    throw new TypeError("invalid_vault_browser_runtime");
+  }
+  const safeName = name === null ? "" : typeof name === "string" && name.length <= 100 && !CONTROL_CHARACTERS.test(name) ? name : "";
+  const safeMessage = typeof message === "string" && message.length <= 300 && !CONTROL_CHARACTERS.test(message) ? message : "";
+  if ((available && !safeName) || !safeMessage) throw new TypeError("invalid_vault_browser_runtime");
+  return Object.freeze({
+    available,
+    name: safeName,
+    source: source as VaultBrowserRuntime["source"],
+    message: safeMessage,
+  });
+}
+
 export function sanitizeAuthorizationProxy(value: unknown): VaultAuthorizationProxy {
   const proxy = requireRecord(value, "invalid_vault_authorization_proxy");
   const raw = own(proxy, "proxy_url");
@@ -614,17 +642,19 @@ const ERROR_NEXT_STEPS: Readonly<Record<string, string>> = Object.freeze({
   unsupported_auth_site: "请刷新状态并使用页面提供的站点操作。",
   managed_browser_unsupported: "请刷新状态并使用站点卡片中提供的操作。",
   browser_login_session_not_found: "请刷新站点状态；如仍未授权，请重新开始。",
-  browser_login_start_failed: "请检查 Chrome 配置与桌面会话，然后手动重试。",
+  browser_login_start_failed: "请检查浏览器配置与桌面会话，然后手动重试。",
   shared_browser_busy: "请完成或取消当前授权，刷新状态后重试。",
-  pixiv_oauth_start_failed: "请检查 Chrome 与授权代理，然后重试。",
-  pixiv_oauth_start_timeout: "请检查 Chrome 与网络线路，刷新状态后重试。",
+  pixiv_oauth_start_failed: "请检查浏览器与授权代理，然后重试。",
+  pixiv_oauth_start_timeout: "请检查浏览器与网络线路，刷新状态后重试。",
   pixiv_oauth_session_not_found: "请刷新 Pixiv 状态并重新开始授权。",
   pixiv_oauth_exchange_failed: "请重新授权；不要把 Token 粘贴到页面。",
   invalid_authorization_proxy: "请使用协议://主机:端口格式，不要添加路径或查询参数。",
   browser_profile_reset_active: "请等待当前清理操作结束后刷新。",
   browser_profile_busy: "请关闭残留的授权浏览器窗口，再刷新后重试。",
+  invalid_browser_executable: "请重新选择 Chrome、Chromium 或 Microsoft Edge 的可执行文件。",
+  browser_busy: "请完成或取消当前授权后再更换浏览器。",
   invalid_browser_profile_path: "请检查授权浏览器数据目录配置后重试。",
-  chrome_not_found: "请在服务配置中设置 Chrome/Chromium，然后重试。",
+  chrome_not_found: "请自动检测或手动选择 Chrome、Chromium 或 Microsoft Edge 后重试。",
   auth_cache_clear_failed: "请刷新确认站点材料；必要时检查服务权限。",
   network_error: "服务恢复后使用“刷新授权状态”重试。",
   invalid_response: "请刷新；若持续发生，请检查服务与桌面界面的版本是否匹配。",
@@ -644,8 +674,10 @@ const ERROR_GUIDANCE: Readonly<Record<string, Readonly<{ title: string; message:
   unsupported_auth_site: Object.freeze({ title: "站点不支持授权", message: "当前版本不支持该站点授权。" }),
   managed_browser_unsupported: Object.freeze({ title: "授权方式不支持", message: "该站点不能使用授权浏览器登录。" }),
   shared_browser_busy: Object.freeze({ title: "授权浏览器正忙", message: "另一项授权或浏览器数据清理正在进行。" }),
-  chrome_not_found: Object.freeze({ title: "未找到 Chrome / Chromium", message: "服务无法启动授权浏览器。" }),
+  chrome_not_found: Object.freeze({ title: "未找到授权浏览器", message: "服务无法启动 Chrome、Chromium 或 Microsoft Edge。" }),
   browser_profile_busy: Object.freeze({ title: "授权浏览器数据正在使用", message: "服务暂时无法使用授权浏览器数据。" }),
+  invalid_browser_executable: Object.freeze({ title: "浏览器不可用", message: "所选文件不是可用的 Chrome、Chromium 或 Microsoft Edge。" }),
+  browser_busy: Object.freeze({ title: "授权浏览器正忙", message: "当前授权流程正在使用浏览器。" }),
   browser_login_start_failed: Object.freeze({ title: "授权浏览器启动失败", message: "服务未能打开授权浏览器标签页。" }),
   browser_login_session_not_found: Object.freeze({ title: "授权会话已失效", message: "服务找不到刚才的浏览器授权会话。" }),
   pixiv_oauth_session_not_found: Object.freeze({ title: "Pixiv 会话已失效", message: "服务找不到当前 Pixiv 授权会话。" }),

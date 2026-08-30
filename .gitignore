@@ -4,6 +4,7 @@ Thumbs.db
 Desktop.ini
 .idea/
 .vscode/
+/.pi/mcp.json
 *.swp
 *.tmp
 

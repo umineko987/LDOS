@@ -100,6 +100,7 @@ html[lang="en"] .vault-impact-note::before { content: "⚠ Impact · "; }
 .vault-session-card,
 .vault-action-panel,
 .vault-profile-status,
+.vault-browser-panel,
 .vault-proxy-panel,
 .vault-danger-zone,
 .vault-app .vault-panel { margin-top: 14px; padding: 14px; border: 1px solid var(--ldos-border-weak); border-radius: var(--ldos-radius-control); background: var(--ldos-glass-surface-weak); box-shadow: none; }
@@ -112,6 +113,7 @@ html[lang="en"] .vault-impact-note::before { content: "⚠ Impact · "; }
 .vault-section-heading h3,
 .vault-session-card h3,
 .vault-action-panel h3,
+.vault-browser-panel h3,
 .vault-profile-status h3,
 .vault-proxy-panel h3,
 .vault-danger-zone h3 { margin: 0; font-size: 1rem; }
@@ -125,6 +127,8 @@ html[lang="en"] .vault-impact-note::before { content: "⚠ Impact · "; }
 .vault-actions { flex-wrap: wrap; justify-content: flex-start; }
 .vault-action-panel .vault-actions { margin-top: 10px; }
 .vault-button { min-height: 42px; }
+.vault-browser-panel .vault-actions { margin-top: 12px; }
+.vault-browser-fact { margin: 12px 0 0; color: var(--ldos-text-heading); font-family: var(--ldos-font-mono); }
 .vault-profile-status .vault-button,
 .vault-proxy-panel .vault-button { margin-top: 12px; }
 .vault-proxy-fact { margin-top: 12px !important; overflow-wrap: anywhere; color: var(--ldos-text-heading); font-family: var(--ldos-font-mono); }
@@ -149,6 +153,7 @@ html[lang="en"] .vault-impact-note::before { content: "⚠ Impact · "; }
   .vault-site-card,
   .vault-session-card,
   .vault-action-panel,
+  .vault-browser-panel,
   .vault-profile-status,
   .vault-proxy-panel,
   .vault-danger-zone { background: var(--ldos-fallback-elevated-solid); }
@@ -167,6 +172,7 @@ html[lang="en"] .vault-impact-note::before { content: "⚠ Impact · "; }
   .vault-site-card,
   .vault-session-card,
   .vault-action-panel,
+  .vault-browser-panel,
   .vault-profile-status,
   .vault-proxy-panel,
   .vault-danger-zone { border-color: var(--ldos-border-button); }
@@ -177,6 +183,7 @@ html[lang="en"] .vault-impact-note::before { content: "⚠ Impact · "; }
   .vault-site-card,
   .vault-session-card,
   .vault-action-panel,
+  .vault-browser-panel,
   .vault-profile-status,
   .vault-proxy-panel,
   .vault-danger-zone,

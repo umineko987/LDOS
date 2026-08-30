@@ -34,6 +34,8 @@ interface PlatformDependencies {
 export interface PlatformCapabilities {
   /** 本机目录选择（图库导入/重关联/导出目标），仅桌面模式可用。 */
   readonly selectDirectory: boolean;
+  /** 选择浏览器可执行文件，仅桌面模式可用。 */
+  readonly selectBrowserExecutable: boolean;
   /** 在系统文件管理器中定位结果，仅桌面模式可用。 */
   readonly revealInFileManager: boolean;
 }
@@ -45,6 +47,8 @@ export interface PlatformAdapter {
   getBackendStatus(): Promise<BackendStatus>;
   /** 选择一个目录。用户取消返回 null；浏览器模式抛 PlatformCapabilityError。 */
   selectDirectory(purpose: PlatformDirectoryPurpose): Promise<string | null>;
+  /** 选择 Chrome、Chromium 或 Edge 可执行文件。用户取消返回 null。 */
+  selectBrowserExecutable(): Promise<string | null>;
   /** 在系统文件管理器中定位一个路径。浏览器模式抛 PlatformCapabilityError。 */
   revealInFileManager(path: string): Promise<void>;
 }
@@ -83,6 +87,7 @@ export function createPlatformAdapter({
 
   const capabilities: PlatformCapabilities = Object.freeze({
     selectDirectory: mode === "tauri",
+    selectBrowserExecutable: mode === "tauri",
     revealInFileManager: mode === "tauri",
   });
 
@@ -103,6 +108,25 @@ export function createPlatformAdapter({
       typeof picked !== "string" ||
       picked.trim().length === 0 ||
       /[\u0000-\u001f]/.test(picked)
+    ) {
+      throw new PlatformCapabilityError("capability_unavailable");
+    }
+    return picked;
+  };
+
+  const selectBrowserExecutable = async (): Promise<string | null> => {
+    if (mode === "browser") throw new PlatformCapabilityError("capability_unavailable");
+    let picked: unknown;
+    try {
+      picked = await bridge.invoke("select_browser_executable");
+    } catch {
+      throw new PlatformCapabilityError("capability_unavailable");
+    }
+    if (picked === null || picked === undefined) return null;
+    if (
+      typeof picked !== "string"
+      || picked.trim().length === 0
+      || /[\u0000-\u001f]/.test(picked)
     ) {
       throw new PlatformCapabilityError("capability_unavailable");
     }
@@ -131,6 +155,7 @@ export function createPlatformAdapter({
     getRuntimeMetadata,
     getBackendStatus,
     selectDirectory,
+    selectBrowserExecutable,
     revealInFileManager,
   });
 }

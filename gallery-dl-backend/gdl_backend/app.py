@@ -30,6 +30,7 @@ from .api_routes import (
     create_proxy_router,
     create_review_router,
     create_scheduler_router,
+    create_setup_router,
     create_tasks_router,
 )
 # Keep these names importable from gdl_backend.app while their implementations
@@ -51,11 +52,13 @@ from .discovery import DiscoveryService
 from .encrypted_dns import EncryptedDNSResolver, NetworkTargetValidator
 from .gallery import GalleryRunner
 from .log_writer import TaskLogWriter
+from .model_setup import ModelSetupManager
 from .ordered_crawl import OrderedCrawlManager
 from .proxy import ProxyPoolAdapter
 from .proxy_source_store import ManagedProxySourceStore
 from .redaction import redact_text, safe_exception_category
 from .review import DedupReviewManager
+from .runtime_config import RuntimeConfigStore
 from .scheduler import TaskScheduler
 from .schemas import (
     SitePolicy,
@@ -75,6 +78,7 @@ class ServiceContainer:
         if os.name != "nt":
             os.umask(0o077)
         self.settings = settings
+        self.runtime_config = RuntimeConfigStore(settings.config_path)
         self.db = Database(
             settings.database_path,
             max_logs_per_task=settings.scheduler.max_logs_per_task,
@@ -160,6 +164,9 @@ class ServiceContainer:
             self.db,
             settings.dedup,
             settings.runtime_dir,
+        )
+        self.model_setup = ModelSetupManager(
+            settings, self.runtime_config, self.reviews.start
         )
         self._health_task: asyncio.Task | None = None
         self._started = False
@@ -304,6 +311,7 @@ class ServiceContainer:
             self._health_task.cancel()
             await asyncio.gather(self._health_task, return_exceptions=True)
             self._health_task = None
+        await self.model_setup.close()
         await self.reviews.stop()
         await self.ordered_crawls.stop()
         await self.scheduler.stop()
@@ -607,6 +615,7 @@ def create_app(
     app.include_router(create_discovery_router())
     app.include_router(create_crawls_router())
     app.include_router(create_review_router())
+    app.include_router(create_setup_router())
     app.include_router(create_policies_router())
     app.include_router(create_gallery_router())
     app.include_router(create_proxy_router())

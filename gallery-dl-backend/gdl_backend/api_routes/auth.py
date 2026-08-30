@@ -7,12 +7,13 @@ from fastapi import APIRouter, Depends, Query
 from ..auth import (
     AuthError,
     vault_safe_browser_profile,
+    vault_safe_browser_runtime,
     vault_safe_proxy_status,
     vault_safe_session,
     vault_safe_status,
     vault_safe_statuses,
 )
-from ..schemas import AuthProxyUpdate
+from ..schemas import AuthProxyUpdate, BrowserExecutableUpdate
 from .body_limits import enforce_auth_proxy_body_limit
 from .dependencies import get_service
 from .errors import ApiError
@@ -42,6 +43,8 @@ _VAULT_SAFE_AUTH_ERROR_CODES = frozenset(
         "browser_profile_reset_active",
         "browser_profile_busy",
         "invalid_browser_profile_path",
+        "invalid_browser_executable",
+        "browser_busy",
         "chrome_not_found",
         "auth_cache_clear_failed",
     }
@@ -99,8 +102,8 @@ def create_auth_router() -> APIRouter:
         result = container.auth.statuses()
         return vault_safe_statuses(result) if view == "vault" else result
 
-    # /auth/proxy must be registered before /auth/{site}, otherwise FastAPI can
-    # treat "proxy" as the site path parameter.
+    # Fixed /auth/proxy and /auth/browser routes must be registered before
+    # /auth/{site}, otherwise FastAPI can treat their names as site parameters.
     @router.get("/auth/proxy")
     async def auth_proxy_status(
         view: AuthResponseView = Query("legacy"),
@@ -130,6 +133,37 @@ def create_auth_router() -> APIRouter:
         try:
             result = await container.auth.clear_authorization_proxy()
             return vault_safe_proxy_status(result) if view == "vault" else result
+        except AuthError as exc:
+            raise_auth_error(exc, view)
+
+    @router.get("/auth/browser")
+    async def auth_browser_runtime(
+        view: AuthResponseView = Query("legacy"),
+        container: Any = Depends(get_service),
+    ):
+        result = container.auth.browser_runtime_status()
+        return vault_safe_browser_runtime(result) if view == "vault" else result
+
+    @router.put("/auth/browser")
+    async def auth_select_browser(
+        payload: BrowserExecutableUpdate,
+        view: AuthResponseView = Query("legacy"),
+        container: Any = Depends(get_service),
+    ):
+        try:
+            result = await container.auth.select_browser_executable(payload.path)
+            return vault_safe_browser_runtime(result) if view == "vault" else result
+        except AuthError as exc:
+            raise_auth_error(exc, view)
+
+    @router.delete("/auth/browser")
+    async def auth_clear_browser(
+        view: AuthResponseView = Query("legacy"),
+        container: Any = Depends(get_service),
+    ):
+        try:
+            result = await container.auth.clear_browser_executable()
+            return vault_safe_browser_runtime(result) if view == "vault" else result
         except AuthError as exc:
             raise_auth_error(exc, view)
 

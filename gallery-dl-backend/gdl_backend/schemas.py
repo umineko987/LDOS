@@ -448,3 +448,15 @@ class AuthProxyUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     proxy_url: str = Field(default="", max_length=300)
+
+
+class ModelInstallRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proxy_url: str = Field(default="", max_length=300)
+
+
+class BrowserExecutableUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=4096)

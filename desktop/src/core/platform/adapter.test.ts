@@ -87,6 +87,7 @@ describe("platform adapter", () => {
       "getRuntimeMetadata",
       "getBackendStatus",
       "selectDirectory",
+      "selectBrowserExecutable",
       "revealInFileManager",
     ]);
     await expect(adapter.getBackendStatus()).resolves.toMatchObject({ state: "ready" });
@@ -101,8 +102,11 @@ describe("platform adapter", () => {
       location: { origin: "http://127.0.0.1:8787" },
     });
 
-    expect(adapter.capabilities).toEqual({ selectDirectory: false, revealInFileManager: false });
+    expect(adapter.capabilities).toEqual({ selectDirectory: false, selectBrowserExecutable: false, revealInFileManager: false });
     await expect(adapter.selectDirectory("gallery_import")).rejects.toEqual(
+      new PlatformCapabilityError("capability_unavailable"),
+    );
+    await expect(adapter.selectBrowserExecutable()).rejects.toEqual(
       new PlatformCapabilityError("capability_unavailable"),
     );
     await expect(adapter.revealInFileManager("/tmp/x")).rejects.toEqual(
@@ -117,7 +121,7 @@ describe("platform adapter", () => {
     const picked = createPlatformAdapter({
       bridge: bridge(true, { select_directory: "/home/user/图库" }),
     });
-    expect(picked.capabilities).toEqual({ selectDirectory: true, revealInFileManager: true });
+    expect(picked.capabilities).toEqual({ selectDirectory: true, selectBrowserExecutable: true, revealInFileManager: true });
     await expect(picked.selectDirectory("gallery_import")).resolves.toBe("/home/user/图库");
 
     for (const bad of ["", "  ", "/tmp/a\u0000b", 42, {}]) {
@@ -131,6 +135,26 @@ describe("platform adapter", () => {
       bridge: bridge(true, { select_directory: new Error("dialog crashed") }),
     });
     await expect(failed.selectDirectory("gallery_import")).rejects.toEqual(
+      new PlatformCapabilityError("capability_unavailable"),
+    );
+  });
+
+  it("returns a validated browser executable selection", async () => {
+    const testBridge = bridge(true, { select_browser_executable: "/usr/bin/chromium" });
+    const adapter = createPlatformAdapter({ bridge: testBridge });
+    await expect(adapter.selectBrowserExecutable()).resolves.toBe("/usr/bin/chromium");
+    expect(testBridge.invoke).toHaveBeenCalledWith("select_browser_executable");
+
+    const cancelled = createPlatformAdapter({ bridge: bridge(true, { select_browser_executable: null }) });
+    await expect(cancelled.selectBrowserExecutable()).resolves.toBeNull();
+    const invalid = createPlatformAdapter({ bridge: bridge(true, { select_browser_executable: "bad\u0000path" }) });
+    await expect(invalid.selectBrowserExecutable()).rejects.toEqual(
+      new PlatformCapabilityError("capability_unavailable"),
+    );
+    const failed = createPlatformAdapter({
+      bridge: bridge(true, { select_browser_executable: new Error("dialog crashed") }),
+    });
+    await expect(failed.selectBrowserExecutable()).rejects.toEqual(
       new PlatformCapabilityError("capability_unavailable"),
     );
   });

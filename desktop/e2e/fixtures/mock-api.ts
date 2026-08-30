@@ -73,6 +73,28 @@ function vaultSnapshot(): Record<string, unknown> {
   };
 }
 
+function modelSetupSnapshot(): Record<string, unknown> {
+  return {
+    phase: "ready",
+    enabled: true,
+    installed: true,
+    using_proxy: false,
+    downloaded_bytes: 190_000_000,
+    expected_bytes: 190_000_000,
+    message: "相似图片模型已就绪。",
+    models: { sscd: { installed: true }, dino: { installed: true } },
+  };
+}
+
+function browserRuntimeSnapshot(): Record<string, unknown> {
+  return {
+    available: true,
+    name: "Chromium",
+    source: "auto",
+    message: "浏览器可用于站点授权",
+  };
+}
+
 function policySnapshot(): Record<string, unknown> {
   const labels = {
     danbooru: ["Danbooru", "anonymous"],
@@ -772,8 +794,17 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       return;
     }
 
+    if (url.pathname === "/api/v1/setup/models" && (request.method() === "GET" || request.method() === "POST")) {
+      await respond(route, modelSetupSnapshot());
+      return;
+    }
+
     if (url.pathname === "/api/v1/auth" && request.method() === "GET") {
       await respond(route, vaultSnapshot());
+      return;
+    }
+    if (url.pathname === "/api/v1/auth/browser" && ["GET", "PUT", "DELETE"].includes(request.method())) {
+      await respond(route, browserRuntimeSnapshot());
       return;
     }
     if (url.pathname === "/api/v1/auth/proxy" && request.method() === "PUT") {

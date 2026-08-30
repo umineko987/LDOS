@@ -343,7 +343,10 @@ data["proxy"]["enabled"] = False
 data["proxy"]["auto_start"] = False
 data["proxy"]["transport_core_binary"] = "bin/proxy-core"
 data["dedup"]["enabled"] = True
-data["dedup"]["python_executable"] = os.path.abspath(dedup_python)
+data["dedup"]["python_executable"] = os.path.relpath(
+    os.path.abspath(dedup_python),
+    start=Path(destination).parent,
+)
 data["dedup"]["worker_script"] = "../dedup_review_worker.py"
 data["dedup"]["core_script"] = "../dedup_core.py"
 data["dedup"]["model_dir"] = "../.models"

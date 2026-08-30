@@ -143,7 +143,7 @@ class BrowserOrchestrator:
             except FileNotFoundError as exc:
                 raise BrowserOrchestratorError(
                     "chrome_not_found",
-                    "没有找到 Chrome 或 Chromium，请配置 auth.chrome_executable",
+                    "没有找到 Chrome、Chromium 或 Microsoft Edge，请在授权保险库中选择浏览器",
                 ) from exc
 
             ensure_private_directory(self.profile_dir)

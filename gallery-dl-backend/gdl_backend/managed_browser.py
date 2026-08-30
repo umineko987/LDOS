@@ -50,6 +50,41 @@ MANAGED_BROWSER_SITES: dict[str, ManagedBrowserSite] = {
 }
 
 
+def browser_name_for_executable(path: Path) -> str | None:
+    normalized = str(path).replace("\\", "/").lower()
+    name = path.name.lower()
+    if (
+        name in {
+            "msedge",
+            "msedge.exe",
+            "microsoft-edge",
+            "microsoft-edge-stable",
+            "microsoft edge",
+        }
+        or "/microsoft/edge/" in normalized
+        or "/microsoft edge.app/" in normalized
+    ):
+        return "Microsoft Edge"
+    if (
+        name in {"chromium", "chromium.exe", "chromium-browser"}
+        or "/chromium/" in normalized
+    ):
+        return "Chromium"
+    if (
+        name in {
+            "chrome",
+            "chrome.exe",
+            "google-chrome",
+            "google-chrome-stable",
+            "google chrome",
+        }
+        or "/google/chrome/" in normalized
+        or "/google chrome.app/" in normalized
+    ):
+        return "Google Chrome"
+    return None
+
+
 def discover_chrome_executable(explicit: str = "") -> Path:
     candidates: list[Path] = []
     configured = explicit.strip() or os.environ.get("GDL_BACKEND_CHROME", "").strip()
@@ -63,6 +98,9 @@ def discover_chrome_executable(explicit: str = "") -> Path:
             "google-chrome-stable",
             "chromium",
             "chromium-browser",
+            "msedge.exe",
+            "microsoft-edge",
+            "microsoft-edge-stable",
         ):
             found = shutil.which(name)
             if found:
@@ -74,27 +112,35 @@ def discover_chrome_executable(explicit: str = "") -> Path:
                 os.environ.get("LOCALAPPDATA"),
             ):
                 if root:
-                    candidates.append(
-                        Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe"
+                    candidates.extend(
+                        (
+                            Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe",
+                            Path(root) / "Chromium" / "Application" / "chrome.exe",
+                            Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+                        )
                     )
         elif os.name == "posix":
             candidates.extend(
                 (
                     Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+                    Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+                    Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
                     Path("/usr/bin/google-chrome"),
                     Path("/usr/bin/google-chrome-stable"),
                     Path("/usr/bin/chromium"),
                     Path("/usr/bin/chromium-browser"),
+                    Path("/usr/bin/microsoft-edge"),
+                    Path("/usr/bin/microsoft-edge-stable"),
                 )
             )
     for candidate in candidates:
         try:
             resolved = candidate.expanduser().resolve()
-        except OSError:
+        except (OSError, ValueError):
             continue
         if resolved.is_file() and (os.name == "nt" or os.access(resolved, os.X_OK)):
             return resolved
-    raise FileNotFoundError("Chrome or Chromium executable was not found")
+    raise FileNotFoundError("Chrome, Chromium, or Microsoft Edge executable was not found")
 
 
 def allocate_debug_port() -> int:

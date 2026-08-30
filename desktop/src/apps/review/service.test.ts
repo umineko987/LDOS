@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../core/api/client";
-import { createReviewService, REVIEW_ENDPOINTS } from "./service";
+import { createReviewService, normalizeModelProxyUrl, REVIEW_ENDPOINTS } from "./service";
 
 function api() {
   const get = vi.fn<(path: string, options?: unknown) => Promise<unknown>>();
@@ -67,6 +67,43 @@ describe("review service", () => {
     expect(service.imageUrl("batch-review", "image-1")).toBe("http://127.0.0.1:8787/api/v1/crawls/batch-review/review/images/image-1");
     expect(calls.resourceUrl).toHaveBeenCalledWith("/api/v1/crawls/batch-review/review/images/image-1");
     expect(JSON.stringify(calls.put.mock.calls)).not.toContain("url");
+  });
+
+  it("reads and starts the optional model setup through fixed endpoints", async () => {
+    const calls = api();
+    const service = createReviewService(calls.client);
+    const signal = new AbortController().signal;
+    const setup = {
+      phase: "idle", enabled: false, installed: false, using_proxy: false,
+      downloaded_bytes: 0, expected_bytes: 190, message: "",
+      models: { sscd: { installed: false }, dino: { installed: false } },
+    };
+    calls.get.mockResolvedValueOnce(setup);
+    await expect(service.readModelSetup(signal)).resolves.toMatchObject({ phase: "idle", installed: false });
+    expect(calls.get).toHaveBeenCalledWith(REVIEW_ENDPOINTS.models, { signal });
+
+    calls.post.mockResolvedValueOnce({ ...setup, phase: "installing", using_proxy: true });
+    await expect(service.installModels("http://127.0.0.1:7890", signal)).resolves.toMatchObject({ phase: "installing", usingProxy: true });
+    expect(calls.post).toHaveBeenCalledWith(
+      `${REVIEW_ENDPOINTS.models}/install`,
+      { proxy_url: "http://127.0.0.1:7890" },
+      { signal },
+    );
+  });
+
+  it("validates the optional model download proxy before sending it", () => {
+    expect(normalizeModelProxyUrl("")).toBe("");
+    expect(normalizeModelProxyUrl("  http://127.0.0.1:7890  ")).toBe("http://127.0.0.1:7890");
+    expect(normalizeModelProxyUrl("https://user:pass@[::1]:443")).toBe("https://user:pass@[::1]:443");
+    for (const invalid of [
+      "127.0.0.1:7890",
+      "socks5://127.0.0.1:7890",
+      "http://127.0.0.1",
+      "http://127.0.0.1:7890/path",
+      "http://127.0.0.1:99999",
+    ]) {
+      expect(() => normalizeModelProxyUrl(invalid)).toThrowError("invalid_model_proxy_format");
+    }
   });
 
   it("loads a review workspace through bounded sequential pages", async () => {
