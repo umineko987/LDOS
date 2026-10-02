@@ -10,7 +10,7 @@
   interface Props {
     snapshot: GalleryBrowseState;
     currentAsset: GalleryAssetEntry | null;
-    contentUrl: (assetId: string) => string;
+    contentUrl: (asset: { asset_id: string; source_id: string | null; relative_path: string }) => string;
     thumbnailUrl: (assetId: string, size: 256 | 512) => string;
     onMove: (delta: number) => void;
     onJump: (index: number) => void;
@@ -322,7 +322,7 @@
     >
       {#if currentAsset && currentAsset.read_state === "ok" && !imageFailed}
         <img
-          src={contentUrl(currentAsset.asset_id)}
+          src={contentUrl(currentAsset)}
           alt=""
           crossorigin="anonymous"
           draggable="false"

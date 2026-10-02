@@ -227,6 +227,7 @@ class GalleryDirectoryPageResponse(BaseModel):
     asset_cursor: str | None = Field(default=None, max_length=512)
     include_descendants: bool
     limit: int = Field(ge=1, le=200)
+    source_roots: dict[str, str] = Field(default_factory=dict)
 
 
 class GallerySearchPageResponse(BaseModel):
@@ -234,10 +235,12 @@ class GallerySearchPageResponse(BaseModel):
     assets: list[GalleryAssetEntryResponse]
     asset_cursor: str | None = Field(default=None, max_length=512)
     limit: int = Field(ge=1, le=200)
+    source_roots: dict[str, str] = Field(default_factory=dict)
 
 
 class GalleryAssetEnvelopeResponse(BaseModel):
     asset: GalleryAssetEntryResponse
+    source_roots: dict[str, str] = Field(default_factory=dict)
 
 
 class GalleryAnnotationResponse(BaseModel):
@@ -614,7 +617,7 @@ def create_gallery_router() -> APIRouter:
         if txt_state is not None and txt_state not in TXT_STATES:
             raise ApiError(422, "invalid_txt_state", "未知的 TXT 状态筛选")
         try:
-            return container.db.gallery.list_directory_entries(
+            result = container.db.gallery.list_directory_entries(
                 directory_id=directory_id,
                 include_descendants=include_descendants,
                 txt_state=txt_state,
@@ -632,6 +635,8 @@ def create_gallery_router() -> APIRouter:
             if "invalid_gallery_page_limit" in message:
                 raise ApiError(422, "invalid_page_limit", "分页大小超出范围") from None
             raise ApiError(422, "invalid_gallery_request", "请求参数无效") from None
+        _attach_source_roots(container, result, result["assets"])
+        return result
 
     @router.get("/gallery/search", response_model=GallerySearchPageResponse)
     async def search_gallery_assets(
@@ -671,6 +676,7 @@ def create_gallery_router() -> APIRouter:
                 raise ApiError(422, code, "搜索词不能为空") from None
             raise ApiError(422, "invalid_gallery_search", "搜索参数无效") from None
         result["scope"] = scope
+        _attach_source_roots(container, result, result["assets"])
         return result
 
 
@@ -687,7 +693,9 @@ def create_gallery_router() -> APIRouter:
         asset = container.db.gallery.get_asset(asset_id)
         if asset is None:
             raise _asset_not_found(asset_id)
-        return {"asset": asset}
+        payload: dict[str, Any] = {"asset": asset}
+        _attach_source_roots(container, payload, [asset])
+        return payload
 
     @router.get("/gallery/assets/{asset_id}/content")
     async def get_gallery_asset_content(
@@ -1011,6 +1019,26 @@ def create_gallery_router() -> APIRouter:
 
 
     return router
+
+
+def _attach_source_roots(
+    container: Any, payload: dict[str, Any], assets: list[dict[str, Any]]
+) -> None:
+    """为桌面端补充 source_id -> 绝对根目录映射，供 WebView asset 协议直读原图。
+
+    只读路径解析；来源已删除时跳过该来源（前端自动回退到 HTTP content 路由）。
+    """
+    catalog: GalleryCatalogService = container.gallery_catalog
+    roots: dict[str, str] = {}
+    for asset in assets:
+        source_id = asset.get("source_id")
+        if source_id is None or source_id in roots:
+            continue
+        try:
+            roots[source_id] = str(catalog.resolve_source_root(source_id))
+        except GallerySourceNotFound:
+            continue
+    payload["source_roots"] = roots
 
 
 def _resolve_asset_file(container: Any, asset_id: str) -> dict[str, Any]:

@@ -27,15 +27,26 @@
       }
     ],
     "security": {
-      "capabilities": ["main"],
-      "csp": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* http://[::1]:*; img-src 'self' data: http://127.0.0.1:* http://localhost:* http://[::1]:*; style-src 'self' 'unsafe-inline'; script-src 'self'",
-      "devCsp": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://127.0.0.1:* http://localhost:* http://[::1]:*; img-src 'self' data: http://127.0.0.1:* http://localhost:* http://[::1]:*; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      "capabilities": [
+        "main"
+      ],
+      "csp": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* http://[::1]:*; img-src 'self' data: asset: http://asset.localhost https://asset.localhost http://127.0.0.1:* http://localhost:* http://[::1]:*; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "devCsp": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://127.0.0.1:* http://localhost:* http://[::1]:*; img-src 'self' data: asset: http://asset.localhost https://asset.localhost http://127.0.0.1:* http://localhost:* http://[::1]:*; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "**"
+        ]
+      }
     }
   },
   "bundle": {
     "active": false,
     "targets": "all",
-    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
     "license": "MIT",
     "shortDescription": "One-stop LoRA dataset workflow desktop application"
   }

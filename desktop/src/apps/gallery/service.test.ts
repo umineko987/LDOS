@@ -3,6 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../../core/api/client";
 import { createGalleryService, GALLERY_ENDPOINTS, searchAssetsPath } from "./service";
 
+vi.mock("@tauri-apps/api/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tauri-apps/api/core")>();
+  return {
+    ...actual,
+    isTauri: vi.fn(() => false),
+    convertFileSrc: vi.fn((filePath: string) => `asset://localhost/${encodeURIComponent(filePath)}`),
+  };
+});
+
 function operation(state: "copying" | "completed" | "failed" | "cancelled" = "copying") {
   return {
     operation_id: "gallery-directory-export-1",
@@ -353,5 +362,86 @@ describe("Gallery source lifecycle service", () => {
     await expect(service.relinkSource("source-1", "bad\npath")).rejects.toThrow(TypeError);
     expect(request).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe("gallery asset content url", () => {
+  const asset = {
+    asset_id: "asset-1",
+    source_id: "source-1",
+    relative_path: "sub/1.jpg",
+  };
+
+  function pageService() {
+    const page = {
+      directory: {
+        directory_id: "dir-1",
+        source_id: "source-1",
+        parent_id: null,
+        relative_path: "",
+        name: "root",
+        direct_directory_count: 0,
+        direct_asset_count: 1,
+        recursive_asset_count: 1,
+        cover_asset_ids: ["asset-1"],
+        indexed_version: 1,
+      },
+      directories: [],
+      assets: [],
+      directory_cursor: null,
+      asset_cursor: null,
+      include_descendants: false,
+      limit: 200,
+      source_roots: { "source-1": "/tmp/ldos-source" },
+    };
+    const get = vi.fn(async () => page);
+    return createGalleryService({ get, resourceUrl: (path: string) => `http://backend${path}` } as unknown as ApiClient);
+  }
+
+  it("falls back to the HTTP content route outside Tauri", async () => {
+    const service = pageService();
+    await service.listDirectoryEntries({
+      directoryId: "dir-1",
+      includeDescendants: false,
+      txtState: null,
+      query: "",
+      directoryCursor: null,
+      assetCursor: null,
+    }, new AbortController().signal);
+    expect(service.assetContentUrl(asset)).toBe(
+      "http://backend/api/v1/gallery/assets/asset-1/content",
+    );
+  });
+
+  it("uses the asset protocol once the source root is known in Tauri", async () => {
+    const core = await import("@tauri-apps/api/core");
+    vi.mocked(core.isTauri).mockReturnValue(true);
+    try {
+      const service = pageService();
+      await service.listDirectoryEntries({
+        directoryId: "dir-1",
+        includeDescendants: false,
+        txtState: null,
+        query: "",
+        directoryCursor: null,
+        assetCursor: null,
+      }, new AbortController().signal);
+      expect(service.assetContentUrl(asset)).toBe(
+        `asset://localhost/${encodeURIComponent("/tmp/ldos-source/sub/1.jpg")}`,
+      );
+      expect(core.convertFileSrc).toHaveBeenCalledWith("/tmp/ldos-source/sub/1.jpg");
+    } finally {
+      vi.mocked(core.isTauri).mockReturnValue(false);
+      vi.mocked(core.convertFileSrc).mockClear();
+    }
+  });
+
+  it("falls back when the asset has no source root cached", () => {
+    const service = createGalleryService({
+      resourceUrl: (path: string) => `http://backend${path}`,
+    } as unknown as ApiClient);
+    expect(service.assetContentUrl({ ...asset, source_id: null })).toBe(
+      "http://backend/api/v1/gallery/assets/asset-1/content",
+    );
   });
 });

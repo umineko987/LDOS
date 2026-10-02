@@ -2025,7 +2025,7 @@
   <Viewer
     {snapshot}
     {currentAsset}
-    contentUrl={service.contentUrl}
+    contentUrl={service.assetContentUrl}
     thumbnailUrl={service.thumbnailUrl}
     onMove={(delta) => void (delta > 0 ? controller.viewerNext() : controller.viewerPrevious())}
     onJump={(index) => void controller.viewerJump(index)}

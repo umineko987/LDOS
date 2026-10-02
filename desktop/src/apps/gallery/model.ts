@@ -720,6 +720,26 @@ export interface GallerySourcePage {
   readonly sources: readonly GallerySourceSummary[];
 }
 
+/** source_id -> 绝对根目录；Tauri 下用于 asset 协议直读原图。 */
+export type GallerySourceRoots = Readonly<Record<string, string>>;
+
+export function sanitizeGallerySourceRoots(raw: unknown): GallerySourceRoots {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new TypeError("invalid_gallery_source_roots");
+  }
+  const roots: Record<string, string> = {};
+  for (const [sourceId, root] of Object.entries(raw)) {
+    if (sourceId.length === 0 || sourceId.length > 128) {
+      throw new TypeError("invalid_gallery_source_root_id");
+    }
+    if (typeof root !== "string" || root.length === 0 || root.length > 4096) {
+      throw new TypeError("invalid_gallery_source_root_path");
+    }
+    roots[sourceId] = root;
+  }
+  return Object.freeze(roots);
+}
+
 export interface GalleryDirectoryPage {
   readonly directory: GalleryDirectoryEntry;
   readonly directories: readonly GalleryDirectoryEntry[];
@@ -728,6 +748,7 @@ export interface GalleryDirectoryPage {
   readonly asset_cursor: string | null;
   readonly include_descendants: boolean;
   readonly limit: number;
+  readonly sourceRoots: GallerySourceRoots;
 }
 
 export interface GallerySearchPage {
@@ -735,6 +756,7 @@ export interface GallerySearchPage {
   readonly assets: readonly GalleryAssetEntry[];
   readonly asset_cursor: string | null;
   readonly limit: number;
+  readonly sourceRoots: GallerySourceRoots;
 }
 
 const SOURCE_PAGE_KEYS = new Set(["sources"]);
@@ -746,8 +768,9 @@ const DIRECTORY_PAGE_KEYS = new Set([
   "asset_cursor",
   "include_descendants",
   "limit",
+  "source_roots",
 ]);
-const SEARCH_PAGE_KEYS = new Set(["scope", "assets", "asset_cursor", "limit"]);
+const SEARCH_PAGE_KEYS = new Set(["scope", "assets", "asset_cursor", "limit", "source_roots"]);
 
 
 export function sanitizeGallerySourcePage(raw: unknown): GallerySourcePage {
@@ -768,6 +791,9 @@ export function sanitizeGalleryDirectoryPage(raw: unknown): GalleryDirectoryPage
     asset_cursor: optionalText(value.asset_cursor, "gallery_asset_cursor", 512),
     include_descendants: booleanValue(value.include_descendants, "gallery_include_descendants", false),
     limit: countValue(value.limit, "gallery_page_limit", 0),
+    sourceRoots: value.source_roots === undefined
+      ? Object.freeze({})
+      : sanitizeGallerySourceRoots(value.source_roots),
   });
 }
 
@@ -779,6 +805,9 @@ export function sanitizeGallerySearchPage(raw: unknown): GallerySearchPage {
     assets: Object.freeze(value.assets.map(sanitizeGalleryAssetEntry)),
     asset_cursor: optionalText(value.asset_cursor, "gallery_asset_cursor", 512),
     limit: countValue(value.limit, "gallery_page_limit", 0),
+    sourceRoots: value.source_roots === undefined
+      ? Object.freeze({})
+      : sanitizeGallerySourceRoots(value.source_roots),
   });
 }
 

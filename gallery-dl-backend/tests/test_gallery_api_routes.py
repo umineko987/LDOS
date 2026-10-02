@@ -418,6 +418,32 @@ class GalleryDirectoryEntriesRoutesTest(GalleryApiTestBase):
         self.assertEqual(source.status_code, 200, source.text)
         self.assertEqual(len(source.json()["assets"]), 3)
 
+    def test_pages_expose_source_roots_for_asset_protocol(self) -> None:
+        source_id = self.source["source_id"]
+        expected_root = str((self.root / "src-a").resolve())
+
+        page = self.client.get(
+            "/api/v1/gallery/directories/{0}/entries".format(self.root_id),
+            params={"view": "desktop"},
+        )
+        self.assertEqual(page.status_code, 200, page.text)
+        self.assertEqual(page.json()["source_roots"], {source_id: expected_root})
+
+        search = self.client.get(
+            "/api/v1/gallery/search",
+            params={"view": "desktop", "scope": "library", "query": "jpg"},
+        )
+        self.assertEqual(search.status_code, 200, search.text)
+        self.assertEqual(search.json()["source_roots"], {source_id: expected_root})
+
+        asset_id = search.json()["assets"][0]["asset_id"]
+        detail = self.client.get(
+            "/api/v1/gallery/assets/{0}".format(asset_id),
+            params={"view": "desktop"},
+        )
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertEqual(detail.json()["source_roots"], {source_id: expected_root})
+
     def test_search_rejects_missing_scope_ids_and_invalid_filters(self) -> None:
         cases = [
             ({"scope": "directory", "query": "hat"}, "gallery_search_directory_required"),
@@ -752,12 +778,12 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
             ): source_keys,
             ("GET", "/api/v1/gallery/directories/{directory_id}/entries"): {
                 "directory", "directories", "assets", "directory_cursor",
-                "asset_cursor", "include_descendants", "limit",
+                "asset_cursor", "include_descendants", "limit", "source_roots",
             },
             ("GET", "/api/v1/gallery/search"): {
-                "scope", "assets", "asset_cursor", "limit",
+                "scope", "assets", "asset_cursor", "limit", "source_roots",
             },
-            ("GET", "/api/v1/gallery/assets/{asset_id}"): {"asset"},
+            ("GET", "/api/v1/gallery/assets/{asset_id}"): {"asset", "source_roots"},
             ("GET", "/api/v1/gallery/assets/{asset_id}/annotation"): {
                 "asset_id", "content", "txt_state", "txt_version",
                 "disk_version",

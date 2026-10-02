@@ -1,3 +1,4 @@
+import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import type { ApiClient } from "../../core/api/client";
 import { sanitizeReviewOperation, validateReviewId } from "../review/model";
 import {
@@ -11,6 +12,7 @@ import {
   sanitizeGallerySourcePage,
   sanitizeGalleryTrashPage,
   sanitizeGallerySearchPage,
+  type GallerySourceRoots,
   validateGalleryQuery,
   type GalleryAnnotation,
   type GalleryDirectoryPage,
@@ -87,6 +89,11 @@ export interface GalleryService {
   cancelDirectoryExport(operationId: string): Promise<GalleryDirectoryExportOperation>;
   thumbnailUrl(assetId: string, size: 256 | 512): string;
   contentUrl(assetId: string): string;
+  assetContentUrl(asset: {
+    readonly asset_id: string;
+    readonly source_id: string | null;
+    readonly relative_path: string;
+  }): string;
   getAnnotation(assetId: string, signal: AbortSignal): Promise<GalleryAnnotation>;
   saveAnnotation(
     assetId: string,
@@ -156,6 +163,8 @@ export function searchAssetsPath(request: GallerySearchRequest): string {
 }
 
 export function createGalleryService(api: ApiClient): GalleryService {
+  // 最近加载页面的 source_id -> 根目录缓存（跨页累积，搜索可跨来源）。
+  let sourceRoots: GallerySourceRoots = Object.freeze({});
   const service: GalleryService = {
     async createReview(directoryIds, signal) {
       if (!Array.isArray(directoryIds) || !directoryIds.length || directoryIds.length > 200 || new Set(directoryIds).size !== directoryIds.length) throw new TypeError("invalid_gallery_review_selection");
@@ -243,10 +252,14 @@ export function createGalleryService(api: ApiClient): GalleryService {
       );
     },
     async listDirectoryEntries(request, signal) {
-      return sanitizeGalleryDirectoryPage(await api.get(directoryEntriesPath(request), { signal }));
+      const page = sanitizeGalleryDirectoryPage(await api.get(directoryEntriesPath(request), { signal }));
+      sourceRoots = Object.freeze({ ...sourceRoots, ...page.sourceRoots });
+      return page;
     },
     async searchAssets(request, signal) {
-      return sanitizeGallerySearchPage(await api.get(searchAssetsPath(request), { signal }));
+      const page = sanitizeGallerySearchPage(await api.get(searchAssetsPath(request), { signal }));
+      sourceRoots = Object.freeze({ ...sourceRoots, ...page.sourceRoots });
+      return page;
     },
     async startDirectoryExport(directoryIds, targetPath) {
       if (
@@ -298,6 +311,17 @@ export function createGalleryService(api: ApiClient): GalleryService {
     },
     contentUrl(assetId) {
       return api.resourceUrl(`/api/v1/gallery/assets/${endpointId(assetId)}/content`);
+    },
+    assetContentUrl(asset) {
+      const root = asset.source_id === null ? undefined : sourceRoots[asset.source_id];
+      // Tauri 环境且根目录已知时走 WebView asset 协议直读磁盘，
+      // 原图不再经过后端 HTTP 管道；否则回退 content 路由。
+      if (root !== undefined && isTauri()) {
+        return convertFileSrc(`${root}/${asset.relative_path}`);
+      }
+      return api.resourceUrl(
+        `/api/v1/gallery/assets/${endpointId(asset.asset_id)}/content`,
+      );
     },
     async getAnnotation(assetId, signal) {
       return sanitizeGalleryAnnotation(
