@@ -30,18 +30,15 @@ describe("desktop architecture boundaries", () => {
     }
   });
 
-  it("uses one typed application-definition source for MenuBar, ApplicationCenter, and Dock", () => {
+  it("uses typed application definitions for workbench navigation icons and page labels", () => {
     const definitions = sourceEnding("/core/applications/definitions.ts");
-    const menu = sourceEnding("/shell/MenuBar.svelte");
-    const center = sourceEnding("/shell/ApplicationCenter.svelte");
-    const dock = sourceEnding("/shell/Dock.svelte");
+    const desktop = sourceEnding("/shell/Desktop.svelte");
     expect(definitions).toContain("APPLICATION_DEFINITIONS");
-    expect(menu).toContain("APPLICATION_DEFINITIONS");
-    expect(menu).toContain("deriveWindowMenu");
-    expect(center).toContain("deriveApplicationGroups");
-    expect(dock).toContain("deriveDockProjection");
-    for (const source of [menu, center, dock]) {
-      expect(source).not.toMatch(/["'](?:crawl|tasks|proxy|vault|review|policy|diagnostics|personalization|gallery|export)["']/);
+    expect(desktop).toContain('type ApplicationId');
+    expect(desktop).toContain('getApplicationDefinition(item.id).icon');
+    expect(desktop).toContain('aria-label={getApplicationDefinition(appId).title}');
+    for (const suffix of ["AppWindow", "WindowLayer", "MenuBar", "Dock", "ApplicationCenter", "Dialog"]) {
+      expect(Object.keys(productionSources).some((path) => path.endsWith(`/shell/${suffix}.svelte`))).toBe(false);
     }
   });
 
@@ -108,7 +105,7 @@ describe("desktop architecture boundaries", () => {
     const gallery = sourceEnding("/apps/gallery/Gallery.svelte");
     const galleryState = sourceEnding("/apps/gallery/state.ts");
     const galleryModel = sourceEnding("/apps/gallery/model.ts");
-    const window = sourceEnding("/shell/AppWindow.svelte");
+    const desktop = sourceEnding("/shell/Desktop.svelte");
     expect(crawl.match(/createCrawlStore\s*\(/g)).toHaveLength(1);
     expect(crawlState.match(/export function createCrawlStore\s*\(/g)).toHaveLength(1);
     expect(crawlModel).toContain("candidates: Readonly<Record<CrawlCandidateKey, CrawlCandidate>>");
@@ -136,17 +133,11 @@ describe("desktop architecture boundaries", () => {
     expect(gallery.match(/createGalleryStore\s*\(/g)).toHaveLength(1);
     expect(galleryState.match(/export function createGalleryStore\s*\(/g)).toHaveLength(1);
     expect(galleryModel).toContain('readonly phase: "unavailable"');
-    expect(window).not.toContain("ApplicationPlaceholder");
-    expect(window).toContain('record.appId === "crawl"');
-    expect(window).toContain('record.appId === "tasks"');
-    expect(window).toContain('record.appId === "proxy"');
-    expect(window).toContain('record.appId === "vault"');
-    expect(window).toContain('record.appId === "review"');
-    expect(window).toContain('record.appId === "policy"');
-    expect(window).toContain('record.appId === "diagnostics"');
-    expect(window).toContain('record.appId === "personalization"');
-    expect(window).toContain('record.appId === "gallery"');
-    expect(window).not.toContain('record.appId === "export"');
+    expect(desktop).not.toContain("ApplicationPlaceholder");
+    for (const appId of ["crawl", "tasks", "proxy", "vault", "review", "policy", "diagnostics", "personalization", "gallery"]) {
+      expect(desktop).toContain(`appId === "${appId}"`);
+    }
+    expect(desktop).not.toContain('appId === "export"');
     expect(sourceEnding("/core/state/shell.ts")).not.toMatch(/CrawlState|TasksState|BatchSummary|TaskEntity|ProxyState|ProxyStatus|VaultState|PolicyState|DiagnosticsState|PersonalizationState|ReviewState|GalleryState|ExportState/);
     for (const [path, source] of Object.entries(productionSources)) {
       if (!path.includes("/core/")) continue;

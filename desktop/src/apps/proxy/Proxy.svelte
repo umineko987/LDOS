@@ -143,6 +143,10 @@
     });
   });
 
+  function displayMessage(message: string): string {
+    return message.replace("完成后将权威重读", "操作完成后会更新").replace("服务端权威读取", "服务").replace("安全事实", "信息").replace("权威状态", "状态");
+  }
+
   onMount(() => {
     controller.activate();
     return () => {
@@ -154,7 +158,7 @@
 
 <section class="proxy-app" data-proxy-app data-domain-owner="proxy" aria-labelledby="proxy-heading" aria-busy={Boolean(snapshot.busy)}>
   <header class="proxy-header">
-    <div><p>代理管理</p><h1 id="proxy-heading">运行池与节点来源</h1></div>
+    <h1 id="proxy-heading">代理</h1>
     <span class="proxy-status" data-kind={workspace.kind}>{workspace.label}</span>
   </header>
 
@@ -166,16 +170,16 @@
       <small>错误码：{snapshot.error.code}{snapshot.error.requestId ? ` · 请求 ${snapshot.error.requestId}` : ""}</small>
     </section>
   {/if}
-  <p class="proxy-live" role="status" aria-live="polite">{snapshot.message} {workspace.message}</p>
+  <p class="proxy-live" role="status" aria-live="polite">{displayMessage(snapshot.message)} {displayMessage(workspace.message)}</p>
 
   <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-scrollable proxy workspace) -->
-  <section class="proxy-workspace" tabindex="0" aria-label="代理管理三段工作区，可横向滚动查看状态总览、运行池控制和来源编辑">
+  <section class="proxy-workspace" tabindex="0" aria-label="代理设置；可纵向滚动">
     <div class="proxy-workspace__track">
       <aside class="proxy-column proxy-column--status" aria-labelledby="proxy-status-heading">
-        <header><p>01 · 状态</p><h2 id="proxy-status-heading">状态总览</h2><span>运行、健康、传输核心和版本关系。</span></header>
+        <header><h2 id="proxy-status-heading">运行状态</h2></header>
         <div class="proxy-column__scroll" tabindex="0" aria-label="代理状态内容；可滚动">
           {#if snapshot.status}
-            <div class="proxy-metrics" aria-label="代理聚合事实">
+            <div class="proxy-metrics" aria-label="代理统计">
               <div><span>节点总数</span><strong>{snapshot.status.total}</strong></div>
               <div><span>健康</span><strong>{snapshot.status.healthy}</strong></div>
               <div><span>可重试</span><strong>{snapshot.status.retryEligible}</strong></div>
@@ -184,7 +188,7 @@
             <section class="proxy-panel"><h3>运行设置</h3><dl>
               <div><dt>启用</dt><dd>{snapshot.status.enabled ? "是" : "否"}</dd></div>
               <div><dt>运行</dt><dd>{snapshot.status.running ? "运行中" : "已停止"}</dd></div>
-              <div><dt>Engine</dt><dd>{snapshot.status.engine}</dd></div>
+              <div><dt>引擎</dt><dd>{snapshot.status.engine}</dd></div>
               <div><dt>管理方式</dt><dd>{snapshot.status.managedByBackend ? "由服务管理" : "未知"}</dd></div>
               <div><dt>自动启动</dt><dd>{snapshot.status.autoStart ? "已启用" : "未启用"}</dd></div>
               <div><dt>最近错误</dt><dd>{snapshot.status.lastError || "无"}</dd></div>
@@ -204,8 +208,8 @@
         </div>
       </aside>
 
-      <main class="proxy-column" aria-labelledby="proxy-runtime-heading">
-        <header><p>02 · 运行池</p><h2 id="proxy-runtime-heading">运行池控制</h2><span>启动、停止、显式应用配置和探活。</span></header>
+      <section class="proxy-column" aria-labelledby="proxy-runtime-heading">
+        <header><h2 id="proxy-runtime-heading">运行池</h2></header>
         <div class="proxy-column__scroll" tabindex="0" aria-label="代理运行池内容；可滚动">
           <div class="proxy-action-panel" aria-label="代理池操作">
             <div class="proxy-actions" aria-label="代理池操作">
@@ -224,7 +228,7 @@
           </div>
           <p class="proxy-control-note">{snapshot.status?.leases ? `仍有 ${snapshot.status.leases} 项正在使用代理；不会强制停止。` : "停止操作不会中断正在使用代理的任务。"}</p>
           <section class="proxy-nodes" aria-labelledby="proxy-nodes-heading">
-            <div class="proxy-section-heading"><h3 id="proxy-nodes-heading">代理节点</h3><span>显示 {nodes.length} / 服务报告 {snapshot.status?.nodeRowsReceived ?? 0}</span></div>
+            <div class="proxy-section-heading"><h3 id="proxy-nodes-heading">代理节点</h3><span>显示 {nodes.length} / {snapshot.status?.nodeRowsReceived ?? 0}</span></div>
             {#each nodes as node (node.id)}
               <article class="proxy-node" data-node-id={node.id} data-leased={node.refCount > 0 ? "true" : undefined}>
                 <div><strong>{node.name}</strong><code>{node.protocol.toUpperCase()} · {node.endpoint}</code></div>
@@ -240,10 +244,10 @@
             {#if (snapshot.status?.nodeRowsReceived ?? 0) > nodes.length}<p class="proxy-control-note">为保证页面流畅，最多显示前 {PROXY_NODE_RENDER_LIMIT} 个节点；完整数量以上方统计为准。</p>{/if}
           </section>
         </div>
-      </main>
+      </section>
 
       <aside class="proxy-column" aria-labelledby="proxy-sources-heading">
-        <header><p>03 · 来源</p><h2 id="proxy-sources-heading">来源编辑</h2><span>保存只更新配置草稿；显式应用后运行池才会改变。</span></header>
+        <header><h2 id="proxy-sources-heading">节点来源</h2><span>保存后需点击“应用并重新加载”才能生效。</span></header>
         <div class="proxy-column__scroll" tabindex="0" aria-label="代理来源内容；可滚动">
           {#if snapshot.sources}
             <section class="proxy-panel"><h3>来源摘要</h3><dl>
@@ -281,7 +285,7 @@
           <section class="proxy-source-group" aria-labelledby="proxy-file-heading">
             <h3 id="proxy-file-heading">节点文件</h3>
             {#if snapshot.sources?.nodeFile.configured}
-              <article class="proxy-source-card"><strong>{snapshot.sources.nodeFile.displayPath || "路径已隐藏"}</strong><p>仅显示相对路径、文件名或隐藏提示。</p><button type="button" class="danger" disabled={!sourceEditable()} onclick={() => controller.requestRemove("node-file-clear")}>清除节点文件</button></article>
+              <article class="proxy-source-card"><strong>{snapshot.sources.nodeFile.displayPath || "路径已隐藏"}</strong><button type="button" class="danger" disabled={!sourceEditable()} onclick={() => controller.requestRemove("node-file-clear")}>清除节点文件</button></article>
             {/if}
             <form onsubmit={(event) => { event.preventDefault(); void submitNodeFile(); }}>
               <label class="proxy-field"><span>允许目录中的节点文件</span><input type="text" autocomplete="off" bind:value={nodeFileDraft} /></label>

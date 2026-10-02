@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import uuid
@@ -79,18 +80,26 @@ class GalleryFileOperations:
         self._repo = repository
         self._clock = clock or time.time
         self._filesystem_locks = filesystem_locks or GalleryFilesystemLocks()
-        self._source_locks: dict[str, threading.Lock] = {}
+        self._source_locks: dict[str, threading.RLock] = {}
         self._locks_guard = threading.Lock()
 
     # ---- 锁 ----
 
-    def _lock_for(self, source_id: str) -> threading.Lock:
+    def _lock_for(self, source_id: str) -> threading.RLock:
         with self._locks_guard:
             lock = self._source_locks.get(source_id)
             if lock is None:
-                lock = threading.Lock()
+                lock = threading.RLock()
                 self._source_locks[source_id] = lock
             return lock
+
+    @contextlib.contextmanager
+    def hold_sources(self, source_ids: list[str]):
+        with contextlib.ExitStack() as stack:
+            for sid in sorted(set(source_ids)):
+                stack.enter_context(self._lock_for(sid))
+            stack.enter_context(self._filesystem_locks.hold(*(f"source:{sid}" for sid in source_ids)))
+            yield
 
     # ---- 公开操作 ----
 
@@ -148,7 +157,8 @@ class GalleryFileOperations:
         )
 
     def trash_assets(
-        self, asset_ids: list[str], directory_ids: list[str] | None = None
+        self, asset_ids: list[str], directory_ids: list[str] | None = None,
+        *, review_snapshot: dict[str, Any] | None = None, operation_id: str | None = None,
     ) -> dict[str, Any]:
         """回收图片或完整物理目录；所有选择作为一个逻辑操作执行。"""
         directory_ids = list(directory_ids or [])
@@ -163,6 +173,25 @@ class GalleryFileOperations:
                 "directory_selection_invalid", {"reason": "duplicate_directory_ids"}
             )
 
+        if review_snapshot is not None and (asset_ids != [review_snapshot["asset_id"]] or directory_ids):
+            raise GalleryFileOperationError("review_selection_invalid")
+        if operation_id is not None:
+            with self._repo._read() as conn:
+                existing = conn.execute("SELECT status FROM gallery_file_operations WHERE id=?", (operation_id,)).fetchone()
+            if existing is not None:
+                if existing["status"] == "committed" and review_snapshot is not None:
+                    with SafeSourceRoot(review_snapshot["root_path"]) as safe:
+                        from .gallery_review_selection import validate_snapshot
+                        validate_snapshot(self._repo, review_snapshot, safe, trash_operation_id=operation_id)
+                    saved = self._repo_list_items(operation_id)
+                    if len(saved) != 1 or saved[0]["asset_id"] != review_snapshot["asset_id"] or saved[0]["review_snapshot"] != review_snapshot:
+                        raise GalleryFileOperationError("review_operation_conflict")
+                    return self._operation_summary(operation_id)
+                if existing["status"] != "rolled_back":
+                    raise GalleryFileOperationError("operation_recovery_required", {"operation_id": operation_id})
+                # A rolled-back attempt can be safely replanned with the same identity.
+                with self._repo._transaction() as conn:
+                    conn.execute("DELETE FROM gallery_file_operations WHERE id=? AND status='rolled_back'", (operation_id,))
         assets = self._repo.get_assets_by_ids(asset_ids)
         if len(assets) != len(set(asset_ids)):
             missing = sorted(set(asset_ids) - {a["asset_id"] for a in assets})
@@ -253,7 +282,9 @@ class GalleryFileOperations:
                     "txt_target": "",
                 }
             )
-        return self._execute(kind="trash", items=items)
+        if review_snapshot is not None:
+            items[0]["review_snapshot"] = review_snapshot
+        return self._execute(kind="trash", items=items, operation_id=operation_id)
 
     def trash_directories(self, directory_ids: list[str]) -> dict[str, Any]:
         """Compatibility helper for callers that only select directories."""
@@ -396,7 +427,7 @@ class GalleryFileOperations:
             source_id = operation["source_ids"][0] if operation["source_ids"] else ""
             if not source_id:
                 continue
-            with self._lock_for(source_id):
+            with self.hold_sources(operation["source_ids"]):
                 try:
                     outcome = self._recover_one(operation)
                     recovered.append(outcome)
@@ -413,6 +444,7 @@ class GalleryFileOperations:
         kind: str,
         items: list[dict[str, Any]],
         expected_txt_version: int | None = None,
+        operation_id: str | None = None,
     ) -> dict[str, Any]:
         source_ids = sorted({item["source_id"] for item in items})
         locks = [self._lock_for(sid) for sid in source_ids]
@@ -434,6 +466,7 @@ class GalleryFileOperations:
                     items=items,
                     source_ids=source_ids,
                     expected_txt_version=expected_txt_version,
+                    operation_id=operation_id,
                 )
         finally:
             for lock in reversed(locks):
@@ -446,9 +479,15 @@ class GalleryFileOperations:
         items: list[dict[str, Any]],
         source_ids: list[str],
         expected_txt_version: int | None,
+        operation_id: str | None = None,
     ) -> dict[str, Any]:
-        operation_id = str(uuid.uuid4())
+        operation_id = operation_id or str(uuid.uuid4())
         now = self._clock()
+        for item in items:
+            if item.get("review_snapshot"):
+                from .gallery_review_selection import validate_snapshot
+                with SafeSourceRoot(item["review_snapshot"]["root_path"]) as safe:
+                    validate_snapshot(self._repo, item["review_snapshot"], safe)
         # 1) 计划落库：状态 planned。检查来源无未终结操作。
         with self._repo._transaction() as conn:  # noqa: SLF001 - 单一所有者边界
             for sid in source_ids:
@@ -498,8 +537,8 @@ class GalleryFileOperations:
                     INSERT INTO gallery_file_operation_items(
                         operation_id, ordinal, source_id, item_type, directory_id, asset_id,
                         origin_relative_path, target_relative_path, has_txt,
-                        expected_asset_version, expected_txt_version, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned')
+                        expected_asset_version, expected_txt_version, review_snapshot_json, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned')
                     """,
                     (
                         operation_id,
@@ -513,6 +552,7 @@ class GalleryFileOperations:
                         1 if item["has_txt"] else 0,
                         item["expected_asset_version"],
                         item["expected_txt_version"],
+                        json.dumps(item.get("review_snapshot") or {}),
                     ),
                 )
         # 2) 执行。
@@ -854,6 +894,25 @@ class GalleryFileOperations:
         self, safe_root: SafeSourceRoot, operation_id: str, item: dict[str, Any]
     ) -> None:
         files_relative = str(trash_files_relative_dir(operation_id))
+        snapshot = item.get("review_snapshot")
+        if snapshot:
+            source = self._repo.get_source(snapshot["source_id"])
+            if source is None or source["root_path"] != snapshot["root_path"] or list(safe_root.root_identity()) != snapshot["root_identity"]:
+                raise GalleryFileOperationError("review_source_changed")
+            asset = self._repo.get_asset(snapshot["asset_id"])
+            if asset is None or any(asset[k] != snapshot[k] for k in ("source_id", "relative_path", "txt_relative_path", "txt_version")):
+                raise GalleryFileOperationError("review_asset_changed")
+            if asset["lifecycle_state"] == "active":
+                if asset["content_version"] != snapshot["content_version"]:
+                    raise GalleryFileOperationError("review_asset_version_conflict")
+            elif asset["lifecycle_state"] != "trashed":
+                raise GalleryFileOperationError("review_asset_changed")
+            for key, version_key in (("relative_path", "disk_version"), ("txt_relative_path", "txt_disk_version")):
+                relative = snapshot[key]
+                if not safe_root.exists_regular(relative) and safe_root.exists_regular(f"{files_relative}/{relative}"):
+                    relative = f"{files_relative}/{relative}"
+                if safe_root.disk_version(relative, allow_missing=key == "txt_relative_path") != snapshot[version_key]:
+                    raise GalleryFileOperationError("review_file_changed")
         if item.get("item_type", "asset") == "directory":
             files_relative = str(trash_files_relative_dir(operation_id))
             target_relative = f"{files_relative}/{item['origin_relative_path']}"
@@ -929,7 +988,10 @@ class GalleryFileOperations:
                     # An externally removed optional TXT does not block image trash.
                     continue
                 try:
-                    safe_root.move_regular(source_relative, target_relative)
+                    expected = None
+                    if snapshot:
+                        expected = snapshot["disk_version"] if source_relative == snapshot["relative_path"] else snapshot["txt_disk_version"]
+                    safe_root.move_regular(source_relative, target_relative, expected_disk_version=expected)
                 except FileExistsError as error:
                     raise GalleryFileOperationError(
                         "trash_target_conflict", {"operation_id": operation_id}
@@ -939,7 +1001,10 @@ class GalleryFileOperations:
         except Exception:
             for source_relative, target_relative in reversed(completed):
                 if safe_root.exists_regular(target_relative):
-                    safe_root.move_regular(target_relative, source_relative)
+                    safe_root.move_regular(
+                        target_relative, source_relative,
+                        expected_disk_version=(snapshot["disk_version"] if source_relative == snapshot["relative_path"] else snapshot["txt_disk_version"]) if snapshot else None,
+                    )
             raise
     def _commit_trash_index(self, item: Mapping[str, Any]) -> None:
         now = self._clock()
@@ -995,6 +1060,7 @@ class GalleryFileOperations:
                 (item["asset_id"],),
             )
             self._bump_source_content_version(conn, item["asset_id"], now)
+            self._recount_source_directories(conn, item["source_id"], now)
     # restore（undo 同路径）：移回原路径 + lifecycle='active'。
 
     def _apply_restore(self, safe_root: SafeSourceRoot, item: dict[str, Any]) -> None:
@@ -1137,6 +1203,7 @@ class GalleryFileOperations:
                     ),
                 )
             self._bump_source_content_version(conn, item["asset_id"], now)
+            self._recount_source_directories(conn, item["source_id"], now)
 
     def _recount_source_directories(
         self, conn: Any, source_id: str, now: float
@@ -1366,6 +1433,9 @@ class GalleryFileOperations:
             item["txt_origin"] = asset["txt_relative_path"] if asset else ""
         try:
             with SafeSourceRoot(source["root_path"]) as safe_root:
+                snapshot = item.get("review_snapshot")
+                if snapshot and (source["root_path"] != snapshot["root_path"] or list(safe_root.root_identity()) != snapshot["root_identity"]):
+                    raise GalleryFileOperationError("review_source_changed")
                 if kind == "rename":
                     if item.get("has_txt") and item.get("txt_target"):
                         item["_txt_content"] = self._read_txt_for_search(
@@ -1423,7 +1493,13 @@ class GalleryFileOperations:
                                 item["txt_origin"],
                             )
                         )
-                    self._rollback_moves(safe_root, moves)
+                    expected_versions = None
+                    if snapshot:
+                        expected_versions = {
+                            f"{files_relative}/{snapshot['relative_path']}": snapshot["disk_version"],
+                            f"{files_relative}/{snapshot['txt_relative_path']}": snapshot["txt_disk_version"],
+                        }
+                    self._rollback_moves(safe_root, moves, expected_versions=expected_versions)
                     now = self._clock()
                     with self._repo._transaction() as conn:  # noqa: SLF001
                         conn.execute(
@@ -1486,7 +1562,8 @@ class GalleryFileOperations:
 
     @staticmethod
     def _rollback_moves(
-        safe_root: SafeSourceRoot, moves: list[tuple[str, str]]
+        safe_root: SafeSourceRoot, moves: list[tuple[str, str]],
+        *, expected_versions: dict[str, str] | None = None,
     ) -> None:
         for source_relative, target_relative in moves:
             source_exists = safe_root.exists_regular(source_relative)
@@ -1496,7 +1573,8 @@ class GalleryFileOperations:
                     "rollback_target_conflict", {"target": target_relative}
                 )
             if source_exists:
-                safe_root.move_regular(source_relative, target_relative)
+                safe_root.move_regular(source_relative, target_relative,
+                    expected_disk_version=expected_versions.get(source_relative) if expected_versions else None)
 
     @staticmethod
     def _upsert_search_index(
@@ -1916,6 +1994,7 @@ def _project_item_row(row: Any) -> dict[str, Any]:
         "has_txt": bool(row["has_txt"]),
         "expected_asset_version": row["expected_asset_version"],
         "expected_txt_version": row["expected_txt_version"],
+        "review_snapshot": json.loads(row["review_snapshot_json"] or "{}"),
         "status": row["status"],
         "error_code": row["error_code"],
     }

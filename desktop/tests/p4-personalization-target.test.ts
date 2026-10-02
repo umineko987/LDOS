@@ -4,7 +4,7 @@ import controllerSource from "../src/apps/personalization/controller.ts?raw";
 import modelSource from "../src/apps/personalization/model.ts?raw";
 import serviceSource from "../src/apps/personalization/service.ts?raw";
 import stateSource from "../src/apps/personalization/state.ts?raw";
-import appWindowSource from "../src/shell/AppWindow.svelte?raw";
+import desktopSource from "../src/shell/Desktop.svelte?raw";
 
 function count(value: string, pattern: RegExp): number { return value.match(pattern)?.length ?? 0; }
 
@@ -17,7 +17,7 @@ describe("P4 Personalization target contracts", () => {
     expect(controllerSource).not.toContain("/api/");
     expect(controllerSource).not.toContain("polling.start");
     expect(serviceSource).not.toContain("fetch(");
-    expect(appWindowSource).toContain('record.appId === "personalization"');
+    expect(desktopSource).toContain('appId === "personalization"');
   });
   it("keeps preview local, apply single-flight, and teardown boundaries explicit", () => {
     expect(controllerSource).toContain("commitPromise");

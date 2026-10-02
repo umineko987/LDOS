@@ -5,5 +5,4 @@
 </script>
 
 <div class="wallpaper wallpaper--{scene}" data-wallpaper data-scene={scene} aria-hidden="true">
-  <div class="wallpaper__noise" data-global-noise></div>
 </div>

@@ -1,4 +1,5 @@
 import type { Route } from "@playwright/test";
+import { appPage } from "./fixtures/app-state";
 
 import {
   bootDesktop,
@@ -7,15 +8,11 @@ import {
   test,
 } from "./fixtures/test";
 
-function appWindow(page: Parameters<typeof bootDesktop>[0], appId: string) {
-  return page.locator(`[data-app-window][data-app-id="${appId}"]`);
-}
-
 async function openCurrentGalleryDirectoryExport(
   page: Parameters<typeof bootDesktop>[0],
 ) {
   await launchApp(page, "gallery");
-  const gallery = appWindow(page, "gallery");
+  const gallery = appPage(page, "gallery");
   await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
   await gallery.getByRole("button", { name: "导出目录…" }).click();
   const directoryExport = gallery.getByRole("dialog", { name: "导出完整目录" });
@@ -29,7 +26,7 @@ test.describe("可用应用关键旅程", () => {
   test("图片采集：自动补全、搜索、选择和创建批次", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "crawl");
-    const window = appWindow(page, "crawl");
+    const window = appPage(page, "crawl");
     const keyword = window.locator("[data-crawl-keyword]");
     await keyword.fill("fixture");
     await expect(window.getByRole("option", { name: /Fixture Artist/ })).toBeVisible();
@@ -40,23 +37,32 @@ test.describe("可用应用关键旅程", () => {
     await expect(candidate).toBeVisible();
     await candidate.getByRole("checkbox", { name: "选择 Fixture Artist" }).check();
     await expect(window.getByText("1 个地址", { exact: true })).toBeVisible();
+    const advanced = window.locator(".crawl-batch-settings");
+    await expect(advanced).not.toHaveAttribute("open");
+    await advanced.locator("summary").click();
+    await expect(advanced.getByLabel("单地址并发")).toHaveValue("20");
+    await expect(advanced.getByLabel("最多任务数")).toHaveValue("10000");
+    await advanced.getByLabel("单地址并发").fill("8");
+    await advanced.getByLabel("最多任务数").fill("250");
+    await advanced.getByLabel("下载代理").selectOption("direct");
+    await advanced.getByRole("textbox", { name: /输出目录/ }).fill("/tmp/ldos-e2e-crawl");
     await window.getByRole("button", { name: "创建批次" }).click();
 
-    await expect(appWindow(page, "tasks")).toBeVisible();
+    await expect(appPage(page, "tasks")).toBeVisible();
     expect(api.count("GET", "/api/v1/search/autocomplete")).toBeGreaterThan(0);
     expect(api.count("POST", "/api/v1/search")).toBe(1);
     expect(api.count("POST", "/api/v1/crawls")).toBe(1);
     const create = api.requests.find(
       (request) => request.method === "POST" && request.path === "/api/v1/crawls?view=desktop",
     );
-    expect(create?.body).toMatchObject({ concurrency: 20, max_tasks: 10000 });
+    expect(create?.body).toMatchObject({ concurrency: 8, max_tasks: 250, proxy_mode: "direct", output_dir: "/tmp/ldos-e2e-crawl" });
     expect(api.unhandled).toEqual([]);
   });
 
   test("批次管理：选择权威批次、分页并确认取消", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "tasks");
-    const window = appWindow(page, "tasks");
+    const window = appPage(page, "tasks");
     const recent = window.getByRole("listbox", { name: "最近批次" });
     await expect(recent.locator("option[value=\"batch-running\"]")).toBeAttached();
     await recent.selectOption("batch-running");
@@ -101,7 +107,7 @@ test.describe("可用应用关键旅程", () => {
   test("代理管理：运行池操作、保存来源与危险操作取消", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "proxy");
-    const window = appWindow(page, "proxy");
+    const window = appPage(page, "proxy");
     await expect(window.getByText("JP fixture")).toBeVisible();
 
     await window.getByRole("button", { name: "启动代理池" }).click();
@@ -125,7 +131,7 @@ test.describe("可用应用关键旅程", () => {
   test("授权管理：切换站点、显示敏感输入并保存登录代理", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "vault");
-    const window = appWindow(page, "vault");
+    const window = appPage(page, "vault");
     await expect(window.getByText("X / Twitter").first()).toBeVisible();
 
     await window.locator("[data-vault-action=\"site:pixiv\"]").click();
@@ -146,7 +152,7 @@ test.describe("可用应用关键旅程", () => {
   test("站点设置：阻止无效草稿、保存完整四字段并恢复默认", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "policy");
-    const window = appWindow(page, "policy");
+    const window = appPage(page, "policy");
     const concurrency = window.locator("[data-policy-field=\"max_concurrency\"]");
     await expect(concurrency).toHaveValue("20");
 
@@ -169,14 +175,86 @@ test.describe("可用应用关键旅程", () => {
     expect(api.unhandled).toEqual([]);
   });
 
+  test("去重模型设置折叠后仍可展开并刷新真实状态", async ({ page }) => {
+    const api = await bootDesktop(page);
+    await launchApp(page, "review");
+    const models = appPage(page, "review").locator(".review-model-setup");
+    await expect(models).toHaveAttribute("data-phase", "ready");
+    await expect(models).not.toHaveAttribute("open");
+    const refresh = models.getByRole("button", { name: "刷新状态" });
+    await expect(refresh).toBeHidden();
+    await models.locator("summary").click();
+    await expect(refresh).toBeVisible();
+    const reads = api.count("GET", "/api/v1/setup/models");
+    await refresh.click();
+    await expect.poll(() => api.count("GET", "/api/v1/setup/models")).toBe(reads + 1);
+    expect(api.count("POST", "/api/v1/setup/models")).toBe(0);
+    expect(api.unhandled).toEqual([]);
+  });
+
+  test("图库去重：跨目录选区、独立任务切换和返回刷新", async ({ page }) => {
+    const api = await bootDesktop(page);
+    await launchApp(page, "review");
+    const review = appPage(page, "review");
+    await expect(review.locator('[data-review-engine-card="gal-asset-02"]')).toBeVisible();
+    await review.locator('[data-review-engine-card="gal-asset-02"]').click();
+    await expect(review.locator('[data-review-dirty="true"]')).toBeVisible();
+    await launchApp(page, "gallery");
+    const gallery = appPage(page, "gallery");
+    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+    const selected = gallery.locator('[data-gallery-dedup="selected"]');
+    await gallery.getByRole("checkbox", { name: "选择图片 image-01.jpg" }).check();
+    await expect(selected).toBeDisabled();
+    await gallery.getByRole("checkbox", { name: "选择目录 subdir" }).check();
+    await gallery.locator("button.gallery-folder").filter({ hasText: "subdir" }).click();
+    await expect(gallery.locator('[data-gallery-asset="gal-asset-05"]')).toBeVisible();
+    await gallery.getByRole("checkbox", { name: "选择图片 image-05.jpg" }).check();
+    await selected.click();
+    const confirmation = gallery.locator("[data-gallery-review-confirmation]");
+    await expect(confirmation).toContainText("E2E 导入目录 / subdir");
+    await expect(confirmation).toContainText("同名 TXT");
+    await confirmation.getByRole("button", { name: "取消", exact: true }).click();
+    await expect(selected).toBeFocused();
+    await selected.click();
+    await confirmation.getByRole("button", { name: "确认发起去重" }).click();
+    await expect(page).toHaveURL(/#\/review$/);
+    await expect(review.locator("[data-review-pending]")).toBeVisible();
+    await expect(review.locator('[data-review-engine-card="gal-asset-02"]')).toHaveAttribute("data-selected", "false");
+    expect(api.requests.find(({ method, path }) => method === "POST" && path === "/api/v1/gallery/reviews")?.body).toEqual({ directory_ids: ["gal-dir-sub"] });
+    await review.getByRole("button", { name: "放弃草稿并切换", exact: true }).click();
+    await review.locator('[data-review-confirmation="discard-switch"]').getByRole("button", { name: "放弃草稿并切换", exact: true }).click();
+    await expect(review.getByRole("combobox", { name: "已提交审核任务" })).toHaveValue("review-created-1");
+    await expect(review.locator('[data-review-engine-card="gal-asset-02"]')).toHaveAttribute("data-selected", "true");
+    const reads = api.count("GET", "/api/v1/gallery/directories/gal-dir-sub/entries");
+    await launchApp(page, "gallery");
+    await expect.poll(() => api.count("GET", "/api/v1/gallery/directories/gal-dir-sub/entries")).toBeGreaterThan(reads);
+    await expect(gallery.locator('[data-gallery-asset="gal-asset-05"]')).toBeVisible();
+    expect(api.unhandled).toEqual([]);
+  });
+
+  test("图库去重：失败保留确认目录并可取消重试", async ({ page }) => {
+    const api = await bootDesktop(page, { failPaths: ["/api/v1/gallery/reviews"] });
+    await launchApp(page, "gallery");
+    const gallery = appPage(page, "gallery");
+    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+    await gallery.locator('[data-gallery-dedup="root"]').click();
+    const confirmation = gallery.locator("[data-gallery-review-confirmation]");
+    await confirmation.getByRole("button", { name: "确认发起去重" }).click();
+    await expect(confirmation.getByRole("alert")).toContainText("fixture_failure");
+    await expect(confirmation).toContainText("来源根目录");
+    await expect(confirmation.getByRole("button", { name: "确认发起去重" })).toBeEnabled();
+    await expect(page).toHaveURL(/#\/gallery$/);
+    expect(api.count("POST", "/api/v1/gallery/reviews")).toBe(1);
+    await confirmation.getByRole("button", { name: "取消", exact: true }).click();
+    await expect(gallery.locator('[data-gallery-dedup="root"]')).toBeFocused();
+  });
   test("去重审核：加载、比较、逐组确认、串行保存并应用", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "review");
-    const window = appWindow(page, "review");
-    const batches = window.getByRole("combobox", { name: "已结束批次" });
-    await expect(batches.locator("option[value=\"batch-review\"]")).toBeAttached();
-    await batches.selectOption("batch-review");
-    await window.getByRole("button", { name: "打开审核" }).click();
+    const window = appPage(page, "review");
+    const batches = window.getByRole("combobox", { name: "已提交审核任务" });
+    await expect(batches.locator("option[value=\"review-fixture\"]")).toBeAttached();
+    await batches.selectOption("review-fixture");
 
     await expect(window.getByRole("heading", { name: /组 1/ })).toBeVisible();
     await expect(window.locator("[data-review-engine-image]").first()).toHaveAttribute("data-review-engine-decoded", "true");
@@ -187,8 +265,8 @@ test.describe("可用应用关键旅程", () => {
       const statusbar = element.querySelector(".review-deck-statusbar");
       return Boolean(host && statusbar && statusbar.getBoundingClientRect().bottom <= host.getBoundingClientRect().bottom + 1);
     })).toBe(true);
-    const firstCard = window.locator('[data-review-engine-card="image-1"]');
-    const secondCard = window.locator('[data-review-engine-card="image-2"]');
+    const firstCard = window.locator('[data-review-engine-card="gal-asset-01"]');
+    const secondCard = window.locator('[data-review-engine-card="gal-asset-02"]');
     await expect(firstCard).toBeFocused();
     await window.getByRole("button", { name: "刷新", exact: true }).focus();
     await page.keyboard.press("ArrowRight");
@@ -250,19 +328,19 @@ test.describe("可用应用关键旅程", () => {
     await page.keyboard.press("Enter");
     await expect(window.getByRole("heading", { name: /组 2/ })).toBeVisible();
     await page.keyboard.press("ArrowRight");
-    const fourthCard = window.locator('[data-review-engine-card="image-4"]');
+    const fourthCard = window.locator('[data-review-engine-card="gal-asset-04"]');
     await expect(fourthCard).toBeFocused();
     await page.keyboard.press("Space");
     await expect(fourthCard).toHaveAttribute("data-selected", "false");
     await page.keyboard.press("Enter");
 
-    await expect.poll(() => api.count("PUT", "/api/v1/crawls/batch-review/review/decisions")).toBeGreaterThan(0);
-    const apply = window.getByRole("button", { name: "应用并整理文件" });
+    await expect.poll(() => api.count("PUT", "/api/v1/gallery/reviews/review-fixture/decisions")).toBeGreaterThan(0);
+    const apply = window.getByRole("button", { name: "送入回收区" });
     await expect(apply).toBeEnabled();
     await apply.click();
     const confirmation = window.locator("[data-review-confirmation=\"apply\"]");
-    await confirmation.getByRole("button", { name: "应用并整理文件" }).click();
-    await expect.poll(() => api.count("POST", "/api/v1/crawls/batch-review/review/apply")).toBe(1);
+    await confirmation.getByRole("button", { name: "确认送入回收区" }).click();
+    await expect.poll(() => api.count("POST", "/api/v1/gallery/reviews/review-fixture/apply")).toBe(1);
     expect(api.unhandled).toEqual([]);
   });
 
@@ -270,7 +348,7 @@ test.describe("可用应用关键旅程", () => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:1420" });
     const api = await bootDesktop(page);
     await launchApp(page, "diagnostics");
-    const window = appWindow(page, "diagnostics");
+    const window = appPage(page, "diagnostics");
     await expect(window.getByRole("heading", { name: "安全配置", exact: true })).toBeVisible();
     await expect(window.getByText("3 / 20")).toBeVisible();
 
@@ -280,14 +358,14 @@ test.describe("可用应用关键旅程", () => {
     expect(clipboard).not.toContain("password");
 
     await window.getByRole("button", { name: "打开批次管理" }).click();
-    await expect(appWindow(page, "tasks")).toBeVisible();
+    await expect(appPage(page, "tasks")).toBeVisible();
     expect(api.unhandled).toEqual([]);
   });
 
   test("外观设置与图库目录导出保持确定状态且无伪能力", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "personalization");
-    const personalization = appWindow(page, "personalization");
+    const personalization = appPage(page, "personalization");
     const scene = personalization.locator("[data-personalization-scene]:not([data-personalization-selected=\"true\"])").first();
     const sceneId = await scene.getAttribute("data-personalization-scene");
     await scene.click();
@@ -296,7 +374,7 @@ test.describe("可用应用关键旅程", () => {
     await expect(personalization.locator("[data-personalization-status=\"success\"]")).toBeVisible();
 
     await launchApp(page, "gallery");
-    const gallery = appWindow(page, "gallery");
+    const gallery = appPage(page, "gallery");
     await expect(gallery.locator("[data-gallery-app]")).toHaveAttribute("data-preview-availability", "live");
     await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
     await expect(gallery.locator("[data-gallery-asset=\"gal-asset-01\"]")).toBeVisible();
@@ -348,7 +426,7 @@ test.describe("可用应用关键旅程", () => {
   test("图库为图片和目录提供显式多选控件", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "gallery");
-    const gallery = appWindow(page, "gallery");
+    const gallery = appPage(page, "gallery");
     await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
 
     await expect(gallery.getByRole("checkbox", { name: "选择目录 E2E 导入目录" })).toHaveCount(0);
@@ -393,7 +471,7 @@ test.describe("可用应用关键旅程", () => {
   test("图库批次卡片可警告并递归删除整个批次", async ({ page }) => {
     const api = await bootDesktop(page, { galleryScenario: "batch_delete" });
     await launchApp(page, "gallery");
-    const gallery = appWindow(page, "gallery");
+    const gallery = appPage(page, "gallery");
     const batchCard = gallery.locator(".gallery-source-card--deletable");
     await expect(batchCard).toHaveCount(1);
     const deleteButton = batchCard.getByRole("button", { name: "删除批次 E2E 下载批次" });
@@ -419,7 +497,7 @@ test.describe("可用应用关键旅程", () => {
   test("图库导入目录卡片可解除挂载但不删除原文件", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "gallery");
-    const gallery = appWindow(page, "gallery");
+    const gallery = appPage(page, "gallery");
     const sourceCard = gallery.locator(".gallery-source-card--deletable");
     await expect(sourceCard).toHaveCount(1);
     const removeButton = sourceCard.getByRole("button", { name: "解除挂载 E2E 导入目录" });
@@ -447,7 +525,7 @@ test.describe("可用应用关键旅程", () => {
   test("图库目录删除提交完整目录选择并保留回收撤销入口", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "gallery");
-    const gallery = appWindow(page, "gallery");
+    const gallery = appPage(page, "gallery");
     await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
 
     await gallery.getByRole("checkbox", { name: "选择目录 subdir" }).check();
@@ -468,7 +546,7 @@ test.describe("可用应用关键旅程", () => {
   test("图库切换目录后单张图片删除不会带入残留目录选择", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "gallery");
-    const gallery = appWindow(page, "gallery");
+    const gallery = appPage(page, "gallery");
     await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
 
     await gallery.getByRole("checkbox", { name: "选择目录 subdir" }).check();
@@ -479,7 +557,8 @@ test.describe("可用应用关键旅程", () => {
 
     const selectionSummary = gallery.locator("[data-gallery-selection-summary]");
     await expect(selectionSummary).toContainText("1 张图片");
-    await expect(selectionSummary).not.toContainText("个目录");
+    // Folder selection persists for dedup/export, never for deletion outside the current view.
+    await expect(selectionSummary).toContainText("1 个目录");
     await gallery.getByRole("button", { name: "删除…" }).click();
     const confirm = gallery.getByRole("alertdialog", { name: "移入回收区" });
     await expect(confirm).toContainText("0 个完整目录");
@@ -498,7 +577,7 @@ test.describe("可用应用关键旅程", () => {
   test("图库呈现扫描失败、原目录管理警告与来源生命周期操作", async ({ page }) => {
     const api = await bootDesktop(page, { galleryScenario: "scan_failed" });
     await launchApp(page, "gallery");
-    const gallery = appWindow(page, "gallery");
+    const gallery = appPage(page, "gallery");
     await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
 
     const sourceStatus = gallery.locator(".gallery-source-status");
@@ -535,7 +614,7 @@ test.describe("可用应用关键旅程", () => {
   test("图库显示候选保留移除统计并可重试去重对账", async ({ page }) => {
     const api = await bootDesktop(page, { galleryScenario: "reconciliation_failed" });
     await launchApp(page, "gallery");
-    const gallery = appWindow(page, "gallery");
+    const gallery = appPage(page, "gallery");
     await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
     const sourceStatus = gallery.locator(".gallery-source-status");
 
@@ -558,7 +637,7 @@ test.describe("可用应用关键旅程", () => {
   test("图库跨全库搜索分页完成沉浸查看、标签辅助与显式 TXT 离开决策", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "gallery");
-    const gallery = appWindow(page, "gallery");
+    const gallery = appPage(page, "gallery");
     await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
 
     await gallery.getByRole("combobox", { name: "范围", exact: true }).selectOption("library");
@@ -653,7 +732,7 @@ test.describe("可用应用关键旅程", () => {
   test("图库查看器删除自动前进，并支持批量恢复与批量永久删除", async ({ page }) => {
     const api = await bootDesktop(page);
     await launchApp(page, "gallery");
-    const gallery = appWindow(page, "gallery");
+    const gallery = appPage(page, "gallery");
     await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
 
     const trashFirstTwoFromViewer = async () => {
@@ -745,7 +824,7 @@ test.describe("空数据与服务失败", () => {
   test("空最近批次不会伪造内容，并给出可操作空状态", async ({ page }) => {
     await bootDesktop(page, { emptyRecent: true });
     await launchApp(page, "tasks");
-    const window = appWindow(page, "tasks");
+    const window = appPage(page, "tasks");
     await expect(window.getByRole("option", { name: "当前筛选没有批次" })).toBeAttached();
     await expect(window.getByRole("heading", { name: "尚未选择批次" })).toBeVisible();
     await expect(window.getByRole("button", { name: "查看所选批次" })).toBeDisabled();
@@ -759,7 +838,7 @@ test.describe("空数据与服务失败", () => {
     test(`${scenario.appId} 在服务失败时保留明确错误与恢复入口`, async ({ page }) => {
       const api = await bootDesktop(page, { failPaths: [scenario.path] });
       await launchApp(page, scenario.appId);
-      const window = appWindow(page, scenario.appId);
+      const window = appPage(page, scenario.appId);
       const alert = window.locator("section[role=\"alert\"]").first();
       await expect(alert).toBeVisible();
       await expect(alert).toContainText(scenario.alert);

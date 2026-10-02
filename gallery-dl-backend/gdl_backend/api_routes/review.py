@@ -44,6 +44,7 @@ def _desktop_review_image(image: dict[str, Any]) -> dict[str, Any]:
         "readable": bool(image.get("readable")),
         "recommended": bool(image.get("recommended")),
         "selected": bool(image.get("selected")),
+        **(image.get("gallery") or {}),
         "metadata": {
             "w": _count(metadata.get("w", metadata.get("width")), maximum=1_000_000),
             "h": _count(metadata.get("h", metadata.get("height")), maximum=1_000_000),
@@ -339,4 +340,6 @@ def create_review_router() -> APIRouter:
                 return FileResponse(target)
         raise ApiError(404, "review_image_not_found", "审核图片文件不存在")
 
+    from .gallery_review import create_gallery_review_router
+    router.include_router(create_gallery_review_router())
     return router

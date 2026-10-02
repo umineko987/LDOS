@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import { render } from "svelte/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { ApiClient } from "../src/core/api/client";
 import type { PollingService } from "../src/core/polling/service";
 import Proxy from "../src/apps/proxy/Proxy.svelte";
-import AppWindow from "../src/shell/AppWindow.svelte";
-import appWindowSource from "../src/shell/AppWindow.svelte?raw";
+import Desktop from "../src/shell/Desktop.svelte";
+import desktopSource from "../src/shell/Desktop.svelte?raw";
+import { createDesktopRuntime } from "./fixtures/desktop";
 import controllerSource from "../src/apps/proxy/controller.ts?raw";
 import modelSource from "../src/apps/proxy/model.ts?raw";
 import proxySource from "../src/apps/proxy/Proxy.svelte?raw";
@@ -18,14 +19,15 @@ const api = Object.freeze({}) as ApiClient;
 const polling = Object.freeze({}) as PollingService;
 
 describe("Svelte Proxy integration", () => {
-  it("renders the real accessible three-column Proxy boundary", () => {
+  it("renders accessible Proxy settings with runtime, sources, and danger controls", () => {
     const body = render(Proxy, { props: { api, polling } }).body;
     for (const marker of [
       "data-proxy-app",
       'data-domain-owner="proxy"',
-      "状态总览",
-      "运行池控制",
-      "来源编辑",
+      '<h1 id="proxy-heading">代理</h1>',
+      "运行状态",
+      "运行池",
+      "节点来源",
       "启动代理池",
       "应用并重新加载",
       "订阅地址",
@@ -33,30 +35,19 @@ describe("Svelte Proxy integration", () => {
       "手动节点",
       "危险操作",
       'aria-live="polite"',
-      'aria-label="代理管理三段工作区，可横向滚动查看状态总览、运行池控制和来源编辑"',
+      'aria-label="代理设置；可纵向滚动"',
     ]) expect(body).toContain(marker);
     expect(body).not.toContain("应用迁移将在后续阶段接入");
   });
 
-  it("uses Proxy for its only AppWindow branch", () => {
-    const body = render(AppWindow, { props: {
-      record: { appId: "proxy", state: "normal", rect: { x: 20, y: 20, w: 800, h: 560 } },
-      api,
-      polling,
-      persistence: Object.freeze({}) as never,
-      focused: true,
-      onNavigate: vi.fn(),
-      onFocus: vi.fn(),
-      onMinimize: vi.fn(),
-      onToggleMaximized: vi.fn(),
-      onClose: vi.fn(),
-      onBeginInteraction: vi.fn(),
-      onKeyboardResize: vi.fn(),
-    } }).body;
+  it("mounts Proxy in the Desktop settings page", () => {
+    const runtime = createDesktopRuntime();
+    runtime.shell.openApplication("proxy");
+    const body = render(Desktop, { props: runtime }).body;
+    expect(body).toContain('data-app-page="" data-app-id="proxy"');
     expect(body).toContain("data-proxy-app");
     expect(body).not.toContain('data-application-content="proxy"');
-    expect(appWindowSource).toContain('record.appId === "proxy"');
-    expect(appWindowSource).toContain("<Proxy {api} {polling} />");
+    expect(desktopSource).toContain('<Proxy {api} {polling} />');
   });
 
   it("keeps keyed domain lists, one owner, shared API/polling, confirmations, and cleanup", () => {
@@ -99,7 +90,7 @@ describe("Svelte Proxy integration", () => {
     expect(proxyCss).not.toMatch(/(?:-webkit-)?backdrop-filter\s*:/);
     expect(proxyCss).not.toMatch(/^\s*filter\s*:/m);
     expect(proxyCss).toContain(".proxy-workspace__track");
-    expect(proxyCss).toContain("overflow-x: auto");
+    expect(proxyCss).toContain("overflow-y: auto");
     expect(proxyCss).toContain("@media (forced-colors: active)");
   });
 });

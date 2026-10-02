@@ -164,7 +164,9 @@ class ServiceContainer:
             self.db,
             settings.dedup,
             settings.runtime_dir,
+            catalog=self.gallery_catalog, file_operations=self.gallery_file_operations,
         )
+        self.gallery_reviews = self.reviews.gallery_reviews
         self.model_setup = ModelSetupManager(
             settings, self.runtime_config, self.reviews.start
         )

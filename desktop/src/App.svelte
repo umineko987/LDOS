@@ -106,8 +106,8 @@
 {:else}
   <main use:localizeUi class="startup-gate" data-startup-phase={phase} aria-labelledby="startup-title" aria-live="polite">
     <section>
-      <p>LDOS Desktop</p>
-      <h1 id="startup-title">{phase === "failed" ? "桌面宿主暂时不可用" : "正在准备夜航桌面"}</h1>
+      <p>LDOS</p>
+      <h1 id="startup-title">{phase === "failed" ? "本地服务暂时不可用" : "正在准备工作台"}</h1>
       <p class="startup-gate__status">{message}</p>
       {#if backendVersion}<small>Backend {backendVersion}</small>{/if}
     </section>

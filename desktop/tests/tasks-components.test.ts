@@ -6,10 +6,11 @@ import type { ApiClient } from "../src/core/api/client";
 import type { PersistenceService } from "../src/core/persistence/service";
 import type { PollingService } from "../src/core/polling/service";
 import { sanitizeTaskPage } from "../src/apps/tasks/model";
-import AppWindow from "../src/shell/AppWindow.svelte";
+import Desktop from "../src/shell/Desktop.svelte";
+import { createDesktopRuntime } from "./fixtures/desktop";
 import TaskRow from "../src/apps/tasks/TaskRow.svelte";
 import Tasks from "../src/apps/tasks/Tasks.svelte";
-import appWindowSource from "../src/shell/AppWindow.svelte?raw";
+import desktopSource from "../src/shell/Desktop.svelte?raw";
 import controllerSource from "../src/apps/tasks/controller.ts?raw";
 import modelSource from "../src/apps/tasks/model.ts?raw";
 import serviceSource from "../src/apps/tasks/service.ts?raw";
@@ -25,27 +26,6 @@ const persistence = Object.freeze({
 }) as PersistenceService;
 const onNavigate = vi.fn();
 
-const windowProps = {
-  api,
-  polling,
-  persistence,
-  focused: true,
-  onNavigate,
-  onFocus: vi.fn(),
-  onMinimize: vi.fn(),
-  onToggleMaximized: vi.fn(),
-  onClose: vi.fn(),
-  onBeginInteraction: vi.fn(),
-  onKeyboardResize: vi.fn(),
-};
-
-function record(appId: "tasks" | "crawl") {
-  return {
-    appId,
-    state: "normal" as const,
-    rect: { x: 20, y: 20, w: 800, h: 560 },
-  };
-}
 
 describe("Svelte Tasks integration", () => {
   it("renders the real Tasks boundary with selection, status, refresh, and accessible workspace controls", () => {
@@ -56,25 +36,30 @@ describe("Svelte Tasks integration", () => {
       "最近批次",
       "批次筛选",
       "查看所选批次",
-      "刷新全部事实",
-      "任务与恢复事实",
+      "刷新批次",
+      "任务进度",
       "操作与恢复",
       'aria-live="polite"',
-      'aria-label="批次管理三段工作区，可横向滚动"',
+      'aria-label="批次管理工作区"',
+      '<h1 id="tasks-heading">批次</h1>',
     ]) expect(body).toContain(marker);
     expect(body).not.toContain("应用迁移将在后续阶段接入");
     expect(body).not.toContain("P2 Shell");
   });
 
-  it("uses Tasks for its only window path while Crawl has its own real branch", () => {
-    const tasks = render(AppWindow, { props: { ...windowProps, record: record("tasks") } }).body;
-    const crawl = render(AppWindow, { props: { ...windowProps, record: record("crawl") } }).body;
+  it("mounts separate Tasks and Crawl pages through Desktop", () => {
+    const runtime = createDesktopRuntime();
+    runtime.shell.openApplication("tasks");
+    const tasks = render(Desktop, { props: runtime }).body;
     expect(tasks).toContain("data-tasks-app");
+    expect(tasks).not.toContain("data-crawl-app");
     expect(tasks).not.toContain('data-application-content="tasks"');
+    runtime.shell.openApplication("crawl");
+    const crawl = render(Desktop, { props: runtime }).body;
     expect(crawl).toContain("data-crawl-app");
+    expect(crawl).toContain("data-tasks-app");
     expect(crawl).not.toContain('data-application-content="crawl"');
-    expect(appWindowSource).toContain('record.appId === "tasks"');
-    expect(appWindowSource).toContain("<Tasks {api} {polling} {persistence} {onNavigate} />");
+    expect(desktopSource).toContain('<Tasks {api} {polling} {persistence} onNavigate={navigate} />');
   });
 
   it("renders only sanitized row facts with a stable task ID", () => {
@@ -135,7 +120,7 @@ describe("Svelte Tasks integration", () => {
     expect(tasksCss).not.toMatch(/^\s*filter\s*:/m);
     expect(tasksCss).toContain(".tasks-workspace__track");
     expect(tasksCss).toContain("grid-template-columns:");
-    expect(tasksCss).toContain("overflow-x: auto");
+    expect(tasksCss).toContain("overflow: auto");
     expect(tasksSource).toContain('aria-modal="true"');
     expect(tasksSource).toContain('aria-describedby="tasks-confirmation-message tasks-confirmation-warning"');
     expect(tasksSource).toContain("trappedTabIndex");

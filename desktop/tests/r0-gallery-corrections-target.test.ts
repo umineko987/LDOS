@@ -80,10 +80,10 @@ describe("R0 single Gallery product contract", () => {
   it("removes the independent Export application and runtime mount", () => {
     expect(APPLICATION_DEFINITIONS.map((definition) => definition.id)).not.toContain("export");
 
-    const appWindowPath = fileURLToPath(new URL("../src/shell/AppWindow.svelte", import.meta.url));
-    const sourceText = readFileSync(appWindowPath, "utf8");
+    const desktopPath = fileURLToPath(new URL("../src/shell/Desktop.svelte", import.meta.url));
+    const sourceText = readFileSync(desktopPath, "utf8");
     expect(sourceText).not.toContain('apps/export/Export.svelte');
-    expect(sourceText).not.toContain('record.appId === "export"');
+    expect(sourceText).not.toContain('appId === "export"');
   });
 
   it("exposes source lifecycle, whole-directory export and gallery-search methods from one service", () => {

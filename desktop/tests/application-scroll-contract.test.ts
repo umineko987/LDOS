@@ -1,15 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const applications = [
-  ["Crawl", "crawl", ".crawl-app", ".crawl-column__scroll"],
-  ["Tasks", "tasks", ".tasks-app", ".tasks-column__scroll"],
-  ["Proxy", "proxy", ".proxy-app", ".proxy-column__scroll"],
-  ["Vault", "vault", ".vault-app", ".vault-column-scroll"],
-  ["Policy", "policy", ".policy-app", ".policy-column-scroll"],
-  ["Diagnostics", "diagnostics", ".diagnostics-app", ".diagnostics-column-scroll"],
-] as const;
-
 function rule(source: string, selector: string): string {
   const start = source.indexOf(`${selector} {`);
   if (start < 0) throw new Error(`missing_selector:${selector}`);
@@ -18,12 +9,29 @@ function rule(source: string, selector: string): string {
   return source.slice(open + 1, close);
 }
 
-describe("application vertical scrolling layout contract", () => {
-  it.each(applications)("constrains %s to the window body and preserves its column scroller", (_, directory, root, scroller) => {
-    const css = readFileSync(new URL(`../src/apps/${directory}/${directory}.css`, import.meta.url), "utf8");
+function appCss(directory: string): string {
+  return readFileSync(new URL(`../src/apps/${directory}/${directory}.css`, import.meta.url), "utf8");
+}
 
-    expect(rule(css, root)).toMatch(/(?:^|;)\s*height:\s*100%\s*;/);
-    expect(rule(css, root)).toMatch(/(?:^|;)\s*min-height:\s*0\s*;/);
-    expect(rule(css, scroller)).toMatch(/(?:^|;)\s*overflow(?:-y)?:\s*auto\s*;/);
+describe("application scrolling in the single content area", () => {
+  it.each(["crawl", "tasks"])("keeps %s workspace and column content scrollable inside the page", (directory) => {
+    const css = appCss(directory);
+    const root = rule(css, `.${directory}-app`);
+    expect(root).toMatch(/(?:^|;)\s*height:\s*100%\s*;/);
+    expect(root).toMatch(/(?:^|;)\s*min-height:\s*0\s*;/);
+    expect(rule(css, `.${directory}-workspace`)).toMatch(/(?:^|;)\s*overflow:\s*auto\s*;/);
+    expect(rule(css, `.${directory}-column__scroll`)).toMatch(/(?:^|;)\s*overflow-y:\s*auto\s*;/);
+    expect(css).not.toMatch(/\.app-window|data-maximized/);
+  });
+
+  it.each(["proxy", "vault", "policy", "diagnostics", "personalization"])("lets %s settings scroll vertically and collapse at narrow content widths", (directory) => {
+    const css = appCss(directory);
+    const root = rule(css, `.${directory}-app`);
+    expect(root).toMatch(/(?:^|;)\s*height:\s*100%\s*;/);
+    expect(root).toMatch(/(?:^|;)\s*min-width:\s*0\s*;/);
+    expect(root).toMatch(/(?:^|;)\s*overflow-y:\s*auto\s*;/);
+    const narrow = css.slice(css.indexOf("@container (max-width: 900px)"));
+    expect(narrow).toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(css).not.toMatch(/min-width:\s*(?:[89]\d\d|\d{4,})px|overflow-x:\s*(?:auto|scroll)|\.app-window|data-maximized/);
   });
 });

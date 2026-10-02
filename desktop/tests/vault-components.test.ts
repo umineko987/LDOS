@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import { render } from "svelte/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import Vault from "../src/apps/vault/Vault.svelte";
 import type { ApiClient } from "../src/core/api/client";
 import type { PollingService } from "../src/core/polling/service";
-import AppWindow from "../src/shell/AppWindow.svelte";
-import appWindowSource from "../src/shell/AppWindow.svelte?raw";
+import Desktop from "../src/shell/Desktop.svelte";
+import desktopSource from "../src/shell/Desktop.svelte?raw";
+import { createDesktopRuntime } from "./fixtures/desktop";
 import controllerSource from "../src/apps/vault/controller.ts?raw";
 import modelSource from "../src/apps/vault/model.ts?raw";
 import serviceSource from "../src/apps/vault/service.ts?raw";
@@ -17,47 +18,36 @@ const vaultCss = readFileSync(new URL("../src/apps/vault/vault.css", import.meta
 const api = Object.freeze({}) as ApiClient;
 const polling = Object.freeze({}) as PollingService;
 
-const windowProps = {
-  record: { appId: "vault" as const, state: "normal" as const, rect: { x: 20, y: 20, w: 800, h: 560 } },
-  api,
-  polling,
-  persistence: Object.freeze({}) as never,
-  focused: true,
-  onNavigate: vi.fn(),
-  onFocus: vi.fn(),
-  onMinimize: vi.fn(),
-  onToggleMaximized: vi.fn(),
-  onClose: vi.fn(),
-  onBeginInteraction: vi.fn(),
-  onKeyboardResize: vi.fn(),
-};
 
 describe("Svelte Vault integration", () => {
-  it("renders the real accessible three-column Vault boundary", () => {
+  it("renders accessible Vault settings with site, browser, and recovery controls", () => {
     const body = render(Vault, { props: { api, polling } }).body;
     for (const marker of [
       "data-vault-app",
       'data-domain-owner="vault"',
-      "01 · 站点",
-      "02 · 材料与会话",
-      "03 · 共享与恢复",
+      '<h1 id="vault-heading">授权</h1>',
+      "选择站点",
+      "浏览器与登录代理",
       "共享授权浏览器数据",
       "登录代理",
       "危险操作",
       'aria-live="polite"',
-      'aria-label="授权管理三栏工作区，可横向滚动查看站点、材料与共享恢复"',
+      'aria-label="站点授权设置；可纵向滚动"',
       'autocomplete="off"',
     ]) expect(body).toContain(marker);
     expect(body).not.toContain("应用迁移将在后续阶段接入");
     expect(body).not.toContain("P2 Shell");
   });
 
-  it("uses Vault for its only AppWindow branch", () => {
-    const body = render(AppWindow, { props: windowProps }).body;
+  it("mounts Vault in Desktop and registers its dirty boundary", () => {
+    const runtime = createDesktopRuntime();
+    runtime.shell.openApplication("vault");
+    const body = render(Desktop, { props: runtime }).body;
+    expect(body).toContain('data-app-page="" data-app-id="vault"');
     expect(body).toContain("data-vault-app");
     expect(body).not.toContain('data-application-content="vault"');
-    expect(appWindowSource).toContain('record.appId === "vault"');
-    expect(appWindowSource).toContain('<Vault {api} {polling} registerUnsavedChanges=');
+    expect(desktopSource).toContain('<Vault {api} {polling} registerUnsavedChanges=');
+    expect(desktopSource).toContain('shell.registerUnsavedChanges("vault", reader, discard)');
   });
 
   it("keeps keyed sites, one owner, shared API/polling, confirmation focus, and complete cleanup", () => {
@@ -97,15 +87,15 @@ describe("Svelte Vault integration", () => {
     expect((serviceSource.match(/view=vault/g) ?? [])).toHaveLength(1);
   });
 
-  it("keeps application internals flat with horizontal and forced-colors fallbacks", () => {
+  it("keeps vertically scrollable flat settings and forced-colors support", () => {
     expect(vaultCss).not.toMatch(/^\s*(?:-webkit-)?backdrop-filter\s*:(?!\s*none)/m);
     expect(vaultCss).not.toMatch(/^\s*filter\s*:/m);
     expect(vaultCss).toContain(".vault-workspace-track");
-    expect(vaultCss).toContain("min-width: 1120px");
-    expect(vaultCss).toContain("overflow-x: auto");
+    expect(vaultCss).toContain("min-width: 0");
+    expect(vaultCss).toContain("overflow-y: auto");
     expect(vaultCss).toContain("@media (forced-colors: active)");
     expect(vaultCss).toContain("CanvasText");
     expect(vaultCss).toContain("Highlight");
-    expect(vaultCss).not.toMatch(/@media\s*\(max-width\s*:/);
+    expect(vaultCss).toContain("@container (max-width: 900px)");
   });
 });

@@ -5,7 +5,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 12
 SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION = 8
 GALLERY_EXPORT_SCHEMA_VERSION = 9
 GALLERY_RECONCILIATION_SCHEMA_VERSION = 10
@@ -322,7 +322,75 @@ def initialize_schema(
         CREATE INDEX IF NOT EXISTS idx_crawl_review_images_selection
             ON crawl_review_images(batch_id, selected, disposition);
 
-        -- ---- 图库与数据集导出（v9） ----
+        CREATE TABLE IF NOT EXISTS gallery_reviews (
+            review_id TEXT PRIMARY KEY,
+            version INTEGER NOT NULL DEFAULT 1,
+            selection_json TEXT NOT NULL DEFAULT '[]',
+            snapshot_json TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL,
+            total_image_count INTEGER NOT NULL DEFAULT 0,
+            total_group_count INTEGER NOT NULL DEFAULT 0,
+            duplicate_group_count INTEGER NOT NULL DEFAULT 0,
+            unreadable_image_count INTEGER NOT NULL DEFAULT 0,
+            automatic_group_count INTEGER NOT NULL DEFAULT 0,
+            automatic_rejected_image_count INTEGER NOT NULL DEFAULT 0,
+            kept_image_count INTEGER NOT NULL DEFAULT 0,
+            rejected_image_count INTEGER NOT NULL DEFAULT 0,
+            failed_image_count INTEGER NOT NULL DEFAULT 0,
+            error TEXT NOT NULL DEFAULT '',
+            analysis_log_path TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            started_at REAL,
+            ready_at REAL,
+            applied_at REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_gallery_reviews_status
+            ON gallery_reviews(status, created_at);
+
+        CREATE TABLE IF NOT EXISTS gallery_review_groups (
+            review_id TEXT NOT NULL,
+            id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            match_levels_json TEXT NOT NULL DEFAULT '[]',
+            reason TEXT NOT NULL DEFAULT '',
+            decided INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY(review_id, id),
+            UNIQUE(review_id, ordinal),
+            FOREIGN KEY(review_id) REFERENCES gallery_reviews(review_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_gallery_review_groups_order
+            ON gallery_review_groups(review_id, kind, ordinal);
+
+        CREATE TABLE IF NOT EXISTS gallery_review_images (
+            review_id TEXT NOT NULL,
+            id TEXT NOT NULL,
+            group_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            relative_path TEXT NOT NULL,
+            file_hash TEXT NOT NULL DEFAULT '',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            readable INTEGER NOT NULL DEFAULT 1,
+            recommended INTEGER NOT NULL DEFAULT 0,
+            selected INTEGER NOT NULL DEFAULT 1,
+            disposition TEXT NOT NULL DEFAULT 'pending',
+            final_relative_path TEXT NOT NULL DEFAULT '',
+            error TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY(review_id, id),
+            UNIQUE(review_id, relative_path),
+            FOREIGN KEY(review_id, group_id)
+                REFERENCES gallery_review_groups(review_id, id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_gallery_review_images_group
+            ON gallery_review_images(review_id, group_id, ordinal);
+        CREATE INDEX IF NOT EXISTS idx_gallery_review_images_selection
+            ON gallery_review_images(review_id, selected, disposition);
+
         CREATE TABLE IF NOT EXISTS gallery_sources (
             id TEXT PRIMARY KEY,
             kind TEXT NOT NULL,
@@ -635,3 +703,10 @@ def initialize_schema(
                 (str(GALLERY_DIRECTORY_TRASH_SCHEMA_VERSION),),
             )
         schema_version = GALLERY_DIRECTORY_TRASH_SCHEMA_VERSION
+
+    if schema_version < 12:
+        with transaction() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(gallery_file_operation_items)")}
+            if "review_snapshot_json" not in columns:
+                conn.execute("ALTER TABLE gallery_file_operation_items ADD COLUMN review_snapshot_json TEXT NOT NULL DEFAULT '{}'")
+            conn.execute("UPDATE meta SET value='12' WHERE key='schema_version'")

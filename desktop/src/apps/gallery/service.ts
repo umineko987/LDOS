@@ -1,4 +1,5 @@
 import type { ApiClient } from "../../core/api/client";
+import { sanitizeReviewOperation, validateReviewId } from "../review/model";
 import {
   sanitizeGalleryAnnotation,
   sanitizeGalleryDirectoryPage,
@@ -57,6 +58,7 @@ export interface GallerySearchRequest {
 }
 
 export interface GalleryService {
+  createReview(directoryIds: readonly string[], signal: AbortSignal): Promise<string>;
   listSources(signal: AbortSignal): Promise<readonly GallerySourceSummary[]>;
   importSource(rootPath: string, displayName?: string | null): Promise<GallerySourceSummary>;
   renameSource(sourceId: string, displayName: string): Promise<GallerySourceSummary>;
@@ -155,6 +157,12 @@ export function searchAssetsPath(request: GallerySearchRequest): string {
 
 export function createGalleryService(api: ApiClient): GalleryService {
   const service: GalleryService = {
+    async createReview(directoryIds, signal) {
+      if (!Array.isArray(directoryIds) || !directoryIds.length || directoryIds.length > 200 || new Set(directoryIds).size !== directoryIds.length) throw new TypeError("invalid_gallery_review_selection");
+      for (const id of directoryIds) validateReviewId(id);
+      const result = sanitizeReviewOperation(await api.post("/api/v1/gallery/reviews", { directory_ids: [...directoryIds] }, { signal }));
+      return result.reviewId;
+    },
     async listSources(signal) {
       const page = sanitizeGallerySourcePage(
         await api.get(`${GALLERY_ENDPOINTS.sources}?view=desktop`, { signal }),

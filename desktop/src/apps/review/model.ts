@@ -1,13 +1,12 @@
 const REVIEW_STATUS_VALUES = [
-  "not_started", "waiting_for_crawl", "pending", "analyzing", "auto_applying",
-  "ready", "applying", "applied", "failed", "apply_failed", "disabled",
+  "pending", "analyzing", "auto_applying", "ready", "blocked", "failed",
+  "applying", "apply_failed", "applied",
 ] as const;
 const REVIEW_STATUS_SET = new Set<string>(REVIEW_STATUS_VALUES);
 const REVIEW_FILTER_SET = new Set<string>(["", "duplicate", "single", "unreadable"]);
 const REVIEW_GROUP_KIND_SET = new Set<string>(["duplicate", "single", "unreadable"]);
 const ACTIVE_STATUS_SET = new Set<string>(["pending", "analyzing", "auto_applying", "applying"]);
 const LISTABLE_STATUS_SET = new Set<string>(["ready", "applying", "applied", "apply_failed"]);
-const TERMINAL_BATCH_STATUS_SET = new Set<string>(["succeeded", "completed_with_errors", "cancelled"]);
 const MODEL_SETUP_PHASE_SET = new Set<string>(["idle", "installing", "ready", "failed"]);
 const DANGEROUS_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -28,7 +27,7 @@ export type ReviewFilter = typeof REVIEW_FILTERS[number]["id"];
 export type ReviewGroupKind = "duplicate" | "single" | "unreadable";
 export type ReviewStatusKind = "ready" | "running" | "warning" | "error" | "disabled";
 export type ReviewPhase = "empty" | "loading" | "content" | "polling" | "writing" | "error";
-export type ReviewOperation = "load" | "refresh" | "save" | "start" | "retry" | "apply" | "";
+export type ReviewOperation = "load" | "refresh" | "save" | "retry" | "apply" | "";
 
 export interface ReviewImage {
   readonly id: string;
@@ -38,6 +37,8 @@ export interface ReviewImage {
   readonly selected: boolean;
   readonly width: number;
   readonly height: number;
+  readonly sourceLabel: string;
+  readonly relativePath: string;
 }
 
 export interface ReviewGroup {
@@ -52,7 +53,7 @@ export interface ReviewGroup {
 }
 
 export interface ReviewSummary {
-  readonly batchId: string;
+  readonly reviewId: string;
   readonly status: ReviewStatus;
   readonly statusLabel: string;
   readonly statusKind: ReviewStatusKind;
@@ -71,7 +72,11 @@ export interface ReviewSummary {
 }
 
 export interface ReviewSnapshot {
-  readonly batchId: string;
+  readonly reviewId: string;
+  readonly version: number;
+  readonly directories: readonly ReviewDirectory[];
+  readonly createdAt: number | null;
+  readonly updatedAt: number | null;
   readonly summary: ReviewSummary;
   readonly groupOrder: readonly string[];
   readonly groups: Readonly<Record<string, ReviewGroup>>;
@@ -87,12 +92,30 @@ export interface ReviewPageChunk {
   readonly total: number;
 }
 
-export interface ReviewRecentBatch {
-  readonly id: string;
-  readonly status: string;
-  readonly statusLabel: string;
+export interface ReviewDirectory {
+  readonly directoryId: string;
+  readonly sourceId: string;
+  readonly sourceLabel: string;
+  readonly relativePath: string;
+  readonly name: string;
+}
+
+export interface ReviewOperationResult {
+  readonly reviewId: string;
+  readonly version: number;
+  readonly summary: ReviewSummary;
+  readonly directories: readonly ReviewDirectory[];
   readonly createdAt: number | null;
-  readonly terminal: boolean;
+  readonly updatedAt: number | null;
+}
+
+export interface ReviewRecentTask extends ReviewOperationResult {}
+
+export interface ReviewTaskPage {
+  readonly items: readonly ReviewRecentTask[];
+  readonly total: number;
+  readonly offset: number;
+  readonly limit: number;
 }
 
 export type ModelSetupPhase = "idle" | "installing" | "ready" | "failed";
@@ -112,6 +135,7 @@ export interface ModelSetupSnapshot {
 }
 
 export interface ReviewDecisionPayload {
+  readonly version: number;
   readonly groups: readonly Readonly<{
     group_id: string;
     selected_image_ids: readonly string[];
@@ -133,7 +157,7 @@ export type ReviewRequestChannel = "page" | "recent" | "summary";
 
 export interface ReviewReadTicket {
   readonly channel: ReviewRequestChannel;
-  readonly batchId: string;
+  readonly reviewId: string;
   readonly filter: ReviewFilter;
   readonly offset: number;
   readonly lifecycle: number;
@@ -147,7 +171,7 @@ export interface ReviewWriteTicket {
 }
 
 export interface ReviewRequestGate {
-  beginRead(channel: ReviewRequestChannel, batchId: string, filter: ReviewFilter, offset: number): ReviewReadTicket;
+  beginRead(channel: ReviewRequestChannel, reviewId: string, filter: ReviewFilter, offset: number): ReviewReadTicket;
   isReadCurrent(ticket: ReviewReadTicket): boolean;
   beginWrite(): ReviewWriteTicket;
   isWriteCurrent(ticket: ReviewWriteTicket): boolean;
@@ -160,16 +184,16 @@ export function createReviewRequestGate(): ReviewRequestGate {
   const sequences: Record<ReviewRequestChannel, number> = { page: 0, recent: 0, summary: 0 };
 
   const gate: ReviewRequestGate = {
-    beginRead(channel, batchId, filter, offset) {
+    beginRead(channel, reviewId, filter, offset) {
       if (!Object.hasOwn(sequences, channel) || !Number.isInteger(offset) || offset < 0 || offset > REVIEW_GROUP_LIMIT) throw new TypeError("invalid_review_request");
       if (channel === "recent") {
-        if (batchId || filter || offset !== 0) throw new TypeError("invalid_review_request");
+        if (reviewId || filter || offset !== 0) throw new TypeError("invalid_review_request");
       } else {
-        validateReviewId(batchId);
+        validateReviewId(reviewId);
         if (!REVIEW_FILTER_SET.has(filter)) throw new TypeError("invalid_review_request");
       }
       const sequence = ++sequences[channel];
-      return Object.freeze({ channel, batchId, filter, offset, lifecycle, write, sequence });
+      return Object.freeze({ channel, reviewId, filter, offset, lifecycle, write, sequence });
     },
     isReadCurrent(ticket) {
       return ticket.lifecycle === lifecycle
@@ -192,8 +216,6 @@ export function createReviewRequestGate(): ReviewRequestGate {
 }
 
 const STATUS_LABELS: Readonly<Record<ReviewStatus, string>> = Object.freeze({
-  not_started: "去重未开始",
-  waiting_for_crawl: "待开始分析",
   pending: "分析已排队",
   analyzing: "去重分析中",
   auto_applying: "自动去重中",
@@ -202,13 +224,7 @@ const STATUS_LABELS: Readonly<Record<ReviewStatus, string>> = Object.freeze({
   applied: "审核已应用",
   failed: "分析失败",
   apply_failed: "部分处理失败",
-  disabled: "审核未启用",
-});
-
-const BATCH_STATUS_LABELS: Readonly<Record<string, string>> = Object.freeze({
-  succeeded: "成功",
-  completed_with_errors: "部分失败",
-  cancelled: "已取消",
+  blocked: "分析受阻",
 });
 
 interface SafeRecord {
@@ -310,8 +326,7 @@ function status(value: unknown): ReviewStatus {
 function statusKind(value: ReviewStatus): ReviewStatusKind {
   if (value === "ready" || value === "applied") return "ready";
   if (ACTIVE_STATUS_SET.has(value)) return "running";
-  if (value === "not_started" || value === "waiting_for_crawl" || value === "apply_failed") return "warning";
-  if (value === "disabled") return "disabled";
+  if (value === "blocked" || value === "apply_failed") return "warning";
   return "error";
 }
 
@@ -319,6 +334,9 @@ function sanitizeImage(value: unknown, index: number): ReviewImage {
   const record = requireRecord(value, "invalid_review_image");
   const id = safeId(own(record, "id"));
   if (!id) throw new TypeError("invalid_review_image_id");
+  if (own(record, "asset_id") !== id) throw new TypeError("review_image_identity_changed");
+  const relativePath = displayText(own(record, "relative_path"));
+  if (!relativePath || /[\\\\:\u0000-\u001f\u007f]/.test(relativePath) || relativePath.split("/").some((part) => !part || part === "." || part === "..")) throw new TypeError("invalid_review_image_path");
   const metadataValue = own(record, "metadata");
   const metadata = metadataValue === undefined ? { descriptors: Object.create(null) as PropertyDescriptorMap } : requireRecord(metadataValue, "invalid_review_image_metadata");
   const ordinal = strictCount(own(record, "ordinal"), "invalid_review_image_ordinal", 100_000);
@@ -330,6 +348,8 @@ function sanitizeImage(value: unknown, index: number): ReviewImage {
     selected: strictBoolean(own(record, "selected"), "invalid_review_image_selected"),
     width: strictCount(own(metadata, "w") ?? 0, "invalid_review_image_width", 1_000_000),
     height: strictCount(own(metadata, "h") ?? 0, "invalid_review_image_height", 1_000_000),
+    sourceLabel: displayText(own(record, "source_display_name")),
+    relativePath,
   });
 }
 
@@ -366,56 +386,89 @@ function sanitizeGroup(value: unknown, index: number): ReviewGroup {
   });
 }
 
-export function sanitizeReviewSummary(value: unknown, batchId?: string): ReviewSummary {
+export function sanitizeReviewSummary(value: unknown, expectedId?: string): ReviewSummary {
   const record = requireRecord(value, "invalid_review_summary");
-  const resolvedBatchId = batchId ?? safeId(own(record, "batch_id"));
-  const safeBatchId = safeId(resolvedBatchId);
-  if (!safeBatchId) throw new TypeError("invalid_review_batch_id");
-  const projected = Object.hasOwn(record.descriptors, "totalImageCount");
-  const count = (legacyKey: string, projectedKey: string): number => strictCount(
-    own(record, projected ? projectedKey : legacyKey) ?? 0,
-    `invalid_review_summary_${projectedKey}`,
-  );
+  const reviewId = validateReviewId(own(record, "review_id"));
+  if (expectedId !== undefined && reviewId !== validateReviewId(expectedId)) throw new TypeError("review_identity_changed");
+  const count = (key: string): number => strictCount(own(record, key), `invalid_review_summary_${key}`);
   const nextStatus = status(own(record, "status"));
-  const rawError = projected ? own(record, "hasError") : own(record, "error") ?? "";
-  const hasError = projected
-    ? strictBoolean(rawError, "invalid_review_summary_error")
-    : typeof rawError === "string"
-      ? rawError.length > 0
-      : (() => { throw new TypeError("invalid_review_summary_error"); })();
   return Object.freeze({
-    batchId: safeBatchId,
+    reviewId,
     status: nextStatus,
     statusLabel: STATUS_LABELS[nextStatus],
     statusKind: statusKind(nextStatus),
-    totalImageCount: count("total_image_count", "totalImageCount"),
-    totalGroupCount: count("total_group_count", "totalGroupCount"),
-    duplicateGroupCount: count("duplicate_group_count", "duplicateGroupCount"),
-    unreadableImageCount: count("unreadable_image_count", "unreadableImageCount"),
-    automaticGroupCount: count("automatic_group_count", "automaticGroupCount"),
-    automaticRejectedImageCount: count("automatic_rejected_image_count", "automaticRejectedImageCount"),
-    selectedImageCount: count("selected_image_count", "selectedImageCount"),
-    decidedGroupCount: count("decided_group_count", "decidedGroupCount"),
-    keptImageCount: count("kept_image_count", "keptImageCount"),
-    rejectedImageCount: count("rejected_image_count", "rejectedImageCount"),
-    failedImageCount: count("failed_image_count", "failedImageCount"),
-    hasError,
+    totalImageCount: count("totalImageCount"),
+    totalGroupCount: count("totalGroupCount"),
+    duplicateGroupCount: count("duplicateGroupCount"),
+    unreadableImageCount: count("unreadableImageCount"),
+    automaticGroupCount: count("automaticGroupCount"),
+    automaticRejectedImageCount: count("automaticRejectedImageCount"),
+    selectedImageCount: count("selectedImageCount"),
+    decidedGroupCount: count("decidedGroupCount"),
+    keptImageCount: count("keptImageCount"),
+    rejectedImageCount: count("rejectedImageCount"),
+    failedImageCount: count("failedImageCount"),
+    hasError: strictBoolean(own(record, "hasError"), "invalid_review_summary_error"),
   });
 }
 
+function displayText(value: unknown): string {
+  if (typeof value !== "string" || value.length > 4096) throw new TypeError("invalid_review_directory_text");
+  return value.replace(/[\u0000-\u001f\u007f]/g, " ");
+}
+
+function sanitizeDirectories(value: unknown): readonly ReviewDirectory[] {
+  if (!Array.isArray(value) || !value.length || value.length > 200) throw new TypeError("invalid_review_directories");
+  const seen = new Set<string>();
+  return Object.freeze(value.map((raw) => {
+    const record = requireRecord(raw, "invalid_review_directory");
+    const directoryId = validateReviewId(own(record, "directory_id"));
+    const relativePath = displayText(own(record, "relative_path"));
+    if (seen.has(directoryId) || /[\\\\:\u0000-\u001f\u007f]/.test(relativePath) || (relativePath && relativePath.split("/").some((part) => !part || part === "." || part === ".."))) throw new TypeError("invalid_review_directory_path");
+    seen.add(directoryId);
+    return Object.freeze({
+      directoryId,
+      sourceId: validateReviewId(own(record, "source_id")),
+      sourceLabel: displayText(own(record, "source_display_name")),
+      relativePath,
+      name: displayText(own(record, "name")),
+    });
+  }));
+}
+
+function reviewIdentity(value: unknown, profile: string, expectedId?: string): ReviewOperationResult {
+  const record = requireRecord(value, "invalid_review_response");
+  if (own(record, "response_profile") !== profile) throw new TypeError("invalid_review_profile");
+  const summary = sanitizeReviewSummary(value, expectedId);
+  const version = strictCount(own(record, "version"), "invalid_review_version", Number.MAX_SAFE_INTEGER);
+  if (!version) throw new TypeError("invalid_review_version");
+  return Object.freeze({
+    reviewId: summary.reviewId,
+    version,
+    summary,
+    directories: sanitizeDirectories(own(record, "directories")),
+    createdAt: safeTime(own(record, "created_at")),
+    updatedAt: safeTime(own(record, "updated_at")),
+  });
+}
+
+export function sanitizeReviewOperation(value: unknown, expectedId?: string): ReviewOperationResult {
+  return reviewIdentity(value, "desktop-gallery-review-operation-v1", expectedId);
+}
+
 export function sanitizeReviewPageChunk(value: unknown, {
-  batchId,
+  reviewId,
   filter = "",
   requestedOffset = 0,
 }: {
-  readonly batchId: string;
+  readonly reviewId: string;
   readonly filter?: ReviewFilter;
   readonly requestedOffset?: number;
 }): ReviewPageChunk {
   const record = requireRecord(value, "invalid_review_page");
   const groupsRecord = requireRecord(own(record, "groups"), "invalid_review_page_groups");
   const items = own(groupsRecord, "items");
-  const safeBatchId = validateReviewId(batchId);
+  const safeReviewId = validateReviewId(reviewId);
   if (!Array.isArray(items) || !REVIEW_FILTER_SET.has(filter) || !Number.isInteger(requestedOffset) || requestedOffset < 0 || requestedOffset > REVIEW_GROUP_LIMIT) {
     throw new TypeError("invalid_review_page");
   }
@@ -439,8 +492,7 @@ export function sanitizeReviewPageChunk(value: unknown, {
     groupOrder.push(group.id);
   }
   const snapshot = Object.freeze({
-    batchId: safeBatchId,
-    summary: sanitizeReviewSummary(value, safeBatchId),
+    ...reviewIdentity(value, "desktop-gallery-review-v1", safeReviewId),
     groupOrder: Object.freeze(groupOrder),
     groups: Object.freeze(groups) as Readonly<Record<string, ReviewGroup>>,
     filter,
@@ -453,7 +505,7 @@ export function sanitizeReviewPageChunk(value: unknown, {
 export function mergeReviewPageChunks(chunks: readonly ReviewPageChunk[]): ReviewSnapshot {
   if (!Array.isArray(chunks) || chunks.length === 0 || chunks.length > REVIEW_GROUP_LIMIT) throw new TypeError("invalid_review_pages");
   const first = chunks[0];
-  const batchId = first.snapshot.batchId;
+  const reviewId = first.snapshot.reviewId;
   const filter = first.snapshot.filter;
   const total = first.total;
   const summary = first.snapshot.summary;
@@ -464,7 +516,7 @@ export function mergeReviewPageChunks(chunks: readonly ReviewPageChunk[]): Revie
   let expectedOffset = 0;
   for (const chunk of chunks) {
     const snapshot = validateReviewSnapshot(chunk.snapshot);
-    if (chunk.offset !== expectedOffset || chunk.total !== total || snapshot.batchId !== batchId || snapshot.filter !== filter || JSON.stringify(snapshot.summary) !== serializedSummary) {
+    if (chunk.offset !== expectedOffset || chunk.total !== total || snapshot.reviewId !== reviewId || snapshot.version !== first.snapshot.version || JSON.stringify(snapshot.directories) !== JSON.stringify(first.snapshot.directories) || snapshot.filter !== filter || JSON.stringify(snapshot.summary) !== serializedSummary) {
       throw new TypeError("review_page_changed");
     }
     for (const groupId of snapshot.groupOrder) {
@@ -481,8 +533,7 @@ export function mergeReviewPageChunks(chunks: readonly ReviewPageChunk[]): Revie
   }
   if (expectedOffset !== total) throw new TypeError("incomplete_review_pages");
   return Object.freeze({
-    batchId,
-    summary,
+    ...first.snapshot,
     groupOrder: Object.freeze(groupOrder),
     groups: Object.freeze(groups) as Readonly<Record<string, ReviewGroup>>,
     filter,
@@ -492,7 +543,7 @@ export function mergeReviewPageChunks(chunks: readonly ReviewPageChunk[]): Revie
 }
 
 export function sanitizeReviewPage(value: unknown, options: {
-  readonly batchId: string;
+  readonly reviewId: string;
   readonly filter?: ReviewFilter;
   readonly requestedOffset?: number;
 }): ReviewSnapshot {
@@ -504,7 +555,8 @@ export function sanitizeReviewPage(value: unknown, options: {
 }
 
 export function validateReviewSnapshot(value: ReviewSnapshot): ReviewSnapshot {
-  if (!safeId(value.batchId) || value.summary.batchId !== value.batchId || !REVIEW_FILTER_SET.has(value.filter) || !Array.isArray(value.groupOrder) || value.groupOrder.length > REVIEW_GROUP_LIMIT || !safeRecord(value.groups) || !Array.isArray(value.dirtyGroupIds)) {
+  if (!Number.isSafeInteger(value.version) || value.version < 1 || !Array.isArray(value.directories) || !value.directories.length) throw new TypeError("invalid_review_snapshot");
+  if (!safeId(value.reviewId) || value.summary.reviewId !== value.reviewId || !REVIEW_FILTER_SET.has(value.filter) || !Array.isArray(value.groupOrder) || value.groupOrder.length > REVIEW_GROUP_LIMIT || !safeRecord(value.groups) || !Array.isArray(value.dirtyGroupIds)) {
     throw new TypeError("invalid_review_snapshot");
   }
   const seenGroups = new Set<string>();
@@ -575,6 +627,7 @@ export function buildReviewDecisionPayload(snapshot: ReviewSnapshot): ReviewDeci
   validateReviewSnapshot(snapshot);
   if (snapshot.summary.status !== "ready" || !snapshot.dirtyGroupIds.length) throw new TypeError("invalid_review_decisions");
   return Object.freeze({
+    version: snapshot.version,
     groups: Object.freeze(snapshot.dirtyGroupIds.map((groupId) => {
       const group = snapshot.groups[groupId];
       return Object.freeze({
@@ -589,33 +642,26 @@ export function splitReviewDecisionPayload(payload: ReviewDecisionPayload): read
   if (!payload || !Array.isArray(payload.groups) || !payload.groups.length) throw new TypeError("invalid_review_decisions");
   const chunks: ReviewDecisionPayload[] = [];
   for (let index = 0; index < payload.groups.length; index += REVIEW_DECISION_BATCH_LIMIT) {
-    chunks.push(Object.freeze({ groups: Object.freeze(payload.groups.slice(index, index + REVIEW_DECISION_BATCH_LIMIT)) }));
+    chunks.push(Object.freeze({ version: payload.version, groups: Object.freeze(payload.groups.slice(index, index + REVIEW_DECISION_BATCH_LIMIT)) }));
   }
   return Object.freeze(chunks);
 }
 
-export function sanitizeReviewRecentBatches(value: unknown): readonly ReviewRecentBatch[] {
-  const record = requireRecord(value, "invalid_review_recent");
+export function sanitizeReviewTaskPage(value: unknown, requestedOffset = 0): ReviewTaskPage {
+  const record = requireRecord(value, "invalid_review_tasks");
   const items = own(record, "items");
-  if (!Array.isArray(items)) throw new TypeError("invalid_review_recent");
-  const result: ReviewRecentBatch[] = [];
+  const offset = strictCount(own(record, "offset"), "invalid_review_tasks_offset");
+  const total = strictCount(own(record, "total"), "invalid_review_tasks_total");
+  const limit = strictCount(own(record, "limit"), "invalid_review_tasks_limit", 100);
+  if (own(record, "response_profile") !== "desktop-gallery-review-list-v1" || !Array.isArray(items) || offset !== requestedOffset || items.length > limit || offset + items.length > total || (offset < total && !items.length)) throw new TypeError("invalid_review_tasks_boundary");
   const seen = new Set<string>();
-  for (const raw of items.slice(0, 30)) {
-    const item = safeRecord(raw);
-    if (!item) continue;
-    const id = safeId(own(item, "id"));
-    const itemStatus = typeof own(item, "status") === "string" ? own(item, "status") as string : "failed";
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    result.push(Object.freeze({
-      id,
-      status: itemStatus,
-      statusLabel: BATCH_STATUS_LABELS[itemStatus] ?? "未结束",
-      createdAt: safeTime(own(item, "created_at")),
-      terminal: TERMINAL_BATCH_STATUS_SET.has(itemStatus),
-    }));
-  }
-  return Object.freeze(result);
+  const tasks = items.map((raw) => {
+    const task = sanitizeReviewOperation(raw);
+    if (seen.has(task.reviewId)) throw new TypeError("duplicate_review_task");
+    seen.add(task.reviewId);
+    return task;
+  });
+  return Object.freeze({ items: Object.freeze(tasks), offset, total, limit });
 }
 
 export function shouldPollReview(summary: ReviewSummary | null): boolean {
@@ -626,8 +672,8 @@ export function reviewCanList(summary: ReviewSummary | null): boolean {
   return Boolean(summary && LISTABLE_STATUS_SET.has(summary.status));
 }
 
-export function reviewImagePath(batchId: string, imageId: string): string {
-  return `/api/v1/crawls/${encodeURIComponent(validateReviewId(batchId))}/review/images/${encodeURIComponent(validateReviewId(imageId))}`;
+export function reviewImagePath(reviewId: string, imageId: string): string {
+  return `/api/v1/gallery/reviews/${encodeURIComponent(validateReviewId(reviewId))}/images/${encodeURIComponent(validateReviewId(imageId))}`;
 }
 
 export function resolveReviewCommand(key: string, {
@@ -661,18 +707,18 @@ export function reviewApplyCounts(summary: ReviewSummary): Readonly<{ automatic:
   return Object.freeze({
     automatic: summary.automaticRejectedImageCount,
     selected: summary.selectedImageCount,
-    rejected: Math.max(0, summary.totalImageCount - summary.selectedImageCount),
+    rejected: Math.max(0, summary.totalImageCount - summary.selectedImageCount - summary.automaticRejectedImageCount),
   });
 }
 
-export function reviewCompletionPresentation(summary: ReviewSummary, filter: ReviewFilter): Readonly<{ batchComplete: boolean; title: string; message: string }> {
+export function reviewCompletionPresentation(summary: ReviewSummary, filter: ReviewFilter): Readonly<{ reviewComplete: boolean; title: string; message: string }> {
   const remaining = Math.max(0, summary.totalGroupCount - Math.min(summary.totalGroupCount, summary.decidedGroupCount));
   if (remaining) {
     const label = REVIEW_FILTERS.find((item) => item.id === filter)?.label ?? "当前";
-    return Object.freeze({ batchComplete: false, title: "当前筛选已过一遍", message: `“${label}”仍有 ${remaining} 组未确认；请切换筛选继续。` });
+    return Object.freeze({ reviewComplete: false, title: "当前筛选已过一遍", message: `“${label}”仍有 ${remaining} 组未确认；请切换筛选继续。` });
   }
   const counts = reviewApplyCounts(summary);
-  return Object.freeze({ batchComplete: true, title: "本批次已全部过一遍", message: `自动移除 ${counts.automatic} 张；最终保留 ${counts.selected} 张，预计移出 ${counts.rejected} 张。` });
+  return Object.freeze({ reviewComplete: true, title: "本次审核已全部过一遍", message: `机器初筛回收 ${counts.automatic} 张；原位保留 ${counts.selected} 张，人工回收 ${counts.rejected} 张。` });
 }
 
 function errorField(value: unknown, key: string): unknown {
@@ -693,7 +739,7 @@ export function reviewErrorPresentation(error: unknown): ReviewErrorPresentation
   const safeStatus = Number.isInteger(rawStatus) && (rawStatus as number) >= 0 && (rawStatus as number) <= 599 ? rawStatus as number : 0;
   const rawRequestId = errorField(error, "requestId");
   const requestId = typeof rawRequestId === "string" && REQUEST_ID_PATTERN.test(rawRequestId) ? rawRequestId : "";
-  const conflict = safeStatus === 409 || code === "review_state_conflict" || code === "crawl_not_finished";
+  const conflict = safeStatus === 409 || code === "review_state_conflict" || code === "review_page_changed" || code === "review_identity_changed";
   const missing = safeStatus === 404;
   return Object.freeze({
     code,
@@ -704,7 +750,7 @@ export function reviewErrorPresentation(error: unknown): ReviewErrorPresentation
     title: missing ? "审核内容不存在" : conflict ? "审核状态已变化" : "审核请求失败",
     message: safeStatus === 0 ? "无法连接到 LDOS 服务。" : "服务未接受本次审核操作。",
     nextStep: missing
-      ? "返回已结束批次列表并选择仍存在的批次。"
+      ? "刷新审核任务列表并打开仍存在的任务。"
       : conflict
         ? "放弃冲突草稿并重新读取最新状态，或保留草稿稍后重试。"
         : "保留待提交组并重试；若持续失败，请打开系统诊断。",
@@ -712,9 +758,9 @@ export function reviewErrorPresentation(error: unknown): ReviewErrorPresentation
 }
 
 export function deriveReviewPresentation(phase: ReviewPhase, summary: ReviewSummary | null): Readonly<{ kind: ReviewStatusKind; label: string; message: string }> {
-  if (phase === "loading") return Object.freeze({ kind: "running", label: "正在加载", message: "正在读取已结束批次与审核工作区。" });
-  if (phase === "writing") return Object.freeze({ kind: "running", label: "正在写入", message: "写入完成后将重新读取权威审核快照。" });
+  if (phase === "loading") return Object.freeze({ kind: "running", label: "正在加载", message: "正在读取审核任务与图片。" });
+  if (phase === "writing") return Object.freeze({ kind: "running", label: "正在写入", message: "正在保存审核结果。" });
   if (phase === "error") return Object.freeze({ kind: "error", label: "审核读取失败", message: "草稿和最后一次安全快照已保留。" });
-  if (!summary) return Object.freeze({ kind: "disabled", label: "尚未选择批次", message: "选择一个已结束批次；打开批次不会自动开始分析。" });
-  return Object.freeze({ kind: summary.statusKind, label: summary.statusLabel, message: reviewCanList(summary) ? "当前筛选的全部审核组已加载。" : "请根据状态启动、等待或重试去重分析。" });
+  if (!summary) return Object.freeze({ kind: "disabled", label: "尚无审核任务", message: "请在图库选择目录发起去重。" });
+  return Object.freeze({ kind: summary.statusKind, label: summary.statusLabel, message: reviewCanList(summary) ? "当前筛选的全部审核组已加载。" : "分析会自动开始；失败或受阻时可重试。" });
 }

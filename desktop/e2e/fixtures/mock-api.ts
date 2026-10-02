@@ -369,36 +369,29 @@ function searchResponse(): Record<string, unknown> {
   };
 }
 
-function reviewPage(decisions: ReadonlyMap<string, readonly string[]>): Record<string, unknown> {
+function reviewPage(decisions: Map<string, readonly string[]>, reviewId: string, version: number, status: string, directoryIds: readonly string[]): Record<string, unknown> {
   const image = (id: string, ordinal: number, recommended: boolean) => ({
-    id,
-    ordinal,
-    readable: true,
-    recommended,
-    selected: decisions.get(id.startsWith("image-1") || id.startsWith("image-2") ? "group-1" : "group-2")?.includes(id) ?? true,
-    relative_path: `/fixture/${id}.svg`,
+    id, ordinal, readable: true, recommended,
+    selected: decisions.get(["gal-asset-01", "gal-asset-02"].includes(id) ? "group-1" : "group-2")?.includes(id) ?? true,
+    asset_id: id, source_id: GALLERY_SOURCE_ID, directory_id: GALLERY_ROOT_DIR, source_display_name: "E2E 导入目录", relative_path: `${id}.jpg`,
     metadata: { w: 1200, h: 800 },
   });
   const groups = [
-    { id: "group-1", ordinal: 1, kind: "duplicate", images: [image("image-1", 1, true), image("image-2", 2, false)] },
-    { id: "group-2", ordinal: 2, kind: "duplicate", images: [image("image-3", 1, true), image("image-4", 2, false)] },
+    { id: "group-1", ordinal: 1, kind: "duplicate", images: [image("gal-asset-01", 1, true), image("gal-asset-02", 2, false)] },
+    { id: "group-2", ordinal: 2, kind: "duplicate", images: [image("gal-asset-03", 1, true), image("gal-asset-04", 2, false)] },
   ].map((group) => ({ ...group, decided: decisions.has(group.id) }));
   return {
-    batch_id: "batch-review",
-    status: "ready",
-    total_image_count: 4,
-    total_group_count: 2,
-    duplicate_group_count: 2,
-    unreadable_image_count: 0,
-    automatic_group_count: 0,
-    automatic_rejected_image_count: 0,
-    selected_image_count: groups.flatMap(({ images }) => images).filter(({ selected }) => selected).length,
-    decided_group_count: decisions.size,
-    kept_image_count: [...decisions.values()].reduce((total, ids) => total + ids.length, 0),
-    rejected_image_count: decisions.size * 2 - [...decisions.values()].reduce((total, ids) => total + ids.length, 0),
-    failed_image_count: 0,
-    error: "",
-    groups: { items: groups, offset: 0, limit: groups.length, total: groups.length },
+    response_profile: "desktop-gallery-review-v1", review_id: reviewId, version, status,
+    directories: directoryIds.map((id) => ({ directory_id: id, source_id: GALLERY_SOURCE_ID, source_display_name: "E2E 导入目录", name: id === GALLERY_ROOT_DIR ? "E2E 导入目录" : "subdir", relative_path: id === GALLERY_ROOT_DIR ? "" : "subdir" })),
+    created_at: 1_700_000_500, updated_at: 1_700_000_500,
+    totalImageCount: 4, totalGroupCount: 2, duplicateGroupCount: 2, unreadableImageCount: 0,
+    automaticGroupCount: 0, automaticRejectedImageCount: 0,
+    selectedImageCount: groups.flatMap(({ images }) => images).filter(({ selected }) => selected).length,
+    decidedGroupCount: decisions.size,
+    keptImageCount: [...decisions.values()].reduce((total, ids) => total + ids.length, 0),
+    rejectedImageCount: decisions.size * 2 - [...decisions.values()].reduce((total, ids) => total + ids.length, 0),
+    failedImageCount: 0, hasError: false,
+    groups: { items: groups, offset: 0, limit: 50, total: groups.length },
   };
 }
 
@@ -666,7 +659,14 @@ function svgImage(id: string): string {
 export async function installMockApi(page: Page, options: MockApiOptions = {}): Promise<MockApi> {
   const requests: RecordedRequest[] = [];
   const unhandled: RecordedRequest[] = [];
-  const decisions = new Map<string, readonly string[]>();
+  const reviews = new Map<string, { decisions: Map<string, readonly string[]>; version: number; status: string; directoryIds: readonly string[] }>();
+  if (!options.emptyRecent) reviews.set("review-fixture", { decisions: new Map(), version: 1, status: "ready", directoryIds: [GALLERY_SUB_DIR] });
+  const reviewResponse = (id: string, operation = false) => {
+    const task = reviews.get(id)!;
+    const page = reviewPage(task.decisions, id, task.version, task.status, task.directoryIds);
+    if (operation) { delete page.groups; page.response_profile = "desktop-gallery-review-operation-v1"; }
+    return page;
+  };
   let gallerySourceMounted = true;
   let galleryBatchDeleted = false;
   let galleryDisplayName = "E2E 导入目录";
@@ -741,25 +741,36 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       await respond(route, taskPage(Number(url.searchParams.get("offset") ?? 0)));
       return;
     }
-    const reviewImageMatch = url.pathname.match(/^\/api\/v1\/crawls\/batch-review\/review\/images\/([^/]+)$/);
-    if (reviewImageMatch) {
-      await route.fulfill({ status: 200, contentType: "image/svg+xml", body: svgImage(decodeURIComponent(reviewImageMatch[1])) });
-      return;
-    }
-    if (url.pathname === "/api/v1/crawls/batch-review/review/decisions" && request.method() === "PUT") {
-      const body = requestBody(request) as { groups?: { group_id?: string; selected_image_ids?: string[] }[] };
-      for (const group of body.groups ?? []) {
-        if (typeof group.group_id === "string" && Array.isArray(group.selected_image_ids)) decisions.set(group.group_id, [...group.selected_image_ids]);
+    if (url.pathname === "/api/v1/gallery/reviews") {
+      if (request.method() === "POST") {
+        const body = requestBody(request) as { directory_ids: string[] };
+        const id = `review-created-${reviews.size}`;
+        reviews.set(id, { decisions: new Map(), version: 1, status: "ready", directoryIds: body.directory_ids });
+        await respond(route, reviewResponse(id, true), 202);
+      } else {
+        const offset = Number(url.searchParams.get("offset") ?? 0);
+        const items = [...reviews.keys()].reverse().map((id) => reviewResponse(id, true));
+        await respond(route, { response_profile: "desktop-gallery-review-list-v1", items: items.slice(offset, offset + 50), total: items.length, offset, limit: 50 });
       }
-      await respond(route, {});
       return;
     }
-    if (url.pathname === "/api/v1/crawls/batch-review/review" && request.method() === "GET") {
-      await respond(route, reviewPage(decisions));
-      return;
-    }
-    if (/^\/api\/v1\/crawls\/batch-review\/review\/(start|retry|apply)$/.test(url.pathname)) {
-      await respond(route, {});
+    const reviewMatch = url.pathname.match(/^\/api\/v1\/gallery\/reviews\/([^/]+)(?:\/(decisions|apply|retry|images)(?:\/([^/]+))?)?$/);
+    if (reviewMatch) {
+      const [, id, action, imageId] = reviewMatch;
+      const task = reviews.get(id);
+      if (!task) { await respond(route, { error: { code: "review_not_found", message: "not found" } }, 404); return; }
+      if (action === "images") {
+        await route.fulfill({ status: 200, contentType: "image/svg+xml", body: svgImage(decodeURIComponent(imageId)) });
+      } else if (!action) {
+        await respond(route, reviewResponse(id));
+      } else {
+        const body = requestBody(request) as { version?: number; groups?: { group_id: string; selected_image_ids: string[] }[] };
+        if (action !== "retry" && body.version !== task.version) { await respond(route, { error: { code: "review_state_conflict", message: "version changed" } }, 409); return; }
+        if (action === "decisions") for (const group of body.groups ?? []) task.decisions.set(group.group_id, [...group.selected_image_ids]);
+        if (action === "apply") task.status = "applied";
+        task.version += 1;
+        await respond(route, reviewResponse(id, true));
+      }
       return;
     }
     const batchMatch = url.pathname.match(/^\/api\/v1\/crawls\/(batch-[a-z0-9-]+)$/);

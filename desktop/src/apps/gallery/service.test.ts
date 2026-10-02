@@ -50,6 +50,23 @@ function api() {
   };
 }
 
+describe("Gallery review creation service", () => {
+  it("submits only directory IDs and uses the returned independent review identity", async () => {
+    const post = vi.fn(async () => ({
+      response_profile: "desktop-gallery-review-operation-v1", review_id: "review-gallery", version: 1, status: "pending",
+      directories: [{ directory_id: "dir-alpha", source_id: "source-one", source_display_name: "Source", relative_path: "alpha", name: "alpha" }],
+      totalImageCount: 0, totalGroupCount: 0, duplicateGroupCount: 0, unreadableImageCount: 0,
+      automaticGroupCount: 0, automaticRejectedImageCount: 0, selectedImageCount: 0,
+      decidedGroupCount: 0, keptImageCount: 0, rejectedImageCount: 0, failedImageCount: 0, hasError: false,
+    }));
+    const service = createGalleryService({ post } as unknown as ApiClient);
+    const signal = new AbortController().signal;
+    expect(await service.createReview(["dir-alpha"], signal)).toBe("review-gallery");
+    expect(post).toHaveBeenCalledWith("/api/v1/gallery/reviews", { directory_ids: ["dir-alpha"] }, { signal });
+    for (const invalid of [[], ["same", "same"], ["../unsafe"]]) await expect(service.createReview(invalid, signal)).rejects.toThrow(TypeError);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+});
 describe("Gallery directory export service", () => {
   it("starts a bounded operation through the Gallery endpoint with one idempotency key", async () => {
     const mock = api();

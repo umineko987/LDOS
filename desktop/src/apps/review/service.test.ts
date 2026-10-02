@@ -18,22 +18,25 @@ function api() {
 }
 
 const rawPage = {
-  batch_id: "batch-review",
+  review_id: "review-one",
+  response_profile: "desktop-gallery-review-v1",
+  version: 1,
+  directories: [{ directory_id: "directory-one", source_id: "source-one", source_display_name: "Source", relative_path: "album", name: "album" }],
   status: "ready",
-  total_image_count: 1,
-  total_group_count: 1,
-  duplicate_group_count: 0,
-  unreadable_image_count: 0,
-  automatic_group_count: 0,
-  automatic_rejected_image_count: 0,
-  selected_image_count: 1,
-  decided_group_count: 0,
-  kept_image_count: 0,
-  rejected_image_count: 0,
-  failed_image_count: 0,
-  error: "",
+  totalImageCount: 1,
+  totalGroupCount: 1,
+  duplicateGroupCount: 0,
+  unreadableImageCount: 0,
+  automaticGroupCount: 0,
+  automaticRejectedImageCount: 0,
+  selectedImageCount: 1,
+  decidedGroupCount: 0,
+  keptImageCount: 0,
+  rejectedImageCount: 0,
+  failedImageCount: 0,
+  hasError: false,
   groups: {
-    items: [{ id: "group-1", ordinal: 1, kind: "duplicate", decided: false, images: [{ id: "image-1", ordinal: 1, readable: true, recommended: true, selected: true, metadata: { w: 800, h: 1200 } }] }],
+    items: [{ id: "group-1", ordinal: 1, kind: "duplicate", decided: false, images: [{ id: "image-1", asset_id: "image-1", source_display_name: "Source", relative_path: "album/1.jpg", ordinal: 1, readable: true, recommended: true, selected: true, metadata: { w: 800, h: 1200 } }] }],
     offset: 0,
     limit: 1,
     total: 1,
@@ -41,31 +44,31 @@ const rawPage = {
 };
 
 describe("review service", () => {
-  it("uses only the established crawls routes, bodies, and abort signal", async () => {
+  it("uses gallery review identities, desktop profiles and versioned mutations", async () => {
     const calls = api();
     const service = createReviewService(calls.client);
     const signal = new AbortController().signal;
-    calls.get.mockResolvedValueOnce({ items: [{ id: "batch-review", status: "succeeded" }] });
-    expect(await service.readRecent(signal)).toEqual([{ id: "batch-review", status: "succeeded", statusLabel: "成功", createdAt: null, terminal: true }]);
-    expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.crawls}?limit=30&view=desktop`, { signal });
+    const operation = { ...rawPage, response_profile: "desktop-gallery-review-operation-v1" };
+    calls.get.mockResolvedValueOnce({ response_profile: "desktop-gallery-review-list-v1", items: [operation], limit: 50, offset: 50, total: 51 });
+    expect(await service.readRecent(signal, 50)).toMatchObject({ total: 51, offset: 50, items: [{ reviewId: "review-one" }] });
+    expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.reviews}?limit=50&offset=50&view=desktop`, { signal });
 
     calls.get.mockResolvedValueOnce(rawPage);
-    const page = await service.readPage("batch-review", "duplicate", signal);
-    expect(page.batchId).toBe("batch-review");
-    expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.crawls}/batch-review/review?limit=50&offset=0&view=desktop&kind=duplicate`, { signal });
+    const page = await service.readPage("review-one", "duplicate", signal);
+    expect(page.reviewId).toBe("review-one");
+    expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.reviews}/review-one?limit=50&offset=0&view=desktop&kind=duplicate`, { signal });
 
-    const payload = Object.freeze({ groups: Object.freeze([{ group_id: "group-1", selected_image_ids: Object.freeze(["image-1"]) }]) });
-    calls.put.mockResolvedValueOnce(rawPage);
-    await service.writeDecisions("batch-review", payload, signal);
-    expect(calls.put).toHaveBeenCalledWith(`${REVIEW_ENDPOINTS.crawls}/batch-review/review/decisions?view=desktop`, payload, { signal });
-
-    for (const operation of ["start", "retry", "apply"] as const) {
-      calls.post.mockResolvedValueOnce(rawPage);
-      await service.run(operation, "batch-review", signal);
-      expect(calls.post).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.crawls}/batch-review/review/${operation}?view=desktop`, {}, { signal });
+    const payload = { version: 1, groups: [{ group_id: "group-1", selected_image_ids: ["image-1"] }] };
+    calls.put.mockResolvedValueOnce({ ...operation, version: 2 });
+    expect(await service.writeDecisions("review-one", payload, signal)).toMatchObject({ version: 2 });
+    expect(calls.put).toHaveBeenCalledWith(`${REVIEW_ENDPOINTS.reviews}/review-one/decisions`, payload, { signal });
+    for (const mutation of ["retry", "apply"] as const) {
+      calls.post.mockResolvedValueOnce(operation);
+      await service.run(mutation, "review-one", 2, signal);
+      expect(calls.post).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.reviews}/review-one/${mutation}`, mutation === "apply" ? { version: 2 } : {}, { signal });
     }
-    expect(service.imageUrl("batch-review", "image-1")).toBe("http://127.0.0.1:8787/api/v1/crawls/batch-review/review/images/image-1");
-    expect(calls.resourceUrl).toHaveBeenCalledWith("/api/v1/crawls/batch-review/review/images/image-1");
+    expect(service.imageUrl("review-one", "image-1")).toBe("http://127.0.0.1:8787/api/v1/gallery/reviews/review-one/images/image-1");
+    expect(calls.resourceUrl).toHaveBeenCalledWith("/api/v1/gallery/reviews/review-one/images/image-1");
     expect(JSON.stringify(calls.put.mock.calls)).not.toContain("url");
   });
 
@@ -115,23 +118,31 @@ describe("review service", () => {
       ...firstGroup,
       id: "group-2",
       ordinal: 2,
-      images: [{ ...firstGroup.images[0], id: "image-2", ordinal: 2 }],
+      images: [{ ...firstGroup.images[0], id: "image-2", asset_id: "image-2", source_display_name: "Source", relative_path: "album/2.jpg", ordinal: 2 }],
     };
-    const summary = { total_image_count: 2, total_group_count: 2, duplicate_group_count: 2, selected_image_count: 2 };
+    const summary = { totalImageCount: 2, totalGroupCount: 2, duplicateGroupCount: 2, selectedImageCount: 2 };
     calls.get
       .mockResolvedValueOnce({ ...rawPage, ...summary, groups: { items: [firstGroup], offset: 0, limit: 50, total: 2 } })
       .mockResolvedValueOnce({ ...rawPage, ...summary, groups: { items: [secondGroup], offset: 1, limit: 50, total: 2 } });
-    const snapshot = await service.readPage("batch-review", "", signal);
+    const snapshot = await service.readPage("review-one", "", signal);
     expect(snapshot.groupOrder).toEqual(["group-1", "group-2"]);
     expect(calls.get.mock.calls.map(([path]) => path)).toEqual([
-      "/api/v1/crawls/batch-review/review?limit=50&offset=0&view=desktop",
-      "/api/v1/crawls/batch-review/review?limit=50&offset=1&view=desktop",
+      "/api/v1/gallery/reviews/review-one?limit=50&offset=0&view=desktop",
+      "/api/v1/gallery/reviews/review-one?limit=50&offset=1&view=desktop",
     ]);
+  });
+  it("refuses to merge groups from different authoritative versions", async () => {
+    const calls = api();
+    const service = createReviewService(calls.client);
+    const groups = { items: rawPage.groups.items, offset: 0, limit: 1, total: 2 };
+    calls.get.mockResolvedValueOnce({ ...rawPage, groups });
+    calls.get.mockResolvedValueOnce({ ...rawPage, version: 2, groups: { ...groups, offset: 1 } });
+    await expect(service.readPage("review-one", "", new AbortController().signal)).rejects.toMatchObject({ code: "review_page_changed", status: 409 });
   });
   it("rejects invalid status operations and rethrows aborts unchanged", async () => {
     const calls = api();
     const service = createReviewService(calls.client);
-    await expect(service.run("invalid" as "start", "batch-review", new AbortController().signal)).rejects.toThrow(TypeError);
+    await expect(service.run("invalid" as "retry", "review-one", 1, new AbortController().signal)).rejects.toThrow(TypeError);
     const abort = new DOMException("aborted", "AbortError");
     calls.get.mockRejectedValueOnce(abort);
     await expect(service.readRecent(new AbortController().signal)).rejects.toBe(abort);

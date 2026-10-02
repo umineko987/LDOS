@@ -11,35 +11,38 @@ import { createReviewStore } from "../src/apps/review/state";
 
 function snapshot() {
   return sanitizeReviewPage({
-    batch_id: "batch-review-target",
+    review_id: "batch-review-target",
+    response_profile: "desktop-gallery-review-v1",
+    version: 1,
+    directories: [{ directory_id: "directory-one", source_id: "source-one", source_display_name: "Source", relative_path: "album", name: "album" }],
     status: "ready",
-    total_image_count: 3,
-    total_group_count: 2,
-    duplicate_group_count: 1,
-    unreadable_image_count: 0,
-    automatic_group_count: 0,
-    automatic_rejected_image_count: 0,
-    selected_image_count: 2,
-    decided_group_count: 0,
-    kept_image_count: 0,
-    rejected_image_count: 0,
-    failed_image_count: 0,
-    error: "",
+    totalImageCount: 3,
+    totalGroupCount: 2,
+    duplicateGroupCount: 1,
+    unreadableImageCount: 0,
+    automaticGroupCount: 0,
+    automaticRejectedImageCount: 0,
+    selectedImageCount: 2,
+    decidedGroupCount: 0,
+    keptImageCount: 0,
+    rejectedImageCount: 0,
+    failedImageCount: 0,
+    hasError: false,
     groups: {
       offset: 0,
       limit: 2,
       total: 2,
       items: [
         { id: "group-one", ordinal: 1, kind: "duplicate", decided: false, images: [
-          { id: "image-one", ordinal: 1, readable: true, recommended: true, selected: true, metadata: { w: 1200, h: 800 }, url: "https://private.invalid/secret" },
-          { id: "image-two", ordinal: 2, readable: true, recommended: false, selected: false, metadata: { w: 800, h: 1200 }, relative_path: "/private/secret.jpg" },
+          { id: "image-one", asset_id: "image-one", source_display_name: "Source", relative_path: "album/one.jpg", ordinal: 1, readable: true, recommended: true, selected: true, metadata: { w: 1200, h: 800 }, url: "https://private.invalid/secret" },
+          { id: "image-two", asset_id: "image-two", source_display_name: "Source", relative_path: "album/two.jpg", ordinal: 2, readable: true, recommended: false, selected: false, metadata: { w: 800, h: 1200 }, final_relative_path: "/private/secret.jpg" },
         ] },
         { id: "group-two", ordinal: 2, kind: "single", decided: false, images: [
-          { id: "image-three", ordinal: 1, readable: true, recommended: true, selected: true, metadata: { w: 900, h: 900 } },
+          { id: "image-three", asset_id: "image-three", source_display_name: "Source", relative_path: "album/three.jpg", ordinal: 1, readable: true, recommended: true, selected: true, metadata: { w: 900, h: 900 } },
         ] },
       ],
     },
-  }, { batchId: "batch-review-target", filter: "" });
+  }, { reviewId: "batch-review-target", filter: "" });
 }
 
 describe("P4 Review target ownership", () => {
@@ -79,7 +82,7 @@ describe("P4 Review target ownership", () => {
     expect(controllerSource).toContain("queueMicrotask(() =>");
     expect(controllerSource).toContain("beforeLeave: save");
     expect(serviceSource.match(/"\/api\/v1\//g)).toHaveLength(2);
-    expect(serviceSource.match(/view=desktop/g)).toHaveLength(4);
+    expect(serviceSource.match(/view=desktop/g)).toHaveLength(2);
     expect(serviceSource).toContain("REVIEW_PAGE_LIMIT = 50");
     expect(serviceSource).not.toContain("all=true");
     const combined = [reviewSource, controllerSource, modelSource, serviceSource, stateSource].join("\n");

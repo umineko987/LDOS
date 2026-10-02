@@ -1,7 +1,5 @@
-import { describe, expect, it } from "vitest";
-
-import budgetContract from "./fixtures/p0-performance-budget.json";
 import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
 
 import wallpaperSource from "../src/shell/Wallpaper.svelte?raw";
 
@@ -17,61 +15,59 @@ function block(source: string, selector: string): string {
   return source.slice(start, close + 1);
 }
 
-describe("night-flight glass visual contract", () => {
-  it("ports the six radial light-well scenes and one global noise layer", () => {
+describe("compact workbench visual contract", () => {
+  it("preserves six palette backgrounds and the wallpaper projection hooks without noise", () => {
     for (const scene of ["graphite", "slate", "deep-ocean", "forest", "plum-gray", "warm-paper"]) {
-      expect(shellCss).toContain(`.wallpaper--${scene} {`);
-      expect(block(shellCss, `.wallpaper--${scene} {`)).toContain("radial-gradient(");
+      expect(block(shellCss, `.wallpaper--${scene} {`)).toContain("background:");
     }
-    expect(wallpaperSource.match(/data-global-noise/g)).toHaveLength(1);
-    expect(block(shellCss, ".wallpaper__noise {")).toContain("opacity: 0.025");
-    expect(shellCss).toContain('url("../assets/noise.svg")');
+    expect(wallpaperSource).toContain("wallpaper--{scene}");
+    expect(wallpaperSource).toContain("data-wallpaper data-scene={scene}");
+    expect(wallpaperSource).not.toContain("data-global-noise");
+    expect(shellCss).not.toMatch(/noise\.svg|wallpaper__noise/);
   });
 
-  it("keeps the champagne accent, radii, glass strength, and dark root tokens", () => {
+  it("uses sans-serif, 140ms transitions, compact radii, and no decorative shadows", () => {
     expect(tokensCss).toContain("--ldos-accent: #e4b863");
-    expect(tokensCss).toContain("--ldos-radius-window: 24px");
-    expect(tokensCss).toContain("--ldos-radius-control: 16px");
-    expect(tokensCss).toContain("--ldos-glass-blur-environment: 40px");
-    expect(tokensCss).toContain("--ldos-glass-blur-window: 60px");
-    expect(tokensCss).toContain("--ldos-glass-saturation: 180%");
+    expect(block(tokensCss, ":root {")).toMatch(/font-family:[^;]*sans-serif;/);
+    expect(tokensCss).toMatch(/--ldos-font-display:[^;]*sans-serif;/);
+    expect(tokensCss).not.toMatch(/(?:^|[\s"',])serif["',;]|宋体|Songti|SimSun/);
+    expect(tokensCss).toContain("--ldos-motion-duration: 140ms");
+    expect(tokensCss).toContain("--ldos-radius-window: 12px");
+    expect(tokensCss).toContain("--ldos-radius-card: 10px");
+    expect(tokensCss).toContain("--ldos-radius-control: 6px");
+    expect(tokensCss).toContain("--ldos-shadow-window: none");
+    expect(tokensCss).toContain("--ldos-shadow-control: none");
     expect(tokensCss).toContain("color-scheme: dark");
     expect(globalCss).toContain("background: var(--ldos-background-deepest)");
   });
 
-  it("uses one main backdrop per visible app window and none in app internals", () => {
-    const supported = shellCss.slice(shellCss.indexOf("@supports ((-webkit-backdrop-filter"), shellCss.indexOf("@supports not"));
-    expect(supported).toContain(".app-window,");
-    expect(supported.match(/\.app-window,/g)).toHaveLength(1);
-    expect(supported).not.toMatch(/\.app-window__|\.menu-popover__item|\.dock__item/);
-    expect(shellCss).not.toMatch(/\.app-window__[^{]*\{[^}]*backdrop-filter/s);
-    expect(budgetContract.budgets.composition_idle.main_backdrops_per_visible_window_max).toBe(1);
-    expect(budgetContract.budgets.composition_idle.internal_backdrops_per_application_max).toBe(0);
+  it("keeps an adaptive sidebar and allows the content area to shrink", () => {
+    expect(block(shellCss, ".workbench {")).toContain("grid-template-columns: 180px minmax(0, 1fr)");
+    const narrow = shellCss.slice(shellCss.indexOf("@media (max-width: 1000px)"));
+    expect(narrow).toContain("grid-template-columns: 80px minmax(0, 1fr)");
+    expect(block(shellCss, ".workbench-main {")).toContain("min-width: 0");
+    expect(block(shellCss, ".workbench-workspace {")).toContain("min-height: 0");
+    expect(globalCss).not.toMatch(/desktop-size-blocker|max-width: 1179px|max-height: 719px/);
   });
 
-  it("takes over the P0 direct-manipulation glass fallback", () => {
-    const interaction = block(shellCss, ".app-window[data-window-interacting] {");
-    expect(interaction).toContain("background: var(--ldos-interaction-surface) !important");
-    expect(interaction).toContain("transition: none !important");
-    expect(interaction).toContain("backdrop-filter: none !important");
-    expect(interaction).toContain("box-shadow: none !important");
-  });
-
-  it("provides no-backdrop, reduced-motion, forced-colors, and contrast fallbacks", () => {
-    expect(shellCss).toContain("@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px)))");
-    expect(shellCss).toContain("@media (forced-colors: active)");
-    expect(globalCss).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(tokensCss).toContain("@media (prefers-contrast: more)");
-    expect(globalCss).toContain("@media (forced-colors: active)");
+  it("uses flat shell surfaces without the old window and Dock styling paths", () => {
+    expect(shellCss).not.toMatch(/\.app-window|\.dock\b|data-window-interacting|data-maximized/);
+    expect(shellCss).not.toMatch(/(?:-webkit-)?backdrop-filter\s*:/);
+    expect(shellCss).not.toMatch(/box-shadow\s*:(?!\s*none)/);
     expect(shellCss).not.toContain("@keyframes");
     expect(shellCss).not.toMatch(/transition[^;]*(?:backdrop-filter|filter)/);
+    expect(block(shellCss, ".workbench-page[hidden] {")).toContain("display: none");
+    expect(block(shellCss, ".workbench-page {")).toContain("overflow: auto");
   });
 
-  it("removes hidden surfaces from layout and enforces the 1180 by 720 minimum", () => {
-    const hidden = block(shellCss, ".app-window[hidden],");
-    expect(hidden).toContain("display: none !important");
-    expect(hidden).toContain("backdrop-filter: none !important");
-    expect(globalCss).toContain("@media (max-width: 1179px), (max-height: 719px)");
-    expect(globalCss).toContain(".desktop-size-blocker");
+  it("retains motion-off, reduced-motion, forced-colors, contrast, and keyboard focus support", () => {
+    expect(globalCss).toContain(':root[data-motion="off"]');
+    expect(globalCss).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(globalCss).toContain("transition: none !important");
+    expect(globalCss).toContain("@media (forced-colors: active)");
+    expect(shellCss).toContain("@media (forced-colors: active)");
+    expect(tokensCss).toContain("@media (prefers-contrast: more)");
+    expect(globalCss).toContain("button:focus-visible");
+    expect(globalCss).toContain("outline: 3px solid Highlight !important");
   });
 });

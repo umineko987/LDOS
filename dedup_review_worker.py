@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import hashlib
 import importlib.util
 import json
@@ -49,7 +50,8 @@ def find_review_images(root: Path) -> list[str]:
         # 与核心脚本 find_images 一致：跳过 duplicates/keep 产物目录，避免已淘汰图重新入组
         directories[:] = [
             name for name in directories
-            if name.lower() not in {"duplicates", "keep"}
+            if name.lower() not in {"duplicates", "keep", ".ldos", "trash", "trashed"}
+            and not name.lower().startswith(".ldos-")
             and not os.path.islink(os.path.join(current_root, name))
         ]
         for name in files:
@@ -113,8 +115,9 @@ def relative_image_path(root: Path, path: str) -> str:
     return resolved.relative_to(root).as_posix()
 
 
-def public_image_info(info: dict[str, Any], root: Path) -> dict[str, Any]:
-    relative_path = relative_image_path(root, info["path"])
+def public_image_info(info: dict[str, Any], root: Path, inputs: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    selected = inputs[normalized_path(info["path"])] if inputs is not None else None
+    relative_path = selected["relative_path"] if selected else relative_image_path(root, info["path"])
     fields = (
         "file_hash",
         "pixel_hash",
@@ -137,15 +140,16 @@ def public_image_info(info: dict[str, Any], root: Path) -> dict[str, Any]:
     )
     metadata = {field: json_value(info.get(field)) for field in fields}
     return {
-        "id": stable_id(relative_path, str(info.get("file_hash") or "")),
+        "id": selected["asset_id"] if selected else stable_id(relative_path, str(info.get("file_hash") or "")),
         "relative_path": relative_path,
         "readable": True,
         "metadata": metadata,
     }
 
 
-def unreadable_image_info(path: str, root: Path, core: Any) -> dict[str, Any]:
-    relative_path = relative_image_path(root, path)
+def unreadable_image_info(path: str, root: Path, core: Any, inputs: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    selected = inputs[normalized_path(path)] if inputs is not None else None
+    relative_path = selected["relative_path"] if selected else relative_image_path(root, path)
     try:
         size = Path(path).stat().st_size
     except OSError:
@@ -155,7 +159,7 @@ def unreadable_image_info(path: str, root: Path, core: Any) -> dict[str, Any]:
     except OSError:
         file_hash = ""
     return {
-        "id": stable_id(relative_path, file_hash),
+        "id": selected["asset_id"] if selected else stable_id(relative_path, file_hash),
         "relative_path": relative_path,
         "readable": False,
         "metadata": {
@@ -174,6 +178,7 @@ def build_manifest(
     auto_groups: list[dict[str, Any]],
     review_groups: list[list[dict[str, Any]]],
     core: Any,
+    *, inputs: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     root = root.resolve()
     all_info_by_path = {normalized_path(info["path"]): info for info in image_infos}
@@ -199,13 +204,13 @@ def build_manifest(
             if key in automatic_rejected_paths:
                 raise ValueError("图片重复出现在多个自动去重组中")
             automatic_rejected_paths.add(key)
-            item = public_image_info(info, root)
+            item = public_image_info(info, root, inputs)
             item["recommended"] = False
             item["review_metrics"] = None
             rejected_items.append(item)
         if not rejected_items:
             continue
-        winner = public_image_info(winner_info, root)
+        winner = public_image_info(winner_info, root, inputs)
         winner["recommended"] = True
         winner["review_metrics"] = None
         label = "L0-完全相同" if kind == "exact" else "L1-压缩同源"
@@ -271,7 +276,7 @@ def build_manifest(
         winner_key = normalized_path(winner["path"])
         items = []
         for key in keys:
-            item = public_image_info(info_by_path[key], root)
+            item = public_image_info(info_by_path[key], root, inputs)
             item["recommended"] = key == winner_key
             item["review_metrics"] = metrics_by_path.get(key)
             items.append(item)
@@ -291,7 +296,7 @@ def build_manifest(
     for path in image_paths:
         if normalized_path(path) in valid_paths:
             continue
-        item = unreadable_image_info(path, root, core)
+        item = unreadable_image_info(path, root, core, inputs)
         groups.append(
             {
                 "id": stable_id("unreadable", item["id"]),
@@ -391,7 +396,8 @@ def main() -> int:
         os.umask(0o077)
     started_at = time.perf_counter()
     parser = argparse.ArgumentParser(description="为聚合爬图批次生成 L0-L2 全图片审核清单")
-    parser.add_argument("root", type=Path, help="批次图片根目录")
+    parser.add_argument("root", type=Path, nargs="?", help="旧批次图片根目录")
+    parser.add_argument("--input", type=Path, help="图库审核已选实际文件 JSON（不扫描公共父目录）")
     parser.add_argument("--output", type=Path, required=True, help="审核清单 JSON 输出路径")
     parser.add_argument("--core-script", type=Path, default=DEFAULT_CORE_SCRIPT)
     parser.add_argument("--model-dir", type=Path, default=DEFAULT_MODEL_DIR)
@@ -405,9 +411,57 @@ def main() -> int:
     parser.add_argument("--no-dino", action="store_true")
     args = parser.parse_args()
 
-    root = args.root.resolve()
+    with ExitStack() as stack:
+        return run_analysis(args, started_at, stack)
+
+
+def run_analysis(args: Any, started_at: float, stack: ExitStack) -> int:
+    selection = json.loads(args.input.read_text(encoding="utf-8")) if args.input else None
+    inputs = None
+    original_extensions = {}
+    if selection is not None:
+        inputs = {}
+        roots = {}
+        held_images = {}
+        for image in selection["images"]:
+            path = Path(image["root_path"]) / image["relative_path"]
+            # Backend owns selection. Still reject links/traversal before opening any model input.
+            relative = Path(image["relative_path"])
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError("图库图片路径无效")
+            cursor = Path(image["root_path"])
+            for part in ("", *relative.parts):
+                cursor = cursor / part
+                if cursor.is_symlink() or (hasattr(cursor, "is_junction") and cursor.is_junction()):
+                    raise ValueError("图库图片路径包含链接")
+            if not path.is_file():
+                raise ValueError("图库图片不存在")
+            from gdl_backend.gallery_safe_paths import SafeSourceRoot
+            safe = roots.get(image["source_id"])
+            if safe is None:
+                safe = roots[image["source_id"]] = stack.enter_context(SafeSourceRoot(image["root_path"]))
+            if list(safe.root_identity()) != image["root_identity"] or safe.disk_version(image["relative_path"]) != image["disk_version"]:
+                raise ValueError("图库审核图片已变化")
+            handle = stack.enter_context(safe.open_binary(image["relative_path"]))
+            original_path = path
+            # Linux models open a held inode, not a mutable directory path.
+            if os.name == "posix" and Path("/proc/self/fd").is_dir():
+                path = Path(f"/proc/self/fd/{handle.fileno()}")
+            key = normalized_path(path)
+            held_images[key] = handle
+            original_extensions[key] = original_path.suffix.lower()
+            if key in inputs:
+                raise ValueError("图库审核图片路径重复")
+            inputs[key] = {"asset_id": image["asset_id"], "relative_path": image["source_id"] + "/" + image["relative_path"]}
+        if not inputs:
+            raise ValueError("图库审核图片为空")
+        root = Path(selection["images"][0]["root_path"])
+    elif args.root:
+        root = args.root.resolve()
+    else:
+        raise ValueError("必须指定 root 或 --input")
     if not root.is_dir():
-        parser.error(f"批次图片目录不存在: {root}")
+        raise ValueError(f"批次图片目录不存在: {root}")
     resource_values = {
         "--workers": (args.workers, 64),
         "--torch-threads": (args.torch_threads, 128),
@@ -417,7 +471,7 @@ def main() -> int:
     }
     for name, (value, maximum) in resource_values.items():
         if not 0 <= value <= maximum:
-            parser.error(f"{name} 必须是 0（自动）或 1..{maximum}")
+            raise ValueError(f"{name} 必须是 0（自动）或 1..{maximum}")
 
     profile = build_resource_profile(
         args.device,
@@ -438,6 +492,28 @@ def main() -> int:
     )
 
     core = load_core(args.core_script.resolve())
+    if inputs is not None and not (os.name == "posix" and Path("/proc/self/fd").is_dir()):
+        # Without /proc (including Windows), feed held bytes to the same core/model readers.
+        # No copied input directory and no later reopening of mutable source paths.
+        import builtins
+        import io
+        import threading
+        reader_lock = threading.Lock()
+        original_image_open = core.Image.open
+        def selected_open(path, *args, **kwargs):
+            handle = held_images.get(normalized_path(path))
+            if handle is None:
+                return builtins.open(path, *args, **kwargs)
+            with reader_lock:
+                handle.seek(0)
+                return io.BytesIO(handle.read())
+        def selected_image_open(path, *args, **kwargs):
+            if isinstance(path, (str, os.PathLike)) and normalized_path(path) in held_images:
+                path = selected_open(path)
+            return original_image_open(path, *args, **kwargs)
+        core.open = selected_open
+        core.Image.open = selected_image_open
+        stack.callback(setattr, core.Image, "open", original_image_open)
     core_arguments = [
         str(root),
         "--no-gui",
@@ -467,7 +543,7 @@ def main() -> int:
     core.validate_args(core_parser, core_args)
 
     scan_started = time.perf_counter()
-    image_paths = find_review_images(root)
+    image_paths = sorted(inputs) if inputs is not None else find_review_images(root)
     scan_elapsed = time.perf_counter() - scan_started
     preprocess_started = time.perf_counter()
     image_infos: list[dict[str, Any]] = []
@@ -476,6 +552,8 @@ def main() -> int:
         for future in as_completed(futures):
             result = future.result()
             if result is not None:
+                if inputs is not None:
+                    result["ext"] = original_extensions[normalized_path(futures[future])]
                 image_infos.append(result)
 
     image_infos.sort(key=lambda info: normalized_path(info["path"]))
@@ -487,7 +565,11 @@ def main() -> int:
         auto_groups, review_groups = [], []
     analysis_elapsed = time.perf_counter() - analysis_started
     manifest_started = time.perf_counter()
-    manifest = build_manifest(root, image_paths, image_infos, auto_groups, review_groups, core)
+    manifest = build_manifest(root, image_paths, image_infos, auto_groups, review_groups, core, inputs=inputs)
+    if selection is not None:
+        manifest.pop("root")
+        manifest["schema_version"] = 3
+        manifest["review_id"] = selection["review_id"]
     manifest_elapsed = time.perf_counter() - manifest_started
     actual_device = args.device
     if not args.no_sscd or not args.no_dino:

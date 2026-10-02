@@ -3,19 +3,14 @@
   "entrypoint": "index.html",
   "files": [
     {
-      "path": "assets/index-CfWqHWDm.css",
-      "sha256": "f1d281b5192de093ac06666f735e9f8994e79a8034e75fe002e1bc1f4869b9dd",
-      "size": 135779
+      "path": "assets/index-BuO95YFx.js",
+      "sha256": "c19a16a47629b7a1b7de5f31323e9db906d64d642370a960495230df26288500",
+      "size": 685615
     },
     {
-      "path": "assets/index-DLzYJPNK.js",
-      "sha256": "ebecf20a9ac634319a3b0cc8fa851e353fe8043b782134ce022e39c18aafad77",
-      "size": 685310
-    },
-    {
-      "path": "assets/noise-DI1T15ao.svg",
-      "sha256": "9a525197b6bc88f7a64d8746a50f04aa64f29f08d06d57c3e69514b6db083529",
-      "size": 497
+      "path": "assets/index-Cx-W8v6l.css",
+      "sha256": "3c03730aa986868df605217cf4730ce34d3dd465841db52e68105b9f24bff587",
+      "size": 107917
     },
     {
       "path": "favicon.png",
@@ -24,7 +19,7 @@
     },
     {
       "path": "index.html",
-      "sha256": "577be699364297aef4b8c05f0a7d0012fbce7e6b78855a0e2eb1c5ac3d09e7dc",
+      "sha256": "13dd957ccb965f9fa4df97098c88f7c34bf3243c6c09dfd920779bdf4b85387c",
       "size": 503
     }
   ],

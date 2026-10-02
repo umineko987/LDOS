@@ -37,8 +37,8 @@ describe("desktop API response-budget contract", () => {
       ]],
       ["review", reviewServiceSource, [
         "limit=${REVIEW_PAGE_LIMIT}&offset=${offset}&view=desktop",
-        "/decisions?view=desktop",
-        `/${"${operation}"}?view=desktop`,
+        'reviewPath(reviewId, "/decisions")',
+        'reviewPath(reviewId, `/${operation}`)',
       ]],
       ["proxy", proxyServiceSource, [
         "status}?view=desktop",
@@ -63,7 +63,7 @@ describe("desktop API response-budget contract", () => {
   });
   it("fails when an application adds an unclassified transport call", () => {
     const inventory = [
-      ["gallery", galleryServiceSource, 23],
+      ["gallery", galleryServiceSource, 24],
       ["crawl", crawlServiceSource, 3],
       ["tasks", tasksServiceSource, 5],
       ["review", reviewServiceSource, 6],
@@ -78,7 +78,7 @@ describe("desktop API response-budget contract", () => {
     expect(count(galleryServiceSource, /view=desktop/g)).toBe(7);
     expect(count(crawlServiceSource, /view=desktop/g)).toBe(2);
     expect(count(tasksServiceSource, /view=(?:desktop|tasks)/g)).toBe(5);
-    expect(count(reviewServiceSource, /view=desktop/g)).toBe(4);
+    expect(count(reviewServiceSource, /view=desktop/g)).toBe(2);
     expect(count(proxyServiceSource, /view=desktop/g)).toBe(11);
   });
 

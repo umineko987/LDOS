@@ -83,8 +83,9 @@ describe("P4 Crawl target migrated from the legacy P0 source probe", () => {
       "Pixiv · Danbooru 画师目录关联账户",
     );
     expect(crawlSource).toContain("{#each CRAWL_SITE_DEFINITIONS as site (site.id)}");
-    expect(crawlSource).toContain("X / Twitter 与 Pixiv 只从 Danbooru 画师目录读取关联账户");
-    expect(crawlSource).toContain("授权仅用于后续访问与采集，不会扩大当前发现范围");
+    expect(crawlSource).toContain("X / Twitter 与 Pixiv 从 Danbooru 画师目录查找关联账户");
+    expect(crawlSource).toContain("采集时需要相应授权");
+    expect(crawlSource).toContain('<details class="crawl-discovery-note"');
     for (const unsupportedClaim of [
       "X / Twitter 站内搜索",
       "Pixiv 站内搜索",

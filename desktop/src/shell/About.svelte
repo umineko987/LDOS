@@ -47,17 +47,17 @@
 </script>
 
 {#if open}
-  <div class="application-center-host about-host" data-about-host>
+  <div class="about-host" data-about-host>
     <button
       type="button"
-      class="application-center__backdrop"
+      class="about-backdrop"
       data-about-backdrop
       tabindex="-1"
       aria-label="关闭关于 LDOS"
       onclick={close}
     ></button>
     <div
-      class="application-center about-dialog"
+      class="about-dialog"
       data-about-dialog
       role="dialog"
       aria-modal="true"
@@ -67,7 +67,7 @@
       bind:this={panel}
       onkeydown={onKeydown}
     >
-      <header class="application-center__header">
+      <header class="about-header">
         <p>关于</p>
         <button type="button" aria-label="关闭关于 LDOS" onclick={close}>关闭</button>
       </header>

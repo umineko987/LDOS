@@ -4,12 +4,18 @@ import {
   type ApplicationId,
   type WindowRect,
 } from "../applications/definitions";
-import type { ShellPersistence, WindowPlacement } from "../state/shell";
+import type { ShellPersistence } from "../state/shell";
 import { clampWindowRect, sameWindowRect, type WindowViewport } from "../windowing/geometry";
 import { BUILT_IN_SCENE_IDS, type SceneId } from "../personalization/scenes";
 import { PERSISTENCE_KEYS, type PersistenceAdapter } from "./adapter";
 export type { SceneId } from "../personalization/scenes";
 export type MotionPreference = "on" | "off";
+
+export interface WindowPlacement {
+  readonly appId: ApplicationId;
+  readonly rect: WindowRect;
+  readonly maximized: boolean;
+}
 
 export interface UiPreferences {
   readonly animations: MotionPreference;
@@ -20,7 +26,11 @@ export interface PersistenceService extends ShellPersistence {
   readCurrentApp(): ApplicationId | null;
   readActiveBatchId(): string | null;
   writeActiveBatchId(batchId: string | null): boolean;
+  readActiveReviewId(): string | null;
+  writeActiveReviewId(reviewId: string | null): boolean;
   readWindowPlacements(): readonly WindowPlacement[];
+  readWindowPlacement(appId: ApplicationId): WindowPlacement | null;
+  writeWindowPlacement(placement: WindowPlacement): boolean;
   readUiPreferences(): UiPreferences;
   writeUiPreferences(preferences: UiPreferences): boolean;
 }
@@ -244,6 +254,17 @@ export function createPersistenceService(
 ): PersistenceService {
   let placementCache: readonly WindowPlacement[] | null = null;
 
+  // Review identity is independent of the Tasks session ID, persisted in the existing local UI envelope.
+  const readActiveReviewId = (): string | null => {
+    const root = parseStorageObject(adapter.readLocal(PERSISTENCE_KEYS.uiPreferences));
+    const descriptors = descriptorsFor(root);
+    const value = descriptors ? dataValue(descriptors, "activeReviewId") : undefined;
+    return typeof value === "string" && BATCH_ID_PATTERN.test(value) ? value : null;
+  };
+  const preferencesEnvelope = (preferences: UiPreferences, reviewId = readActiveReviewId()): string => {
+    const projected = projectUiPreferences(preferences);
+    return JSON.stringify(reviewId ? { ...projected, activeReviewId: reviewId } : projected);
+  };
   const readWindowPlacements = (): readonly WindowPlacement[] => {
     const serialized = adapter.readLocal(PERSISTENCE_KEYS.windowPlacements);
     let placements = deserializeWindowPlacements(serialized, viewport());
@@ -293,6 +314,12 @@ export function createPersistenceService(
       if (!BATCH_ID_PATTERN.test(batchId)) throw new TypeError("invalid_batch_id");
       return adapter.writeSession(PERSISTENCE_KEYS.activeBatch, batchId);
     },
+    readActiveReviewId,
+    writeActiveReviewId(reviewId) {
+      if (reviewId !== null && !BATCH_ID_PATTERN.test(reviewId)) throw new TypeError("invalid_review_id");
+      const preferences = deserializeUiPreferences(adapter.readLocal(PERSISTENCE_KEYS.uiPreferences));
+      return adapter.writeLocal(PERSISTENCE_KEYS.uiPreferences, preferencesEnvelope(preferences, reviewId));
+    },
     readWindowPlacements,
     readWindowPlacement(appId) {
       const placements = placementCache ?? readWindowPlacements();
@@ -318,13 +345,13 @@ export function createPersistenceService(
       const serialized = adapter.readLocal(PERSISTENCE_KEYS.uiPreferences);
       const preferences = deserializeUiPreferences(serialized);
       if (serialized !== null) {
-        const migrated = serializeUiPreferences(preferences);
+        const migrated = preferencesEnvelope(preferences);
         if (migrated !== serialized) adapter.writeLocal(PERSISTENCE_KEYS.uiPreferences, migrated);
       }
       return preferences;
     },
     writeUiPreferences(preferences) {
-      return adapter.writeLocal(PERSISTENCE_KEYS.uiPreferences, serializeUiPreferences(preferences));
+      return adapter.writeLocal(PERSISTENCE_KEYS.uiPreferences, preferencesEnvelope(preferences));
     },
   };
   return Object.freeze(service);

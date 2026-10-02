@@ -1,89 +1,88 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  createShellPollingLifecycleSource,
-  deriveApplicationGroups,
-  deriveDockProjection,
-  deriveWindowMenu,
-} from "./projections";
+import { createPollingService, POLLING_SCOPE_STATES } from "../polling/service";
+import { createShellPollingLifecycleSource } from "./projections";
 import { createShellStore } from "./shell";
 
-describe("single-source shell projections", () => {
-  it("derives all application-center groups and order from definitions", () => {
-    expect(deriveApplicationGroups().map((group) => ({
-      id: group.id,
-      title: group.title,
-      applications: group.applications.map(({ id }) => id),
-    }))).toEqual([
-      { id: "workflow", title: "工作流", applications: ["crawl", "tasks", "gallery", "review"] },
-      { id: "connections", title: "连接与策略", applications: ["proxy", "vault", "policy"] },
-      { id: "system", title: "系统", applications: ["diagnostics", "personalization"] },
-    ]);
-  });
-
-  it("projects fixed and dynamic Dock items without a copied application list", async () => {
+describe("shell polling lifecycle projection", () => {
+  it("projects unvisited, background, and current application states", () => {
     const shell = createShellStore();
+    const source = createShellPollingLifecycleSource(shell);
+    expect(source.getFocusedScope()).toBeNull();
+    expect(source.getScopeState("global")).toBe(POLLING_SCOPE_STATES.UNMANAGED);
+    expect(source.getScopeState("app:unknown")).toBe(POLLING_SCOPE_STATES.UNMANAGED);
+    expect(source.getScopeState("app:tasks")).toBe(POLLING_SCOPE_STATES.CLOSED);
+
     shell.openApplication("tasks");
-    shell.openApplication("proxy");
-    await shell.requestMinimize("proxy");
+    expect(source.getFocusedScope()).toBe("app:tasks");
+    expect(source.getScopeState("app:tasks")).toBe(POLLING_SCOPE_STATES.OPEN);
     shell.openApplication("vault");
-    shell.openApplication("review");
-    const model = deriveDockProjection(shell.getState(), 6);
-    expect(model.items.map(({ key, state, activation }) => [key, state, activation])).toEqual([
-      ["application-center", "launcher", "open-center"],
-      ["app:crawl", "closed", "open"],
-      ["app:tasks", "background", "focus"],
-      ["app:gallery", "closed", "open"],
-      ["app:review", "focused", "minimize"],
-      ["app:proxy", "minimized", "restore"],
-      ["app:vault", "background", "focus"],
-    ]);
-    expect(model.visible).toHaveLength(6);
-    expect(model.overflow.map(({ key }) => key)).toEqual(["app:vault"]);
-    expect(model.items[4].ariaLabel).toContain("当前聚焦；最小化窗口");
-    expect(model.items[5].ariaLabel).toContain("已最小化；恢复窗口");
-    expect(() => deriveDockProjection(shell.getState(), 0)).toThrow("invalid_dock_limit");
-    expect(() => deriveDockProjection(shell.getState(), 1.5)).toThrow("invalid_dock_limit");
-  });
-
-  it("derives Window menu commands from the same z-order", async () => {
-    const shell = createShellStore();
-    shell.openApplication("crawl");
+    expect(source.getFocusedScope()).toBe("app:vault");
+    expect(source.getScopeState("app:tasks")).toBe(POLLING_SCOPE_STATES.MINIMIZED);
+    expect(source.getScopeState("app:vault")).toBe(POLLING_SCOPE_STATES.OPEN);
+    expect(source.getScopeState("app:crawl")).toBe(POLLING_SCOPE_STATES.CLOSED);
     shell.openApplication("tasks");
-    shell.openApplication("proxy");
-    await shell.requestMinimize("tasks");
-    expect(deriveWindowMenu(shell.getState())).toEqual([
-      { appId: "crawl", title: "图片采集", command: "focus", checked: false, description: "后台窗口" },
-      { appId: "tasks", title: "批次管理", command: "restore", checked: false, description: "已最小化" },
-      { appId: "proxy", title: "代理管理", command: "minimize", checked: true, description: "当前窗口" },
-    ]);
+    expect(source.getScopeState("app:tasks")).toBe(POLLING_SCOPE_STATES.OPEN);
+    expect(source.getScopeState("app:vault")).toBe(POLLING_SCOPE_STATES.MINIMIZED);
   });
 
-  it("projects only focused/open/minimized/closed lifecycle facts for polling", async () => {
+  it("notifies only on navigation and stops after unsubscribe or shell destruction", () => {
     const shell = createShellStore();
     const source = createShellPollingLifecycleSource(shell);
     const listener = vi.fn();
     const unsubscribe = source.subscribe(listener);
-    expect(source.getFocusedScope()).toBeNull();
-    expect(source.getScopeState("global")).toBe("unmanaged");
-    expect(source.getScopeState("app:unknown")).toBe("unmanaged");
-    expect(source.getScopeState("app:tasks")).toBe("closed");
-    shell.setApplicationCenter(true);
     expect(listener).not.toHaveBeenCalled();
-
     shell.openApplication("tasks");
-    expect(source.getFocusedScope()).toBe("app:tasks");
-    expect(source.getScopeState("app:tasks")).toBe("open");
+    shell.openApplication("tasks");
+    shell.registerUnsavedChanges("tasks", () => true);
+    shell.hasUnsavedChanges();
     expect(listener).toHaveBeenCalledOnce();
-    await shell.requestMinimize("tasks");
-    expect(source.getFocusedScope()).toBeNull();
-    expect(source.getScopeState("app:tasks")).toBe("minimized");
-    expect(listener).toHaveBeenCalledTimes(2);
-    await shell.requestClose("tasks");
-    expect(source.getScopeState("app:tasks")).toBe("closed");
+    shell.openApplication("vault");
+    shell.openApplication("tasks");
     expect(listener).toHaveBeenCalledTimes(3);
     unsubscribe();
     shell.openApplication("crawl");
     expect(listener).toHaveBeenCalledTimes(3);
+    const remainingListener = vi.fn();
+    source.subscribe(remainingListener);
+    shell.destroy();
+    shell.openApplication("review");
+    expect(remainingListener).not.toHaveBeenCalled();
+  });
+
+  it("pauses background app polling without interrupting existing global critical polling", async () => {
+    vi.useFakeTimers();
+    const shell = createShellStore();
+    const polling = createPollingService({ lifecycleSource: createShellPollingLifecycleSource(shell) });
+    try {
+      const appTask = vi.fn(async () => null);
+      const criticalTask = vi.fn(async () => null);
+      polling.start({
+        key: "tasks.authority", scope: "app:tasks", intervalMs: 1_000,
+        immediate: false, critical: false, task: appTask, onResult() {},
+      });
+      polling.start({
+        key: "platform.backend-status", intervalMs: 500,
+        immediate: false, critical: true, task: criticalTask, onResult() {},
+      });
+      await vi.advanceTimersByTimeAsync(500);
+      expect(appTask).not.toHaveBeenCalled();
+      expect(criticalTask).toHaveBeenCalledOnce();
+      shell.openApplication("tasks");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(appTask).toHaveBeenCalledOnce();
+      shell.openApplication("vault");
+      expect(polling.getSummary().find(({ key }) => key === "tasks.authority")?.state).toBe("paused");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(appTask).toHaveBeenCalledOnce();
+      expect(criticalTask).toHaveBeenCalledTimes(3);
+      shell.openApplication("tasks");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(appTask).toHaveBeenCalledTimes(2);
+    } finally {
+      polling.destroy();
+      shell.destroy();
+      vi.useRealTimers();
+    }
   });
 });

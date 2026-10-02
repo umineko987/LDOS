@@ -87,7 +87,7 @@ export function derivePersonalizationPreview(value: unknown): PersonalizationPre
 export function derivePersonalizationPresentation({ dirty, busy, phase }: { readonly dirty: boolean; readonly busy: boolean; readonly phase: PersonalizationPhase }): PersonalizationPresentation {
   if (busy || phase === "saving") return Object.freeze({ state: "saving", kind: "running", label: "正在保存", message: "正在保存外观设置，请勿重复提交。" });
   if (phase === "error") return Object.freeze({ state: "error", kind: "error", label: "保存失败", message: "原设置保持不变；草稿仍保留，可重试。" });
-  if (dirty || phase === "dirty") return Object.freeze({ state: "dirty", kind: "warning", label: "有未应用的更改", message: "应用前只更新当前桌面预览，不会写入偏好存储。" });
-  if (phase === "success") return Object.freeze({ state: "success", kind: "ready", label: "已保存", message: "外观设置已保存并投影到桌面。" });
+  if (dirty || phase === "dirty") return Object.freeze({ state: "dirty", kind: "warning", label: "有未应用的更改", message: "正在预览工作台配色，点击“应用”保存。" });
+  if (phase === "success") return Object.freeze({ state: "success", kind: "ready", label: "已保存", message: "外观设置已保存并应用到工作台。" });
   return Object.freeze({ state: "clean", kind: "ready", label: "设置已保存", message: "当前预览与已保存设置一致。" });
 }

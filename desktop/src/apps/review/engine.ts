@@ -267,7 +267,7 @@ export function buildReviewEngineFrame(
   focusedGroupId: string,
   activeImageId: string,
   loupeEnabled: boolean,
-  imageUrl: (batchId: string, imageId: string) => string,
+  imageUrl: (reviewId: string, imageId: string) => string,
 ): ReviewEngineFrame | null {
   if (!snapshot) return null;
   const focusedIndex = snapshot.groupOrder.indexOf(focusedGroupId);
@@ -275,18 +275,18 @@ export function buildReviewEngineFrame(
   const group = snapshot.groups[focusedGroupId];
   const images = group.imageOrder.map((imageId) => {
     const image = group.images[imageId];
-    return freeze({ ...image, url: imageUrl(snapshot.batchId, image.id) });
+    return freeze({ ...image, url: imageUrl(snapshot.reviewId, image.id) });
   });
   const preloadUrls: string[] = [];
   for (const index of reviewImageWindow(snapshot.groupOrder.length, focusedIndex)) {
     if (index === focusedIndex) continue;
     const neighbor = snapshot.groups[snapshot.groupOrder[index]];
     for (const imageId of neighbor.imageOrder) {
-      if (neighbor.images[imageId].readable) preloadUrls.push(imageUrl(snapshot.batchId, imageId));
+      if (neighbor.images[imageId].readable) preloadUrls.push(imageUrl(snapshot.reviewId, imageId));
     }
   }
   return freeze({
-    key: `${snapshot.batchId}:${snapshot.filter}:${focusedGroupId}`,
+    key: `${snapshot.reviewId}:${snapshot.filter}:${focusedGroupId}`,
     images: Object.freeze(images),
     preloadUrls: Object.freeze(preloadUrls),
     activeImageId,

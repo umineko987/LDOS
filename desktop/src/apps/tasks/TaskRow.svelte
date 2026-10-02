@@ -17,7 +17,7 @@
   <td>{task.sourceOrder + 1}.{task.addressOrder + 1}.{task.sequence}</td>
   <td>
     <strong>{siteLabel(task.site)}</strong>
-    <span>{task.addressId ? shortBatchId(task.addressId) : "地址事实不可用"}</span>
+    <span>{task.addressId ? shortBatchId(task.addressId) : "地址不可用"}</span>
   </td>
   <td><span class="tasks-status" data-status-kind={task.statusKind}>{task.statusLabel}</span></td>
   <td>{task.attemptCount}/{task.maxAttempts}</td>

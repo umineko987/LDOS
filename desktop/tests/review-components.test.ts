@@ -12,27 +12,14 @@ import stateSource from "../src/apps/review/state.ts?raw";
 import type { ApiClient } from "../src/core/api/client";
 import type { PersistenceService } from "../src/core/persistence/service";
 import type { PollingService } from "../src/core/polling/service";
-import AppWindow from "../src/shell/AppWindow.svelte";
-import appWindowSource from "../src/shell/AppWindow.svelte?raw";
+import Desktop from "../src/shell/Desktop.svelte";
+import desktopSource from "../src/shell/Desktop.svelte?raw";
+import { createDesktopRuntime } from "./fixtures/desktop";
 
 const api = Object.freeze({}) as ApiClient;
 const polling = Object.freeze({}) as PollingService;
-const persistence = Object.freeze({ readActiveBatchId: () => null, writeActiveBatchId: () => true }) as unknown as PersistenceService;
+const persistence = Object.freeze({ readActiveReviewId: () => null, writeActiveReviewId: () => true }) as unknown as PersistenceService;
 const css = readFileSync(new URL("../src/apps/review/review.css", import.meta.url), "utf8");
-const props = {
-  record: { appId: "review" as const, state: "maximized" as const, rect: { x: 0, y: 0, w: 1280, h: 720 } },
-  api,
-  polling,
-  persistence,
-  focused: true,
-  onNavigate: vi.fn(),
-  onFocus: vi.fn(),
-  onMinimize: vi.fn(),
-  onToggleMaximized: vi.fn(),
-  onClose: vi.fn(),
-  onBeginInteraction: vi.fn(),
-  onKeyboardResize: vi.fn(),
-};
 
 describe("Svelte Review integration", () => {
   it("renders the real accessible Review workspace without projecting media paths", () => {
@@ -40,10 +27,10 @@ describe("Svelte Review integration", () => {
     for (const marker of [
       "data-review-app",
       'data-domain-owner="review"',
-      "去重审核",
-      "已结束批次",
-      "打开批次管理",
-      "尚未打开审核批次",
+      '<h1 id="review-heading">去重</h1>',
+      "已提交审核任务",
+      "打开图库",
+      "尚无审核任务",
       'aria-live="polite"',
     ]) expect(body).toContain(marker);
     expect(reviewSource).toContain('aria-label="审核工具栏"');
@@ -60,12 +47,15 @@ describe("Svelte Review integration", () => {
     expect(css).toContain(".review-model-confirmation::backdrop { background: rgb(3 7 18 / 0.68); }");
   });
 
-  it("routes Review through its only AppWindow branch", () => {
-    const body = render(AppWindow, { props }).body;
+  it("mounts Review in Desktop with navigation and its dirty boundary", () => {
+    const runtime = createDesktopRuntime();
+    runtime.shell.openApplication("review");
+    const body = render(Desktop, { props: runtime }).body;
+    expect(body).toContain('data-app-page="" data-app-id="review"');
     expect(body).toContain("data-review-app");
     expect(body).not.toContain('data-application-content="review"');
-    expect(appWindowSource).toContain('record.appId === "review"');
-    expect(appWindowSource).toContain("<Review {api} {polling} {persistence} {onNavigate}");
+    expect(desktopSource).toContain('<Review {api} {polling} {persistence} active={snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate}');
+    expect(desktopSource).toContain('shell.registerUnsavedChanges("review", reader, discard, prepare)');
   });
 
   it("keeps stable keyed groups and images under one domain state owner", () => {
@@ -116,7 +106,7 @@ describe("Svelte Review integration", () => {
       /data:image/,
     ]) expect(combined).not.toMatch(forbidden);
     expect(serviceSource.match(/"\/api\/v1\//g)).toHaveLength(2);
-    expect(serviceSource.match(/view=desktop/g)).toHaveLength(4);
+    expect(serviceSource.match(/view=desktop/g)).toHaveLength(2);
     expect(serviceSource).toContain("REVIEW_PAGE_LIMIT = 50");
     expect(serviceSource).not.toContain("all=true");
     expect(controllerSource).toContain('REVIEW_POLL_KEY = "review.active"');
@@ -129,8 +119,8 @@ describe("Svelte Review integration", () => {
       ".review-deck-header",
       ".review-deck-stage",
       ".review-deck-statusbar",
-      "max-height: 230px",
       "min-height: 0",
+      "grid-template-rows: auto minmax(0, 1fr) auto",
       "overflow: hidden",
       '.review-operation-live[data-review-dirty="true"]',
       'content: "△ 未保存 · "',

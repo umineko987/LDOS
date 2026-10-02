@@ -234,6 +234,10 @@
     }
   }
 
+  function displayMessage(message: string): string {
+    return message.replace("操作完成后将权威重读", "操作完成后会更新").replace("安全授权事实", "授权信息").replace("安全事实", "信息").replace("权威授权状态", "授权状态").replace("；仅当前站点会自动轮询", "");
+  }
+
   onMount(() => {
     const unregisterUnsaved = registerUnsavedChanges?.(() => Boolean(proxyDraft), clearSensitiveInputs) ?? (() => {});
     controller.activate();
@@ -251,7 +255,7 @@
 
 <section class="vault-app" data-vault-app data-domain-owner="vault" aria-labelledby="vault-heading" aria-busy={Boolean(snapshot.busy)}>
   <header class="vault-header">
-    <div><p>授权管理</p><h1 id="vault-heading">站点材料与共享恢复</h1></div>
+    <h1 id="vault-heading">授权</h1>
     <div class="vault-header-actions"><span class="vault-status" data-vault-workspace-state={presentation.state} data-kind={presentation.kind}>{presentation.label}</span><button type="button" class="vault-button" disabled={controls.refresh.disabled} onclick={refresh}>{controls.refresh.label}</button></div>
   </header>
 
@@ -262,13 +266,13 @@
       <small>错误码：{snapshot.error.code}{snapshot.error.requestId ? ` · 请求 ${snapshot.error.requestId}` : ""}</small>
     </section>
   {/if}
-  <p class="vault-live" aria-live="polite">{snapshot.message} {presentation.message}</p>
+  <p class="vault-live" aria-live="polite">{displayMessage(snapshot.message)} {displayMessage(presentation.message)}</p>
 
   <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-scrollable Vault workspace) -->
-  <section class="vault-workspace" tabindex="0" bind:this={workspace} aria-label="授权管理三栏工作区，可横向滚动查看站点、材料与共享恢复">
+  <section class="vault-workspace" tabindex="0" bind:this={workspace} aria-label="站点授权设置；可纵向滚动">
     <div class="vault-workspace-track">
       <nav class="vault-column vault-column--navigation" aria-labelledby="vault-sites-heading">
-        <header><p>01 · 站点</p><h2 id="vault-sites-heading">授权目标</h2><span>固定顺序显示五个后端支持的站点。</span></header>
+        <header><h2 id="vault-sites-heading">选择站点</h2></header>
         <div class="vault-column-scroll" tabindex="0" aria-label="授权目标内容；可滚动">
           <div class="vault-site-nav" role="group" aria-label="授权站点">
             {#each siteItems as item (item.definition.id)}
@@ -285,21 +289,20 @@
               </button>
             {/each}
           </div>
-          <p class="vault-proof-note">◆ 状态说明 · 站点状态来自服务安全投影；页面不保存 Cookie、Token 或浏览器地址。</p>
         </div>
       </nav>
 
-      <main class="vault-column vault-column--materials" aria-labelledby="vault-materials-heading">
-        <header><p>02 · 材料与会话</p><h2 id="vault-materials-heading">{selectedStatus?.label ?? getVaultSiteDefinition(snapshot.selectedSite)?.label ?? "授权站点"}</h2><span>只展示是否存在、是否有效和活动会话事实。</span></header>
+      <section class="vault-column vault-column--materials" aria-labelledby="vault-materials-heading">
+        <header><h2 id="vault-materials-heading">{selectedStatus?.label ?? getVaultSiteDefinition(snapshot.selectedSite)?.label ?? "授权站点"}</h2></header>
         <div class="vault-column-scroll" tabindex="0" aria-label="授权材料与会话内容；可滚动">
           <section class="vault-waiting-host" data-vault-workspace-state={presentation.state} aria-live="polite">
             <span class="vault-status" data-kind={presentation.kind}>{presentation.label}</span>
-            <p>{presentation.message}</p>
+            <p>{displayMessage(presentation.message)}</p>
           </section>
 
           {#if selectedStatus}
             <section class="vault-site-card" data-site-state={statusKind(selectedStatus)} aria-labelledby="vault-site-facts-heading">
-              <div class="vault-section-heading"><h3 id="vault-site-facts-heading">站点事实</h3><span class="vault-status" data-kind={statusKind(selectedStatus)}>{statusLabel(selectedStatus)}</span></div>
+              <div class="vault-section-heading"><h3 id="vault-site-facts-heading">授权状态</h3><span class="vault-status" data-kind={statusKind(selectedStatus)}>{statusLabel(selectedStatus)}</span></div>
               <dl class="vault-definition-list">
                 <div><dt>访问方式</dt><dd>{selectedStatus.method === "anonymous" ? "公开访问" : selectedStatus.method === "oauth" ? "Pixiv 登录令牌" : "托管浏览器 Cookie"}</dd></div>
                 <div><dt>已配置材料</dt><dd>{boolLabel(selectedStatus.configured)}</dd></div>
@@ -314,7 +317,7 @@
               <section class="vault-session-card" aria-labelledby="vault-session-heading">
                 <h3 id="vault-session-heading">授权会话</h3>
                 <p class="vault-session-state" data-kind={selectedStatus.session.active ? "running" : "disabled"}>{selectedStatus.session.active ? "活动会话 · " : "最近会话 · "}{sessionLabel(selectedStatus.session.state)}</p>
-                <p>活动会话只在当前选中站点上以 800ms 前台频率读取；会话结束后自动停止并完整确认。</p>
+                <p>请在打开的浏览器中完成登录，授权状态会自动更新。</p>
               </section>
             {/if}
 
@@ -334,13 +337,13 @@
               <p id="vault-authorize-reason" class="vault-field-error" aria-live="polite">{controls.sites[snapshot.selectedSite]?.authorize.reason ?? ""}</p>
             </section>
           {:else}
-            <section class="vault-empty-state"><span class="vault-status" data-kind="disabled">等待站点状态</span><p>刷新后将在这里显示经过安全投影的站点事实。</p></section>
+            <section class="vault-empty-state"><span class="vault-status" data-kind="disabled">等待站点状态</span><p>刷新后查看授权状态。</p></section>
           {/if}
         </div>
-      </main>
+      </section>
 
       <aside class="vault-column vault-column--recovery" aria-labelledby="vault-recovery-heading">
-        <header><p>03 · 共享与恢复</p><h2 id="vault-recovery-heading">共享授权浏览器</h2><span>共享材料和登录代理只显示受控事实。</span></header>
+        <header><h2 id="vault-recovery-heading">浏览器与登录代理</h2></header>
         <div class="vault-column-scroll" tabindex="0" aria-label="共享授权与恢复内容；可滚动">
           <section class="vault-browser-panel" aria-labelledby="vault-browser-heading" aria-busy={Boolean(browserBusy)}>
             <div class="vault-section-heading"><h3 id="vault-browser-heading">授权浏览器</h3><span class="vault-status" data-kind={browserBusy ? "running" : browserRuntime?.available ? "ready" : browserError ? "error" : "warning"}>{browserBusy === "select" ? "正在保存" : browserBusy ? "正在检测" : browserRuntime?.available ? "可用" : "未就绪"}</span></div>

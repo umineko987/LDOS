@@ -44,8 +44,20 @@ class DedupReviewManager:
         runtime_dir: Path,
         *,
         runner: AnalysisRunner | None = None,
+        catalog: Any = None,
+        file_operations: Any = None,
     ) -> None:
         self.db = db
+        self.repository = db
+        self.catalog = catalog
+        self.file_operations = file_operations
+        self.gallery_reviews = None
+        if catalog is not None and type(self) is DedupReviewManager:
+            from .gallery_review import GalleryDedupReviewManager
+            self.gallery_reviews = GalleryDedupReviewManager(
+                db, settings, runtime_dir, runner=runner, catalog=catalog,
+                file_operations=file_operations,
+            )
         self.settings = settings
         self.runtime_dir = Path(os.path.abspath(os.fspath(runtime_dir / "reviews")))
         self.runner = runner
@@ -55,12 +67,17 @@ class DedupReviewManager:
         self._current_batch_id = ""
 
     async def start(self) -> None:
+        if self.gallery_reviews is not None:
+            await self.gallery_reviews.start()
+            return
         if self._loop_task is not None:
             return
         # Recover crashed analyzing/applying reviews even when dedup is now disabled:
         # otherwise a review left mid-flight by a crash stays stuck forever (the loop
         # below never runs to advance it, and retry only accepts 'failed').
-        self.db.recover_crawl_reviews()
+        self.repository.recover_crawl_reviews()
+        if self.file_operations is not None:
+            await asyncio.to_thread(self.file_operations.recover_unfinished)
         if not self.settings.enabled:
             return
         ensure_private_directory(self.runtime_dir)
@@ -72,9 +89,14 @@ class DedupReviewManager:
             await asyncio.gather(self._loop_task, return_exceptions=True)
             self._loop_task = None
         await self._terminate_process()
+        if self.gallery_reviews is not None:
+            await self.gallery_reviews.stop()
 
     def notify(self) -> None:
-        self._wake.set()
+        if self.gallery_reviews is not None:
+            self.gallery_reviews.notify()
+        else:
+            self._wake.set()
 
     async def _loop(self) -> None:
         while True:
@@ -97,9 +119,11 @@ class DedupReviewManager:
     async def run_once(self) -> bool:
         if not self.settings.enabled:
             return False
-        automatic = self.db.next_crawl_review_automatic()
+        if self.gallery_reviews is not None:
+            return await self.gallery_reviews.run_once()
+        automatic = self.repository.next_crawl_review_automatic()
         if automatic is not None:
-            self._current_batch_id = str(automatic["batch_id"])
+            self._current_batch_id = str(automatic.get("review_id") or automatic["batch_id"])
             try:
                 # Off-loop: this does per-image shutil.move + DB writes; running it
                 # inline would freeze the whole backend (HTTP + scheduler) for the
@@ -108,24 +132,26 @@ class DedupReviewManager:
             finally:
                 self._current_batch_id = ""
             return True
-        claimed = self.db.claim_next_crawl_review()
+        claimed = self.repository.claim_next_crawl_review()
         if claimed is None:
             return False
-        batch_id = str(claimed["batch_id"])
+        batch_id = str(claimed.get("review_id") or claimed["batch_id"])
         self._current_batch_id = batch_id
         try:
+            if claimed.get("review_id"):
+                await asyncio.to_thread(self._validate_input, claimed)
             if self.runner is not None:
                 manifest, log_path = await self.runner(claimed)
             else:
                 manifest, log_path = await self._run_worker(claimed)
             await asyncio.to_thread(self._validate_manifest, claimed, manifest)
-            self.db.replace_crawl_review_manifest(batch_id, manifest, log_path=log_path)
-            review = self.db.get_crawl_review(batch_id)
+            self.repository.replace_crawl_review_manifest(batch_id, manifest, log_path=log_path)
+            review = self.repository.get_crawl_review(batch_id)
             if review is not None and review["status"] == "auto_applying":
                 await asyncio.to_thread(self._apply_automatic_rejections, claimed)
         except asyncio.CancelledError:
             await self._terminate_process()
-            self.db.requeue_crawl_review(batch_id)
+            self.repository.requeue_crawl_review(batch_id)
             raise
         except Exception as exc:
             # Only point at the worker log if it was actually created; a startup-time
@@ -133,13 +159,13 @@ class DedupReviewManager:
             # path just gives the UI a 404 link.
             log_file = self.runtime_dir / f"{batch_id}.log"
             log_path = str(log_file) if log_file.is_file() else ""
-            self.db.fail_crawl_review(batch_id, str(exc), log_path=log_path)
+            self.repository.fail_crawl_review(batch_id, str(exc), log_path=log_path)
         finally:
             self._current_batch_id = ""
         return True
 
     async def _run_worker(self, claimed: dict[str, Any]) -> tuple[dict[str, Any], str]:
-        batch_id = str(claimed["batch_id"])
+        batch_id = str(claimed.get("review_id") or claimed["batch_id"])
         # 不解引用 .venv/bin/python 符号链接，否则会退化为缺少依赖的系统 Python。
         python = self.settings.python_executable.absolute()
         worker = self.settings.worker_script.resolve()
@@ -160,7 +186,6 @@ class DedupReviewManager:
         command = [
             str(python),
             str(worker),
-            str(claimed["output_dir"]),
             "--output",
             str(manifest_path),
             "--core-script",
@@ -180,11 +205,21 @@ class DedupReviewManager:
             "--neighbor-block-size",
             str(self.settings.neighbor_block_size),
         ]
+        if claimed.get("review_id"):
+            input_path = self.runtime_dir / f"{batch_id}.input.json"
+            def write_input() -> None:
+                with open_private_binary(input_path) as handle:
+                    handle.write(json.dumps(claimed, ensure_ascii=False).encode("utf-8"))
+            await asyncio.to_thread(write_input)
+            command.extend(["--input", str(input_path)])
+        else:
+            command.insert(2, str(claimed["output_dir"]))
         if self.settings.no_sscd:
             command.append("--no-sscd")
         if self.settings.no_dino:
             command.append("--no-dino")
         environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(Path(__file__).parent.parent) + os.pathsep + environment.get("PYTHONPATH", "")
         environment.setdefault("PYTHONUTF8", "1")
         environment.setdefault("PYTHONUNBUFFERED", "1")
         creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -243,11 +278,17 @@ class DedupReviewManager:
 
     @staticmethod
     def _validate_manifest(claimed: dict[str, Any], manifest: dict[str, Any]) -> None:
-        if int(manifest.get("schema_version") or 0) not in {1, 2}:
+        if int(manifest.get("schema_version") or 0) not in {1, 2, 3}:
             raise ValueError("去重审核清单版本无效")
-        root = Path(claimed["output_dir"]).resolve()
-        if Path(str(manifest.get("root") or "")).resolve() != root:
-            raise ValueError("去重审核清单的批次目录不匹配")
+        inputs = {image["asset_id"]: image for image in claimed.get("images", [])} if claimed.get("review_id") else None
+        if inputs is not None:
+            if manifest.get("review_id") != claimed["review_id"] or manifest.get("schema_version") != 3:
+                raise ValueError("图库审核清单身份不匹配")
+            root = None
+        else:
+            root = Path(claimed["output_dir"]).resolve()
+            if Path(str(manifest.get("root") or "")).resolve() != root:
+                raise ValueError("去重审核清单的批次目录不匹配")
         groups = manifest.get("groups")
         if not isinstance(groups, list):
             raise ValueError("去重审核清单缺少 groups")
@@ -265,7 +306,12 @@ class DedupReviewManager:
                 raise ValueError("去重审核图片 ID 无效")
             if not relative_path:
                 raise ValueError("去重审核图片路径无效")
-            resolve_review_file(root, relative_path)
+            if inputs is not None:
+                selected = inputs.get(image_id)
+                if selected is None or relative_path != selected["source_id"] + "/" + selected["relative_path"]:
+                    raise ValueError("图库审核清单包含快照范围外图片")
+            else:
+                resolve_review_file(root, relative_path)
             if count:
                 if image_id in seen_images:
                     raise ValueError("去重审核图片 ID 重复")
@@ -308,19 +354,21 @@ class DedupReviewManager:
             if winner_path not in manual_paths:
                 raise ValueError("自动去重组的保留图未进入人工审核")
         expected = int((manifest.get("counts") or {}).get("images") or 0)
+        if inputs is not None and set(inputs) != seen_images:
+            raise ValueError("图库审核清单未完整覆盖所选快照")
         if expected != len(seen_images):
             raise ValueError("去重审核清单的图片计数不一致")
 
     def start_analysis(self, batch_id: str) -> dict[str, Any]:
         if not self.settings.enabled:
             raise RuntimeError("去重功能未启用")
-        review = self.db.start_crawl_review(batch_id)
+        review = self.repository.start_crawl_review(batch_id)
         if review["status"] == "pending":
             self.notify()
         return review
 
     def retry_analysis(self, batch_id: str) -> bool:
-        retried = self.db.retry_crawl_review(batch_id)
+        retried = self.repository.retry_crawl_review(batch_id)
         if retried:
             self.notify()
         return retried

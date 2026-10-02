@@ -14,33 +14,32 @@ export const APPLICATIONS = [
 
 export type AppId = (typeof APPLICATIONS)[number];
 
-export function appWindow(page: Page, appId: string): Locator {
-  return page.locator(`[data-app-window][data-app-id="${appId}"]`);
+export function appPage(page: Page, appId: string): Locator {
+  return page.locator(`[data-app-page][data-app-id="${appId}"]`);
 }
 
 export async function prepareRichState(page: Page, appId: AppId): Promise<void> {
-  const window = appWindow(page, appId);
+  const app = appPage(page, appId);
   if (appId === "crawl") {
-    await window.locator("[data-crawl-keyword]").fill("fixture");
-    const suggestion = window.getByRole("option", { name: /Fixture Artist/ });
+    await app.locator("[data-crawl-keyword]").fill("fixture");
+    const suggestion = app.getByRole("option", { name: /Fixture Artist/ });
     await expect(suggestion).toBeVisible();
     await suggestion.click();
-    await window.getByRole("button", { name: "搜索来源" }).click();
-    await expect(window.locator("[data-crawl-candidate]").first()).toBeVisible();
+    await app.getByRole("button", { name: "搜索来源" }).click();
+    await expect(app.locator("[data-crawl-candidate]").first()).toBeVisible();
   } else if (appId === "tasks") {
-    await window.getByRole("listbox", { name: "最近批次" }).selectOption("batch-running");
-    await window.getByRole("button", { name: "查看所选批次" }).click();
-    await expect(window.getByRole("heading", { name: "图片任务" })).toBeVisible();
+    await app.getByRole("listbox", { name: "最近批次" }).selectOption("batch-running");
+    await app.getByRole("button", { name: "查看所选批次" }).click();
+    await expect(app.getByRole("heading", { name: "图片任务" })).toBeVisible();
   } else if (appId === "review") {
-    await window.getByRole("combobox", { name: "已结束批次" }).selectOption("batch-review");
-    await window.getByRole("button", { name: "打开审核" }).click();
-    await expect(window.getByRole("heading", { name: /组 1/ })).toBeVisible();
-    await expect(window.locator("[data-review-engine-image]").first()).toHaveAttribute("data-review-engine-decoded", "true");
+    await app.getByRole("combobox", { name: "已提交审核任务" }).selectOption("review-fixture");
+    await expect(app.getByRole("heading", { name: /组 1/ })).toBeVisible();
+    await expect(app.locator("[data-review-engine-image]").first()).toHaveAttribute("data-review-engine-decoded", "true");
   } else if (appId === "gallery") {
-    await window.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
-    await expect(window.locator("[data-gallery-asset=\"gal-asset-01\"]")).toBeVisible();
+    await app.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+    await expect(app.locator('[data-gallery-asset="gal-asset-01"]')).toBeVisible();
   } else {
-    const busy = window.locator("[aria-busy]").first();
+    const busy = app.locator("[aria-busy]").first();
     if (await busy.count()) await expect(busy).toHaveAttribute("aria-busy", "false");
   }
 }

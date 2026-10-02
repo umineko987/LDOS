@@ -1,13 +1,10 @@
-import { APPLICATIONS, appWindow, prepareRichState } from "./fixtures/app-state";
+import { APPLICATIONS, appPage, prepareRichState } from "./fixtures/app-state";
+import { bootDesktop, expect, launchApp, test } from "./fixtures/test";
 
-import { bootDesktop, expect, launchApp, maximizeApp, test } from "./fixtures/test";
-
-test("应用中心视觉基线", async ({ page }) => {
+// Regenerate these baselines only after the shared workbench styles have settled.
+test("工作台默认采集视觉基线", async ({ page }) => {
   await bootDesktop(page);
-  await page.keyboard.press("Control+o");
-  const center = page.locator("[data-application-center]");
-  await expect(center).toBeVisible();
-  await expect(center).toHaveScreenshot("application-center.png", {
+  await expect(page.locator("[data-workbench]")).toHaveScreenshot("workbench.png", {
     animations: "disabled",
     caret: "hide",
     maxDiffPixelRatio: 0.002,
@@ -15,12 +12,11 @@ test("应用中心视觉基线", async ({ page }) => {
 });
 
 for (const appId of APPLICATIONS) {
-  test(`${appId} 丰富状态视觉基线`, async ({ page }) => {
+  test(`${appId} 全屏业务页丰富状态视觉基线`, async ({ page }) => {
     await bootDesktop(page);
     await launchApp(page, appId);
-    await maximizeApp(page, appId);
     await prepareRichState(page, appId);
-    await expect(appWindow(page, appId)).toHaveScreenshot(`${appId}-maximized.png`, {
+    await expect(appPage(page, appId)).toHaveScreenshot(`${appId}-page.png`, {
       animations: "disabled",
       caret: "hide",
       maxDiffPixelRatio: 0.002,

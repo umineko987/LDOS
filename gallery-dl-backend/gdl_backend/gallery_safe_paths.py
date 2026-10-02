@@ -607,6 +607,7 @@ class SafeSourceRoot:
         target_relative: str,
         *,
         create_target_parents: bool = True,
+        expected_disk_version: str | None = None,
     ) -> None:
         if not _HAS_DIR_FD:
             source = self._fallback_path(source_relative)
@@ -632,6 +633,8 @@ class SafeSourceRoot:
                     or (target_metadata.st_dev, target_metadata.st_ino) != identity
                 ):
                     raise UnsafeSourcePathError(source_relative, "leaf_changed")
+                if expected_disk_version is not None and self.disk_version(source_relative) != expected_disk_version:
+                    raise UnsafeSourcePathError(source_relative, "disk_version_conflict")
                 source.unlink()
             except Exception:
                 target.unlink(missing_ok=True)
@@ -676,6 +679,11 @@ class SafeSourceRoot:
                         or (target_metadata.st_dev, target_metadata.st_ino) != identity
                     ):
                         raise UnsafeSourcePathError(source_relative, "leaf_changed")
+                    if expected_disk_version is not None:
+                        with os.fdopen(os.dup(descriptor), "rb") as handle:
+                            digest = hashlib.file_digest(handle, "sha256").digest()
+                        if _opaque_disk_version(os.fstat(descriptor), digest) != expected_disk_version:
+                            raise UnsafeSourcePathError(source_relative, "disk_version_conflict")
                     os.unlink(source_name, dir_fd=source_parent)
                     target_created = False
                 except OSError as error:

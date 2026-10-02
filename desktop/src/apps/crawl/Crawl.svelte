@@ -207,11 +207,10 @@
 >
   <header class="crawl-header">
     <div>
-      <p>图片采集</p>
-      <h1 id="crawl-heading">来源发现与有序批次</h1>
+      <h1 id="crawl-heading">采集</h1>
     </div>
     <span class="crawl-status" data-kind={snapshot.phase === "error" ? "error" : snapshot.busy ? "running" : "ready"}>
-      {snapshot.busy === "search" ? "正在搜索" : snapshot.busy === "crawl" ? "正在创建" : snapshot.phase === "error" ? "需要处理" : "真实 API 工作区"}
+      {snapshot.busy === "search" ? "正在搜索" : snapshot.busy === "crawl" ? "正在创建" : snapshot.phase === "error" ? "需要处理" : "就绪"}
     </span>
   </header>
 
@@ -226,17 +225,37 @@
     </section>
   {/if}
 
-  <p class="crawl-live" role="status" aria-live="polite">{snapshot.message}</p>
+  <p class="crawl-live" role="status" aria-live="polite">{snapshot.message.replaceAll("操作地址已安全清理，需要重新搜索后才能创建批次。", "请重新搜索，再创建批次。")}</p>
 
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-scrollable three-column workspace) -->
-  <section class="crawl-workspace" tabindex="0" aria-label="图片采集三段工作区，可横向滚动查看全部三栏">
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-scrollable workspace) -->
+  <section class="crawl-workspace" tabindex="0" aria-label="图片采集工作区">
     <div class="crawl-workspace__track">
-      <aside class="crawl-column" aria-labelledby="crawl-sources-heading">
-        <header><p>01 · 来源</p><h2 id="crawl-sources-heading">来源与连接</h2><span>启用来源，并按真实执行顺序排列。</span></header>
+      <aside class="crawl-column crawl-column--sources" aria-labelledby="crawl-sources-heading">
+        <header><h2 id="crawl-sources-heading">来源与顺序</h2></header>
         <div class="crawl-column__scroll">
-          <fieldset class="crawl-panel" aria-describedby="crawl-source-discovery-note">
-            <legend>来源启用状态</legend>
-            <p id="crawl-source-discovery-note">Danbooru、EH 与 Pawchive / Pawoo 执行站内发现；X / Twitter 与 Pixiv 只从 Danbooru 画师目录读取关联账户。X / Twitter 与 Pixiv 授权仅用于后续访问与采集，不会扩大当前发现范围。</p>
+          {#if sources.length}
+            <nav class="crawl-source-list" aria-label="采集来源顺序与当前来源">
+              {#each sources as source, index (source.key)}
+                <section class:active={source.key === snapshot.activeSourceKey} data-source-key={source.key}>
+                  <button
+                    type="button"
+                    class="crawl-source-select"
+                    aria-current={source.key === snapshot.activeSourceKey ? "page" : undefined}
+                    aria-label={`第 ${index + 1} 个来源，${source.label}，${selectedInSource(source.key)} 个已选地址`}
+                    onclick={() => store.setActiveSource(source.key)}
+                  >{index + 1}. {source.label}</button>
+                  <small>{source.status === "succeeded" ? "完整" : source.status === "partial" ? "部分" : "失败"} · {selectedInSource(source.key)} 已选</small>
+                  <span class="crawl-order-actions">
+                    <button type="button" disabled={index === 0} aria-label={`将来源 ${source.label} 上移一位`} onclick={() => store.moveSource(source.key, -1)}>上移</button>
+                    <button type="button" disabled={index === sources.length - 1} aria-label={`将来源 ${source.label} 下移一位`} onclick={() => store.moveSource(source.key, 1)}>下移</button>
+                  </span>
+                </section>
+              {/each}
+            </nav>
+          {/if}
+          <fieldset class="crawl-panel crawl-source-settings" aria-describedby="crawl-source-discovery-note">
+            <legend>搜索来源</legend>
+            <details class="crawl-discovery-note"><summary>来源发现范围</summary><p id="crawl-source-discovery-note">Danbooru、EH 与 Pawchive / Pawoo 支持站内搜索；X / Twitter 与 Pixiv 从 Danbooru 画师目录查找关联账户，采集时需要相应授权。</p></details>
             {#each CRAWL_SITE_DEFINITIONS as site (site.id)}
               <div class="crawl-source-setting">
                 <label>
@@ -248,7 +267,14 @@
                   />
                   <strong>{site.label}</strong>
                 </label>
-                <label>
+              </div>
+            {/each}
+          </fieldset>
+          <details class="crawl-advanced">
+            <summary>各来源代理设置</summary>
+            <div class="crawl-advanced__body">
+              {#each CRAWL_SITE_DEFINITIONS as site (site.id)}
+                <label class="crawl-field">
                   <span>{site.label} 代理覆盖</span>
                   <select aria-label={`${site.label} 代理覆盖`} bind:value={sourceProxyModes[site.id]}>
                     <option value="">使用全局设置</option>
@@ -257,28 +283,10 @@
                     <option value="direct">不使用代理</option>
                   </select>
                 </label>
-              </div>
-            {/each}
-          </fieldset>
+              {/each}
+            </div>
+          </details>
 
-          <nav class="crawl-source-list" aria-label="采集来源顺序与当前来源">
-            {#each sources as source, index (source.key)}
-              <section class:active={source.key === snapshot.activeSourceKey} data-source-key={source.key}>
-                <button
-                  type="button"
-                  class="crawl-source-select"
-                  aria-current={source.key === snapshot.activeSourceKey ? "page" : undefined}
-                  aria-label={`第 ${index + 1} 个来源，${source.label}，${selectedInSource(source.key)} 个已选地址`}
-                  onclick={() => store.setActiveSource(source.key)}
-                >{index + 1}. {source.label}</button>
-                <small>{source.status === "succeeded" ? "完整" : source.status === "partial" ? "部分" : "失败"} · {selectedInSource(source.key)} 已选</small>
-                <span class="crawl-order-actions">
-                  <button type="button" disabled={index === 0} aria-label={`将来源 ${source.label} 上移一位`} onclick={() => store.moveSource(source.key, -1)}>上移</button>
-                  <button type="button" disabled={index === sources.length - 1} aria-label={`将来源 ${source.label} 下移一位`} onclick={() => store.moveSource(source.key, 1)}>下移</button>
-                </span>
-              </section>
-            {/each}
-          </nav>
 
           {#if activeSource?.site === "exhentai" && activeSource.tagFacets.length}
             <section class="crawl-eh" aria-labelledby="crawl-eh-heading">
@@ -306,8 +314,8 @@
         </div>
       </aside>
 
-      <main class="crawl-column crawl-column--candidates" aria-labelledby="crawl-candidates-heading">
-        <header><p>02 · 候选</p><h2 id="crawl-candidates-heading">搜索与候选地址</h2><span>只显示安全投影；原始操作地址不会进入 DOM。</span></header>
+      <section class="crawl-column crawl-column--candidates" aria-labelledby="crawl-candidates-heading">
+        <header><h2 id="crawl-candidates-heading">搜索与候选地址</h2><span>勾选要采集的地址，可用上移、下移调整顺序。</span></header>
         <div class="crawl-column__scroll">
           <form class="crawl-search" onsubmit={(event) => { event.preventDefault(); void runSearch(); }}>
             <label class="crawl-field crawl-field--keyword">
@@ -325,7 +333,7 @@
                 aria-expanded={snapshot.suggestions.length > 0}
                 aria-controls="crawl-suggestions"
                 aria-activedescendant={suggestionIndex >= 0 ? `crawl-suggestion-${suggestionIndex}` : undefined}
-                aria-invalid={!searchValidation.valid && searchValidation.field === "keyword"}
+                aria-invalid={keyword.length > 0 && !searchValidation.valid && searchValidation.field === "keyword"}
                 value={keyword}
                 oninput={(event) => onKeywordInput((event.currentTarget as HTMLInputElement).value)}
                 onkeydown={onSuggestionKeydown}
@@ -355,7 +363,7 @@
               <label class="crawl-field"><span>结果上限</span><input type="number" min="1" max="200" bind:value={searchLimit} /></label>
               <label class="crawl-field"><span>全局搜索代理</span><select bind:value={searchProxy}><option value="required">仅使用代理</option><option value="prefer">优先代理，不可用时直连</option><option value="direct">不使用代理</option></select></label>
             </div>
-            {#if !searchValidation.valid}<p class="crawl-validation" role="status">{searchValidation.reason}</p>{/if}
+            {#if !searchValidation.valid && (searchValidation.field !== "keyword" || keyword.length > 0)}<p class="crawl-validation" role="status">{searchValidation.reason}</p>{/if}
             <button type="submit" class="primary" disabled={Boolean(snapshot.busy) || !searchValidation.valid}>{snapshot.busy === "search" ? "正在搜索…" : "搜索来源"}</button>
           </form>
 
@@ -393,45 +401,52 @@
             {/if}
           </section>
         </div>
-      </main>
+      </section>
 
-      <aside class="crawl-column" aria-labelledby="crawl-submit-heading">
-        <header><p>03 · 执行</p><h2 id="crawl-submit-heading">摘要与创建批次</h2><span>选择和排序按稳定业务 key 投影。</span></header>
-        <div class="crawl-column__scroll">
-          <section class="crawl-panel" aria-labelledby="crawl-selection-heading">
+      <aside class="crawl-column crawl-column--submit" aria-labelledby="crawl-submit-heading">
+        <div class="crawl-submit-summary">
+          <h2 id="crawl-submit-heading">创建批次</h2>
+          <section class="crawl-selection" aria-labelledby="crawl-selection-heading">
             <h3 id="crawl-selection-heading">当前选择</h3>
-            <div class="crawl-selection"><strong>{new Set(selected.map(({ sourceKey }) => sourceKey)).size} 个来源</strong><span>{selected.length} 个地址</span></div>
+            <strong>{new Set(selected.map(({ sourceKey }) => sourceKey)).size} 个来源</strong><span>{selected.length} 个地址</span>
           </section>
-          <section class="crawl-panel" aria-labelledby="crawl-order-heading">
-            <h3 id="crawl-order-heading">执行顺序</h3>
+          <details class="crawl-advanced crawl-order-preview">
+            <summary id="crawl-order-heading">预览执行顺序</summary>
             <ol class="crawl-execution">
               {#each sources.filter((source) => selectedInSource(source.key) > 0) as source (source.key)}
                 <li><strong>{source.label}</strong><ol>{#each (snapshot.candidateOrder[source.key] ?? []).filter((key) => snapshot.candidates[key]?.selected) as key (key)}<li>{snapshot.candidates[key].label} · {snapshot.candidates[key].displayEndpoint}</li>{/each}</ol></li>
-              {:else}<li>选择候选后在此预览精确执行顺序。</li>{/each}
+              {:else}<li>选择候选后在此预览执行顺序。</li>{/each}
             </ol>
-          </section>
-          <form class="crawl-create" onsubmit={(event) => { event.preventDefault(); void createBatch(); }}>
-            <fieldset class="crawl-panel">
-              <legend>批次设置</legend>
-              <label class="crawl-field"><span>单地址并发</span><input type="number" min="1" max="128" bind:value={concurrency} /></label>
-              <label class="crawl-field"><span>最多任务数</span><input type="number" min="1" max="100000" bind:value={maxTasks} /></label>
-              <label class="crawl-field"><span>下载代理</span><select bind:value={crawlProxy}><option value="required">仅使用代理</option><option value="prefer">优先代理，不可用时直连</option><option value="direct">不使用代理</option></select></label>
-              <label class="crawl-field"><span>输出目录（可选）</span><input type="text" maxlength="2048" autocomplete="off" placeholder="系统允许的输出目录" value={outputDir} onbeforeinput={preventUnsafeOutput} oninput={(event) => { outputDir = (event.currentTarget as HTMLInputElement).value; outputDirInvalid = /[\u0000-\u001f\u007f]/.test(outputDir); }} /><small>仅保留到本次提交；最小化、关闭或离开应用即清空。</small></label>
-            </fieldset>
-            {#if selected.some(({ site }) => site === "exhentai")}
-              <fieldset class="crawl-panel">
-                <legend>EH 下载选项</legend>
-                <label><input type="radio" name="eh-image-mode" value="original" bind:group={imageMode} />原图</label>
-                <label><input type="radio" name="eh-image-mode" value="resample" bind:group={imageMode} onchange={() => { gpPolicy = "stop"; }} />1280 查看图</label>
-                <label class="crawl-field"><span>原图 GP 不足时</span><select bind:value={gpPolicy} disabled={imageMode === "resample"}><option value="stop">停止该地址</option><option value="resized">降级到 1280 查看图</option></select></label>
-              </fieldset>
-            {/if}
-            {#if !crawlValidation.valid}<p class="crawl-validation" role="status">{crawlValidation.reason}</p>{/if}
-            {#if !snapshot.operationalAvailable}<p class="crawl-validation" role="alert">操作地址已安全清理，需要重新搜索后才能创建批次。</p>{/if}
-            <p class="crawl-submit-reason" aria-live="polite">{canCreate ? "已就绪，可按当前顺序创建批次。" : selected.length ? crawlValidation.reason || "当前暂不可创建。" : "请先选择至少一个候选地址。"}</p>
-            <button type="submit" class="primary" disabled={!canCreate}>{snapshot.busy === "crawl" ? "正在创建批次…" : "创建批次"}</button>
-          </form>
+          </details>
         </div>
+        <form class="crawl-create" onsubmit={(event) => { event.preventDefault(); void createBatch(); }}>
+          <details class="crawl-advanced crawl-batch-settings">
+            <summary>批次设置 · 并发 {concurrency} · {selected.some(({ site }) => site === "exhentai") ? "代理、目录与 EH 选项" : "代理与输出目录"}</summary>
+            <div class="crawl-advanced__body">
+              <fieldset class="crawl-panel crawl-batch-fields">
+                <legend>批次设置</legend>
+                <label class="crawl-field"><span>单地址并发</span><input type="number" min="1" max="128" bind:value={concurrency} /></label>
+                <label class="crawl-field"><span>最多任务数</span><input type="number" min="1" max="100000" bind:value={maxTasks} /></label>
+                <label class="crawl-field"><span>下载代理</span><select bind:value={crawlProxy}><option value="required">仅使用代理</option><option value="prefer">优先代理，不可用时直连</option><option value="direct">不使用代理</option></select></label>
+                <label class="crawl-field crawl-field--output"><span>输出目录（可选）</span><input type="text" maxlength="2048" autocomplete="off" placeholder="留空使用默认目录" value={outputDir} onbeforeinput={preventUnsafeOutput} oninput={(event) => { outputDir = (event.currentTarget as HTMLInputElement).value; outputDirInvalid = /[\u0000-\u001f\u007f]/.test(outputDir); }} /><small>仅用于本次提交，离开采集页后清空。</small></label>
+              </fieldset>
+              {#if selected.some(({ site }) => site === "exhentai")}
+                <fieldset class="crawl-panel crawl-eh-download">
+                  <legend>EH 下载选项</legend>
+                  <label><input type="radio" name="eh-image-mode" value="original" bind:group={imageMode} />原图</label>
+                  <label><input type="radio" name="eh-image-mode" value="resample" bind:group={imageMode} onchange={() => { gpPolicy = "stop"; }} />1280 查看图</label>
+                  <label class="crawl-field"><span>原图 GP 不足时</span><select bind:value={gpPolicy} disabled={imageMode === "resample"}><option value="stop">停止该地址</option><option value="resized">降级到 1280 查看图</option></select></label>
+                </fieldset>
+              {/if}
+            </div>
+          </details>
+          {#if !crawlValidation.valid}<p class="crawl-validation" role="status">{crawlValidation.reason}</p>{/if}
+          {#if !snapshot.operationalAvailable}<p class="crawl-validation" role="alert">请重新搜索，再创建批次。</p>{/if}
+          <div class="crawl-create-actions">
+            <p class="crawl-submit-reason" aria-live="polite">{canCreate ? "按当前选择和顺序开始采集。" : selected.length ? crawlValidation.reason || "当前暂不可创建。" : "请先选择至少一个候选地址。"}</p>
+            <button type="submit" class="primary" disabled={!canCreate}>{snapshot.busy === "crawl" ? "正在创建批次…" : "创建批次"}</button>
+          </div>
+        </form>
       </aside>
     </div>
   </section>

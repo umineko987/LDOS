@@ -17,7 +17,7 @@ body {
   min-width: 320px;
   color: var(--ldos-text-body);
   background: var(--ldos-background-deepest);
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.55;
   text-rendering: optimizeLegibility;
 }
@@ -31,8 +31,8 @@ textarea {
 }
 
 button {
-  min-height: 44px;
-  padding: 8px 14px;
+  min-height: 36px;
+  padding: 6px 12px;
   border: 1px solid var(--ldos-border-button);
   border-radius: var(--ldos-radius-control);
   color: var(--ldos-text-heading);
@@ -50,18 +50,12 @@ button {
 button:hover:not(:disabled) {
   border-color: var(--ldos-border-focus);
   background: var(--ldos-glass-surface-hover);
-  transform: translateY(-2px);
-}
-
-button:active:not(:disabled) {
-  transform: scale(0.97);
 }
 
 button:disabled,
 button[aria-disabled="true"] {
   color: var(--ldos-text-muted);
   cursor: not-allowed;
-  text-decoration: line-through;
 }
 
 button:focus-visible,
@@ -150,10 +144,6 @@ h3 {
   transform: none;
 }
 
-.desktop-size-blocker {
-  display: none;
-}
-
 :root[data-motion="off"] *,
 :root[data-motion="off"] *::before,
 :root[data-motion="off"] *::after {
@@ -169,31 +159,6 @@ h3 {
     scroll-behavior: auto !important;
     animation: none !important;
     transition: none !important;
-  }
-}
-
-@media (max-width: 1179px), (max-height: 719px) {
-  .desktop {
-    display: none !important;
-  }
-
-  .desktop-size-blocker {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    color: CanvasText;
-    background: Canvas;
-  }
-
-  .desktop-size-blocker > div {
-    width: min(540px, 100%);
-    padding: 28px;
-    border: 2px solid CanvasText;
-    border-radius: var(--ldos-radius-window);
-    text-align: center;
   }
 }
 

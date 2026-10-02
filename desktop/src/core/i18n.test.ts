@@ -44,6 +44,16 @@ describe("UI localization", () => {
       ["活动 · 运行中 · batch-1", "Active · Running · batch-1"],
       ["终态 · 成功 · batch-1", "Finished · Succeeded · batch-1"],
       ["当前筛选显示 2 / 最近 5 个批次。", "Current filter shows 2 / 5 recent batches."],
+      ["配色：夜航石墨", "Palette: Nocturne Graphite"],
+      ["批次设置 · 并发 20 · 代理与输出目录", "Batch settings · concurrency 20 · Proxy and output folder"],
+      ["来源进度汇总（2）", "Source progress summary (2)"],
+      ["当前页错误分类（3 个任务）", "Error categories for this page (3 tasks)"],
+      ["Pixiv 正等待授权浏览器操作。", "Pixiv is waiting for authorization browser interaction."],
+      ["组 1 · 重复组", "Group 1 · Duplicate groups"],
+      ["1. 独立图片 · 1/1 保留 · 已确认", "1. Single images · 1/1 kept · Confirmed"],
+      ["图 2 · 推荐项", "Image 2 · Recommended"],
+      ["1 / 2 组已确认", "1 / 2 groups confirmed"],
+      ["当前组 2 / 3 保留", "Current group 2 / 3 kept"],
     ] as const;
 
     for (const [source, expected] of cases) {
@@ -52,6 +62,17 @@ describe("UI localization", () => {
     expect(translateUiText("本地服务已连接 · custom", "en"))
       .toBe("Local service connected · custom");
     expect(translateUiText("  应用中心\n", "en")).toBe("  Application Center\n");
+  });
+
+  it("translates compact-page status copy without reintroducing window wording", () => {
+    expect(translateUiText("当前显示批次摘要与任务详情。", "en"))
+      .toBe("Showing the batch summary and task details.");
+    expect(translateUiText("部分检查失败；未更新的结果已标记为过期。", "en"))
+      .toBe("Some checks failed. Results that were not updated are marked stale.");
+    expect(translateUiText("操作完成并重新读取设置前，请勿离开此页。", "en"))
+      .toBe("Do not leave this page until the action finishes and settings are refreshed.");
+    expect(translateUiText("正在预览工作台配色，点击“应用”保存。", "en"))
+      .toBe("Previewing the workbench palette. Select Apply to save.");
   });
 
   it("preserves user content inside localized controls", () => {

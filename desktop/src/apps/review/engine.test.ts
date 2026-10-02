@@ -17,7 +17,7 @@ import {
 import type { ReviewImage } from "./model";
 
 function image(id: string, width: number, height: number, recommended = false): ReviewImage {
-  return Object.freeze({ id, ordinal: 1, readable: true, recommended, selected: true, width, height });
+  return Object.freeze({ id, ordinal: 1, readable: true, recommended, selected: true, width, height, sourceLabel: "Source", relativePath: `${id}.jpg` });
 }
 
 class FakeImage {

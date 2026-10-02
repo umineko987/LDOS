@@ -28,9 +28,10 @@ class CrawlReviewGroupLimitExceeded(RuntimeError):
 def read_crawl_review_manifest_state(
     connection: sqlite3.Connection,
     batch_id: str,
+    *, reviews_table: str = "crawl_reviews", identity_column: str = "batch_id",
 ) -> dict[str, Any]:
     row = connection.execute(
-        "SELECT status FROM crawl_reviews WHERE batch_id=?",
+        f"SELECT status FROM {reviews_table} WHERE {identity_column}=?",
         (batch_id,),
     ).fetchone()
     if row is None or row["status"] != "analyzing":
@@ -208,16 +209,19 @@ def write_crawl_review_manifest(
     normalized: dict[str, Any],
     *,
     now: float,
+    groups_table: str = "crawl_review_groups",
+    images_table: str = "crawl_review_images",
+    identity_column: str = "batch_id",
 ) -> None:
     connection.execute(
-        "DELETE FROM crawl_review_groups WHERE batch_id=?",
+        f"DELETE FROM {groups_table} WHERE {identity_column}=?",
         (batch_id,),
     )
     for group in normalized["groups"]:
         connection.execute(
-            """
-            INSERT INTO crawl_review_groups(
-                batch_id, id, ordinal, kind, match_levels_json, reason,
+            f"""
+            INSERT INTO {groups_table}(
+                {identity_column}, id, ordinal, kind, match_levels_json, reason,
                 decided, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -235,9 +239,9 @@ def write_crawl_review_manifest(
         )
         for image in group["images"]:
             connection.execute(
-                """
-                INSERT INTO crawl_review_images(
-                    batch_id, id, group_id, ordinal, relative_path, file_hash,
+                f"""
+                INSERT INTO {images_table}(
+                    {identity_column}, id, group_id, ordinal, relative_path, file_hash,
                     metadata_json, readable, recommended, selected, disposition,
                     created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
@@ -282,15 +286,16 @@ def update_crawl_review_manifest_result(
     *,
     log_path: str,
     now: float,
+    reviews_table: str = "crawl_reviews", identity_column: str = "batch_id",
 ) -> None:
     connection.execute(
-        """
-        UPDATE crawl_reviews SET status=?, total_image_count=?,
+        f"""
+        UPDATE {reviews_table} SET status=?, total_image_count=?,
             total_group_count=?, duplicate_group_count=?, unreadable_image_count=?,
             automatic_group_count=?, automatic_rejected_image_count=?,
             kept_image_count=0, rejected_image_count=0, failed_image_count=0,
             error='', analysis_log_path=?, ready_at=?, updated_at=?
-        WHERE batch_id=?
+        WHERE {identity_column}=?
         """,
         (
             result["status"],
@@ -319,12 +324,18 @@ class ReviewRepository:
         clock: Clock,
         max_groups: GroupLimit,
         get_review: ReviewReader,
+        gallery: bool = False,
     ) -> None:
         self._read = read
         self._transaction = transaction
         self._clock = clock
         self._max_groups = max_groups
         self._get_review = get_review
+        prefix = "gallery" if gallery else "crawl"
+        self.reviews_table = f"{prefix}_reviews"
+        self.groups_table = f"{prefix}_review_groups"
+        self.images_table = f"{prefix}_review_images"
+        self.identity_column = "review_id" if gallery else "batch_id"
 
     _crawl_review = staticmethod(project_crawl_review)
     _crawl_review_group = staticmethod(project_crawl_review_group)
@@ -341,7 +352,10 @@ class ReviewRepository:
         automatic_groups = list(manifest.get("auto_groups") or [])
         now = self._clock()
         with self._transaction() as connection:
-            read_crawl_review_manifest_state(connection, batch_id)
+            read_crawl_review_manifest_state(
+                connection, batch_id, reviews_table=self.reviews_table,
+                identity_column=self.identity_column,
+            )
             normalized = normalize_crawl_review_manifest(
                 manifest,
                 groups=groups,
@@ -352,40 +366,42 @@ class ReviewRepository:
                 connection,
                 batch_id,
                 normalized,
-                now=now,
+                now=now, groups_table=self.groups_table, images_table=self.images_table,
+                identity_column=self.identity_column,
             )
             update_crawl_review_manifest_result(
                 connection,
                 batch_id,
                 result,
                 log_path=log_path,
-                now=now,
+                now=now, reviews_table=self.reviews_table,
+                identity_column=self.identity_column,
             )
 
     def get_crawl_review(self, batch_id: str) -> dict[str, Any] | None:
         with self._read() as conn:
             row = conn.execute(
-                "SELECT * FROM crawl_reviews WHERE batch_id=?",
+                f"SELECT * FROM {self.reviews_table} WHERE {self.identity_column}=?",
                 (batch_id,),
             ).fetchone()
             review = self._crawl_review(row)
             if review is None:
                 return None
             image_counts = conn.execute(
-                """
+                f"""
                 SELECT
                     SUM(CASE WHEN selected=1 THEN 1 ELSE 0 END) AS selected_count,
                     SUM(CASE WHEN disposition='kept' THEN 1 ELSE 0 END) AS kept_count,
                     SUM(CASE WHEN disposition='rejected' THEN 1 ELSE 0 END) AS rejected_count,
                     SUM(CASE WHEN disposition='failed' THEN 1 ELSE 0 END) AS failed_count
-                FROM crawl_review_images WHERE batch_id=?
+                FROM {self.images_table} WHERE {self.identity_column}=?
                 """,
                 (batch_id,),
             ).fetchone()
             decided = conn.execute(
-                """
-                SELECT COUNT(*) FROM crawl_review_groups
-                WHERE batch_id=? AND decided=1 AND kind NOT LIKE 'auto_%'
+                f"""
+                SELECT COUNT(*) FROM {self.groups_table}
+                WHERE {self.identity_column}=? AND decided=1 AND kind NOT LIKE 'auto_%'
                 """,
                 (batch_id,),
             ).fetchone()[0]
@@ -412,11 +428,11 @@ class ReviewRepository:
             if batch["status"] not in {"succeeded", "completed_with_errors", "cancelled"}:
                 raise RuntimeError("爬取批次结束后才能启动去重分析")
             conn.execute(
-                """
-                INSERT INTO crawl_reviews(batch_id, status, created_at, updated_at)
+                f"""
+                INSERT INTO {self.reviews_table}({self.identity_column}, status, created_at, updated_at)
                 VALUES (?, 'pending', ?, ?)
-                ON CONFLICT(batch_id) DO UPDATE SET status='pending', updated_at=?, error=''
-                WHERE crawl_reviews.status='waiting_for_crawl'
+                ON CONFLICT({self.identity_column}) DO UPDATE SET status='pending', updated_at=?, error=''
+                WHERE {self.reviews_table}.status='waiting_for_crawl'
                 """,
                 (batch_id, now, now, now),
             )
@@ -429,16 +445,16 @@ class ReviewRepository:
         now = self._clock()
         with self._transaction() as conn:
             analyzing = conn.execute(
-                """
-                UPDATE crawl_reviews SET status='pending', updated_at=?,
+                f"""
+                UPDATE {self.reviews_table} SET status='pending', updated_at=?,
                     error='服务重启，重新执行去重分析'
                 WHERE status='analyzing'
                 """,
                 (now,),
             ).rowcount
             applying = conn.execute(
-                """
-                UPDATE crawl_reviews SET status='apply_failed', updated_at=?,
+                f"""
+                UPDATE {self.reviews_table} SET status='apply_failed', updated_at=?,
                     error='服务重启，需重试应用审核结果'
                 WHERE status='applying'
                 """,
@@ -450,9 +466,9 @@ class ReviewRepository:
         now = self._clock()
         with self._transaction() as conn:
             row = conn.execute(
-                """
-                SELECT cr.batch_id, cb.output_dir FROM crawl_reviews cr
-                JOIN crawl_batches cb ON cb.id=cr.batch_id
+                f"""
+                SELECT cr.{self.identity_column}, cb.output_dir FROM {self.reviews_table} cr
+                JOIN crawl_batches cb ON cb.id=cr.{self.identity_column}
                 WHERE cr.status='pending'
                   AND cb.status IN ('succeeded','completed_with_errors','cancelled')
                 ORDER BY cb.finished_at, cb.created_at LIMIT 1
@@ -461,10 +477,10 @@ class ReviewRepository:
             if row is None:
                 return None
             updated = conn.execute(
-                """
-                UPDATE crawl_reviews SET status='analyzing', started_at=?, updated_at=?,
+                f"""
+                UPDATE {self.reviews_table} SET status='analyzing', started_at=?, updated_at=?,
                     ready_at=NULL, applied_at=NULL, error=''
-                WHERE batch_id=? AND status='pending'
+                WHERE {self.identity_column}=? AND status='pending'
                 """,
                 (now, now, row["batch_id"]),
             )
@@ -475,9 +491,9 @@ class ReviewRepository:
     def next_crawl_review_automatic(self) -> dict[str, Any] | None:
         with self._read() as conn:
             row = conn.execute(
-                """
-                SELECT cr.batch_id, cb.output_dir FROM crawl_reviews cr
-                JOIN crawl_batches cb ON cb.id=cr.batch_id
+                f"""
+                SELECT cr.{self.identity_column}, cb.output_dir FROM {self.reviews_table} cr
+                JOIN crawl_batches cb ON cb.id=cr.{self.identity_column}
                 WHERE cr.status='auto_applying'
                 ORDER BY cr.updated_at, cr.created_at LIMIT 1
                 """
@@ -492,9 +508,9 @@ class ReviewRepository:
     def requeue_crawl_review(self, batch_id: str) -> None:
         with self._transaction() as conn:
             conn.execute(
-                """
-                UPDATE crawl_reviews SET status='pending', updated_at=?, error=''
-                WHERE batch_id=? AND status='analyzing'
+                f"""
+                UPDATE {self.reviews_table} SET status='pending', updated_at=?, error=''
+                WHERE {self.identity_column}=? AND status='analyzing'
                 """,
                 (self._clock(), batch_id),
             )
@@ -502,9 +518,9 @@ class ReviewRepository:
     def fail_crawl_review(self, batch_id: str, error: str, *, log_path: str = "") -> None:
         with self._transaction() as conn:
             conn.execute(
-                """
-                UPDATE crawl_reviews SET status='failed', error=?, analysis_log_path=?,
-                    updated_at=? WHERE batch_id=? AND status='analyzing'
+                f"""
+                UPDATE {self.reviews_table} SET status='failed', error=?, analysis_log_path=?,
+                    updated_at=? WHERE {self.identity_column}=? AND status='analyzing'
                 """,
                 (redact_text(error, limit=4000), log_path, self._clock(), batch_id),
             )
@@ -513,22 +529,22 @@ class ReviewRepository:
         now = self._clock()
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT status FROM crawl_reviews WHERE batch_id=?",
+                f"SELECT status FROM {self.reviews_table} WHERE {self.identity_column}=?",
                 (batch_id,),
             ).fetchone()
             if row is None:
                 return False
             if row["status"] != "failed":
                 raise RuntimeError("当前审核分析状态不允许重试")
-            conn.execute("DELETE FROM crawl_review_groups WHERE batch_id=?", (batch_id,))
+            conn.execute(f"DELETE FROM {self.groups_table} WHERE {self.identity_column}=?", (batch_id,))
             conn.execute(
-                """
-                UPDATE crawl_reviews SET status='pending', total_image_count=0,
+                f"""
+                UPDATE {self.reviews_table} SET status='pending', total_image_count=0,
                     total_group_count=0, duplicate_group_count=0, unreadable_image_count=0,
                     automatic_group_count=0, automatic_rejected_image_count=0,
                     kept_image_count=0, rejected_image_count=0, failed_image_count=0,
                     error='', updated_at=?, started_at=NULL, ready_at=NULL, applied_at=NULL
-                WHERE batch_id=?
+                WHERE {self.identity_column}=?
                 """,
                 (now, batch_id),
             )
@@ -543,7 +559,7 @@ class ReviewRepository:
         offset: int = 0,
         all_groups: bool = False,
     ) -> dict[str, Any]:
-        where = "batch_id=? AND kind NOT LIKE 'auto_%'"
+        where = f"{self.identity_column}=? AND kind NOT LIKE 'auto_%'"
         params: list[Any] = [batch_id]
         if kind:
             where += " AND kind=?"
@@ -557,7 +573,7 @@ class ReviewRepository:
         with self._read() as conn:
             total = int(
                 conn.execute(
-                    f"SELECT COUNT(*) FROM crawl_review_groups WHERE {where}",
+                    f"SELECT COUNT(*) FROM {self.groups_table} WHERE {where}",
                     params,
                 ).fetchone()[0]
             )
@@ -567,7 +583,7 @@ class ReviewRepository:
                 )
             rows = conn.execute(
                 f"""
-                SELECT * FROM crawl_review_groups WHERE {where}
+                SELECT * FROM {self.groups_table} WHERE {where}
                 ORDER BY ordinal LIMIT ? OFFSET ?
                 """,
                 [*params, page_limit, page_offset],
@@ -578,9 +594,9 @@ class ReviewRepository:
                 if group is None:
                     continue
                 image_rows = conn.execute(
-                    """
-                    SELECT * FROM crawl_review_images
-                    WHERE batch_id=? AND group_id=? ORDER BY ordinal
+                    f"""
+                    SELECT * FROM {self.images_table}
+                    WHERE {self.identity_column}=? AND group_id=? ORDER BY ordinal
                     """,
                     (batch_id, group["id"]),
                 ).fetchall()
@@ -603,15 +619,18 @@ class ReviewRepository:
         self,
         batch_id: str,
         decisions: list[dict[str, Any]],
+        *, version: int | None = None,
     ) -> None:
         now = self._clock()
         with self._transaction() as conn:
             review = conn.execute(
-                "SELECT status FROM crawl_reviews WHERE batch_id=?",
+                f"SELECT * FROM {self.reviews_table} WHERE {self.identity_column}=?",
                 (batch_id,),
             ).fetchone()
             if review is None:
                 raise KeyError(batch_id)
+            if version is not None and int(review["version"]) != version:
+                raise RuntimeError("审核版本冲突")
             if review["status"] != "ready":
                 raise RuntimeError("当前审核状态不允许修改选择")
             seen_groups: set[str] = set()
@@ -621,7 +640,7 @@ class ReviewRepository:
                     raise ValueError("审核决策包含空或重复的组 ID")
                 seen_groups.add(group_id)
                 group_row = conn.execute(
-                    "SELECT kind FROM crawl_review_groups WHERE batch_id=? AND id=?",
+                    f"SELECT kind FROM {self.groups_table} WHERE {self.identity_column}=? AND id=?",
                     (batch_id, group_id),
                 ).fetchone()
                 if group_row is None:
@@ -632,8 +651,8 @@ class ReviewRepository:
                     # the worker already moved away -> apply_failed + skewed auto counts.
                     raise ValueError("不能修改自动去重组的选择")
                 rows = conn.execute(
-                    """
-                    SELECT id FROM crawl_review_images WHERE batch_id=? AND group_id=?
+                    f"""
+                    SELECT id FROM {self.images_table} WHERE {self.identity_column}=? AND group_id=?
                     """,
                     (batch_id, group_id),
                 ).fetchall()
@@ -644,39 +663,41 @@ class ReviewRepository:
                 if not selected.issubset(available):
                     raise ValueError("审核决策包含不属于当前组的图片 ID")
                 conn.execute(
-                    """
-                    UPDATE crawl_review_images SET selected=0, updated_at=?
-                    WHERE batch_id=? AND group_id=?
+                    f"""
+                    UPDATE {self.images_table} SET selected=0, updated_at=?
+                    WHERE {self.identity_column}=? AND group_id=?
                     """,
                     (now, batch_id, group_id),
                 )
                 if selected:
                     conn.executemany(
-                        """
-                        UPDATE crawl_review_images SET selected=1, updated_at=?
-                        WHERE batch_id=? AND group_id=? AND id=?
+                        f"""
+                        UPDATE {self.images_table} SET selected=1, updated_at=?
+                        WHERE {self.identity_column}=? AND group_id=? AND id=?
                         """,
                         [(now, batch_id, group_id, image_id) for image_id in selected],
                     )
                 conn.execute(
-                    """
-                    UPDATE crawl_review_groups SET decided=1, updated_at=?
-                    WHERE batch_id=? AND id=?
+                    f"""
+                    UPDATE {self.groups_table} SET decided=1, updated_at=?
+                    WHERE {self.identity_column}=? AND id=?
                     """,
                     (now, batch_id, group_id),
                 )
             conn.execute(
-                "UPDATE crawl_reviews SET updated_at=? WHERE batch_id=?",
+                f"UPDATE {self.reviews_table} SET updated_at=? "
+                + (" , version=version+1 " if self.identity_column == "review_id" else "")
+                + f"WHERE {self.identity_column}=?",
                 (now, batch_id),
             )
 
     def get_crawl_review_image(self, batch_id: str, image_id: str) -> dict[str, Any] | None:
         with self._read() as conn:
             row = conn.execute(
-                """
-                SELECT cri.*, cb.output_dir FROM crawl_review_images cri
-                JOIN crawl_batches cb ON cb.id=cri.batch_id
-                WHERE cri.batch_id=? AND cri.id=?
+                f"""
+                SELECT cri.*, cb.output_dir FROM {self.images_table} cri
+                JOIN crawl_batches cb ON cb.id=cri.{self.identity_column}
+                WHERE cri.{self.identity_column}=? AND cri.id=?
                 """,
                 (batch_id, image_id),
             ).fetchone()
@@ -685,10 +706,10 @@ class ReviewRepository:
     def begin_crawl_review_apply(self, batch_id: str) -> bool:
         with self._transaction() as conn:
             review = conn.execute(
-                """
+                f"""
                 SELECT cr.status AS status, cb.status AS batch_status
-                FROM crawl_reviews cr JOIN crawl_batches cb ON cb.id=cr.batch_id
-                WHERE cr.batch_id=?
+                FROM {self.reviews_table} cr JOIN crawl_batches cb ON cb.id=cr.{self.identity_column}
+                WHERE cr.{self.identity_column}=?
                 """,
                 (batch_id,),
             ).fetchone()
@@ -702,9 +723,9 @@ class ReviewRepository:
                 return False
             undecided = int(
                 conn.execute(
-                    """
-                    SELECT COUNT(*) FROM crawl_review_groups
-                    WHERE batch_id=? AND decided=0
+                    f"""
+                    SELECT COUNT(*) FROM {self.groups_table}
+                    WHERE {self.identity_column}=? AND decided=0
                     """,
                     (batch_id,),
                 ).fetchone()[0]
@@ -712,9 +733,9 @@ class ReviewRepository:
             if undecided:
                 raise RuntimeError(f"还有 {undecided} 个图片组尚未确认")
             updated = conn.execute(
-                """
-                UPDATE crawl_reviews SET status='applying', error='', updated_at=?
-                WHERE batch_id=? AND status IN ('ready','apply_failed')
+                f"""
+                UPDATE {self.reviews_table} SET status='applying', error='', updated_at=?
+                WHERE {self.identity_column}=? AND status IN ('ready','apply_failed')
                 """,
                 (self._clock(), batch_id),
             )
@@ -723,8 +744,8 @@ class ReviewRepository:
     def crawl_review_apply_images(self, batch_id: str) -> list[dict[str, Any]]:
         with self._read() as conn:
             rows = conn.execute(
-                """
-                SELECT * FROM crawl_review_images WHERE batch_id=?
+                f"""
+                SELECT * FROM {self.images_table} WHERE {self.identity_column}=?
                 ORDER BY group_id, ordinal
                 """,
                 (batch_id,),
@@ -734,11 +755,11 @@ class ReviewRepository:
     def crawl_review_automatic_images(self, batch_id: str) -> list[dict[str, Any]]:
         with self._read() as conn:
             rows = conn.execute(
-                """
-                SELECT cri.* FROM crawl_review_images cri
-                JOIN crawl_review_groups crg
-                    ON crg.batch_id=cri.batch_id AND crg.id=cri.group_id
-                WHERE cri.batch_id=? AND crg.kind LIKE 'auto_%' AND cri.selected=0
+                f"""
+                SELECT cri.* FROM {self.images_table} cri
+                JOIN {self.groups_table} crg
+                    ON crg.{self.identity_column}=cri.{self.identity_column} AND crg.id=cri.group_id
+                WHERE cri.{self.identity_column}=? AND crg.kind LIKE 'auto_%' AND cri.selected=0
                 ORDER BY crg.ordinal, cri.ordinal
                 """,
                 (batch_id,),
@@ -749,14 +770,14 @@ class ReviewRepository:
         now = self._clock()
         with self._transaction() as conn:
             counts = conn.execute(
-                """
+                f"""
                 SELECT
                     SUM(CASE WHEN cri.disposition='rejected' THEN 1 ELSE 0 END) AS rejected,
                     SUM(CASE WHEN cri.disposition='failed' THEN 1 ELSE 0 END) AS failed
-                FROM crawl_review_images cri
-                JOIN crawl_review_groups crg
-                    ON crg.batch_id=cri.batch_id AND crg.id=cri.group_id
-                WHERE cri.batch_id=? AND crg.kind LIKE 'auto_%'
+                FROM {self.images_table} cri
+                JOIN {self.groups_table} crg
+                    ON crg.{self.identity_column}=cri.{self.identity_column} AND crg.id=cri.group_id
+                WHERE cri.{self.identity_column}=? AND crg.kind LIKE 'auto_%'
                 """,
                 (batch_id,),
             ).fetchone()
@@ -764,10 +785,10 @@ class ReviewRepository:
             failed = int(counts["failed"] or 0)
             error = f"{failed} 张严格自动淘汰图片处理失败" if failed else ""
             updated = conn.execute(
-                """
-                UPDATE crawl_reviews SET status='ready', rejected_image_count=?,
+                f"""
+                UPDATE {self.reviews_table} SET status='ready', rejected_image_count=?,
                     failed_image_count=?, error=?, ready_at=?, updated_at=?
-                WHERE batch_id=? AND status='auto_applying'
+                WHERE {self.identity_column}=? AND status='auto_applying'
                 """,
                 (rejected, failed, error, now, now, batch_id),
             )
@@ -783,9 +804,9 @@ class ReviewRepository:
     ) -> None:
         with self._transaction() as conn:
             conn.execute(
-                """
-                UPDATE crawl_review_images SET disposition='moving', final_relative_path=?,
-                    error='', updated_at=? WHERE batch_id=? AND id=?
+                f"""
+                UPDATE {self.images_table} SET disposition='moving', final_relative_path=?,
+                    error='', updated_at=? WHERE {self.identity_column}=? AND id=?
                 """,
                 (final_relative_path, self._clock(), batch_id, image_id),
             )
@@ -803,9 +824,9 @@ class ReviewRepository:
             raise ValueError("审核图片结果状态无效")
         with self._transaction() as conn:
             conn.execute(
-                """
-                UPDATE crawl_review_images SET disposition=?, final_relative_path=?,
-                    error=?, updated_at=? WHERE batch_id=? AND id=?
+                f"""
+                UPDATE {self.images_table} SET disposition=?, final_relative_path=?,
+                    error=?, updated_at=? WHERE {self.identity_column}=? AND id=?
                 """,
                 (
                     disposition,
@@ -821,12 +842,12 @@ class ReviewRepository:
         now = self._clock()
         with self._transaction() as conn:
             counts = conn.execute(
-                """
+                f"""
                 SELECT
                     SUM(CASE WHEN disposition='kept' THEN 1 ELSE 0 END) AS kept,
                     SUM(CASE WHEN disposition='rejected' THEN 1 ELSE 0 END) AS rejected,
                     SUM(CASE WHEN disposition NOT IN ('kept','rejected') THEN 1 ELSE 0 END) AS failed
-                FROM crawl_review_images WHERE batch_id=?
+                FROM {self.images_table} WHERE {self.identity_column}=?
                 """,
                 (batch_id,),
             ).fetchone()
@@ -836,9 +857,9 @@ class ReviewRepository:
             status = "apply_failed" if failed else "applied"
             error = f"{failed} 张图片处理失败" if failed else ""
             conn.execute(
-                """
-                UPDATE crawl_reviews SET status=?, kept_image_count=?, rejected_image_count=?,
-                    failed_image_count=?, error=?, updated_at=?, applied_at=? WHERE batch_id=?
+                f"""
+                UPDATE {self.reviews_table} SET status=?, kept_image_count=?, rejected_image_count=?,
+                    failed_image_count=?, error=?, updated_at=?, applied_at=? WHERE {self.identity_column}=?
                 """,
                 (status, kept, rejected, failed, error, now, now if not failed else None, batch_id),
             )

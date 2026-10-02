@@ -7,8 +7,9 @@ import type { PersistenceService } from "../src/core/persistence/service";
 import { sanitizeCrawlSearchResponse } from "../src/apps/crawl/model";
 import CandidateRow from "../src/apps/crawl/CandidateRow.svelte";
 import Crawl from "../src/apps/crawl/Crawl.svelte";
-import AppWindow from "../src/shell/AppWindow.svelte";
-import appWindowSource from "../src/shell/AppWindow.svelte?raw";
+import Desktop from "../src/shell/Desktop.svelte";
+import desktopSource from "../src/shell/Desktop.svelte?raw";
+import { createDesktopRuntime } from "./fixtures/desktop";
 import candidateSource from "../src/apps/crawl/CandidateRow.svelte?raw";
 import controllerSource from "../src/apps/crawl/controller.ts?raw";
 import crawlSource from "../src/apps/crawl/Crawl.svelte?raw";
@@ -23,19 +24,19 @@ const persistence = Object.freeze({ readActiveBatchId: () => null }) as Persiste
 const onNavigate = vi.fn();
 
 describe("Svelte Crawl integration", () => {
-  it("renders the real three-column Crawl boundary and accessible controls", () => {
+  it("renders the Crawl workspace and accessible search and batch controls", () => {
     const body = render(Crawl, { props: { api, persistence, onNavigate } }).body;
     for (const marker of [
       "data-crawl-app",
       'data-domain-owner="crawl"',
-      "来源与连接",
+      '<h1 id="crawl-heading">采集</h1>',
+      "来源与顺序",
       "搜索与候选地址",
-      "摘要与创建批次",
       'role="combobox"',
       'aria-controls="crawl-suggestions"',
       'aria-live="polite"',
-      'aria-label="图片采集三段工作区，可横向滚动查看全部三栏"',
       "创建批次",
+      'aria-label="图片采集工作区"',
     ]) expect(body).toContain(marker);
     expect(body).not.toContain("应用迁移将在后续阶段接入");
     expect(body).not.toContain("P2 Shell");
@@ -46,10 +47,11 @@ describe("Svelte Crawl integration", () => {
     for (const marker of [
       "X / Twitter · Danbooru 画师目录关联账户",
       "Pixiv · Danbooru 画师目录关联账户",
-      "Danbooru、EH 与 Pawchive / Pawoo 执行站内发现",
-      "X / Twitter 与 Pixiv 只从 Danbooru 画师目录读取关联账户",
-      "X / Twitter 与 Pixiv 授权仅用于后续访问与采集，不会扩大当前发现范围",
-      'aria-describedby="crawl-source-discovery-note"',
+      "Danbooru、EH 与 Pawchive / Pawoo 支持站内搜索",
+      "X / Twitter 与 Pixiv 从 Danbooru 画师目录查找关联账户",
+      "采集时需要相应授权",
+      '<details class="crawl-discovery-note"',
+      "来源发现范围",
       'aria-label="启用 X / Twitter · Danbooru 画师目录关联账户"',
       'aria-label="Pixiv · Danbooru 画师目录关联账户 代理覆盖"',
     ]) expect(body).toContain(marker);
@@ -61,25 +63,14 @@ describe("Svelte Crawl integration", () => {
     ]) expect(body).not.toContain(unsupportedClaim);
   });
 
-  it("uses Crawl for its only window branch and removes the Crawl placeholder", () => {
-    const body = render(AppWindow, { props: {
-      record: { appId: "crawl", state: "normal", rect: { x: 20, y: 20, w: 800, h: 560 } },
-      api,
-      polling: Object.freeze({}) as never,
-      persistence,
-      focused: true,
-      onNavigate,
-      onFocus: vi.fn(),
-      onMinimize: vi.fn(),
-      onToggleMaximized: vi.fn(),
-      onClose: vi.fn(),
-      onBeginInteraction: vi.fn(),
-      onKeyboardResize: vi.fn(),
-    } }).body;
+  it("mounts Crawl in the Desktop page without a placeholder", () => {
+    const runtime = createDesktopRuntime();
+    runtime.shell.openApplication("crawl");
+    const body = render(Desktop, { props: runtime }).body;
+    expect(body).toContain('data-app-page="" data-app-id="crawl"');
     expect(body).toContain("data-crawl-app");
     expect(body).not.toContain('data-application-content="crawl"');
-    expect(appWindowSource).toContain('record.appId === "crawl"');
-    expect(appWindowSource).toContain("<Crawl {api} {persistence} {onNavigate} />");
+    expect(desktopSource).toContain('<Crawl {api} {persistence} onNavigate={navigate} />');
   });
 
   it("renders only sanitized candidate facts and a stable business key", () => {
@@ -147,7 +138,7 @@ describe("Svelte Crawl integration", () => {
     expect(crawlCss).not.toMatch(/(?:-webkit-)?backdrop-filter\s*:/);
     expect(crawlCss).not.toMatch(/^\s*filter\s*:/m);
     expect(crawlCss).toContain(".crawl-workspace__track");
-    expect(crawlCss).toContain("overflow-x: auto");
+    expect(crawlCss).toContain("overflow: auto");
     expect(crawlCss).toContain("@media (forced-colors: active)");
   });
 });

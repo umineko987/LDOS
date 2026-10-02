@@ -40,6 +40,13 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("DELETE", "/api/v1/auth/browser"): ("auth_clear_browser_api_v1_auth_browser_delete", ("200", "422")),
     ("GET", "/api/v1/setup/models"): ("model_status_api_v1_setup_models_get", ("200",)),
     ("POST", "/api/v1/setup/models/install"): ("install_models_api_v1_setup_models_install_post", ("202", "422")),
+    ("POST", "/api/v1/gallery/reviews"): ("create_review_api_v1_gallery_reviews_post", ("202", "422")),
+    ("GET", "/api/v1/gallery/reviews"): ("list_reviews_api_v1_gallery_reviews_get", ("200", "422")),
+    ("GET", "/api/v1/gallery/reviews/{review_id}"): ("get_review_api_v1_gallery_reviews__review_id__get", ("200", "422")),
+    ("PUT", "/api/v1/gallery/reviews/{review_id}/decisions"): ("decisions_api_v1_gallery_reviews__review_id__decisions_put", ("200", "422")),
+    ("POST", "/api/v1/gallery/reviews/{review_id}/apply"): ("apply_api_v1_gallery_reviews__review_id__apply_post", ("200", "422")),
+    ("POST", "/api/v1/gallery/reviews/{review_id}/retry"): ("retry_api_v1_gallery_reviews__review_id__retry_post", ("202", "422")),
+    ("GET", "/api/v1/gallery/reviews/{review_id}/images/{image_id}"): ("image_content_api_v1_gallery_reviews__review_id__images__image_id__get", ("200", "422")),
     ("GET", "/api/v1/gallery/sources"): ("list_gallery_sources_api_v1_gallery_sources_get", ("200", "422")),
     ("GET", "/api/v1/gallery/sources/{source_id}"): ("get_gallery_source_api_v1_gallery_sources__source_id__get", ("200", "422")),
     ("POST", "/api/v1/gallery/imports"): ("import_gallery_source_api_v1_gallery_imports_post", ("201", "422")),
@@ -212,6 +219,7 @@ class AppRoutingContractTests(unittest.TestCase):
             "crawls": "gdl_backend.api_routes.crawls",
             "review": "gdl_backend.api_routes.review",
             "gallery": "gdl_backend.api_routes.gallery",
+            "gallery_review": "gdl_backend.api_routes.gallery_review",
             "policies": "gdl_backend.api_routes.policies",
             "proxy": "gdl_backend.api_routes.proxy",
             "scheduler": "gdl_backend.api_routes.scheduler",
@@ -219,6 +227,8 @@ class AppRoutingContractTests(unittest.TestCase):
 
         for key, route in routes.items():
             path = route.path
+            if path.startswith("/gallery/"):
+                path = "/api/v1" + path
             if path in {"/", "/healthz", "/readyz", "/api/v1/config"}:
                 domain = "diagnostics"
             elif path.startswith("/api/v1/auth"):
@@ -229,6 +239,8 @@ class AppRoutingContractTests(unittest.TestCase):
                 domain = "tasks"
             elif path.startswith("/api/v1/search"):
                 domain = "discovery"
+            elif path.startswith("/api/v1/gallery/reviews"):
+                domain = "gallery_review"
             elif "/review" in path:
                 domain = "review"
             elif path.startswith("/api/v1/crawls"):

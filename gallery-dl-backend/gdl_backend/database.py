@@ -101,6 +101,13 @@ class Database:
             max_groups=lambda: MAX_CRAWL_REVIEW_GROUPS,
             get_review=lambda batch_id: self.get_crawl_review(batch_id),
         )
+        from ._database_gallery_review_repository import GalleryReviewRepository
+
+        self.gallery_reviews = GalleryReviewRepository(
+            read=self._read, transaction=self._transaction, clock=lambda: time.time(),
+            max_groups=lambda: MAX_CRAWL_REVIEW_GROUPS, gallery=True,
+            get_review=lambda review_id: self.gallery_reviews.get_crawl_review(review_id),
+        )
         self._proxy_probe_repository = ProxyProbeRepository(
             read=self._read,
             transaction=self._transaction,

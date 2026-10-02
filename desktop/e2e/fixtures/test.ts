@@ -32,30 +32,16 @@ export { expect };
 export async function bootDesktop(page: Page, options: MockApiOptions = {}, entryPath = "/"): Promise<MockApi> {
   const api = await installMockApi(page, options);
   await page.goto(entryPath);
-  await expect(page.locator("[data-desktop]")).toBeVisible();
+  await expect(page.locator("[data-desktop][data-workbench]")).toBeVisible();
   return api;
 }
 
 export async function launchApp(page: Page, appId: string): Promise<void> {
-  await page.getByRole("button", { name: /应用中心；打开全部应用列表/ }).click();
-  const center = page.locator("[data-application-center]");
-  await expect(center).toBeVisible();
-  await center.locator(`[data-application-center-app="${appId}"]`).click();
-  await expect(page.locator(`[data-app-window][data-app-id="${appId}"]`)).toBeVisible();
-}
-
-export async function maximizeApp(page: Page, appId: string): Promise<void> {
-  const window = page.locator(`[data-app-window][data-app-id="${appId}"]`);
-  if (await window.getAttribute("data-window-state") !== "maximized") {
-    await window.getByRole("button", { name: "最大化窗口" }).click();
-  }
-  await expect(window).toHaveAttribute("data-window-state", "maximized");
-}
-
-export async function closeApp(page: Page, appId: string): Promise<void> {
-  const window = page.locator(`[data-app-window][data-app-id="${appId}"]`);
-  await window.getByRole("button", { name: "关闭窗口" }).click();
-  await expect(window).toHaveCount(0);
+  const navigation = page.locator(`[data-nav-app="${appId}"]`);
+  if (!await navigation.isVisible()) await page.locator("[data-nav-settings]").click();
+  await navigation.click();
+  await expect(page).toHaveURL(new RegExp(`#/${appId}$`));
+  await expect(page.locator(`[data-app-page][data-app-id="${appId}"]`)).toBeVisible();
 }
 
 export async function expectDesktopInsideViewport(page: Page): Promise<void> {
@@ -69,15 +55,16 @@ export async function expectDesktopInsideViewport(page: Page): Promise<void> {
   expect(dimensions.scrollHeight).toBeLessThanOrEqual(dimensions.height);
 }
 
-export async function expectWindowInsideWorkspace(page: Page, appId: string): Promise<void> {
-  const window = page.locator(`[data-app-window][data-app-id="${appId}"]`);
-  const workspace = page.locator("[data-window-layer]");
-  const [windowBox, workspaceBox] = await Promise.all([window.boundingBox(), workspace.boundingBox()]);
-  expect(windowBox).not.toBeNull();
+export async function expectPageInsideWorkspace(page: Page, appId: string): Promise<void> {
+  const app = page.locator(`[data-app-page][data-app-id="${appId}"]`);
+  const workspace = page.locator("[data-workspace]");
+  const [appBox, workspaceBox] = await Promise.all([app.boundingBox(), workspace.boundingBox()]);
+  expect(appBox).not.toBeNull();
   expect(workspaceBox).not.toBeNull();
-  if (!windowBox || !workspaceBox) return;
-  expect(windowBox.x).toBeGreaterThanOrEqual(workspaceBox.x - 1);
-  expect(windowBox.y).toBeGreaterThanOrEqual(workspaceBox.y - 1);
-  expect(windowBox.x + windowBox.width).toBeLessThanOrEqual(workspaceBox.x + workspaceBox.width + 1);
-  expect(windowBox.y + windowBox.height).toBeLessThanOrEqual(workspaceBox.y + workspaceBox.height + 1);
+  if (!appBox || !workspaceBox) return;
+  expect(appBox.x).toBeGreaterThanOrEqual(workspaceBox.x - 1);
+  expect(appBox.y).toBeGreaterThanOrEqual(workspaceBox.y - 1);
+  expect(appBox.x + appBox.width).toBeLessThanOrEqual(workspaceBox.x + workspaceBox.width + 1);
+  expect(appBox.y + appBox.height).toBeLessThanOrEqual(workspaceBox.y + workspaceBox.height + 1);
+  expect(await app.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
 }

@@ -7,7 +7,7 @@ import { resolveNavigationTarget } from "../src/core/routing/hash";
 import gallerySource from "../src/apps/gallery/Gallery.svelte?raw";
 import galleryServiceSource from "../src/apps/gallery/service.ts?raw";
 import platformAdapterSource from "../src/core/platform/adapter.ts?raw";
-import appWindowSource from "../src/shell/AppWindow.svelte?raw";
+import desktopSource from "../src/shell/Desktop.svelte?raw";
 
 describe("P4 single Gallery directory-export target", () => {
   it("keeps Gallery live while removing the independent Export route and mount", () => {
@@ -15,9 +15,9 @@ describe("P4 single Gallery directory-export target", () => {
     expect(getApplicationDefinition("export")).toBeNull();
     expect(resolveNavigationTarget("/export")).toBeNull();
     expect(resolveNavigationTarget("/unknown-application")).toBeNull();
-    expect(appWindowSource).toContain('record.appId === "gallery"');
-    expect(appWindowSource).not.toContain('record.appId === "export"');
-    expect(appWindowSource).not.toContain("apps/export/Export.svelte");
+    expect(desktopSource).toContain('appId === "gallery"');
+    expect(desktopSource).not.toContain('appId === "export"');
+    expect(desktopSource).not.toContain("apps/export/Export.svelte");
   });
 
   it("owns selection, target, progress and cancellation inside Gallery", () => {

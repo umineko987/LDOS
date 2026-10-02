@@ -26,11 +26,13 @@
   import { createReviewStore, focusedReviewGroup, reviewGroupsFromState } from "./state";
   import "./review.css";
 
-  let { api, polling, persistence, onNavigate, registerUnsavedChanges }: {
+  let { api, polling, persistence, onNavigate, reviewId = "", active = true, registerUnsavedChanges }: {
     api: ApiClient;
     polling: PollingService;
     persistence: PersistenceService;
     onNavigate: (appId: ApplicationId) => void;
+    reviewId?: string;
+    active?: boolean;
     registerUnsavedChanges?: (reader: () => boolean, discard?: () => void, prepare?: () => Promise<boolean>) => () => void;
   } = $props();
 
@@ -63,13 +65,40 @@
   let loupeState = $state<ReviewLoupeState>({ active: false, pinned: false, magnification: REVIEW_DEFAULT_MAGNIFICATION });
   let engine: ReviewEngine | null = null;
   let engineSequence = 0;
+  let mounted = $state(false);
+  let receivedReviewId = "";
 
+  $effect(() => {
+    if (!mounted) return;
+    const currentId = reviewId;
+    if (active) {
+      untrack(() => {
+        controller.activate();
+        if (currentId && currentId !== receivedReviewId) {
+          receivedReviewId = currentId;
+          void openReviewAndFocus(currentId);
+        }
+        syncModelPolling();
+        updateEngine();
+      });
+    } else {
+      untrack(() => { controller.deactivate(); stopModelPolling(); });
+    }
+  });
+
+  function displayMessage(message: string): string {
+    return message
+      .replaceAll("权威审核快照", "审核结果")
+      .replaceAll("权威审核状态", "审核结果")
+      .replaceAll("安全快照", "审核结果");
+  }
   function selectValue(event: Event): string { return (event.currentTarget as HTMLSelectElement).value; }
   function currentState() { return store.getState(); }
   function updateEngine(state = currentState()): void {
     const sequence = ++engineSequence;
     void tick().then(() => {
       if (!engine || sequence !== engineSequence) return;
+      if (!active) { engine.release(); return; }
       const frame = buildReviewEngineFrame(state.snapshot, state.focusedGroupId, state.activeImageId, loupeEnabled, service.imageUrl);
       if (frame) engine.update(frame);
       else engine.release();
@@ -77,13 +106,14 @@
   }
   function focusActiveImage(): void {
     void tick().then(() => {
+      if (!active) return;
       const target = reviewDeck?.querySelector<HTMLElement>('[data-review-engine-card][data-active="true"]') ?? reviewDeck;
       target?.focus({ preventScroll: true });
       target?.scrollIntoView({ block: "nearest", inline: "nearest" });
     });
   }
-  async function loadSelectedAndFocus(): Promise<void> {
-    if (await controller.loadSelected()) focusActiveImage();
+  async function openReviewAndFocus(reviewId: string): Promise<void> {
+    if (await controller.openReview(reviewId) && active) focusActiveImage();
   }
   async function setFilterAndFocus(filter: (typeof REVIEW_FILTERS)[number]["id"]): Promise<void> {
     if (await controller.setFilter(filter)) focusActiveImage();
@@ -130,7 +160,7 @@
   }
   function syncModelPolling(): void {
     stopModelPolling();
-    if (modelSetup?.phase !== "installing") return;
+    if (!active || modelSetup?.phase !== "installing") return;
     modelPoll = polling.start({
       key: "review.model-setup",
       scope: "app:review-model-setup",
@@ -237,7 +267,7 @@
     event.returnValue = "";
   }
   function onDeckKeydown(event: KeyboardEvent): void {
-    if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || snapshot.busy) return;
+    if (!active || event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || snapshot.busy) return;
     const target = event.target as Element | null;
     if (target?.closest?.("input, select, textarea, a[href], [contenteditable]")) return;
     const imageCard = target?.closest?.("[data-review-engine-card]");
@@ -263,7 +293,7 @@
   }
 
   $effect(() => {
-    if (!snapshot.confirmation) return;
+    if (!active || !snapshot.confirmation) { confirmationDialog?.close(); return; }
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     void tick().then(() => {
       if (confirmationDialog && !confirmationDialog.open && typeof confirmationDialog.showModal === "function") confirmationDialog.showModal();
@@ -272,7 +302,7 @@
   });
 
   $effect(() => {
-    if (!modelConfirmationOpen) return;
+    if (!active || !modelConfirmationOpen) { modelConfirmationDialog?.close(); return; }
     void tick().then(() => {
       if (modelConfirmationDialog && !modelConfirmationDialog.open && typeof modelConfirmationDialog.showModal === "function") modelConfirmationDialog.showModal();
       restoreFocus(modelDialogItems()[0] ?? modelConfirmationDialog);
@@ -289,7 +319,7 @@
       controller.beforeLeave,
     ) ?? (() => {});
     globalThis.addEventListener("beforeunload", onBeforeUnload);
-    controller.activate();
+    mounted = true;
     void refreshModelSetup();
     return () => {
       engineSequence += 1;
@@ -308,45 +338,65 @@
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions (application-level review shortcuts) -->
 <section class="review-app" data-review-app data-domain-owner="review" data-mode={listable ? "deck" : "panel"} aria-labelledby="review-heading" aria-busy={Boolean(snapshot.busy)} onkeydown={onDeckKeydown}>
   <header class="review-header">
-    <div><p>去重审核</p><h1 id="review-heading">比较、确认与文件整理</h1></div>
+    <h1 id="review-heading">去重</h1>
     <span class="review-status" data-kind={snapshot.presentation.kind}>{snapshot.presentation.label}</span>
-  </header>
-
-  <section class="review-model-setup" data-phase={modelSetup?.phase ?? "loading"} aria-labelledby="review-model-heading" aria-busy={modelSetup?.phase === "installing"}>
-    <div class="review-model-copy">
-      <p>可选能力</p>
-      <h2 id="review-model-heading">相似图片模型</h2>
-      <span>{modelSetup?.phase === "ready" ? "已安装并启用" : modelSetup?.phase === "installing" ? "正在准备" : modelSetup?.installed ? "已安装，等待启用" : "需要下载后启用"}</span>
-      <p>{modelSetup?.phase === "ready" ? "SSCD 与 DINOv2 已就绪，新建抓取批次可使用相似图片审核。" : "下载约 190 MB 的 SSCD 与 DINOv2 模型；Release 版使用 CPU 分析。"}</p>
-    </div>
-    {#if modelSetup?.phase === "installing"}
-      <div class="review-model-progress" role="status" aria-live="polite">
-        <progress max={modelSetup.expectedBytes} value={modelSetup.downloadedBytes}></progress>
-        <span>{formatMegabytes(modelSetup.downloadedBytes)} / {formatMegabytes(modelSetup.expectedBytes)}{modelSetup.usingProxy ? " · 使用本次代理" : ""}</span>
-        <small>{modelSetup.message || "正在下载并检查模型"}</small>
+    <details class="review-model-setup" data-phase={modelSetup?.phase ?? "loading"} aria-labelledby="review-model-heading" aria-busy={modelSetup?.phase === "installing"} open={modelSetup?.phase !== "ready" || Boolean(modelSetupError)}>
+      <summary><h2 id="review-model-heading">相似图片模型</h2><span>{modelSetup?.phase === "ready" ? "已启用" : modelSetup?.phase === "installing" ? "正在下载" : modelSetup?.installed ? "等待启用" : "下载并启用"}</span></summary>
+      <div class="review-model-content">
+        <div class="review-model-copy">
+          <p>{modelSetup?.phase === "ready" ? "SSCD 与 DINOv2 已就绪，可在图库发起相似图片去重。" : "下载约 190 MB 的 SSCD 与 DINOv2 模型，用于发现相似图片。"}</p>
+        </div>
+        {#if modelSetup?.phase === "installing"}
+          <div class="review-model-progress" role="status" aria-live="polite">
+            <progress max={modelSetup.expectedBytes} value={modelSetup.downloadedBytes}></progress>
+            <span>{formatMegabytes(modelSetup.downloadedBytes)} / {formatMegabytes(modelSetup.expectedBytes)}{modelSetup.usingProxy ? " · 使用本次代理" : ""}</span>
+            <small>{modelSetup.message || "正在下载并检查模型"}</small>
+          </div>
+        {/if}
+        {#if modelSetupError || modelSetup?.phase === "failed"}<p class="review-model-error" role="alert">{modelSetupError || modelSetup?.message || "模型准备失败，请重试。"}</p>{/if}
+        <div class="review-model-actions">
+          {#if modelSetup?.phase !== "ready"}<button type="button" class="review-button review-button--primary" disabled={!modelSetup || modelSetup.phase === "installing"} onclick={openModelConfirmation}>{modelSetup?.installed ? "启用模型" : modelSetup?.phase === "failed" ? "重新下载" : "下载并启用"}</button>{/if}
+          <button type="button" disabled={Boolean(modelRequest)} onclick={() => void refreshModelSetup()}>刷新状态</button>
+        </div>
       </div>
-    {/if}
-    {#if modelSetupError || modelSetup?.phase === "failed"}<p class="review-model-error" role="alert">{modelSetupError || modelSetup?.message || "模型准备失败，请重试。"}</p>{/if}
-    <div class="review-model-actions">
-      {#if modelSetup?.phase !== "ready"}<button type="button" class="review-button review-button--primary" disabled={!modelSetup || modelSetup.phase === "installing"} onclick={openModelConfirmation}>{modelSetup?.installed ? "启用模型" : modelSetup?.phase === "failed" ? "重新下载" : "下载并启用"}</button>{/if}
-      <button type="button" disabled={Boolean(modelRequest)} onclick={() => void refreshModelSetup()}>刷新状态</button>
-    </div>
-  </section>
+    </details>
+  </header>
 
   {#if snapshot.error}
     <section class="review-error" role="alert" aria-labelledby="review-error-title">
-      <div><strong id="review-error-title">{snapshot.error.title}</strong><p>{snapshot.error.message} {snapshot.error.nextStep}</p><small>错误码：{snapshot.error.code}{snapshot.error.requestId ? ` · 请求 ${snapshot.error.requestId}` : ""}</small></div>
-      <div><button type="button" onclick={() => onNavigate("diagnostics")}>打开系统诊断</button>{#if snapshot.error.conflict && snapshot.snapshot?.dirty}<button type="button" class="review-button review-button--dangerous" onclick={() => controller.requestDiscardReload()}>放弃草稿并重读</button>{/if}</div>
+      <div><strong id="review-error-title">{snapshot.error.title}</strong><p>{displayMessage(`${snapshot.error.message} ${snapshot.error.nextStep}`)}</p><small>错误码：{snapshot.error.code}{snapshot.error.requestId ? ` · 请求 ${snapshot.error.requestId}` : ""}</small></div>
+      <div><button type="button" onclick={() => onNavigate("diagnostics")}>打开系统诊断</button>{#if snapshot.error.conflict && snapshot.snapshot?.dirty}<button type="button" class="review-button review-button--dangerous" onclick={() => controller.requestDiscardReload()}>放弃草稿并刷新</button>{/if}</div>
     </section>
   {/if}
 
   <section class="review-picker" aria-labelledby="review-picker-heading">
-    <div><p>批次</p><h2 id="review-picker-heading">已结束批次</h2></div>
-    <label><span class="visually-hidden">已结束批次</span><select aria-label="已结束批次" value={snapshot.selectedBatchId} disabled={Boolean(snapshot.busy)} onchange={(event) => controller.selectBatch(selectValue(event))}><option value="">{snapshot.recent.some((batch) => batch.terminal) ? "选择已结束批次" : "暂无已结束批次"}</option>{#each snapshot.recent.filter((batch) => batch.terminal) as batch (batch.id)}<option value={batch.id}>{batch.statusLabel} · {formatTime(batch.createdAt)} · {batch.id.slice(0, 12)}</option>{/each}</select></label>
-    <div class="review-picker-actions"><button type="button" class="review-button review-button--primary" disabled={Boolean(snapshot.busy || !snapshot.selectedBatchId)} onclick={() => void loadSelectedAndFocus()}>打开审核</button><button type="button" disabled={Boolean(snapshot.busy)} onclick={() => void controller.refresh()}>刷新</button><button type="button" onclick={() => onNavigate("tasks")}>打开批次管理</button></div>
+    <h2 id="review-picker-heading">审核任务</h2>
+    <label><span class="visually-hidden">已提交审核任务</span><select aria-label="已提交审核任务" value={snapshot.snapshot?.reviewId ?? ""} disabled={Boolean(snapshot.busy)} onchange={(event) => void openReviewAndFocus(selectValue(event))}>
+      <option value="" disabled>{snapshot.recent.length ? "打开已提交任务" : "暂无审核任务"}</option>
+      {#if snapshot.snapshot && !snapshot.recent.some((task) => task.reviewId === snapshot.snapshot?.reviewId)}<option value={snapshot.snapshot.reviewId}>{snapshot.snapshot.summary.statusLabel} · {snapshot.snapshot.reviewId.slice(0, 12)}</option>{/if}
+      {#each snapshot.recent as task (task.reviewId)}<option value={task.reviewId}>{task.summary.statusLabel} · {formatTime(task.createdAt)} · {task.directories.map((directory) => `${directory.sourceLabel}/${directory.relativePath || "来源根目录"}`).join(" · ")}</option>{/each}
+    </select></label>
+    <div class="review-picker-actions">
+      <button type="button" disabled={Boolean(snapshot.busy) || snapshot.recentOffset === 0} onclick={() => void controller.listTasks(Math.max(0, snapshot.recentOffset - 50))}>上一页任务</button>
+      <button type="button" disabled={Boolean(snapshot.busy) || snapshot.recentOffset + snapshot.recent.length >= snapshot.recentTotal} onclick={() => void controller.listTasks(snapshot.recentOffset + snapshot.recent.length)}>下一页任务</button>
+      <button type="button" disabled={Boolean(snapshot.busy)} onclick={() => void controller.refresh()}>刷新</button>
+      <button type="button" onclick={() => onNavigate("gallery")}>打开图库</button>
+    </div>
   </section>
 
-  <p class="review-operation-live" data-review-dirty={Boolean(snapshot.snapshot?.dirty)} role="status" aria-live="polite">{snapshot.message}</p>
+  {#if snapshot.pendingReviewId}
+    <section class="review-switch" role="status" data-review-pending={snapshot.pendingReviewId}>
+      <p>新审核任务已收到；当前草稿仍保留。请保存或放弃后切换。</p>
+      <button type="button" disabled={Boolean(snapshot.busy)} onclick={() => void controller.saveAndSwitch()}>保存并切换</button>
+      <button type="button" disabled={Boolean(snapshot.busy)} onclick={() => controller.requestDiscardSwitch()}>放弃草稿并切换</button>
+    </section>
+  {/if}
+
+  {#if snapshot.snapshot}
+    <p class="review-directory-summary" data-review-directories>{snapshot.snapshot.directories.map((directory) => `${directory.sourceLabel} / ${directory.relativePath || "来源根目录"}`).join(" · ")} · 递归子目录，整组选区跨目录比较 · {snapshot.snapshot.summary.totalImageCount} 张图片 · 机器初筛回收 {snapshot.snapshot.summary.automaticRejectedImageCount} 张</p>
+  {/if}
+
+  <p class="review-operation-live" data-review-dirty={Boolean(snapshot.snapshot?.dirty)} role="status" aria-live="polite">{displayMessage(snapshot.message)}</p>
 
   <section class="review-engine-host" bind:this={engineHost}>
     {#if snapshot.snapshot}
@@ -356,9 +406,8 @@
           <button type="button" disabled={Boolean(snapshot.busy || !snapshot.snapshot.dirty)} onclick={() => void saveAndFocus()}>保存待提交组</button>
           <button type="button" aria-pressed={loupeEnabled} disabled={!images.some((image) => image.readable)} onclick={toggleLoupe}>{loupeEnabled ? "关闭放大镜" : "开启放大镜"}</button>
           <button type="button" aria-pressed={loupeState.pinned} disabled={!loupeEnabled || !images.some((image) => image.readable)} onclick={toggleLoupePin}>{loupeState.pinned ? "解除锁定" : "锁定坐标"}</button>
-          {#if snapshot.snapshot.summary.status === "not_started" || snapshot.snapshot.summary.status === "waiting_for_crawl"}<button type="button" class="review-button review-button--primary" disabled={Boolean(snapshot.busy)} onclick={() => void controller.run("start")}>开始分析</button>{/if}
-          {#if snapshot.snapshot.summary.status === "failed"}<button type="button" class="review-button review-button--primary" disabled={Boolean(snapshot.busy)} onclick={() => void controller.run("retry")}>重试分析</button>{/if}
-          {#if snapshot.snapshot.summary.status === "ready" || snapshot.snapshot.summary.status === "apply_failed"}<button type="button" class="review-button review-button--dangerous" disabled={Boolean(snapshot.busy || snapshot.snapshot.dirty || snapshot.snapshot.summary.decidedGroupCount < snapshot.snapshot.summary.totalGroupCount)} onclick={() => controller.requestApply()}>{snapshot.snapshot.summary.status === "apply_failed" ? "重试整理" : "应用并整理文件"}</button>{/if}
+          {#if snapshot.snapshot.summary.status === "failed" || snapshot.snapshot.summary.status === "blocked"}<button type="button" class="review-button review-button--primary" disabled={Boolean(snapshot.busy)} onclick={() => void controller.run("retry")}>重试分析</button>{/if}
+          {#if snapshot.snapshot.summary.status === "ready" || snapshot.snapshot.summary.status === "apply_failed"}<button type="button" class="review-button review-button--dangerous" disabled={Boolean(snapshot.busy || snapshot.snapshot.dirty || snapshot.snapshot.summary.decidedGroupCount < snapshot.snapshot.summary.totalGroupCount)} onclick={() => controller.requestApply()}>{snapshot.snapshot.summary.status === "apply_failed" ? "重试回收" : "送入回收区"}</button>{/if}
         </div>
       </section>
 
@@ -366,8 +415,8 @@
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-operated review deck) -->
         <section class="review-deck" data-review-deck bind:this={reviewDeck} tabindex="0" aria-label="去重审核全高分拣台；左右键移动图片，空格切换保留，Enter 采纳并前进，Escape 返回上一组，X 切换放大镜">
           <header class="review-deck-header">
-            <div><p>当前筛选全量组选择器</p><h2>组 {focusedGroup.ordinal} · {focusedGroup.kind === "duplicate" ? "重复组" : focusedGroup.kind === "single" ? "独立图片" : "读取受限"}</h2></div>
-            <div class="review-group-controls"><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === 0} onclick={() => moveGroupAndFocus(-1)}>上一组</button><label><span class="visually-hidden">当前筛选全量组选择器</span><select data-review-group-select aria-label="当前筛选全量组选择器" value={focusedGroup.id} disabled={Boolean(snapshot.busy)} onchange={(event) => { if (controller.setFocusedGroup(selectValue(event))) focusActiveImage(); }}>{#each groups as group (group.id)}<option value={group.id}>{group.ordinal}. {group.kind} · {group.selectedImageCount}/{group.imageCount} 保留{group.decided ? " · 已确认" : ""}</option>{/each}</select></label><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === snapshot.snapshot.groupOrder.length - 1} onclick={() => moveGroupAndFocus(1)}>下一组</button></div>
+            <h2>组 {focusedGroup.ordinal} · {focusedGroup.kind === "duplicate" ? "重复组" : focusedGroup.kind === "single" ? "独立图片" : "读取受限"}</h2>
+            <div class="review-group-controls"><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === 0} onclick={() => moveGroupAndFocus(-1)}>上一组</button><label><span class="visually-hidden">当前筛选全量组选择器</span><select data-review-group-select aria-label="当前筛选全量组选择器" value={focusedGroup.id} disabled={Boolean(snapshot.busy)} onchange={(event) => { if (controller.setFocusedGroup(selectValue(event))) focusActiveImage(); }}>{#each groups as group (group.id)}<option value={group.id}>{group.ordinal}. {group.kind === "duplicate" ? "重复组" : group.kind === "single" ? "独立图片" : "读取受限"} · {group.selectedImageCount}/{group.imageCount} 保留{group.decided ? " · 已确认" : ""}</option>{/each}</select></label><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === snapshot.snapshot.groupOrder.length - 1} onclick={() => moveGroupAndFocus(1)}>下一组</button></div>
           </header>
 
           <section class="review-deck-stage" aria-label={`组 ${focusedGroup.ordinal} 图片比较舞台`}>
@@ -375,7 +424,7 @@
               {#each images as image (image.id)}
                 <button type="button" class="review-image-card" data-review-engine-card={image.id} data-selected={image.selected} data-active={snapshot.activeImageId === image.id} aria-checked={image.selected} aria-current={snapshot.activeImageId === image.id} aria-disabled={snapshot.snapshot.summary.status !== "ready" || Boolean(snapshot.busy)} role="checkbox" onclick={() => toggleImage(focusedGroup.id, image.id)} onfocus={() => controller.setActiveImage(image.id)}>
                   <span class="review-image-media"><img data-review-engine-image data-review-engine-decoded="false" alt={`组 ${focusedGroup.ordinal} 图 ${image.ordinal}`} crossorigin="anonymous" decoding="async" /><span class="review-image-fallback">{image.readable ? "预览加载失败" : "图片不可读"}</span><span class="review-image-crosshair" data-review-engine-crosshair hidden></span><canvas class="review-loupe-lens" data-review-engine-lens width="1" height="1" hidden aria-hidden="true"></canvas></span>
-                  <span class="review-image-card-copy"><strong>图 {image.ordinal}{image.recommended ? " · 推荐项" : ""}</strong><span>{image.width} × {image.height}</span><span class="review-image-stamp" data-state={image.selected ? "keep" : "drop"}>{image.selected ? "✓ 保留" : "✗ 移除"}</span><span class="review-image-active-marker">当前检查</span></span>
+                  <span class="review-image-card-copy"><strong>图 {image.ordinal}{image.recommended ? " · 推荐项" : ""}</strong><span title={`${image.sourceLabel} / ${image.relativePath}`}>{image.sourceLabel} / {image.relativePath}</span><span>{image.width} × {image.height}</span><span class="review-image-stamp" data-state={image.selected ? "keep" : "drop"}>{image.selected ? "✓ 保留" : "✗ 回收"}</span><span class="review-image-active-marker">当前检查</span></span>
                 </button>
               {/each}
             </div>
@@ -384,15 +433,15 @@
 
           <footer class="review-deck-statusbar">
             <div><span>{snapshot.snapshot.summary.decidedGroupCount} / {snapshot.snapshot.summary.totalGroupCount} 组已确认</span><span>当前组 {focusedGroup.selectedImageCount} / {focusedGroup.imageCount} 保留</span><span>{loupeEnabled ? `同步放大镜 ${formatReviewMagnification(loupeState.magnification)}${loupeState.pinned ? " · 坐标已锁定" : loupeState.active ? " · 正在检查" : ""}` : "放大镜已关闭"}</span></div>
-            <div class="review-shortcut-hints"><kbd>←/→</kbd> 图片 <kbd>Space</kbd> 保留/移除 <kbd>Enter</kbd> 采纳并前进 <kbd>Esc</kbd> 上一组 <kbd>X</kbd> 放大镜 <kbd>Ctrl+滚轮</kbd> 缩放</div>
+            <details class="review-shortcut-hints"><summary>快捷键</summary><div><kbd>←/→</kbd> 图片 <kbd>Space</kbd> 保留/移除 <kbd>Enter</kbd> 采纳并前进 <kbd>Esc</kbd> 上一组 <kbd>X</kbd> 放大镜 <kbd>Ctrl+滚轮</kbd> 缩放</div></details>
             <button type="button" class="review-button review-button--primary" disabled={snapshot.snapshot.summary.status !== "ready" || Boolean(snapshot.busy)} onclick={() => void confirmAndAdvanceAndFocus()}>采纳并前进</button>
           </footer>
         </section>
       {:else}
-        <section class="review-panel" aria-labelledby="review-state-heading"><h2 id="review-state-heading">{snapshot.snapshot.summary.statusLabel}</h2><p>{snapshot.presentation.message}</p><dl><div><dt>图片</dt><dd>{snapshot.snapshot.summary.totalImageCount}</dd></div><div><dt>审核组</dt><dd>{snapshot.snapshot.summary.totalGroupCount}</dd></div><div><dt>重复组</dt><dd>{snapshot.snapshot.summary.duplicateGroupCount}</dd></div><div><dt>读取失败</dt><dd>{snapshot.snapshot.summary.unreadableImageCount}</dd></div></dl></section>
+        <section class="review-panel" aria-labelledby="review-state-heading"><h2 id="review-state-heading">{snapshot.snapshot.summary.statusLabel}</h2><p>{displayMessage(snapshot.presentation.message)}</p><dl><div><dt>图片</dt><dd>{snapshot.snapshot.summary.totalImageCount}</dd></div><div><dt>审核组</dt><dd>{snapshot.snapshot.summary.totalGroupCount}</dd></div><div><dt>重复组</dt><dd>{snapshot.snapshot.summary.duplicateGroupCount}</dd></div><div><dt>读取失败</dt><dd>{snapshot.snapshot.summary.unreadableImageCount}</dd></div></dl></section>
       {/if}
     {:else}
-      <section class="review-panel review-empty" aria-labelledby="review-empty-heading"><h2 id="review-empty-heading">尚未打开审核批次</h2><p>{snapshot.presentation.message}</p><p>打开已结束批次不会自动开始分析，也不会读取或显示本机文件路径。</p></section>
+      <section class="review-panel review-empty" aria-labelledby="review-empty-heading"><h2 id="review-empty-heading">尚无审核任务</h2><p>请在图库选择目录发起去重。</p><button type="button" onclick={() => onNavigate("gallery")}>打开图库</button></section>
     {/if}
   </section>
 </section>

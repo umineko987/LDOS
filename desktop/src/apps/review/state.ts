@@ -8,12 +8,13 @@ import {
   type ReviewErrorPresentation,
   type ReviewOperation,
   type ReviewPhase,
-  type ReviewRecentBatch,
+  type ReviewRecentTask,
+  type ReviewTaskPage,
   type ReviewSnapshot,
 } from "./model";
 
 export type ReviewConfirmation = Readonly<{
-  action: "apply" | "discard-reload";
+  action: "apply" | "discard-reload" | "discard-switch";
   title: string;
   message: string;
   confirmLabel: string;
@@ -21,8 +22,11 @@ export type ReviewConfirmation = Readonly<{
 }>;
 
 export interface ReviewState {
-  readonly recent: readonly ReviewRecentBatch[];
-  readonly selectedBatchId: string;
+  readonly recent: readonly ReviewRecentTask[];
+  readonly selectedReviewId: string;
+  readonly pendingReviewId: string;
+  readonly recentOffset: number;
+  readonly recentTotal: number;
   readonly snapshot: ReviewSnapshot | null;
   readonly focusedGroupId: string;
   readonly activeImageId: string;
@@ -37,8 +41,10 @@ export interface ReviewState {
 export interface ReviewStore {
   subscribe(listener: (state: ReviewState) => void): () => void;
   getState(): ReviewState;
-  commitRecent(recent: readonly ReviewRecentBatch[]): boolean;
-  selectBatch(batchId: string): boolean;
+  commitRecent(page: ReviewTaskPage): boolean;
+  selectReview(reviewId: string): boolean;
+  queueReview(reviewId: string): boolean;
+  updateDraftVersion(version: number): boolean;
   begin(operation: Exclude<ReviewOperation, "">, message: string): boolean;
   commitSnapshot(snapshot: ReviewSnapshot, message?: string): boolean;
   fail(error: ReviewErrorPresentation, message?: string): boolean;
@@ -80,14 +86,17 @@ export function focusedReviewGroup(state: ReviewState) {
 export function createReviewStore(): ReviewStore {
   let state = freezeState({
     recent: Object.freeze([]),
-    selectedBatchId: "",
+    selectedReviewId: "",
+    pendingReviewId: "",
+    recentOffset: 0,
+    recentTotal: 0,
     snapshot: null,
     focusedGroupId: "",
     activeImageId: "",
     phase: "empty",
     busy: "",
     error: null,
-    message: "选择一个已结束批次；打开批次不会自动开始分析。",
+    message: "请在图库选择目录发起去重。",
     confirmation: null,
   });
   const listeners = new Set<(value: ReviewState) => void>();
@@ -108,20 +117,20 @@ export function createReviewStore(): ReviewStore {
       return () => listeners.delete(listener);
     },
     getState: () => state,
-    commitRecent(recent) {
-      const safeRecent = Object.freeze([...recent]);
-      const selectedBatchId = safeRecent.some(({ id }) => id === state.selectedBatchId)
-        ? state.selectedBatchId
-        : safeRecent.some(({ id }) => id === state.snapshot?.batchId)
-          ? state.snapshot!.batchId
-          : "";
-      return publish({ ...state, recent: safeRecent, selectedBatchId });
+    commitRecent(page) {
+      return publish({ ...state, recent: page.items, recentOffset: page.offset, recentTotal: page.total });
     },
-    selectBatch(batchId) {
-      const id = batchId ? validateReviewId(batchId) : "";
-      if (id && !state.recent.some((batch) => batch.id === id && batch.terminal)) return false;
-      if (state.selectedBatchId === id) return false;
-      return publish({ ...state, selectedBatchId: id });
+    selectReview(reviewId) {
+      const id = reviewId ? validateReviewId(reviewId) : "";
+      if (state.selectedReviewId === id && !state.pendingReviewId) return false;
+      return publish({ ...state, selectedReviewId: id, pendingReviewId: "" });
+    },
+    queueReview(reviewId) {
+      return publish({ ...state, pendingReviewId: validateReviewId(reviewId), message: "新审核任务已收到；请保存或放弃当前草稿后切换。" });
+    },
+    updateDraftVersion(version) {
+      if (!state.snapshot?.dirty || !Number.isSafeInteger(version) || version <= state.snapshot.version) return false;
+      return publish({ ...state, snapshot: Object.freeze({ ...state.snapshot, version }) });
     },
     begin(operation, message) {
       if (state.busy) return false;
@@ -137,7 +146,7 @@ export function createReviewStore(): ReviewStore {
         : firstImage(snapshot, focusedGroupId);
       return publish({
         ...state,
-        selectedBatchId: snapshot.batchId,
+        selectedReviewId: snapshot.reviewId,
         snapshot,
         focusedGroupId,
         activeImageId,

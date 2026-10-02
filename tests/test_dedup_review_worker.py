@@ -43,6 +43,48 @@ def image_info(path: Path, rank: int) -> dict:
 
 
 class ReviewManifestTests(unittest.TestCase):
+    def test_selected_roots_use_only_snapshotted_files_and_preserve_asset_ids(self):
+        from PIL import Image
+        with patch.object(sys, "path", [str(ROOT / "gallery-dl-backend"), *sys.path]):
+            from gdl_backend.gallery_safe_paths import SafeSourceRoot
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                selected = []
+                for n in range(2):
+                    source = root / f"source-{n}"
+                    source.mkdir()
+                    Image.new("RGB", (32, 32), "red").save(source / "selected.png")
+                    Image.new("RGB", (32, 32), "blue").save(source / "not-selected.png")
+                    with SafeSourceRoot(source) as safe:
+                        selected.append({"asset_id": f"asset-{n}", "source_id": f"source-{n}",
+                                         "root_path": str(source), "relative_path": "selected.png",
+                                         "root_identity": list(safe.root_identity()),
+                                         "disk_version": safe.disk_version("selected.png")})
+                input_path, output = root / "input.json", root / "manifest.json"
+                input_path.write_text(json.dumps({"review_id": "gallery-review", "images": selected}))
+                args = ["worker", "--input", str(input_path), "--output", str(output),
+                        "--device", "cpu", "--no-sscd", "--no-dino"]
+                with patch.object(sys, "argv", args):
+                    self.assertEqual(worker.main(), 0)
+                original_is_dir = Path.is_dir
+                def without_proc(path):
+                    return False if str(path) == "/proc/self/fd" else original_is_dir(path)
+                with patch.object(Path, "is_dir", without_proc), patch.object(sys, "argv", args):
+                    self.assertEqual(worker.main(), 0)
+                manifest = json.loads(output.read_text())
+                self.assertEqual(manifest["schema_version"], 3)
+                self.assertEqual(manifest["review_id"], "gallery-review")
+                self.assertNotIn("root", manifest)
+                self.assertEqual(manifest["counts"]["images"], 2)
+                emitted = [image for group in manifest["groups"] for image in group["items"]]
+                emitted += [image for group in manifest["auto_groups"] for image in group["rejected_items"]]
+                self.assertEqual({image["id"] for image in emitted}, {"asset-0", "asset-1"})
+                self.assertEqual({image["relative_path"] for image in emitted},
+                                 {"source-0/selected.png", "source-1/selected.png"})
+                for entry in selected:
+                    self.assertTrue((Path(entry["root_path"]) / "selected.png").is_file())
+                    self.assertTrue((Path(entry["root_path"]) / "not-selected.png").is_file())
+
     def test_cpu_profile_is_bounded_and_allows_explicit_override(self):
         profile = build_resource_profile("cpu", cpu_count=64)
         self.assertLessEqual(profile.workers, 4)

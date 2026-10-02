@@ -26,7 +26,7 @@
   import Viewer from "./Viewer.svelte";
   import "./gallery.css";
 
-  let { api }: { api: ApiClient } = $props();
+  let { api, active = true, onReviewCreated }: { api: ApiClient; active?: boolean; onReviewCreated?: (reviewId: string) => void } = $props();
 
   const runtime = untrack(() => {
     const store = createGalleryStore();
@@ -36,6 +36,7 @@
   const { store, service, controller } = runtime;
   const snapshot: GalleryBrowseState = $derived($store);
 
+  let galleryRoot = $state<HTMLElement>();
   // ---- 虚拟化窗口状态（滚动驱动，非 store 事务） ----
   let contentScroll = $state(0);
   let contentHeight = $state(0);
@@ -122,7 +123,7 @@
       return;
     }
     const sourceLabel = activeSource?.display_name ?? "来源";
-    selectedDirectorySelections = snapshot.directories.map((directory) => exportSelection(directory, sourceLabel));
+    for (const directory of snapshot.directories) rememberDirectorySelection(exportSelection(directory, sourceLabel));
     controller.selectAllAssets();
   }
   const currentAsset = $derived(
@@ -178,10 +179,10 @@
   );
 
   function requestDeleteSelection(): void {
-    if (selectedItemCount === 0) return;
+    if (!snapshot.selectedAssetIds.length && !selectedVisibleDirectoryIds.length) return;
     controller.requestTrashSelection(
       snapshot.selectedAssetIds,
-      selectedDirectorySelections.map((selection) => selection.directoryId),
+      selectedVisibleDirectoryIds,
     );
   }
 
@@ -576,6 +577,9 @@
   const selectedDirectoryIds = $derived(
     new Set(selectedDirectorySelections.map((selection) => selection.directoryId)),
   );
+  const selectedVisibleDirectoryIds = $derived(
+    snapshot.directories.filter((directory) => selectedDirectoryIds.has(directory.directory_id)).map((directory) => directory.directory_id),
+  );
   const selectedItemCount = $derived(
     snapshot.selectedAssetIds.length + selectedDirectorySelections.length,
   );
@@ -628,7 +632,7 @@
     ].join("\u0000");
     if (selectionContextKey === nextSelectionContextKey) return;
     selectionContextKey = nextSelectionContextKey;
-    resetBrowseSelection();
+    controller.clearAssetSelection();
   });
 
   function clearVisibleSelection(): void {
@@ -681,6 +685,71 @@
     };
   }
 
+  // Review has its own immutable submission scope; export edits never alter it.
+  let reviewSelections = $state<DirectoryExportSelection[]>([]);
+  let reviewConfirmOpen = $state(false);
+  let reviewCreating = $state(false);
+  let reviewCreateError = $state("");
+  let reviewCreateRequest: AbortController | null = null;
+  let reviewDialog = $state<HTMLDialogElement>();
+  let reviewReturnFocus: FocusTarget | null = null;
+
+  function openReviewConfirmation(scope: "selected" | "current" | "root"): void {
+    if (reviewCreating) return;
+    const current = currentDirectoryExportSelection();
+    reviewSelections = scope === "selected" ? [...selectedDirectorySelections]
+      : scope === "current" && current ? [current]
+      : scope === "root" && activeSource?.root_directory_id ? [{ directoryId: activeSource.root_directory_id, directoryName: activeSource.display_name, sourceLabel: activeSource.display_name, relativePath: "来源根目录" }] : [];
+    if (!reviewSelections.length) return;
+    reviewReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    reviewCreateError = "";
+    reviewConfirmOpen = true;
+  }
+
+  function closeReviewConfirmation(): void {
+    if (reviewCreating) return;
+    reviewConfirmOpen = false;
+    reviewDialog?.close();
+    const target = reviewReturnFocus;
+    reviewReturnFocus = null;
+    void tick().then(() => restoreFocus(target));
+  }
+
+  function onReviewConfirmationKeydown(event: KeyboardEvent): void {
+    if (event.key === "Escape") { event.preventDefault(); closeReviewConfirmation(); return; }
+    if (event.key !== "Tab") return;
+    const items = [...(reviewDialog?.querySelectorAll<HTMLElement>("button:not([disabled])") ?? [])];
+    const next = trappedTabIndex(items.indexOf(document.activeElement as HTMLElement), items.length, event.shiftKey);
+    if (next !== null) { event.preventDefault(); restoreFocus(items[next]); }
+  }
+
+  $effect(() => {
+    if (!reviewConfirmOpen || !active) return;
+    void tick().then(() => {
+      if (!reviewDialog?.open) reviewDialog?.showModal();
+      restoreFocus(reviewDialog?.querySelector<HTMLElement>("button") ?? reviewDialog);
+    });
+  });
+
+  async function createDirectoryReview(): Promise<void> {
+    if (reviewCreating || !reviewSelections.length) return;
+    reviewCreating = true;
+    reviewCreateError = "";
+    const request = new AbortController();
+    reviewCreateRequest = request;
+    try {
+      const reviewId = await service.createReview(reviewSelections.map((item) => item.directoryId), request.signal);
+      if (request.signal.aborted) return;
+      reviewCreating = false;
+      closeReviewConfirmation();
+      onReviewCreated?.(reviewId);
+    } catch (error) {
+      if (!request.signal.aborted) reviewCreateError = `去重任务创建失败（${error instanceof ApiError ? error.code : "request_failed"}）；目录选区已保留，请刷新图库并重试。`;
+    } finally {
+      reviewCreating = false;
+      if (reviewCreateRequest === request) reviewCreateRequest = null;
+    }
+  }
   function currentDirectoryExportSelection(): DirectoryExportSelection | null {
     const directory = snapshot.currentDirectory;
     const source = snapshot.sources.find(
@@ -1082,7 +1151,9 @@
 
   onMount(() => {
     controller.activate();
+    galleryMounted = true;
     return () => {
+      reviewCreateRequest?.abort();
       const activeExport = directoryExportOperation;
       clearDirectoryExportPolling();
       clearSearchDebounce();
@@ -1099,8 +1170,27 @@
     };
   });
 
+  let galleryMounted = $state(false);
+  let galleryActivationSeen = false;
+  let galleryWasActive = false;
+  let galleryRefreshNotice = $state("");
+  $effect(() => {
+    if (!galleryMounted) return;
+    const nowActive = active;
+    untrack(() => {
+      if (nowActive && galleryActivationSeen && !galleryWasActive) {
+        galleryRefreshNotice = snapshot.txtDraft !== null && snapshot.txtDraft !== (snapshot.viewerAnnotation?.content ?? "")
+          ? "正在刷新图库；打开的 TXT 草稿保持不变。若文件已移动，请先保存草稿或关闭查看器后再打开。" : "";
+        void controller.reconcileOnFocus();
+      }
+      if (!nowActive) reviewDialog?.close();
+      galleryWasActive = nowActive;
+      galleryActivationSeen = true;
+    });
+  });
   function onWindowFocus(): void {
     if (
+      !active || reviewConfirmOpen ||
       platformDirectoryPickerActive ||
       importWarningOpen ||
       sourceManagerOpen ||
@@ -1114,6 +1204,7 @@
 
   /** 应用级快捷键：对话框/面板 Escape + 网格 Delete/Ctrl+A/F2（查看器打开时让位）。 */
   function onAppKeydown(event: KeyboardEvent): void {
+    if (!active || reviewConfirmOpen || event.defaultPrevented || galleryRoot?.closest("[hidden], [inert]")) return;
     if (snapshot.viewerIndex >= 0) return;
     if (importWarningOpen) {
       if (event.key === "Escape") {
@@ -1152,14 +1243,24 @@
 </script>
 
 
+{#if reviewConfirmOpen}
+  <dialog class="gallery-dialog gallery-review-confirmation" bind:this={reviewDialog} data-gallery-review-confirmation aria-labelledby="gallery-review-title" onkeydown={onReviewConfirmationKeydown} oncancel={(event) => { event.preventDefault(); closeReviewConfirmation(); }}>
+    <h2 id="gallery-review-title">对这些目录发起去重？</h2>
+    <ul>{#each reviewSelections as directory (directory.directoryId)}<li>{directory.sourceLabel} / {directory.relativePath || directory.directoryName}</li>{/each}</ul>
+    <p>包含各目录的子目录；选区作为一个集合跨目录比较，重叠目录只处理一次。单张图片选区不参与。</p>
+    <p>机器初筛会先把明确重复的图片与同名 TXT 移入回收区；疑似重复项随后人工审核。可在回收区恢复，彻底删除不可撤销。</p>
+    {#if reviewCreateError}<p class="gallery-dialog__error" role="alert">{reviewCreateError}</p>{/if}
+    <div class="gallery-dialog__actions"><button type="button" disabled={reviewCreating} onclick={closeReviewConfirmation}>取消</button><button type="button" disabled={reviewCreating} onclick={() => void createDirectoryReview()}>{reviewCreating ? "正在发起…" : "确认发起去重"}</button></div>
+  </dialog>
+{/if}
 <svelte:window
   onkeydown={onAppKeydown}
   onfocus={onWindowFocus}
 />
 
-<section class="gallery-app" data-gallery-app data-domain-owner="gallery" data-preview-availability="live" aria-labelledby="gallery-heading">
+<section class="gallery-app" data-gallery-app data-domain-owner="gallery" data-preview-availability="live" aria-labelledby="gallery-heading" bind:this={galleryRoot}>
   <header class="gallery-header" inert={snapshot.viewerIndex >= 0 ? true : undefined} aria-hidden={snapshot.viewerIndex >= 0 ? "true" : undefined}>
-    <div><p>图片库</p><h1 id="gallery-heading">媒体浏览工作区</h1></div>
+    <h1 id="gallery-heading">图库</h1>
     <span class="gallery-status" data-kind={snapshot.sourcesPhase}>{snapshot.sourcesPhase === "ready" ? `${formatCount(snapshot.sources.length)} 个来源` : snapshot.sourcesPhase === "error" ? "来源加载失败" : "正在加载来源"}</span>
   </header>
 
@@ -1235,7 +1336,7 @@
       </div>
     </aside>
 
-    <main class="gallery-content" aria-labelledby="gallery-content-heading">
+    <section class="gallery-content" aria-labelledby="gallery-content-heading">
       <h2 id="gallery-content-heading" class="gallery-visually-hidden">目录内容</h2>
       {#if snapshot.activeSourceId === null}
         <div class="gallery-empty" role="status">
@@ -1247,7 +1348,6 @@
           <section class="gallery-source-status" aria-label="当前来源状态">
             <div class="gallery-source-status__heading">
               <div>
-                <strong>{activeSource.display_name}</strong>
                 <span>{sourceSubtitle(activeSource)}</span>
               </div>
               <div class="gallery-source-status__actions">
@@ -1379,13 +1479,16 @@
               {#if snapshot.selectedAssetIds.length > 0}
                 <button type="button" onclick={requestRenameSelection} disabled={singleSelectedAsset === null}>重命名…</button>
               {/if}
-              <button type="button" class="gallery-toolbar-danger" disabled={selectedItemCount === 0} onclick={requestDeleteSelection}>删除…</button>
+              <button type="button" class="gallery-toolbar-danger" title="只删除当前目录中已选择的项目；跨目录选区仅用于去重或导出。" disabled={!snapshot.selectedAssetIds.length && !selectedVisibleDirectoryIds.length} onclick={requestDeleteSelection}>删除…</button>
             {/if}
             <button
               type="button"
               aria-pressed={snapshot.trashPanelPhase !== "closed"}
               onclick={toggleTrashPanel}
             >回收区</button>
+            <button type="button" data-gallery-dedup="selected" disabled={reviewCreating || !selectedDirectorySelections.length} onclick={() => openReviewConfirmation("selected")}>去重所选目录…</button>
+            <button type="button" data-gallery-dedup="current" disabled={reviewCreating || !snapshot.currentDirectory} onclick={() => openReviewConfirmation("current")}>去重当前目录…</button>
+            <button type="button" data-gallery-dedup="root" disabled={reviewCreating || !activeSource?.root_directory_id} onclick={() => openReviewConfirmation("root")}>去重来源根目录…</button>
             <button
               type="button"
               class="gallery-toolbar-export"
@@ -1394,6 +1497,7 @@
             >导出目录…</button>
           </div>
         </nav>
+        {#if galleryRefreshNotice}<p class="gallery-hint" role="status" data-gallery-refresh-notice>{galleryRefreshNotice}</p>{/if}
         {#if snapshot.query.length > 0}
           <p class="gallery-search-summary" role="status">
             “{snapshot.query}” · {snapshot.searchScope === "directory" ? "当前目录" : snapshot.searchScope === "source" ? "整个来源" : "整个图库"} · 已载入 {formatCount(snapshot.assets.length)} 项
@@ -1570,7 +1674,7 @@
           {/if}
         {/if}
       {/if}
-    </main>
+    </section>
   </div>
 </section>
 
@@ -1608,7 +1712,6 @@
       aria-modal="true"
       aria-labelledby="gallery-source-manager-title"
     >
-      <p class="gallery-source-dialog__eyebrow">来源生命周期</p>
       <h2 id="gallery-source-manager-title">管理“{activeSource.display_name}”</h2>
       <form onsubmit={(event) => { event.preventDefault(); void saveSourceName(); }}>
         <label>
