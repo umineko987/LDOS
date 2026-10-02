@@ -6,6 +6,7 @@
     GalleryTxtViewMode,
   } from "./state";
   import { restoreFocus, trappedTabIndex, type FocusTarget } from "../../core/a11y/focus";
+  import { enqueueThumbnailPrefetch } from "./thumbnailPrefetch";
 
   interface Props {
     snapshot: GalleryBrowseState;
@@ -83,6 +84,18 @@
   const interactionBusy = $derived(
     snapshot.viewerPagePhase === "loading" || snapshot.viewerOperationPhase === "trashing",
   );
+
+  $effect(() => {
+    // 预热相邻资产的缩略图条，左右翻页时直接命中缓存。
+    const index = snapshot.viewerIndex;
+    if (index < 0) return;
+    const urls: string[] = [];
+    for (const offset of [-2, -1, 1, 2]) {
+      const neighbor = snapshot.viewerAssets[index + offset];
+      if (neighbor) urls.push(thumbnailUrl(neighbor.asset_id, 256));
+    }
+    enqueueThumbnailPrefetch(urls);
+  });
 
   $effect(() => {
     currentAsset?.asset_id;

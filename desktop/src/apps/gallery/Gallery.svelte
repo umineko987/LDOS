@@ -22,6 +22,7 @@
     type GalleryTxtState,
   } from "./model";
   import { createGalleryService } from "./service";
+  import { enqueueThumbnailPrefetch } from "./thumbnailPrefetch";
   import { createGalleryStore, type GalleryBrowseState } from "./state";
   import Viewer from "./Viewer.svelte";
   import "./gallery.css";
@@ -1168,6 +1169,15 @@
       }
       controller.destroy();
     };
+  });
+
+  $effect(() => {
+    // 预热当前已加载页的缩略图：主网格 512、目录封面 256（低并发队列）。
+    const assetUrls = snapshot.assets.map((asset) => service.thumbnailUrl(asset.asset_id, 512));
+    const coverUrls = snapshot.directories.flatMap((directory) =>
+      directory.cover_asset_ids.slice(0, 4).map((coverId) => service.thumbnailUrl(coverId, 256)),
+    );
+    enqueueThumbnailPrefetch([...coverUrls, ...assetUrls]);
   });
 
   let galleryMounted = $state(false);
