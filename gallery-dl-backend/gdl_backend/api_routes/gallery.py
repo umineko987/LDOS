@@ -735,7 +735,10 @@ def create_gallery_router() -> APIRouter:
             raise ApiError(422, "invalid_thumbnail_size", "缩略图尺寸只支持 256/512")
         resolved = _resolve_asset_file(container, asset_id)
         try:
-            thumbnail = container.gallery_thumbnails.thumbnail_response(
+            # Pillow 解码/缩放/编码是重同步操作（冷缓存可达数百毫秒），
+            # 必须移出事件循环，否则一张缩略图会阻塞全部并发 API 响应。
+            thumbnail = await asyncio.to_thread(
+                container.gallery_thumbnails.thumbnail_response,
                 source_root=resolved["source_root"],
                 relative_path=resolved["relative_path"],
                 asset_id=asset_id,
