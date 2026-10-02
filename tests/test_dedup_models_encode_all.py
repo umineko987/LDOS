@@ -11,7 +11,7 @@ from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "dedup"))
 
 import dedup_models
 from dedup_models import DINO_CACHE_KEY, SSCD_CACHE_KEY, DeepEmbeddingExtractor

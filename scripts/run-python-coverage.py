@@ -28,10 +28,10 @@ COMPONENTS = {
     },
     "dedup": {
         "cwd": ROOT,
-        "coverage_args": ["--include=dedup_*.py"],
-        "report_args": ["--include=dedup_*.py"],
+        "coverage_args": ["--include=dedup/dedup_*.py"],
+        "report_args": ["--include=dedup/dedup_*.py"],
         "test_args": ["-m", "unittest", "discover", "-s", "tests", "-v"],
-        "source_description": "all repository-root dedup_*.py files",
+        "source_description": "all dedup/dedup_*.py files",
         "omissions": [],
     },
 }

@@ -384,8 +384,8 @@ def _default_dedup_python() -> Path:
 class DedupSettings:
     enabled: bool = True
     python_executable: Path = field(default_factory=_default_dedup_python)
-    worker_script: Path = field(default_factory=lambda: (WORKSPACE_DIR / "dedup_review_worker.py").resolve())
-    core_script: Path = field(default_factory=lambda: (WORKSPACE_DIR / "dedup_core.py").resolve())
+    worker_script: Path = field(default_factory=lambda: (WORKSPACE_DIR / "dedup" / "dedup_review_worker.py").resolve())
+    core_script: Path = field(default_factory=lambda: (WORKSPACE_DIR / "dedup" / "dedup_core.py").resolve())
     model_dir: Path = field(default_factory=lambda: (WORKSPACE_DIR / ".models").resolve())
     device: str = "auto"
     # 0 表示由 worker 根据设备和 CPU 数量选择；显式正整数始终覆盖 profile。
@@ -566,12 +566,12 @@ class AppSettings:
             worker_script=_path(
                 dedup_data.get("worker_script"),
                 base,
-                WORKSPACE_DIR / "dedup_review_worker.py",
+                WORKSPACE_DIR / "dedup" / "dedup_review_worker.py",
             ),
             core_script=_path(
                 dedup_data.get("core_script"),
                 base,
-                WORKSPACE_DIR / "dedup_core.py",
+                WORKSPACE_DIR / "dedup" / "dedup_core.py",
             ),
             model_dir=_managed_path(
                 dedup_data.get("model_dir"),

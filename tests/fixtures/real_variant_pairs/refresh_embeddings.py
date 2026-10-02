@@ -14,8 +14,8 @@ import numpy as np
 
 FIXTURE_ROOT = Path(__file__).resolve().parent
 ROOT = FIXTURE_ROOT.parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+if str(ROOT / "dedup") not in sys.path:
+    sys.path.insert(0, str(ROOT / "dedup"))
 
 from dedup_models import (  # noqa: E402
     DINO_REPOSITORY,
@@ -51,7 +51,7 @@ def _calculate_embeddings(model_dir: Path) -> dict[str, dict[str, list[float]]]:
 
     specification = importlib.util.spec_from_file_location(
         "dedup_fixture_refresh",
-        ROOT / "dedup_core.py",
+        ROOT / "dedup" / "dedup_core.py",
     )
     module = importlib.util.module_from_spec(specification)
     assert specification.loader is not None

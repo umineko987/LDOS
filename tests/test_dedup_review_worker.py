@@ -7,13 +7,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "dedup"))
+
 from dedup_resources import build_resource_profile
 
 import dedup_review_worker as worker
 
-
-ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location("dedup_review_test_core", ROOT / "dedup_core.py")
+SPEC = importlib.util.spec_from_file_location("dedup_review_test_core", ROOT / "dedup" / "dedup_core.py")
 CORE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CORE)
 

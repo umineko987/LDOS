@@ -12,8 +12,8 @@ import numpy as np
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-SCRIPT_PATH = ROOT / "dedup_core.py"
+sys.path.insert(0, str(ROOT / "dedup"))
+SCRIPT_PATH = ROOT / "dedup" / "dedup_core.py"
 SPEC = importlib.util.spec_from_file_location("dedup_script_real", SCRIPT_PATH)
 DEDUP = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(DEDUP)

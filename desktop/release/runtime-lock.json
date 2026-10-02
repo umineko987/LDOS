@@ -56,10 +56,10 @@
     "requirements-dedup-cpu.txt"
   ],
   "application_scripts": [
-    "dedup_core.py",
-    "dedup_models.py",
-    "dedup_resources.py",
-    "dedup_review_worker.py"
+    "dedup/dedup_core.py",
+    "dedup/dedup_models.py",
+    "dedup/dedup_resources.py",
+    "dedup/dedup_review_worker.py"
   ],
   "optional_resources": {
     "dedup_models": false,

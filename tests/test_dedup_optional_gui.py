@@ -1,10 +1,12 @@
 import importlib.util
+import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = ROOT / "dedup_core.py"
+sys.path.insert(0, str(ROOT / "dedup"))
+SCRIPT_PATH = ROOT / "dedup" / "dedup_core.py"
 SPEC = importlib.util.spec_from_file_location("dedup_optional_gui_core", SCRIPT_PATH)
 DEDUP = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(DEDUP)

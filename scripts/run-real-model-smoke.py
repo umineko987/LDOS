@@ -21,7 +21,7 @@ except ImportError:  # Windows 不提供 resource；模型闭环本身仍可完�
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKER = ROOT / "dedup_review_worker.py"
+WORKER = ROOT / "dedup" / "dedup_review_worker.py"
 
 
 def open_private_log(path: Path):
@@ -116,7 +116,7 @@ def main() -> int:
             "--output",
             str(manifest_path),
             "--core-script",
-            str(ROOT / "dedup_core.py"),
+            str(ROOT / "dedup" / "dedup_core.py"),
             "--model-dir",
             str(args.model_dir.absolute()),
             "--device",
