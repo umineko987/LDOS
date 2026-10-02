@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -18,23 +17,8 @@ from gdl_backend.discovery import DiscoveryError
 from gdl_backend.encrypted_dns import EncryptedDNSError, NetworkTargetValidator
 from gdl_backend.proxy import ProxyLease
 from gdl_backend.site import SiteInfo
-from gdl_backend.webui_static import WebUIStaticFiles
 
 from tests.helpers import local_test_client, make_settings
-
-
-WEBUI_ROOT = Path(__file__).resolve().parents[1] / "gdl_backend" / "webui_dist"
-WEBUI_MANIFEST_PATH = WEBUI_ROOT / "frontend-manifest.json"
-
-
-def _webui_source_inventory() -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            path.relative_to(WEBUI_ROOT).as_posix()
-            for path in WEBUI_ROOT.rglob("*")
-            if path.is_file()
-        )
-    )
 
 
 def _json_strings(value: object):
@@ -608,156 +592,6 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(
             ready.json()["components"]["dedup_python"]["status"], "error"
         )
-
-    def test_desktop_distribution_can_omit_the_backend_static_frontend(self):
-        extra_container = ServiceContainer(self.settings)
-        try:
-            app = create_app(
-                self.settings,
-                container=extra_container,
-                start_background=False,
-                include_webui=False,
-            )
-            self.assertFalse(
-                any(getattr(route, "path", None) == "/ui" for route in app.routes)
-            )
-        finally:
-            extra_container.gallery_catalog.stop()
-            extra_container.db.close()
-
-    def test_webui_serves_only_the_canonical_desktop_build(self):
-        root = self.client.get("/")
-        self.assertEqual(root.status_code, 200)
-        self.assertEqual(root.json()["ui"], "/ui/")
-
-        slash_redirect = self.client.get("/ui", follow_redirects=False)
-        self.assertEqual(slash_redirect.status_code, 307)
-        self.assertEqual(
-            slash_redirect.headers["location"],
-            f"{str(self.client.base_url).rstrip('/')}/ui/",
-        )
-
-        manifest = json.loads(WEBUI_MANIFEST_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(manifest["schema_version"], 1)
-        self.assertEqual(manifest["build_source"], "desktop")
-        self.assertEqual(manifest["entrypoint"], "index.html")
-        entries = manifest["files"]
-        manifest_paths = tuple(entry["path"] for entry in entries)
-        self.assertEqual(tuple(sorted(manifest_paths)), manifest_paths)
-        self.assertEqual(
-            _webui_source_inventory(),
-            tuple(sorted(("frontend-manifest.json", *manifest_paths))),
-        )
-
-        for entry in entries:
-            relative_path = entry["path"]
-            content = (WEBUI_ROOT / relative_path).read_bytes()
-            with self.subTest(manifest_file=relative_path):
-                self.assertEqual(entry["size"], len(content))
-                self.assertEqual(
-                    entry["sha256"],
-                    hashlib.sha256(content).hexdigest(),
-                )
-
-        index = self.client.get("/ui/")
-        self.assertEqual(index.status_code, 200)
-        self.assertEqual(index.content, (WEBUI_ROOT / "index.html").read_bytes())
-        self.assertEqual(
-            index.headers["content-type"].partition(";")[0].lower(),
-            "text/html",
-        )
-        self.assertIn('<div id="app"></div>', index.text)
-        javascript_path = next(path for path in manifest_paths if path.endswith(".js"))
-        stylesheet_path = next(path for path in manifest_paths if path.endswith(".css"))
-        self.assertIn(f'src="./{javascript_path}"', index.text)
-        self.assertIn(f'href="./{stylesheet_path}"', index.text)
-        favicon_path = next(path for path in manifest_paths if path.endswith(".png"))
-        self.assertIn(f'href="./{favicon_path}"', index.text)
-
-        self.assertEqual(self.client.get("/ui-next/").status_code, 404)
-        self.assertEqual(self.client.get("/ui/js/main.js").status_code, 404)
-        self.assertEqual(self.client.get("/ui/styles/desktop.css").status_code, 404)
-        self.assertEqual(self.client.get("/ui/does-not-exist.js").status_code, 404)
-        self.assertEqual(self.client.get("/ui/unknown-route").status_code, 404)
-
-        ui_mounts = [
-            route
-            for route in self.app.routes
-            if getattr(route, "path", None) == "/ui"
-            and isinstance(getattr(route, "app", None), StaticFiles)
-        ]
-        self.assertEqual(len(ui_mounts), 1)
-        self.assertIsInstance(ui_mounts[0].app, WebUIStaticFiles)
-        self.assertEqual(Path(ui_mounts[0].app.directory).resolve(), WEBUI_ROOT.resolve())
-
-    def test_webui_build_assets_keep_static_http_contract(self):
-        media_types = {
-            ".html": "text/html",
-            ".json": "application/json",
-            ".css": "text/css",
-            ".js": "text/javascript",
-            ".svg": "image/svg+xml",
-            ".png": "image/png",
-        }
-        for relative_path in _webui_source_inventory():
-            route = f"/ui/{relative_path}"
-            with self.subTest(static_resource=relative_path):
-                response = self.client.get(route)
-                self.assertEqual(response.status_code, 200, route)
-                self.assertEqual(
-                    response.headers["content-type"].partition(";")[0].lower(),
-                    media_types[Path(relative_path).suffix],
-                )
-                self.assertEqual(response.headers.get("cache-control"), "no-cache")
-                self.assertTrue(response.headers.get("etag"))
-                self.assertTrue(response.headers.get("last-modified"))
-                self.assertEqual(
-                    response.content,
-                    (WEBUI_ROOT / relative_path).read_bytes(),
-                )
-                self.assertEqual(response.request.url.path, route)
-                self.assertFalse(response.request.url.query)
-                self.assertEqual(
-                    (response.request.url.scheme, response.request.url.host, response.request.url.port),
-                    (self.client.base_url.scheme, self.client.base_url.host, self.client.base_url.port),
-                )
-                self.assertFalse(response.history)
-
-                revalidated = self.client.get(
-                    route,
-                    headers={"If-None-Match": response.headers["etag"]},
-                )
-                self.assertEqual(revalidated.status_code, 304)
-                self.assertEqual(revalidated.content, b"")
-                self.assertEqual(revalidated.headers.get("cache-control"), "no-cache")
-                self.assertEqual(revalidated.headers.get("etag"), response.headers["etag"])
-
-        html = self.client.get("/ui/")
-        modified_since = self.client.get(
-            "/ui/",
-            headers={"If-Modified-Since": html.headers["last-modified"]},
-        )
-        self.assertEqual(modified_since.status_code, 304)
-        self.assertEqual(modified_since.headers.get("cache-control"), "no-cache")
-        self.assertEqual(modified_since.headers.get("etag"), html.headers["etag"])
-
-        javascript_path = next(
-            path for path in _webui_source_inventory() if path.endswith(".js")
-        )
-        with patch(
-            "starlette.responses.guess_type",
-            return_value=("application/javascript", None),
-        ):
-            javascript = self.client.get(f"/ui/{javascript_path}")
-        self.assertEqual(
-            javascript.headers.get("content-type"),
-            "text/javascript; charset=utf-8",
-        )
-
-        for api_path in ("/", "/healthz", "/api/v1/config"):
-            api = self.client.get(api_path)
-            self.assertEqual(api.status_code, 200, api_path)
-            self.assertNotIn("cache-control", api.headers, api_path)
 
     def test_authorization_proxy_api_roundtrip(self):
         # 路由顺序回归：/auth/proxy 不能被 /auth/{site} 当成站点名吃掉（那会 404）

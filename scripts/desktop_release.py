@@ -45,13 +45,7 @@ LINUX_TORCHVISION_RPATH = (
 )
 BACKEND_SOURCE = ROOT / "gallery-dl-backend" / "gdl_backend"
 GALLERY_SOURCE = ROOT / "gallery-dl-codeberg"
-FRONTEND_MANIFEST = (
-    ROOT
-    / "gallery-dl-backend"
-    / "gdl_backend"
-    / "webui_dist"
-    / "frontend-manifest.json"
-)
+FRONTEND_MANIFEST = ROOT / "desktop" / "dist" / "frontend-manifest.json"
 
 
 class ReleaseError(RuntimeError):
@@ -531,8 +525,6 @@ def copy_backend_sources(app: Path) -> None:
     for relative in tracked_files(ROOT, "gallery-dl-backend/gdl_backend"):
         source = ROOT / relative
         package_relative = Path(relative).relative_to("gallery-dl-backend")
-        if "webui_dist" in package_relative.parts:
-            continue
         target = app / package_relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
@@ -1023,7 +1015,7 @@ print(json.dumps({
                 _, root_payload = _http_json(
                     opener, f"http://127.0.0.1:{port}/", {200}
                 )
-                if root_payload.get("ui", "missing") is not None:
+                if "ui" in root_payload:
                     raise ReleaseError("desktop backend exposed a second frontend")
                 try:
                     opener.open(f"http://127.0.0.1:{port}/ui/", timeout=1)
@@ -1262,10 +1254,10 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
 def frontend_build_commands(npm: str) -> list[list[str]]:
     """vite 构建产物并非跨平台字节一致（原生工具链差异），因此 canonical
     前端只在 Linux 构建一次；其余平台设置 LDOS_PREBUILT_FRONTEND=1
-    后仅校验下载到的 canonical dist，不重新生成。"""
+    复用下载到的 canonical dist，不重新生成。"""
     if os.environ.get("LDOS_PREBUILT_FRONTEND"):
-        return [[npm, "run", "verify:artifacts"]]
-    return [[npm, "run", "build"], [npm, "run", "verify:artifacts"]]
+        return []
+    return [[npm, "run", "build"]]
 
 
 def build_release(cache_dir: Path) -> dict[str, Any]:

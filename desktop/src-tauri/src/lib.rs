@@ -196,11 +196,11 @@ mod tests {
             serde_json::from_str(include_str!("../tauri.release.conf.json"))
                 .expect("valid release Tauri config JSON");
         assert_eq!(release["bundle"]["active"], true);
+        assert!(release["build"].get("beforeBuildCommand").is_none());
         assert_eq!(
             release["bundle"]["resources"],
             serde_json::json!({
-                "../../gallery-dl-backend/gdl_backend/webui_dist/frontend-manifest.json":
-                    "frontend-manifest.json"
+                "../../dist/frontend-manifest.json": "frontend-manifest.json"
             })
         );
         assert_eq!(

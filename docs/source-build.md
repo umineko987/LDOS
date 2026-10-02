@@ -31,10 +31,6 @@ python scripts/desktop_release.py build
 在 PowerShell 中执行：
 
 ```powershell
-Remove-Item -Recurse -Force .\desktop\dist -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force .\desktop\dist | Out-Null
-Copy-Item .\gallery-dl-backend\gdl_backend\webui_dist\* .\desktop\dist -Recurse -Force
-$env:LDOS_PREBUILT_FRONTEND = "1"
 python .\scripts\desktop_release.py build
 ```
 

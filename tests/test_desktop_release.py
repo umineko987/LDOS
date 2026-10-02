@@ -176,17 +176,11 @@ class DesktopReleaseTests(unittest.TestCase):
         self.assertFalse(base["bundle"]["active"])
         self.assertNotIn("resources", base["bundle"])
         self.assertNotIn("beforeBundleCommand", base["build"])
-        self.assertEqual(
-            release_config["build"]["beforeBuildCommand"],
-            "npm run verify:artifacts",
-        )
+        self.assertNotIn("beforeBuildCommand", release_config["build"])
         self.assertTrue(release_config["bundle"]["active"])
         self.assertEqual(
             release_config["bundle"]["resources"],
-            {
-                "../../gallery-dl-backend/gdl_backend/webui_dist/frontend-manifest.json":
-                    "frontend-manifest.json",
-            },
+            {"../../dist/frontend-manifest.json": "frontend-manifest.json"},
         )
         self.assertEqual(
             linux_config["bundle"]["linux"]["deb"]["files"],
@@ -235,7 +229,6 @@ class DesktopReleaseTests(unittest.TestCase):
                 for item in release.tracked_files(
                     ROOT, "gallery-dl-backend/gdl_backend"
                 )
-                if "webui_dist" not in Path(item).parts
             }
             actual = {
                 item.relative_to(app).as_posix()
@@ -536,19 +529,16 @@ class DesktopReleaseTests(unittest.TestCase):
         ):
             release.ensure_clean_tracked_checkout()
 
-    def test_prebuilt_frontend_env_verifies_without_rebuilding(self) -> None:
+    def test_prebuilt_frontend_env_skips_rebuilding(self) -> None:
         with mock.patch.dict(os.environ, {"LDOS_PREBUILT_FRONTEND": "1"}):
             commands = release.frontend_build_commands("npm")
-        self.assertEqual(commands, [["npm", "run", "verify:artifacts"]])
+        self.assertEqual(commands, [])
 
-    def test_default_frontend_path_builds_then_verifies(self) -> None:
+    def test_default_frontend_path_builds(self) -> None:
         env = {k: v for k, v in os.environ.items() if k != "LDOS_PREBUILT_FRONTEND"}
         with mock.patch.dict(os.environ, env, clear=True):
             commands = release.frontend_build_commands("npm")
-        self.assertEqual(
-            commands,
-            [["npm", "run", "build"], ["npm", "run", "verify:artifacts"]],
-        )
+        self.assertEqual(commands, [["npm", "run", "build"]])
 
     def test_scan_exempts_upstream_sbom_paths_but_not_credentials(self) -> None:
         # 用真实存在的路径作禁用针，避免 Windows 把 "/home/..." 解析成

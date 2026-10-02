@@ -55,12 +55,6 @@ include-package-data = false
 [tool.setuptools.packages.find]
 include = ["gdl_backend*"]
 
-[tool.setuptools.package-data]
-gdl_backend = [
-  "webui_dist/*",
-  "webui_dist/assets/*",
-]
-
 # scripts/run-python-coverage.py supplies the narrow source boundary for each
 # component.  Branch mode is shared and no production package is globally
 # omitted here.

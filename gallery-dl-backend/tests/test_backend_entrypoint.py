@@ -79,13 +79,12 @@ class BackendEntrypointTests(unittest.TestCase):
             server=SimpleNamespace(host="127.0.0.1", port=8787)
         )
         with (
-            patch.dict(os.environ, {"LDOS_DESKTOP_DISTRIBUTION": "1"}),
             patch.object(backend_entrypoint, "create_app", return_value=app) as create_app,
             patch.object(backend_entrypoint.uvicorn, "run"),
         ):
             backend_entrypoint._run_server(settings)
 
-        create_app.assert_called_once_with(settings, include_webui=False)
+        create_app.assert_called_once_with(settings)
 
     def test_supervised_path_uses_server_and_parent_pipe_watcher(self) -> None:
         app = object()

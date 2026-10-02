@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 from gdl_backend.app import create_app
 from gdl_backend.config import AppSettings
-from gdl_backend.webui_static import WebUIStaticFiles
 from tests.helpers import local_test_client, make_settings
 
 
@@ -253,27 +252,6 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
         self.assertEqual(media.headers["Access-Control-Allow-Origin"], TAURI_ORIGIN)
         self.assertEqual(
             media.headers["Cross-Origin-Resource-Policy"],
-            "cross-origin",
-        )
-
-        # A static-image fixture keeps this media-header contract independent
-        # of whether the current UI theme happens to ship an external image.
-        static_root = self.root / "static-media"
-        static_root.mkdir()
-        (static_root / "pixel.svg").write_text(
-            '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>',
-            encoding="utf-8",
-        )
-        mount = next(route for route in self.app.routes if route.name == "webui")
-        with patch.object(mount, "app", WebUIStaticFiles(directory=str(static_root))):
-            static_image = self.client.get(
-                "/ui/pixel.svg",
-                headers=self.cross_origin_headers(),
-            )
-        self.assertEqual(static_image.status_code, 200, static_image.text)
-        self.assertEqual(static_image.headers["Access-Control-Allow-Origin"], TAURI_ORIGIN)
-        self.assertEqual(
-            static_image.headers["Cross-Origin-Resource-Policy"],
             "cross-origin",
         )
 

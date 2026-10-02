@@ -24,7 +24,7 @@ Linux 本机若已有 `/usr/bin/chromium`，配置会直接复用；也可设置
 
 1. 先检查实际差异：本地跑 `npm run test:e2e -- visual.spec.ts` 失败后查看 `test-results/` 的 diff 截图，确认变化来自真实 UI 演进。
 2. 在 GitHub Actions 手动触发 `视觉基线与前端产物刷新`（`.github/workflows/visual-baseline-refresh.yml`），在目标分支上生成新基线与 canonical 前端产物。
-3. 下载 `refreshed-baselines` 产物，将 `desktop/e2e/visual.spec.ts-snapshots` 与 `gallery-dl-backend/gdl_backend/webui_dist` 的内容替换进提交。
+3. 下载 `refreshed-baselines` 产物，将 `desktop/e2e/visual.spec.ts-snapshots` 的内容替换进提交。
 
 ## 边界
 

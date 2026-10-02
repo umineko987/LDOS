@@ -247,13 +247,11 @@ jobs:
         working-directory: desktop
         run: npm run test:e2e
 
-      - name: Build and verify canonical frontend artifacts
+      - name: Build frontend
         working-directory: desktop
-        run: |
-          npm run build
-          npm run verify:artifacts
+        run: npm run build
 
-      - name: Build and verify backend wheel projection
+      - name: Build backend wheel projection
         shell: bash
         run: |
           mkdir -p artifacts/wheel
@@ -261,7 +259,6 @@ jobs:
             --wheel-dir artifacts/wheel ./gallery-dl-backend
           wheel_path="$(find artifacts/wheel -maxdepth 1 -type f -name '*.whl' -print -quit)"
           test -n "$wheel_path"
-          python scripts/frontend_artifacts.py verify --wheel "$wheel_path"
 
       - name: Upload frontend diagnostics
         if: always()

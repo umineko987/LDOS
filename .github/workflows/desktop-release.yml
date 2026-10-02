@@ -57,12 +57,11 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
-      - name: Build and verify canonical frontend
+      - name: Build canonical frontend
         working-directory: desktop
         run: |
           npm ci
           npm run build
-          npm run verify:artifacts
 
       - name: Verify generated projection is committed and byte-stable
         shell: bash
@@ -182,9 +181,7 @@ jobs:
 
       - name: Check restored frontend before packaging
         shell: bash
-        run: |
-          test -f desktop/dist/index.html
-          python scripts/frontend_artifacts.py verify
+        run: test -f desktop/dist/index.html
 
       - name: Build, run, and statically verify the bundle
         env:

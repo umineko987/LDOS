@@ -3,8 +3,6 @@ name: 视觉基线与前端产物刷新
 # 视觉基线只能在 canonical 测试环境（ubuntu-24.04 + Playwright Chromium +
 # fonts-noto-cjk + node 24.13.0）下生成：本地机器的浏览器/字体栈渲染结果
 # 与 CI 字节不一致，直接提交本地基线会让 e2e 视觉回归永久失败。
-# webui_dist 同理：frontend 作业的清洁度门禁要求提交字节与 CI 构建一致，
-# 而 node 版本差异可能改变产物字节，故一并在此环境重建。
 
 on:
   workflow_dispatch:
@@ -14,7 +12,7 @@ permissions:
 
 jobs:
   refresh:
-    name: 重新生成视觉基线与 canonical 前端产物
+    name: 重新生成视觉基线
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -39,15 +37,10 @@ jobs:
       - name: 刷新 Linux Chromium 视觉基线
         working-directory: desktop
         run: npm run test:e2e -- visual.spec.ts --update-snapshots
-      - name: 生成并同步 canonical 前端
-        working-directory: desktop
-        run: npm run build
       - name: 保存刷新产物
         uses: actions/upload-artifact@v7
         with:
           name: refreshed-baselines
-          path: |
-            desktop/e2e/visual.spec.ts-snapshots
-            gallery-dl-backend/gdl_backend/webui_dist
+          path: desktop/e2e/visual.spec.ts-snapshots
           if-no-files-found: error
           retention-days: 7
