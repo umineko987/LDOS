@@ -33,12 +33,12 @@ test("图库配置：折叠摘要、三个真实过滤的阻止原因、取消�
   await expect(panel.locator("[data-gallery-review-options]")).not.toHaveAttribute("open");
   await expect(panel.locator("[data-gallery-review-enabled]")).toContainText("基础去重");
   const blockers = panel.locator("[data-gallery-review-blockers]");
-  await expect(blockers).toContainText("SSCD/DINO");
-  await expect(blockers).toContainText("sketch classifier");
+  await expect(blockers).toContainText("monochrome");
+  await expect(blockers).toContainText("素描检测暂缓");
   await expect(start).toBeDisabled();
   await panel.locator("[data-gallery-review-options] > summary").click();
   await panel.getByRole("checkbox", { name: "非目标角色", exact: true }).check();
-  await expect(blockers).toContainText("CCIP");
+  await expect(blockers).toContainText("ccip");
   await expect(blockers).toContainText("执行角色过滤前需添加参考图");
   await expect(blockers.locator("li")).toHaveCount(4);
   expect(api.count("POST", reviews)).toBe(0);
@@ -139,11 +139,18 @@ test("能力加载失败不能当作可用；后端 409 原因和 422 参考图�
   await bootDesktop(page, { failPaths: ["/api/v1/setup/models"] });
   const { panel, start } = await openPanel(page);
   await panel.getByLabel("选择预设", { exact: true }).selectOption("builtin-character");
-  await expect(panel).toContainText("过滤能力加载失败；未加载的过滤项不可执行。");
+  await expect(panel).toContainText("fixture_failure: 模拟服务错误");
   await expect(panel.locator("[data-gallery-review-blockers]")).toContainText("过滤能力未加载");
   await expect(start).toBeDisabled();
   await panel.locator("[data-gallery-review-options] > summary").click();
   await panel.getByRole("checkbox", { name: "非目标角色", exact: true }).uncheck();
+  await expect(start).toBeDisabled();
+  await page.route("**/api/v1/setup/models", (route) => route.fulfill({ json: {
+    phase: "ready", installed: true, enabled: true, using_proxy: false, downloaded_bytes: 190_000_000, expected_bytes: 190_000_000, message: "", requested_models: ["dedup"],
+    models: { sscd: { installed: true }, dino: { installed: true } },
+    review_filters: { filter_monochrome: { available: false, reason: "missing" }, filter_character: { available: false, reason: "missing" }, filter_sketch: { available: false, reason: "deferred" } },
+  } }));
+  await panel.getByRole("button", { name: "刷新过滤能力", exact: true }).click();
   await expect(start).toBeEnabled();
   await page.route(`**${reviews}`, (route) => route.fulfill({ status: 409, json: { error: { code: "review_filter_unavailable", message: "Unavailable", details: { filters: [{ option: "filter_character", reason: "Capability changed before submission" }] } } } }));
   await start.click();

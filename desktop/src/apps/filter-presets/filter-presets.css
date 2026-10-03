@@ -30,6 +30,10 @@
 .filter-source-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .filter-preset-actions { border-top: 1px solid var(--ldos-border-weak); padding-top: 12px; }
 .filter-presets-app button, .filter-options-editor button, .filter-reference-picker button { min-height: 32px; }
+.filter-model-setup, .filter-model-confirmation { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--ldos-border-weak); border-radius: var(--ldos-radius-control); }
+.filter-model-setup .review-model-progress { display: grid; gap: 6px; min-width: 0; }
+.filter-model-setup progress { width: 100%; accent-color: var(--ldos-accent); }
+.filter-model-setup [role="alert"] { color: var(--ldos-state-warning); overflow-wrap: anywhere; }
 .filter-image-choice:focus-within { outline: 2px solid var(--ldos-border-focus); outline-offset: 2px; }
 @container (max-width: 640px) { .filter-presets-layout { grid-template-columns: minmax(0, 1fr); } .filter-presets-list ul { display: flex; flex-wrap: wrap; gap: 6px; } }
 @media (forced-colors: active) { .filter-image-choice[data-selected="true"], .filter-presets-list button[aria-current] { border-color: Highlight; } }

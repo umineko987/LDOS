@@ -1,4 +1,4 @@
-import { sanitizeFilterConfig, type FilterConfig } from "../filter-presets/model";
+import { sanitizeFilterConfig, sanitizeFilterCapabilities, type FilterConfig, type FilterCapabilities } from "../filter-presets/model";
 const REVIEW_STATUS_VALUES = [
   "pending", "analyzing", "auto_applying", "ready", "blocked", "failed",
   "applying", "apply_failed", "applied",
@@ -117,6 +117,7 @@ export interface ReviewOperationResult {
 
 export type ModelSetupPhase = "idle" | "installing" | "ready" | "failed";
 
+export type ModelInstallKey = "dedup" | "monochrome" | "ccip";
 export interface ModelSetupSnapshot {
   readonly phase: ModelSetupPhase;
   readonly enabled: boolean;
@@ -125,12 +126,18 @@ export interface ModelSetupSnapshot {
   readonly downloadedBytes: number;
   readonly expectedBytes: number;
   readonly message: string;
+  readonly requestedModels: readonly ModelInstallKey[];
+  readonly reviewFilters: FilterCapabilities | null;
   readonly models: Readonly<{
     sscd: Readonly<{ installed: boolean }>;
     dino: Readonly<{ installed: boolean }>;
   }>;
 }
 
+/** A filtering-only install may have phase=ready without enabling SSCD/DINO. */
+export function baseModelsReady(setup: ModelSetupSnapshot | null): boolean {
+  return !!setup?.installed && setup.enabled && setup.models.sscd.installed && setup.models.dino.installed;
+}
 export interface ReviewErrorPresentation {
   readonly code: string;
   readonly status: number;
@@ -287,6 +294,15 @@ export function sanitizeModelSetup(value: unknown): ModelSetupSnapshot {
   const message = typeof rawMessage === "string"
     ? rawMessage.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 500)
     : "";
+  const rawRequested = own(record, "requested_models");
+  if (rawRequested !== undefined && (!Array.isArray(rawRequested) || !rawRequested.length
+    || rawRequested.some((key) => !["dedup", "monochrome", "ccip"].includes(key)))) {
+    throw new TypeError("invalid_model_setup_requested_models");
+  }
+  const requestedModels = Object.freeze([...(Array.isArray(rawRequested) ? rawRequested : ["dedup"])]) as readonly ModelInstallKey[];
+  const rawFilters = own(record, "review_filters");
+  const reviewFilters = rawFilters === undefined ? null : sanitizeFilterCapabilities(rawFilters);
+  if (rawFilters !== undefined && rawPhase !== phase) throw new TypeError("invalid_model_setup_phase");
   return Object.freeze({
     phase,
     enabled: strictBoolean(own(record, "enabled"), "invalid_model_setup_enabled"),
@@ -295,6 +311,8 @@ export function sanitizeModelSetup(value: unknown): ModelSetupSnapshot {
     downloadedBytes,
     expectedBytes,
     message,
+    requestedModels,
+    reviewFilters,
     models: Object.freeze({
       sscd: Object.freeze({ installed: strictBoolean(own(sscd, "installed"), "invalid_model_setup_sscd") }),
       dino: Object.freeze({ installed: strictBoolean(own(dino, "installed"), "invalid_model_setup_dino") }),

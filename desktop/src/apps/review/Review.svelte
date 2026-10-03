@@ -20,6 +20,7 @@
     resolveReviewCommand,
     reviewCanList,
     reviewErrorPresentation,
+    baseModelsReady,
     type ModelSetupSnapshot,
   } from "./model";
   import { createReviewService, normalizeModelProxyUrl } from "./service";
@@ -56,6 +57,7 @@
   let modelReturnFocus: FocusTarget | null = null;
   let modelSetup = $state<ModelSetupSnapshot | null>(null);
   let modelSetupError = $state("");
+  const baseReady = $derived(baseModelsReady(modelSetup));
   let modelProxy = $state("");
   let modelProxyError = $state("");
   let modelConfirmationOpen = $state(false);
@@ -81,11 +83,11 @@
           receivedReviewId = currentId;
           void openReviewAndFocus(currentId);
         }
-        syncModelPolling();
+        void refreshModelSetup();
         updateEngine();
       });
     } else {
-      untrack(() => { controller.deactivate(); stopModelPolling(); });
+      untrack(() => { controller.deactivate(); stopModelPolling(); modelRequest?.abort(); modelRequest = null; });
     }
   });
 
@@ -220,7 +222,7 @@
       critical: false,
       task: (signal) => service.readModelSetup(signal),
       onResult: (status) => {
-        const completed = modelSetup?.phase === "installing" && status.phase === "ready";
+        const completed = modelSetup?.phase === "installing" && baseModelsReady(status);
         modelSetup = status;
         modelSetupError = "";
         if (status.phase !== "installing") stopModelPolling();
@@ -233,11 +235,15 @@
     });
   }
   async function refreshModelSetup(): Promise<void> {
+    if (!active) return;
+    stopModelPolling();
     modelRequest?.abort();
     const request = new AbortController();
     modelRequest = request;
     try {
-      modelSetup = await service.readModelSetup(request.signal);
+      const status = await service.readModelSetup(request.signal);
+      if (modelRequest !== request || request.signal.aborted) return;
+      modelSetup = status;
       modelSetupError = "";
       syncModelPolling();
     } catch (error) {
@@ -278,7 +284,9 @@
     modelRequest = request;
     modelSetupError = "";
     try {
-      modelSetup = await service.installModels(proxyUrl, request.signal);
+      const status = await service.installModels(proxyUrl, request.signal);
+      if (modelRequest !== request || request.signal.aborted) return;
+      modelSetup = status;
       syncModelPolling();
     } catch (error) {
       if (!request.signal.aborted) modelSetupError = describeSetupError(error);
@@ -366,7 +374,6 @@
     ) ?? (() => {});
     globalThis.addEventListener("beforeunload", onBeforeUnload);
     mounted = true;
-    void refreshModelSetup();
     return () => {
       engineSequence += 1;
       modelRequest?.abort();
@@ -386,11 +393,11 @@
   <header class="review-header">
     <h1 id="review-heading">去重</h1>
     <span class="review-status" data-kind={snapshot.presentation.kind}>{snapshot.presentation.label}</span>
-    <details class="review-model-setup" data-phase={modelSetup?.phase ?? "loading"} aria-labelledby="review-model-heading" aria-busy={modelSetup?.phase === "installing"} open={modelSetup?.phase !== "ready" || Boolean(modelSetupError)}>
-      <summary><h2 id="review-model-heading">相似图片模型</h2><span>{modelSetup?.phase === "ready" ? "已启用" : modelSetup?.phase === "installing" ? "正在下载" : modelSetup?.installed ? "等待启用" : "下载并启用"}</span></summary>
+    <details class="review-model-setup" data-phase={baseReady ? "ready" : modelSetup?.phase === "ready" ? "idle" : modelSetup?.phase ?? "loading"} aria-labelledby="review-model-heading" aria-busy={modelSetup?.phase === "installing"} open={!baseReady || Boolean(modelSetupError)}>
+      <summary><h2 id="review-model-heading">相似图片模型</h2><span>{baseReady ? "已启用" : modelSetup?.phase === "installing" ? "正在下载" : modelSetup?.installed ? "等待启用" : "下载并启用"}</span></summary>
       <div class="review-model-content">
         <div class="review-model-copy">
-          <p>{modelSetup?.phase === "ready" ? "SSCD 与 DINOv2 已就绪，可在图库发起相似图片去重。" : "下载约 190 MB 的 SSCD 与 DINOv2 模型，用于发现相似图片。"}</p>
+          <p>{baseReady ? "SSCD 与 DINOv2 已就绪，可在图库发起相似图片去重。" : "下载约 190 MB 的 SSCD 与 DINOv2 模型，用于发现相似图片。"}</p>
         </div>
         {#if modelSetup?.phase === "installing"}
           <div class="review-model-progress" role="status" aria-live="polite">
@@ -401,7 +408,7 @@
         {/if}
         {#if modelSetupError || modelSetup?.phase === "failed"}<p class="review-model-error" role="alert">{modelSetupError || modelSetup?.message || "模型准备失败，请重试。"}</p>{/if}
         <div class="review-model-actions">
-          {#if modelSetup?.phase !== "ready"}<button type="button" class="review-button review-button--primary" disabled={!modelSetup || modelSetup.phase === "installing"} onclick={openModelConfirmation}>{modelSetup?.installed ? "启用模型" : modelSetup?.phase === "failed" ? "重新下载" : "下载并启用"}</button>{/if}
+          {#if !baseReady}<button type="button" class="review-button review-button--primary" disabled={!modelSetup || modelSetup.phase === "installing"} onclick={openModelConfirmation}>{modelSetup?.installed ? "启用模型" : modelSetup?.phase === "failed" ? "重新下载" : "下载并启用"}</button>{/if}
           <button type="button" disabled={Boolean(modelRequest)} onclick={() => void refreshModelSetup()}>刷新状态</button>
         </div>
       </div>
@@ -496,7 +503,7 @@
   <dialog class="review-confirmation review-model-confirmation" aria-modal="true" aria-labelledby="review-model-confirmation-title" aria-describedby="review-model-confirmation-message" bind:this={modelConfirmationDialog} oncancel={(event) => { event.preventDefault(); closeModelConfirmation(); }} onkeydown={onModelDialogKeydown} onclick={(event) => { if (event.target === event.currentTarget) closeModelConfirmation(); }}>
     <section>
       <h2 id="review-model-confirmation-title">下载并启用相似图片模型？</h2>
-      <p id="review-model-confirmation-message">将下载约 {formatMegabytes(modelSetup?.expectedBytes ?? 190_000_000)} 的 SSCD 与 DINOv2 模型。下载完成后自动启用，不需要重启 LDOS。</p>
+      <p id="review-model-confirmation-message">将下载约 {formatMegabytes(190_000_000)} 的 SSCD 与 DINOv2 模型。下载完成后自动启用，不需要重启 LDOS。</p>
       <label class="review-model-proxy">
         <span>本次下载代理（可选）</span>
         <input

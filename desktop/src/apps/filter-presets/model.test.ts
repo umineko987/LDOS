@@ -1,9 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_FILTER_OPTIONS, cloneFilterOptions, filterConfigBlockers, filterOptionsSummary,
-  sanitizeFilterCapabilities, sanitizeFilterConfig, sanitizeFilterOptions, validateFilterName,
+  sanitizeFilterCapabilities, sanitizeFilterConfig, sanitizeFilterOptions, validateFilterName, requiredFilterModels,
 } from "./model";
 
+it("prepares only selected, unready filters, never sketch or base models", () => {
+  const options = { ...EMPTY_FILTER_OPTIONS, basic_dedup: true, similarity_groups: true, filter_monochrome: true, filter_character: true, filter_sketch: true };
+  expect(requiredFilterModels(options, null)).toEqual(["monochrome", "ccip"]);
+  const capabilities = sanitizeFilterCapabilities({
+    filter_monochrome: { available: true, reason: "" },
+    filter_character: { available: false, reason: "missing" },
+    filter_sketch: { available: false, reason: "deferred" },
+  });
+  expect(requiredFilterModels(options, capabilities)).toEqual(["ccip"]);
+  expect(requiredFilterModels({ ...options, filter_character: false }, capabilities)).toEqual([]);
+});
 const unavailable = {
   filter_monochrome: { available: false, reason: "monochrome not integrated" },
   filter_sketch: { available: false, reason: "sketch not integrated" },

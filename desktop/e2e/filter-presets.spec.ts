@@ -15,7 +15,7 @@ test("筛选预设：内置另存、自定义增改复制删除，保留隐藏�
   await app.getByRole("button", { name: "另存为自定义" }).click();
   await app.getByLabel("预设名称").fill("Style draft");
   await expect(app.getByRole("checkbox", { name: "单色 / 灰度" })).toBeChecked();
-  await expect(app.locator('[data-filter-capability="filter_monochrome"]')).toContainText("SSCD/DINO");
+  await expect(app.locator('[data-filter-capability="filter_monochrome"]')).toContainText("monochrome");
   await app.getByRole("checkbox", { name: "单色 / 灰度" }).uncheck();
   await app.getByRole("checkbox", { name: "素描", exact: true }).uncheck();
   await app.getByRole("button", { name: "保存预设" }).click();
@@ -111,7 +111,7 @@ test("过滤能力加载失败：不假定可用，仍可保存空参考模板�
   await app.getByRole("button", { name: "角色 LoRA", exact: true }).click();
   await app.getByRole("button", { name: "另存为自定义" }).click();
   await app.getByLabel("预设名称").fill("Empty template");
-  await expect(app.getByText("过滤能力加载失败；未加载的过滤项不可执行。", { exact: true })).toBeVisible();
+  await expect(app.getByText("fixture_failure: 模拟服务错误", { exact: true })).toBeVisible();
   await expect(app.locator("[data-filter-capability]")).toHaveCount(3);
   await expect(app.locator('[data-filter-capability="filter_character"]')).toContainText("过滤能力未加载");
   await app.getByRole("button", { name: "保存预设" }).click();

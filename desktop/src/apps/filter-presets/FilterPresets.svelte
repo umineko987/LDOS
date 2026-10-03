@@ -4,6 +4,7 @@
   import { translateCurrentUiText } from "../../core/i18n";
   import { createFilterPresetService } from "./service";
   import { cloneFilterOptions, EMPTY_FILTER_OPTIONS, validateFilterName, type FilterPreset, type FilterOptions, type FilterCapabilities } from "./model";
+  import type { ModelSetupSnapshot } from "../review/model";
   import FilterOptionsEditor from "./FilterOptionsEditor.svelte";
   import "./filter-presets.css";
 
@@ -24,6 +25,11 @@
   let message = $state("");
   let loadError = $state("");
   let capabilities = $state<FilterCapabilities | null>(null);
+  let modelSetup = $state<ModelSetupSnapshot | null>(null);
+  function updateModelSetup(next: ModelSetupSnapshot | null): void {
+    capabilityRequest?.abort(); capabilityRequest = null;
+    modelSetup = next; capabilities = next?.reviewFilters ?? null; capabilityError = "";
+  }
   let capabilityError = $state("");
   let editorRevision = $state(0);
   let request: AbortController | null = null;
@@ -73,10 +79,10 @@
   async function loadCapabilities(): Promise<void> {
     if (!active) return;
     capabilityRequest?.abort();
-    const next = new AbortController(); capabilityRequest = next; capabilities = null; capabilityError = "";
+    const next = new AbortController(); capabilityRequest = next; capabilities = null; modelSetup = null; capabilityError = "";
     try {
-      const result = await service.capabilities(next.signal);
-      if (capabilityRequest === next && !next.signal.aborted && !destroyed) capabilities = result;
+      const result = await service.readModelSetup(next.signal);
+      if (capabilityRequest === next && !next.signal.aborted && !destroyed) { modelSetup = result; capabilities = result.reviewFilters; }
     } catch {
       if (capabilityRequest === next && !next.signal.aborted && !destroyed) capabilityError = "过滤能力加载失败；未加载的过滤项不可执行。";
     } finally { if (capabilityRequest === next) capabilityRequest = null; }
@@ -147,7 +153,7 @@
         <p id="filter-name-help" class="filter-help">名称需为 1–80 个字符，不能包含控制字符。</p>
         {#if capabilityError}<p role="alert">{capabilityError}</p><button type="button" disabled={busy || !active} onclick={() => void loadCapabilities()}>重试过滤能力</button>{/if}
         {#key editorRevision}
-          <FilterOptionsEditor {api} {options} {capabilities} disabled={busy || !!selected?.builtin || !active} onChange={(next) => { options = cloneFilterOptions(next); }} />
+          <FilterOptionsEditor {api} {options} {capabilities} {active} setup={modelSetup} onModelSetup={updateModelSetup} prepareDisabled={busy} disabled={busy || !!selected?.builtin || !active} onChange={(next) => { options = cloneFilterOptions(next); }} />
         {/key}
         {#if !selected?.builtin}
           <div class="filter-toolbar filter-preset-actions"><button type="button" disabled={busy || !dirty || !validName || !active} onclick={() => void save()}>保存预设</button><button type="button" disabled={busy || !dirty} onclick={discard}>取消修改</button></div>

@@ -9,6 +9,7 @@ import {
   sanitizeReviewOperation,
   validateReviewId,
   type ModelSetupSnapshot,
+  type ModelInstallKey,
   type ReviewFilter,
   type ReviewOperationResult,
   type ReviewSnapshot,
@@ -53,7 +54,7 @@ export type ReviewStatusOperation = "retry";
 
 export interface ReviewService {
   readModelSetup(signal: AbortSignal): Promise<ModelSetupSnapshot>;
-  installModels(proxyUrl: string, signal: AbortSignal): Promise<ModelSetupSnapshot>;
+  installModels(proxyUrl: string, signal: AbortSignal, models?: readonly ModelInstallKey[]): Promise<ModelSetupSnapshot>;
   readPage(reviewId: string, filter: ReviewFilter, signal: AbortSignal): Promise<ReviewSnapshot>;
   adoptGroup(reviewId: string, groupId: string, selectedImageIds: readonly string[], version: number, signal: AbortSignal): Promise<ReviewOperationResult>;
   finishReview(reviewId: string, signal: AbortSignal): Promise<void>;
@@ -75,9 +76,14 @@ export function createReviewService(api: ApiClient): ReviewService {
     async readModelSetup(signal: AbortSignal) {
       return sanitizeModelSetup(await api.get(REVIEW_ENDPOINTS.models, { signal }));
     },
-    async installModels(proxyUrl: string, signal: AbortSignal) {
+    async installModels(proxyUrl: string, signal: AbortSignal, models?: readonly ModelInstallKey[]) {
       const normalizedProxy = normalizeModelProxyUrl(proxyUrl);
-      return sanitizeModelSetup(await api.post(`${REVIEW_ENDPOINTS.models}/install`, { proxy_url: normalizedProxy }, { signal }));
+      if (models && (!models.length || models.length > 3 || models.some((key) => !["dedup", "monochrome", "ccip"].includes(key)))) {
+        throw new TypeError("invalid_model_selection");
+      }
+      return sanitizeModelSetup(await api.post(`${REVIEW_ENDPOINTS.models}/install`, {
+        proxy_url: normalizedProxy, ...(models ? { models: [...new Set(models)] } : {}),
+      }, { signal }));
     },
     async readPage(reviewId: string, filter: ReviewFilter, signal: AbortSignal) {
       const chunks: ReturnType<typeof sanitizeReviewPageChunk>[] = [];

@@ -1,5 +1,6 @@
 import type { Page, Request, Route } from "@playwright/test";
 import { sanitizeFilterConfig, filterConfigBlockers, type FilterConfig, type FilterCapabilities } from "../../src/apps/filter-presets/model";
+import { normalizeModelProxyUrl } from "../../src/apps/review/service";
 
 export interface RecordedRequest {
   readonly method: string;
@@ -14,6 +15,7 @@ export interface MockApiOptions {
   readonly directoryExportScenario?: "completed" | "copying" | "failed" | "conflict";
   readonly galleryScenario?: "ready" | "reconciliation_failed" | "scan_failed" | "batch_delete";
   readonly delayMs?: number;
+  readonly baseModelsReady?: boolean;
 }
 
 export interface MockApi {
@@ -74,21 +76,22 @@ function vaultSnapshot(): Record<string, unknown> {
   };
 }
 
-function modelSetupSnapshot(): Record<string, unknown> {
+function modelSetupSnapshot(baseReady: boolean, requested: readonly string[], phase: string, readyFilters: ReadonlySet<string>, usingProxy: boolean): Record<string, unknown> {
+  const sizes: Record<string, number> = { dedup: 190_000_000, monochrome: 16_800_000, ccip: 150_300_000 };
+  const expected = requested.reduce((sum, key) => sum + sizes[key], 0);
+  const filters = {
+    filter_monochrome: { available: readyFilters.has("monochrome"), reason: readyFilters.has("monochrome") ? "" : "缺少或损坏的 monochrome 模型，请先准备模型" },
+    filter_sketch: { available: false, reason: "素描检测暂缓，尚无已接入的可靠模型；单色分类器不能代替素描检测" },
+    filter_character: { available: readyFilters.has("ccip"), reason: readyFilters.has("ccip") ? "" : "缺少或损坏的 ccip 模型，请先准备模型" },
+  };
   return {
-    phase: "ready",
-    enabled: true,
-    installed: true,
-    using_proxy: false,
-    downloaded_bytes: 190_000_000,
-    expected_bytes: 190_000_000,
-    message: "相似图片模型已就绪。",
-    models: { sscd: { installed: true }, dino: { installed: true } },
-    review_filters: {
-      filter_monochrome: { available: false, reason: "Monochrome classifier is not integrated; the installer only provisions SSCD/DINO." },
-      filter_sketch: { available: false, reason: "A reliable sketch classifier has not been confirmed." },
-      filter_character: { available: false, reason: "CCIP and character-reference rules are not integrated." },
-    },
+    phase, enabled: baseReady, installed: baseReady, using_proxy: phase === "installing" && usingProxy,
+    downloaded_bytes: phase === "installing" ? Math.floor(expected / 2) : phase === "ready" ? expected : 0,
+    expected_bytes: expected, message: phase === "installing" ? "正在下载并检查模型" : "",
+    requested_models: [...requested], review_filters: filters,
+    models: { sscd: { installed: baseReady }, dino: { installed: baseReady },
+      monochrome: { installed: filters.filter_monochrome.available, downloaded_bytes: filters.filter_monochrome.available ? sizes.monochrome : 0, expected_bytes: sizes.monochrome },
+      ccip: { installed: filters.filter_character.available, downloaded_bytes: filters.filter_character.available ? sizes.ccip : 0, expected_bytes: sizes.ccip } },
   };
 }
 
@@ -665,6 +668,13 @@ function svgImage(id: string): string {
 export async function installMockApi(page: Page, options: MockApiOptions = {}): Promise<MockApi> {
   const requests: RecordedRequest[] = [];
   const unhandled: RecordedRequest[] = [];
+  let baseReady = options.baseModelsReady !== false;
+  let requestedModels = ["dedup"];
+  let modelPhase = baseReady ? "ready" : "idle";
+  let modelUsingProxy = false;
+  let modelPolls = 0;
+  const readyFilters = new Set<string>();
+  const setupSnapshot = () => modelSetupSnapshot(baseReady, requestedModels, modelPhase, readyFilters, modelUsingProxy);
   type ReviewTask = { decisions: Map<string, readonly string[]>; version: number; status: string; directoryIds: readonly string[]; filterConfig: FilterConfig | null };
   const emptyFilterOptions = { basic_dedup: false, filter_monochrome: false, filter_sketch: false, filter_character: false, similarity_groups: false, reference_asset_ids: [] as string[] };
   const presets = new Map([
@@ -784,10 +794,11 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
     }
     if (url.pathname === "/api/v1/gallery/reviews") {
       if (request.method() === "POST") {
+        if (!baseReady) { await respond(route, { error: { code: "dedup_disabled", message: "去重功能未启用" } }, 409); return; }
         const body = requestBody(request) as { directory_ids: string[]; asset_ids?: string[]; filter_config?: FilterConfig };
         const config = body.filter_config ? sanitizeFilterConfig(body.filter_config) : null;
         if (config) {
-          const blockers = filterConfigBlockers(config.options, modelSetupSnapshot().review_filters as FilterCapabilities);
+          const blockers = filterConfigBlockers(config.options, setupSnapshot().review_filters as FilterCapabilities);
           if (blockers.length) {
             const missingReferences = blockers.some((blocker) => blocker.option === "reference_asset_ids");
             await respond(route, { error: { code: missingReferences ? "filter_reference_required" : "review_filter_unavailable", message: missingReferences ? "请添加角色参考图。" : "启用的自动过滤尚不可用。", details: { filters: blockers } } }, missingReferences ? 422 : 409);
@@ -863,8 +874,27 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       return;
     }
 
-    if (url.pathname === "/api/v1/setup/models" && (request.method() === "GET" || request.method() === "POST")) {
-      await respond(route, modelSetupSnapshot());
+    if (url.pathname === "/api/v1/setup/models/install" && request.method() === "POST") {
+      const body = requestBody(request) as { proxy_url?: string; models?: string[] };
+      const models = body?.models ?? ["dedup"];
+      if (!Array.isArray(models) || !models.length || models.length > 3 || models.some((key) => !["dedup", "monochrome", "ccip"].includes(key))
+        || Object.keys(body ?? {}).some((key) => !["proxy_url", "models"].includes(key))) {
+        await respond(route, { error: { code: "validation_error", message: "模型选择无效" } }, 422); return;
+      }
+      try { normalizeModelProxyUrl(body.proxy_url ?? ""); }
+      catch { await respond(route, { error: { code: "invalid_model_proxy", message: "下载代理格式无效" } }, 422); return; }
+      if (modelPhase !== "installing") {
+        requestedModels = [...new Set(models)]; modelPhase = "installing"; modelPolls = 0; modelUsingProxy = !!body.proxy_url;
+      }
+      await respond(route, setupSnapshot(), 202);
+      return;
+    }
+    if (url.pathname === "/api/v1/setup/models" && request.method() === "GET") {
+      if (modelPhase === "installing" && ++modelPolls >= 2) {
+        modelPhase = "ready";
+        for (const key of requestedModels) { if (key === "dedup") baseReady = true; else readyFilters.add(key); }
+      }
+      await respond(route, setupSnapshot());
       return;
     }
 

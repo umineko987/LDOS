@@ -15,6 +15,7 @@
     sanitizeFilterConfig, validateFilterName,
     type FilterOptions, type FilterConfig, type FilterPreset, type FilterCapabilities,
   } from "../filter-presets/model";
+  import { baseModelsReady, type ModelSetupSnapshot } from "../review/model";
   import { createGalleryController } from "./controller";
   import {
     GALLERY_AVAILABILITY_LABELS,
@@ -708,6 +709,17 @@
   let reviewPresetId = $state("");
   let reviewConfig = $state<FilterConfig | null>(null);
   let reviewCapabilities = $state<FilterCapabilities | null>(null);
+  let reviewModelSetup = $state<ModelSetupSnapshot | null>(null);
+  function updateReviewModelSetup(next: ModelSetupSnapshot | null): void {
+    reviewCapabilitiesRequest?.abort(); reviewCapabilitiesRequest = null;
+    reviewModelSetup = next; reviewCapabilities = next?.reviewFilters ?? null; reviewCapabilitiesError = "";
+  }
+  const reviewBaseBlocker = $derived(!reviewModelSetup
+    ? "模型状态未确认，暂不可执行。请刷新过滤能力。"
+    : reviewModelSetup.enabled !== true
+    ? "当前后端要求先启用基础去重服务，即使本次仅过滤；请到去重页明确准备 SSCD/DINO。"
+    : reviewConfig && (reviewConfig.options.basic_dedup || reviewConfig.options.similarity_groups) && !baseModelsReady(reviewModelSetup)
+      ? "基础去重或相似图片分组需要 SSCD/DINO 就绪；请到去重页准备模型。" : "");
   let reviewPresetsLoading = $state(false);
   let reviewPresetsError = $state("");
   let reviewCapabilitiesError = $state("");
@@ -761,10 +773,10 @@
   async function loadReviewCapabilities(): Promise<void> {
     reviewCapabilitiesRequest?.abort();
     const request = new AbortController(); reviewCapabilitiesRequest = request;
-    reviewCapabilities = null; reviewCapabilitiesError = "";
+    reviewCapabilities = null; reviewModelSetup = null; reviewCapabilitiesError = "";
     try {
-      const capabilities = await presetService.capabilities(request.signal);
-      if (reviewCapabilitiesRequest === request && !request.signal.aborted && !reviewDestroyed) reviewCapabilities = capabilities;
+      const status = await presetService.readModelSetup(request.signal);
+      if (reviewCapabilitiesRequest === request && !request.signal.aborted && !reviewDestroyed) { reviewModelSetup = status; reviewCapabilities = status.reviewFilters; }
     } catch {
       if (reviewCapabilitiesRequest === request && !request.signal.aborted) reviewCapabilitiesError = "过滤能力加载失败；未加载的过滤项不可执行。";
     } finally { if (reviewCapabilitiesRequest === request) reviewCapabilitiesRequest = null; }
@@ -830,7 +842,7 @@
   });
 
   async function createDirectoryReview(): Promise<void> {
-    if (!active || reviewBusy || !reviewConfig || reviewBlockers.length || (!reviewSelections.length && !reviewAssetIds.length)) return;
+    if (!active || reviewBusy || !reviewConfig || reviewBlockers.length || reviewBaseBlocker || (!reviewSelections.length && !reviewAssetIds.length)) return;
     reviewCreating = true;
     reviewCreateError = ""; reviewCreateReasons = [];
     const request = new AbortController();
@@ -1385,7 +1397,7 @@
           <div data-gallery-review-enabled><p><span>预设：</span>{reviewConfig.preset_name}</p><h3>已启用功能</h3><ul>{#each reviewEnabledLabels as label}<li>{label}</li>{:else}<li>未启用任何功能</li>{/each}</ul></div>
           <p class="gallery-export-sheet__hint">临时调整仅用于本次任务，不会覆盖已有预设。</p>
           <details bind:open={reviewOptionsExpanded} data-gallery-review-options><summary>展开并调整本次选项</summary>
-            {#key reviewEditorRevision}<FilterOptionsEditor {api} options={reviewConfig.options} onChange={changeReviewOptions} capabilities={reviewCapabilities} disabled={reviewBusy || !active} />{/key}
+            {#key reviewEditorRevision}<FilterOptionsEditor {api} options={reviewConfig.options} onChange={changeReviewOptions} capabilities={reviewCapabilities} setup={reviewModelSetup} onModelSetup={updateReviewModelSetup} active={active && reviewConfirmOpen} prepareDisabled={reviewBusy} disabled={reviewBusy || !active} />{/key}
           </details>
           {#if reviewSaveOpen}
             <form class="filter-toolbar gallery-review-save" onsubmit={(event) => { event.preventDefault(); void saveReviewPreset(); }}>
@@ -1399,14 +1411,15 @@
         {/if}
         {#if reviewCapabilitiesError}<p class="gallery-export-sheet__error" role="alert">{reviewCapabilitiesError}</p><button type="button" disabled={reviewBusy} onclick={() => void loadReviewCapabilities()}>重试过滤能力</button>{/if}
         {#if reviewBlockers.length}
-          <div class="gallery-export-sheet__error" role="alert" data-gallery-review-blockers><strong>以下已勾选功能暂不可执行，请取消对应选项后再开始：</strong><ul>{#each reviewBlockers as blocker}<li><strong>{blocker.option === "reference_asset_ids" ? "角色参考图" : FILTER_LABELS[blocker.option]}</strong>：{blocker.reason}</li>{/each}</ul></div>
+          <div class="gallery-export-sheet__error" role="alert" data-gallery-review-blockers><strong>以下已勾选功能暂不可执行，请准备模型或取消对应选项后再开始：</strong><ul>{#each reviewBlockers as blocker}<li><strong>{blocker.option === "reference_asset_ids" ? "角色参考图" : FILTER_LABELS[blocker.option]}</strong>：{blocker.reason}</li>{/each}</ul></div>
         {/if}
+        {#if reviewBaseBlocker}<p class="gallery-export-sheet__error" role="alert" data-gallery-review-base-blocker>{reviewBaseBlocker}</p>{/if}
       </section>
       <p class="gallery-export-sheet__hint">自动排除的图片与同名 TXT 会移入回收区，可恢复；彻底删除不可撤销。</p>
       <p class="gallery-export-sheet__hint">相似图片只分组供人工判断，不自动排除差分。</p>
       {#if reviewCreateError}<div class="gallery-export-sheet__error" role="alert"><p>{reviewCreateError}</p>{#if reviewCreateReasons.length}<ul>{#each reviewCreateReasons as reason}<li>{reason}</li>{/each}</ul>{/if}</div>{/if}
     </div>
-    <footer class="gallery-export-sheet__actions"><button type="button" disabled={reviewBusy} onclick={closeReviewConfirmation}>取消</button><button type="button" class="gallery-dialog__primary" disabled={reviewBusy || !reviewConfig || reviewBlockers.length > 0} onclick={() => void createDirectoryReview()}>{reviewCreating ? "正在发起…" : "开始处理"}</button></footer>
+    <footer class="gallery-export-sheet__actions"><button type="button" disabled={reviewBusy} onclick={closeReviewConfirmation}>取消</button><button type="button" class="gallery-dialog__primary" disabled={reviewBusy || !reviewConfig || reviewBlockers.length > 0 || !!reviewBaseBlocker} onclick={() => void createDirectoryReview()}>{reviewCreating ? "正在发起…" : "开始处理"}</button></footer>
   </dialog>
 {/if}
 <svelte:window

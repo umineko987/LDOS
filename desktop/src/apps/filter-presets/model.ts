@@ -115,6 +115,19 @@ export function sanitizeFilterCapabilities(raw: unknown): FilterCapabilities {
   return Object.freeze(result);
 }
 
+export type FilterModelKey = "monochrome" | "ccip";
+export const FILTER_MODELS = Object.freeze({
+  monochrome: { label: "单色模型", megabytes: 16.8 },
+  ccip: { label: "角色模型（CCIP feat + metric）", megabytes: 150.3 },
+});
+
+/** Only explicitly selected, unready filters; sketch never has a downloadable model. */
+export function requiredFilterModels(options: FilterOptions, capabilities: FilterCapabilities | null): readonly FilterModelKey[] {
+  const models: FilterModelKey[] = [];
+  if (options.filter_monochrome && capabilities?.filter_monochrome.available !== true) models.push("monochrome");
+  if (options.filter_character && capabilities?.filter_character.available !== true) models.push("ccip");
+  return models;
+}
 /** UI labels for enabled functions; no implicit dependency or feature toggling. */
 export function filterOptionsSummary(options: FilterOptions): readonly string[] {
   return Object.entries(FILTER_LABELS).filter(([key]) => options[key as keyof typeof FILTER_LABELS]).map(([, label]) => label);
