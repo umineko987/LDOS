@@ -297,6 +297,12 @@ class DedupReviewManager:
         seen_paths: set[str] = set()
         manual_paths: set[str] = set()
 
+        config = claimed.get("filter_config")
+        options = config["options"] if config is not None else None
+        if config is not None and manifest.get("filter_config") != config:
+            raise ValueError("图库审核过滤配置快照不匹配")
+        if options is not None and not options["basic_dedup"] and manifest.get("auto_groups"):
+            raise ValueError("基础去重已关闭，但清单仍自动淘汰重复图片")
         def validate_image(image: Any, *, count: bool) -> str:
             if not isinstance(image, dict):
                 raise ValueError("去重审核图片格式无效")
@@ -324,6 +330,8 @@ class DedupReviewManager:
         for group in groups:
             if not isinstance(group, dict):
                 raise ValueError("去重审核组格式无效")
+            if group.get("kind") not in {"duplicate", "single", "unreadable"}:
+                raise ValueError("人工审核组类型无效")
             group_id = str(group.get("id") or "")
             if not group_id or group_id in seen_groups:
                 raise ValueError("去重审核组 ID 无效")
@@ -333,8 +341,21 @@ class DedupReviewManager:
                 raise ValueError("去重审核组没有图片")
             if group.get("kind") == "duplicate" and len(items) < 2:
                 raise ValueError("重复组至少需要两张图片")
+            if options is not None and not options["similarity_groups"] and len(items) != 1:
+                raise ValueError("相似分组已关闭，但清单仍折叠人工候选")
             for image in items:
                 manual_paths.add(validate_image(image, count=True))
+
+        filtered_items = manifest.get("filtered_items", [])
+        if not isinstance(filtered_items, list):
+            raise ValueError("自动过滤图片格式无效")
+        filtered_paths: set[str] = set()
+        for image in filtered_items:
+            if not isinstance(image, dict) or image.get("reason") not in {"filter_monochrome", "filter_sketch", "filter_character"}:
+                raise ValueError("自动过滤原因无效")
+            if options is None or not options[image["reason"]]:
+                raise ValueError("清单包含未启用的自动过滤")
+            filtered_paths.add(validate_image(image, count=True))
 
         for group in manifest.get("auto_groups") or []:
             if not isinstance(group, dict):
@@ -351,8 +372,8 @@ class DedupReviewManager:
                 raise ValueError("自动去重组没有淘汰图片")
             for image in rejected_items:
                 validate_image(image, count=True)
-            if winner_path not in manual_paths:
-                raise ValueError("自动去重组的保留图未进入人工审核")
+            if winner_path not in manual_paths | filtered_paths:
+                raise ValueError("自动去重组的保留图未进入人工审核或自动过滤")
         expected = int((manifest.get("counts") or {}).get("images") or 0)
         if inputs is not None and set(inputs) != seen_images:
             raise ValueError("图库审核清单未完整覆盖所选快照")

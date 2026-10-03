@@ -179,6 +179,7 @@ def build_manifest(
     review_groups: list[list[dict[str, Any]]],
     core: Any,
     *, inputs: dict[str, dict[str, Any]] | None = None,
+    filtered_items: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     root = root.resolve()
     all_info_by_path = {normalized_path(info["path"]): info for info in image_infos}
@@ -231,10 +232,22 @@ def build_manifest(
             }
         )
 
+    filtered = []
+    filtered_paths: set[str] = set()
+    for exclusion in filtered_items or []:
+        key = normalized_path(exclusion["image"]["path"])
+        if key not in all_info_by_path or key in automatic_rejected_paths or key in filtered_paths:
+            raise ValueError("自动过滤图片不在幸存选区或重复处理")
+        if exclusion.get("reason") not in {"filter_monochrome", "filter_sketch", "filter_character"}:
+            raise ValueError("自动过滤原因无效")
+        filtered_paths.add(key)
+        item = public_image_info(all_info_by_path[key], root, inputs)
+        filtered.append({**item, "recommended": False, "review_metrics": None, "reason": exclusion["reason"]})
+
     info_by_path = {
         key: info
         for key, info in all_info_by_path.items()
-        if key not in automatic_rejected_paths
+        if key not in automatic_rejected_paths and key not in filtered_paths
     }
     union_find = UnionFind(list(info_by_path))
     relations: list[tuple[list[str], set[str]]] = []
@@ -334,6 +347,10 @@ def build_manifest(
         for item_ordinal, item in enumerate(group["rejected_items"], 1):
             item["ordinal"] = item_ordinal
 
+    filtered.sort(key=lambda item: item["relative_path"].casefold())
+    for ordinal, item in enumerate(filtered, 1):
+        item["ordinal"] = ordinal
+
     return {
         "schema_version": 2,
         "root": str(root),
@@ -346,11 +363,13 @@ def build_manifest(
             "single_groups": sum(group["kind"] == "single" for group in groups),
             "unreadable_images": sum(group["kind"] == "unreadable" for group in groups),
             "automatic_groups": len(automatic_groups),
-            "automatic_rejected_images": sum(
+            "filtered_images": len(filtered),
+            "automatic_rejected_images": len(filtered) + sum(
                 len(group["rejected_items"]) for group in automatic_groups
             ),
         },
         "auto_groups": automatic_groups,
+        "filtered_items": filtered,
         "groups": groups,
     }
 
@@ -390,6 +409,45 @@ def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
         if created:
             temporary.unlink(missing_ok=True)
 
+def analyze_with_filters(core: Any, image_infos: list[dict[str, Any]], core_args: Any,
+                         config: dict[str, Any] | None, references: list[Any]) -> tuple[list, list, list]:
+    if config is None:
+        automatic, candidates = core.analyze_images(image_infos, core_args) if image_infos else ([], [])
+        return automatic, candidates, []
+    from gdl_backend import review_filters
+    options = config["options"]
+    try:
+        if options["filter_character"] and not references:
+            raise review_filters.FilterConfigurationError("filter_reference_required", "角色过滤必须指定有效参考图")
+        review_filters.require_filter_capabilities(options)
+        import copy
+        basic_args = copy.copy(core_args)
+        # An unavailable SSCD must never relax the strict automatic compression gate.
+        basic_args.no_auto_compression = basic_args.no_auto_compression or basic_args.no_sscd
+        if not any(options[key] for key in ("filter_monochrome", "filter_sketch", "filter_character")):
+            automatic, candidates = core.analyze_images(
+                image_infos, basic_args, basic_dedup=options["basic_dedup"],
+                similarity_groups=options["similarity_groups"],
+            ) if image_infos else ([], [])
+            return automatic, candidates, []
+        automatic = []
+        if options["basic_dedup"] and image_infos:
+            automatic, _ = core.analyze_images(image_infos, basic_args, similarity_groups=False, release_arrays=False)
+        rejected = {normalized_path(member["path"]) for group in automatic for member in group["members"]
+                    if normalized_path(member["path"]) != normalized_path(group["winner"]["path"])}
+        survivors = [info for info in image_infos if normalized_path(info["path"]) not in rejected]
+        filtered = review_filters.filter_images(survivors, options, references if options["filter_character"] else [])
+        filtered_paths = {normalized_path(item["image"]["path"]) for item in filtered}
+        survivors = [info for info in survivors if normalized_path(info["path"]) not in filtered_paths]
+        candidates = []
+        if options["similarity_groups"] and survivors:
+            _, candidates = core.analyze_images(survivors, core_args, basic_dedup=False)
+        return automatic, candidates, filtered
+    finally:
+        # Includes rejected/filtered inputs and paths that never reach phase two.
+        core.release_image_arrays(image_infos)
+
+
 
 def main() -> int:
     if os.name != "nt":
@@ -418,12 +476,14 @@ def main() -> int:
 def run_analysis(args: Any, started_at: float, stack: ExitStack) -> int:
     selection = json.loads(args.input.read_text(encoding="utf-8")) if args.input else None
     inputs = None
+    reference_handles = []
     original_extensions = {}
     if selection is not None:
         inputs = {}
         roots = {}
         held_images = {}
-        for image in selection["images"]:
+        for is_reference, image in ([(False, item) for item in selection["images"]]
+                                    + [(True, item) for item in selection.get("references", [])]):
             path = Path(image["root_path"]) / image["relative_path"]
             # Backend owns selection. Still reject links/traversal before opening any model input.
             relative = Path(image["relative_path"])
@@ -436,13 +496,18 @@ def run_analysis(args: Any, started_at: float, stack: ExitStack) -> int:
                     raise ValueError("图库图片路径包含链接")
             if not path.is_file():
                 raise ValueError("图库图片不存在")
-            from gdl_backend.gallery_safe_paths import SafeSourceRoot
+            from gdl_backend.gallery_safe_paths import SafeSourceRoot, held_file_disk_version
             safe = roots.get(image["source_id"])
             if safe is None:
                 safe = roots[image["source_id"]] = stack.enter_context(SafeSourceRoot(image["root_path"]))
-            if list(safe.root_identity()) != image["root_identity"] or safe.disk_version(image["relative_path"]) != image["disk_version"]:
+            if list(safe.root_identity()) != image["root_identity"]:
                 raise ValueError("图库审核图片已变化")
             handle = stack.enter_context(safe.open_binary(image["relative_path"]))
+            if held_file_disk_version(handle) != image["disk_version"]:
+                raise ValueError("图库审核图片已变化")
+            if is_reference:
+                reference_handles.append(handle)
+                continue
             original_path = path
             # Linux models open a held inode, not a mutable directory path.
             if os.name == "posix" and Path("/proc/self/fd").is_dir():
@@ -559,17 +624,24 @@ def run_analysis(args: Any, started_at: float, stack: ExitStack) -> int:
     image_infos.sort(key=lambda info: normalized_path(info["path"]))
     preprocess_elapsed = time.perf_counter() - preprocess_started
     analysis_started = time.perf_counter()
-    if image_infos:
-        auto_groups, review_groups = core.analyze_images(image_infos, core_args)
-    else:
-        auto_groups, review_groups = [], []
+    references = []
+    if selection is not None and (selection.get("filter_config") or {}).get("options", {}).get("filter_character"):
+        from PIL import Image
+        for handle in reference_handles:
+            handle.seek(0)
+            with Image.open(handle) as reference:
+                references.append(reference.convert("RGB"))
+    auto_groups, review_groups, filtered = analyze_with_filters(
+        core, image_infos, core_args, selection.get("filter_config") if selection is not None else None, references,
+    )
     analysis_elapsed = time.perf_counter() - analysis_started
     manifest_started = time.perf_counter()
-    manifest = build_manifest(root, image_paths, image_infos, auto_groups, review_groups, core, inputs=inputs)
+    manifest = build_manifest(root, image_paths, image_infos, auto_groups, review_groups, core, inputs=inputs, filtered_items=filtered)
     if selection is not None:
         manifest.pop("root")
         manifest["schema_version"] = 3
         manifest["review_id"] = selection["review_id"]
+        manifest["filter_config"] = selection.get("filter_config")
     manifest_elapsed = time.perf_counter() - manifest_started
     actual_device = args.device
     if not args.no_sscd or not args.no_dino:

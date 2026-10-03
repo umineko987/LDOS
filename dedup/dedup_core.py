@@ -1,3 +1,4 @@
+import copy
 import importlib
 import os
 import sys
@@ -1013,8 +1014,31 @@ def split_review_cliques(unit_infos, review_edges, review_metrics):
     return cliques
 
 
-def analyze_images(image_infos, args):
-    exact_units = build_exact_units(image_infos)
+def release_image_arrays(image_infos):
+    """Release task-local pixel arrays and features, keeping manifest metadata."""
+    large_keys = {
+        'gray_medium', 'color_small', 'alpha_medium', 'edge_medium',
+        'sscd_embedding', 'dino_embedding', '_sift_keypoints', '_sift_descriptors',
+    }
+    for info in image_infos:
+        for key in large_keys:
+            info.pop(key, None)
+
+
+def analyze_images(image_infos, args, *, basic_dedup=True, similarity_groups=True, release_arrays=True):
+    # Disabled basic dedup must not even collapse exact copies into representatives.
+    exact_units = build_exact_units(image_infos) if basic_dedup else [
+        {'bases': [info], 'members': [info], 'winner': info, 'kind': 'single', 'reason': ''}
+        for info in image_infos
+    ]
+    if not similarity_groups and (not basic_dedup or args.no_auto_compression):
+        if release_arrays:
+            release_image_arrays(image_infos)
+        return [unit for unit in exact_units if len(unit['members']) > 1], []
+    if not similarity_groups:
+        # DINO and geometry only contribute to review grouping, never strict compression.
+        args = copy.copy(args)
+        args.no_dino = True
     base_infos = [unit['winner'] for unit in exact_units]
     sscd_pairs, dino_pairs = extract_deep_candidates(base_infos, args)
     tree = HammingBKTree()
@@ -1054,7 +1078,8 @@ def analyze_images(image_infos, args):
             'geometric_inliers': 0,
         })
         if (
-            metrics.get('dino_similarity') is not None
+            similarity_groups
+            and metrics.get('dino_similarity') is not None
             and metrics['dino_similarity'] >= args.dino_review_threshold
             and metrics['edge_similarity'] >= args.edge_review_threshold
         ):
@@ -1083,12 +1108,14 @@ def analyze_images(image_infos, args):
         first, second = key
         metrics = pair_metrics[key]
         comparison_cache[key] = metrics
-        if is_l1_auto_candidate(metrics, args):
+        if basic_dedup and is_l1_auto_candidate(metrics, args):
             metrics['candidate_level'] = 'L1-自动'
             metrics['candidate_score'] = metrics.get('sscd_similarity') or metrics['review_score']
             relation = 'compression'
             compression_edges.append(key)
         else:
+            if not similarity_groups:
+                continue
             level, candidate_score = classify_review_candidate(metrics, args)
             if level is None:
                 continue
@@ -1187,13 +1214,8 @@ def analyze_images(image_infos, args):
         review_groups.append(display_members)
 
     # 后续文件操作和 GUI 不再需要大数组，及时释放以降低审核阶段内存。
-    large_keys = {
-        'gray_medium', 'color_small', 'alpha_medium', 'edge_medium',
-        'sscd_embedding', 'dino_embedding', '_sift_keypoints', '_sift_descriptors',
-    }
-    for info in image_infos:
-        for key in large_keys:
-            info.pop(key, None)
+    if release_arrays:
+        release_image_arrays(image_infos)
 
     return auto_groups, review_groups
 

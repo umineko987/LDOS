@@ -189,6 +189,21 @@ def normalize_crawl_review_manifest(
             automatic_rejected_count += 1
         normalized_groups.append(normalized_group)
 
+    filtered_items = manifest.get("filtered_items", [])
+    if not isinstance(filtered_items, list):
+        raise ValueError("自动过滤图片格式无效")
+    filtered_ordinal = max((group["ordinal"] for group in normalized_groups), default=0)
+    for ordinal, image in enumerate(filtered_items, 1):
+        if not isinstance(image, dict) or image.get("reason") not in {"filter_monochrome", "filter_sketch", "filter_character"}:
+            raise ValueError("自动过滤原因无效")
+        group_id = "filtered:" + str(image.get("id") or "")
+        group = normalize_group(group_id, filtered_ordinal + ordinal, "auto_filtered", [], image["reason"], decided=True)
+        group["images"].append(normalize_image(
+            group_id, image, 1, selected=False, metadata_extra={"automatic_filter": {"reason": image["reason"]}},
+        ))
+        normalized_groups.append(group)
+        automatic_rejected_count += 1
+
     expected_images = int((manifest.get("counts") or {}).get("images") or 0)
     if expected_images != image_count:
         raise ValueError("审核清单的总图片计数不一致")

@@ -165,6 +165,19 @@ def _opaque_disk_version(metadata: os.stat_result, payload_digest: bytes) -> str
     digest.update(payload_digest)
     return digest.hexdigest()
 
+def held_file_disk_version(handle: BinaryIO) -> str:
+    """Fingerprint the held inode, not a path that could have been replaced."""
+    position = handle.tell()
+    try:
+        handle.seek(0)
+        metadata = os.fstat(handle.fileno())
+        digest = hashlib.sha256()
+        while chunk := handle.read(128 * 1024):
+            digest.update(chunk)
+        return _opaque_disk_version(metadata, digest.digest())
+    finally:
+        handle.seek(position)
+
 
 class SafeSourceRoot:
     """A short-lived, descriptor-anchored view of one registered source root."""
@@ -487,15 +500,11 @@ class SafeSourceRoot:
     def disk_version(self, relative_path: str, *, allow_missing: bool = False) -> str:
         try:
             with self.open_binary(relative_path) as handle:
-                metadata = os.fstat(handle.fileno())
-                digest = hashlib.sha256()
-                while chunk := handle.read(128 * 1024):
-                    digest.update(chunk)
+                return held_file_disk_version(handle)
         except UnsafeSourcePathError as error:
             if allow_missing and error.reason in {"file_missing", "parent_missing"}:
                 return _MISSING_DISK_VERSION
             raise
-        return _opaque_disk_version(metadata, digest.digest())
 
     def read_with_disk_version(
         self,
