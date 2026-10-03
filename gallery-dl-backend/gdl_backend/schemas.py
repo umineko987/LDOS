@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PrivateAttr, StrictBool, StringConstraints, field_validator, model_validator
 
 from .proxy_source_store import (
     MAX_INLINE_NODES,
@@ -19,6 +19,41 @@ from .site_policy import (
     EditableSitePolicy,
     ProxyMode,
 )
+
+
+def _filter_name_without_controls(value: Any) -> Any:
+    if isinstance(value, str) and re.search(r"[\x00-\x1f\x7f]", value):
+        raise ValueError("筛选预设名称不能包含控制字符")
+    return value
+
+
+FilterName = Annotated[
+    str, StringConstraints(strict=True, strip_whitespace=True, min_length=1, max_length=80),
+    BeforeValidator(_filter_name_without_controls),
+]
+AssetId = Annotated[str, StringConstraints(strict=True, min_length=1, max_length=128)]
+
+
+class FilterOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    basic_dedup: StrictBool
+    filter_monochrome: StrictBool
+    filter_sketch: StrictBool
+    filter_character: StrictBool
+    similarity_groups: StrictBool
+    reference_asset_ids: list[AssetId] = Field(max_length=200)
+
+
+class FilterConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    preset_name: FilterName
+    options: FilterOptions
+
+
+class FilterPresetWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: FilterName
+    options: FilterOptions
 
 
 EHImageMode = Literal["original", "resample"]

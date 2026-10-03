@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable
 
 from .config import AppSettings
 from .runtime_config import RuntimeConfigStore
+from .review_filters import filter_capabilities
 
 SSCD_BYTES = 98_791_638
 DINO_BYTES = 88_283_115
@@ -121,6 +122,7 @@ class ModelSetupManager:
             "downloaded_bytes": downloaded,
             "expected_bytes": EXPECTED_DOWNLOAD_BYTES,
             "message": self._message,
+            "review_filters": filter_capabilities(),
             "models": {
                 "sscd": {"installed": sscd_installed},
                 "dino": {"installed": dino_installed},
