@@ -77,8 +77,8 @@
   "dedup": {
     "enabled": false,
     "python_executable": "",
-    "worker_script": "../dedup_review_worker.py",
-    "core_script": "../dedup_core.py",
+    "worker_script": "../dedup/dedup_review_worker.py",
+    "core_script": "../dedup/dedup_core.py",
     "model_dir": "../.models",
     "device": "auto",
     "workers": 0,
