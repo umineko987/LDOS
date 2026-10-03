@@ -688,6 +688,7 @@
 
   // Review has its own immutable submission scope; export edits never alter it.
   let reviewSelections = $state<DirectoryExportSelection[]>([]);
+  let reviewAssetIds = $state<string[]>([]);
   let reviewConfirmOpen = $state(false);
   let reviewCreating = $state(false);
   let reviewCreateError = $state("");
@@ -695,13 +696,11 @@
   let reviewDialog = $state<HTMLDialogElement>();
   let reviewReturnFocus: FocusTarget | null = null;
 
-  function openReviewConfirmation(scope: "selected" | "current" | "root"): void {
+  function openReviewConfirmation(): void {
     if (reviewCreating) return;
-    const current = currentDirectoryExportSelection();
-    reviewSelections = scope === "selected" ? [...selectedDirectorySelections]
-      : scope === "current" && current ? [current]
-      : scope === "root" && activeSource?.root_directory_id ? [{ directoryId: activeSource.root_directory_id, directoryName: activeSource.display_name, sourceLabel: activeSource.display_name, relativePath: "来源根目录" }] : [];
-    if (!reviewSelections.length) return;
+    reviewSelections = [...selectedDirectorySelections];
+    reviewAssetIds = [...snapshot.selectedAssetIds];
+    if (!reviewSelections.length && !reviewAssetIds.length) return;
     reviewReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     reviewCreateError = "";
     reviewConfirmOpen = true;
@@ -733,19 +732,19 @@
   });
 
   async function createDirectoryReview(): Promise<void> {
-    if (reviewCreating || !reviewSelections.length) return;
+    if (reviewCreating || (!reviewSelections.length && !reviewAssetIds.length)) return;
     reviewCreating = true;
     reviewCreateError = "";
     const request = new AbortController();
     reviewCreateRequest = request;
     try {
-      const reviewId = await service.createReview(reviewSelections.map((item) => item.directoryId), request.signal);
+      const reviewId = await service.createReview(reviewSelections.map((item) => item.directoryId), reviewAssetIds, request.signal);
       if (request.signal.aborted) return;
       reviewCreating = false;
       closeReviewConfirmation();
       onReviewCreated?.(reviewId);
     } catch (error) {
-      if (!request.signal.aborted) reviewCreateError = `去重任务创建失败（${error instanceof ApiError ? error.code : "request_failed"}）；目录选区已保留，请刷新图库并重试。`;
+      if (!request.signal.aborted) reviewCreateError = `去重任务创建失败（${error instanceof ApiError ? error.code : "request_failed"}）；选区已保留，请刷新图库并重试。`;
     } finally {
       reviewCreating = false;
       if (reviewCreateRequest === request) reviewCreateRequest = null;
@@ -1255,9 +1254,9 @@
 
 {#if reviewConfirmOpen}
   <dialog class="gallery-dialog gallery-review-confirmation" bind:this={reviewDialog} data-gallery-review-confirmation aria-labelledby="gallery-review-title" onkeydown={onReviewConfirmationKeydown} oncancel={(event) => { event.preventDefault(); closeReviewConfirmation(); }}>
-    <h2 id="gallery-review-title">对这些目录发起去重？</h2>
-    <ul>{#each reviewSelections as directory (directory.directoryId)}<li>{directory.sourceLabel} / {directory.relativePath || directory.directoryName}</li>{/each}</ul>
-    <p>包含各目录的子目录；选区作为一个集合跨目录比较，重叠目录只处理一次。单张图片选区不参与。</p>
+    <h2 id="gallery-review-title">对勾选的内容发起去重？</h2>
+    <ul>{#each reviewSelections as directory (directory.directoryId)}<li>{directory.sourceLabel} / {directory.relativePath || directory.directoryName}</li>{/each}{#if reviewAssetIds.length > 0}<li>勾选的 {formatCount(reviewAssetIds.length)} 张图片</li>{/if}</ul>
+    <p>选区作为一个集合跨目录比较：目录包含其子目录，重叠目录只处理一次，同时勾选的图片只算一份。</p>
     <p>机器初筛会先把明确重复的图片与同名 TXT 移入回收区；疑似重复项随后人工审核。可在回收区恢复，彻底删除不可撤销。</p>
     {#if reviewCreateError}<p class="gallery-dialog__error" role="alert">{reviewCreateError}</p>{/if}
     <div class="gallery-dialog__actions"><button type="button" disabled={reviewCreating} onclick={closeReviewConfirmation}>取消</button><button type="button" disabled={reviewCreating} onclick={() => void createDirectoryReview()}>{reviewCreating ? "正在发起…" : "确认发起去重"}</button></div>
@@ -1496,9 +1495,7 @@
               aria-pressed={snapshot.trashPanelPhase !== "closed"}
               onclick={toggleTrashPanel}
             >回收区</button>
-            <button type="button" data-gallery-dedup="selected" disabled={reviewCreating || !selectedDirectorySelections.length} onclick={() => openReviewConfirmation("selected")}>去重所选目录…</button>
-            <button type="button" data-gallery-dedup="current" disabled={reviewCreating || !snapshot.currentDirectory} onclick={() => openReviewConfirmation("current")}>去重当前目录…</button>
-            <button type="button" data-gallery-dedup="root" disabled={reviewCreating || !activeSource?.root_directory_id} onclick={() => openReviewConfirmation("root")}>去重来源根目录…</button>
+            <button type="button" data-gallery-dedup disabled={reviewCreating || selectedItemCount === 0} onclick={openReviewConfirmation}>去重…</button>
             <button
               type="button"
               class="gallery-toolbar-export"
@@ -1607,8 +1604,6 @@
                           {/if}
                           <span class="gallery-card__badges">
                             <span class="gallery-badge" data-kind={txtBadgeKind(asset)}>{txtBadge(asset)}</span>
-                            {#if asset.dedup_visibility === "candidate"}<span class="gallery-badge" data-kind="warn">待去重</span>{/if}
-                            {#if asset.dedup_visibility === "excluded"}<span class="gallery-badge" data-kind="muted">已排除</span>{/if}
                           </span>
                         </button>
                       </div>
@@ -1669,7 +1664,7 @@
                               <img src={service.thumbnailUrl(asset.asset_id, 256)} alt="" crossorigin="anonymous" loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
                             {/if}
                           </span>
-                          <span class="gallery-list-row__name" role="cell">{asset.name}{#if asset.dedup_visibility === "candidate"}<span class="gallery-list-row__candidate"> · 待去重</span>{/if}</span>
+                          <span class="gallery-list-row__name" role="cell">{asset.name}</span>
                           <span class="gallery-list-row__path" role="cell">{snapshot.query.length > 0 ? `${assetSourceLabel(asset)} · ${asset.relative_path}` : asset.relative_path}</span>
                           <span role="cell"><span class="gallery-badge" data-kind={txtBadgeKind(asset)}>{txtBadge(asset)}</span></span>
                           <span class="gallery-list-row__size" role="cell">{formatCount(asset.size_bytes)} B</span>

@@ -1,16 +1,15 @@
 import type { ApiClient } from "../../core/api/client";
+
+const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 import {
   reviewImagePath,
   mergeReviewPageChunks,
   sanitizeReviewPageChunk,
   sanitizeModelSetup,
-  sanitizeReviewTaskPage,
   sanitizeReviewOperation,
   validateReviewId,
   type ModelSetupSnapshot,
-  type ReviewDecisionPayload,
   type ReviewFilter,
-  type ReviewTaskPage,
   type ReviewOperationResult,
   type ReviewSnapshot,
 } from "./model";
@@ -50,14 +49,14 @@ export function normalizeModelProxyUrl(value: string): string {
   }
   return candidate;
 }
-export type ReviewStatusOperation = "retry" | "apply";
+export type ReviewStatusOperation = "retry";
 
 export interface ReviewService {
   readModelSetup(signal: AbortSignal): Promise<ModelSetupSnapshot>;
   installModels(proxyUrl: string, signal: AbortSignal): Promise<ModelSetupSnapshot>;
-  readRecent(signal: AbortSignal, offset?: number): Promise<ReviewTaskPage>;
   readPage(reviewId: string, filter: ReviewFilter, signal: AbortSignal): Promise<ReviewSnapshot>;
-  writeDecisions(reviewId: string, payload: ReviewDecisionPayload, signal: AbortSignal): Promise<ReviewOperationResult>;
+  adoptGroup(reviewId: string, groupId: string, selectedImageIds: readonly string[], version: number, signal: AbortSignal): Promise<ReviewOperationResult>;
+  finishReview(reviewId: string, signal: AbortSignal): Promise<void>;
   run(operation: ReviewStatusOperation, reviewId: string, version: number, signal: AbortSignal): Promise<ReviewOperationResult>;
   imageUrl(reviewId: string, imageId: string): string;
 }
@@ -80,10 +79,6 @@ export function createReviewService(api: ApiClient): ReviewService {
       const normalizedProxy = normalizeModelProxyUrl(proxyUrl);
       return sanitizeModelSetup(await api.post(`${REVIEW_ENDPOINTS.models}/install`, { proxy_url: normalizedProxy }, { signal }));
     },
-    async readRecent(signal: AbortSignal, offset = 0) {
-      if (!Number.isInteger(offset) || offset < 0) throw new TypeError("invalid_review_offset");
-      return sanitizeReviewTaskPage(await api.get(`${REVIEW_ENDPOINTS.reviews}?limit=50&offset=${offset}&view=desktop`, { signal }), offset);
-    },
     async readPage(reviewId: string, filter: ReviewFilter, signal: AbortSignal) {
       const chunks: ReturnType<typeof sanitizeReviewPageChunk>[] = [];
       let offset = 0;
@@ -98,13 +93,22 @@ export function createReviewService(api: ApiClient): ReviewService {
       } while (offset < total);
       return mergeReviewPageChunks(chunks);
     },
-    async writeDecisions(reviewId: string, payload: ReviewDecisionPayload, signal: AbortSignal) {
-      return sanitizeReviewOperation(await api.put(reviewPath(reviewId, "/decisions"), payload, { signal }), reviewId);
+    async adoptGroup(reviewId: string, groupId: string, selectedImageIds: readonly string[], version: number, signal: AbortSignal) {
+      if (!Number.isSafeInteger(version) || version < 1) throw new TypeError("invalid_review_version");
+      if (!selectedImageIds.every((id) => typeof id === "string" && SAFE_ID.test(id))) throw new TypeError("invalid_review_selection");
+      const payload = { version, selected_image_ids: [...new Set(selectedImageIds)] };
+      return sanitizeReviewOperation(
+        await api.post(reviewPath(reviewId, `/groups/${encodeURIComponent(groupId)}/adopt`), payload, { signal }),
+        reviewId,
+      );
+    },
+    async finishReview(reviewId: string, signal: AbortSignal) {
+      await api.post(reviewPath(reviewId, "/finish"), {}, { signal });
     },
     async run(operation: ReviewStatusOperation, reviewId: string, version: number, signal: AbortSignal) {
-      if (operation !== "retry" && operation !== "apply") throw new TypeError("invalid_review_operation");
+      if (operation !== "retry") throw new TypeError("invalid_review_operation");
       if (!Number.isSafeInteger(version) || version < 1) throw new TypeError("invalid_review_version");
-      return sanitizeReviewOperation(await api.post(reviewPath(reviewId, `/${operation}`), operation === "apply" ? { version } : {}, { signal }), reviewId);
+      return sanitizeReviewOperation(await api.post(reviewPath(reviewId, `/${operation}`), {}, { signal }), reviewId);
     },
     imageUrl(reviewId: string, imageId: string) {
       return api.resourceUrl(reviewImagePath(reviewId, imageId));

@@ -58,11 +58,9 @@ describe("review state", () => {
     expect(after.activeImageId).toBe("image-2");
   });
 
-  it("keeps task selection independent of task-list pages and tracks a pending switch", () => {
+  it("tracks a pending switch independently of task selection", () => {
     const store = createReviewStore();
-    store.commitRecent({ items: [page()], total: 2, offset: 0, limit: 1 });
     expect(store.selectReview("review-other-page")).toBe(true);
-    store.commitRecent({ items: [], total: 2, offset: 2, limit: 1 });
     expect(store.getState().selectedReviewId).toBe("review-other-page");
     store.queueReview("review-pending");
     expect(store.getState().pendingReviewId).toBe("review-pending");
@@ -73,16 +71,16 @@ describe("review state", () => {
   it("confirms groups, gates writes, and preserves dirty snapshots on failure", () => {
     const store = createReviewStore();
     store.commitSnapshot(page());
-    expect(store.confirmGroup("group-1")).toBe(true);
-    expect(store.getState().snapshot?.groups["group-1"].decided).toBe(true);
-    expect(store.begin("save", "正在保存")).toBe(true);
-    expect(store.begin("save", "正在保存")).toBe(false);
+    expect(store.toggleImage("group-1", "image-1")).toBe(true);
+    expect(store.getState().snapshot?.dirty).toBe(true);
+    expect(store.begin("adopt", "正在采纳")).toBe(true);
+    expect(store.begin("adopt", "正在采纳")).toBe(false);
     const dirty = store.getState().snapshot;
     store.fail(Object.freeze({ title: "审核状态已变化", message: "safe", nextStep: "safe", code: "review_state_conflict", status: 409, requestId: "", conflict: true, missing: false }));
     expect(store.getState().snapshot).toBe(dirty);
     expect(store.getState().snapshot?.dirty).toBe(true);
     expect(store.getState().phase).toBe("error");
-    expect(store.requestConfirmation(Object.freeze({ action: "discard-reload", title: "放弃", message: "safe", confirmLabel: "放弃", warning: "safe" }))).toBe(true);
+    expect(store.requestConfirmation(Object.freeze({ action: "discard-local", title: "放弃", message: "safe", confirmLabel: "放弃", warning: "safe" }))).toBe(true);
     expect(store.dismissConfirmation()).toBe(true);
   });
 

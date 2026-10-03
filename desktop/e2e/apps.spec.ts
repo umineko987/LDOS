@@ -196,34 +196,41 @@ test.describe("可用应用关键旅程", () => {
     const api = await bootDesktop(page);
     await launchApp(page, "review");
     const review = appPage(page, "review");
+    await expect(review.getByRole("heading", { name: "尚无去重任务" })).toBeVisible();
+    await launchApp(page, "gallery");
+    const gallery = appPage(page, "gallery");
+    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+    const dedupButton = gallery.locator("[data-gallery-dedup]");
+    await gallery.getByRole("checkbox", { name: "选择图片 image-01.jpg" }).check();
+    await dedupButton.click();
+    await gallery.locator("[data-gallery-review-confirmation]").getByRole("button", { name: "确认发起去重" }).click();
+    await expect(page).toHaveURL(/#\/review$/);
     await expect(review.locator('[data-review-engine-card="gal-asset-02"]')).toBeVisible();
     await review.locator('[data-review-engine-card="gal-asset-02"]').click();
     await expect(review.locator('[data-review-dirty="true"]')).toBeVisible();
     await launchApp(page, "gallery");
-    const gallery = appPage(page, "gallery");
-    await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
-    const selected = gallery.locator('[data-gallery-dedup="selected"]');
-    await gallery.getByRole("checkbox", { name: "选择图片 image-01.jpg" }).check();
-    await expect(selected).toBeDisabled();
+    await gallery.getByRole("checkbox", { name: "选择图片 image-01.jpg" }).uncheck();
     await gallery.getByRole("checkbox", { name: "选择目录 subdir" }).check();
     await gallery.locator("button.gallery-folder").filter({ hasText: "subdir" }).click();
     await expect(gallery.locator('[data-gallery-asset="gal-asset-05"]')).toBeVisible();
     await gallery.getByRole("checkbox", { name: "选择图片 image-05.jpg" }).check();
-    await selected.click();
+    await dedupButton.click();
     const confirmation = gallery.locator("[data-gallery-review-confirmation]");
     await expect(confirmation).toContainText("E2E 导入目录 / subdir");
+    await expect(confirmation).toContainText("勾选的 1 张图片");
     await expect(confirmation).toContainText("同名 TXT");
     await confirmation.getByRole("button", { name: "取消", exact: true }).click();
-    await expect(selected).toBeFocused();
-    await selected.click();
+    await expect(dedupButton).toBeFocused();
+    await dedupButton.click();
     await confirmation.getByRole("button", { name: "确认发起去重" }).click();
     await expect(page).toHaveURL(/#\/review$/);
     await expect(review.locator("[data-review-pending]")).toBeVisible();
     await expect(review.locator('[data-review-engine-card="gal-asset-02"]')).toHaveAttribute("data-selected", "false");
-    expect(api.requests.find(({ method, path }) => method === "POST" && path === "/api/v1/gallery/reviews")?.body).toEqual({ directory_ids: ["gal-dir-sub"] });
-    await review.getByRole("button", { name: "放弃草稿并切换", exact: true }).click();
-    await review.locator('[data-review-confirmation="discard-switch"]').getByRole("button", { name: "放弃草稿并切换", exact: true }).click();
-    await expect(review.getByRole("combobox", { name: "已提交审核任务" })).toHaveValue("review-created-1");
+    expect(api.requests.filter(({ method, path }) => method === "POST" && path === "/api/v1/gallery/reviews").at(-1)?.body).toEqual({ directory_ids: ["gal-dir-sub"], asset_ids: ["gal-asset-05"] });
+    await review.getByRole("button", { name: "结束当前任务并切换", exact: true }).click();
+    await expect(review.locator("[data-review-pending]")).toBeHidden();
+    await expect.poll(() => api.count("POST", "/api/v1/gallery/reviews/review-created-1/finish")).toBe(1);
+    await expect(review.locator('[data-review-directories]')).toContainText("E2E 导入目录 / subdir");
     await expect(review.locator('[data-review-engine-card="gal-asset-02"]')).toHaveAttribute("data-selected", "true");
     const reads = api.count("GET", "/api/v1/gallery/directories/gal-dir-sub/entries");
     await launchApp(page, "gallery");
@@ -232,30 +239,34 @@ test.describe("可用应用关键旅程", () => {
     expect(api.unhandled).toEqual([]);
   });
 
-  test("图库去重：失败保留确认目录并可取消重试", async ({ page }) => {
+  test("图库去重：纯图片选区失败提示并可取消重试", async ({ page }) => {
     const api = await bootDesktop(page, { failPaths: ["/api/v1/gallery/reviews"] });
     await launchApp(page, "gallery");
     const gallery = appPage(page, "gallery");
     await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
-    await gallery.locator('[data-gallery-dedup="root"]').click();
+    const dedupButton = gallery.locator("[data-gallery-dedup]");
+    await gallery.getByRole("checkbox", { name: "选择图片 image-01.jpg" }).check();
+    await dedupButton.click();
     const confirmation = gallery.locator("[data-gallery-review-confirmation]");
     await confirmation.getByRole("button", { name: "确认发起去重" }).click();
     await expect(confirmation.getByRole("alert")).toContainText("fixture_failure");
-    await expect(confirmation).toContainText("来源根目录");
+    await expect(confirmation).toContainText("勾选的 1 张图片");
     await expect(confirmation.getByRole("button", { name: "确认发起去重" })).toBeEnabled();
     await expect(page).toHaveURL(/#\/gallery$/);
     expect(api.count("POST", "/api/v1/gallery/reviews")).toBe(1);
     await confirmation.getByRole("button", { name: "取消", exact: true }).click();
-    await expect(gallery.locator('[data-gallery-dedup="root"]')).toBeFocused();
+    await expect(gallery.locator("[data-gallery-dedup]")).toBeFocused();
   });
-  test("去重审核：加载、比较、逐组确认、串行保存并应用", async ({ page }) => {
+  test("去重审核：加载、比较、逐组采纳并完成一次性任务", async ({ page }) => {
     const api = await bootDesktop(page);
-    await launchApp(page, "review");
+    await launchApp(page, "gallery");
+    const galleryHome = appPage(page, "gallery");
+    await galleryHome.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+    await galleryHome.getByRole("checkbox", { name: "选择图片 image-01.jpg" }).check();
+    await galleryHome.locator("[data-gallery-dedup]").click();
+    await galleryHome.locator("[data-gallery-review-confirmation]").getByRole("button", { name: "确认发起去重" }).click();
+    await expect(page).toHaveURL(/#\/review$/);
     const window = appPage(page, "review");
-    const batches = window.getByRole("combobox", { name: "已提交审核任务" });
-    await expect(batches.locator("option[value=\"review-fixture\"]")).toBeAttached();
-    await batches.selectOption("review-fixture");
-
     await expect(window.getByRole("heading", { name: /组 1/ })).toBeVisible();
     await expect(window.locator("[data-review-engine-image]").first()).toHaveAttribute("data-review-engine-decoded", "true");
     const deck = window.locator("[data-review-deck]");
@@ -267,7 +278,7 @@ test.describe("可用应用关键旅程", () => {
     })).toBe(true);
     const firstCard = window.locator('[data-review-engine-card="gal-asset-01"]');
     const secondCard = window.locator('[data-review-engine-card="gal-asset-02"]');
-    await expect(firstCard).toBeFocused();
+    await expect(firstCard).toHaveAttribute("data-active", "true");
     await window.getByRole("button", { name: "刷新", exact: true }).focus();
     await page.keyboard.press("ArrowRight");
     await expect(secondCard).toHaveAttribute("data-active", "true");
@@ -275,72 +286,54 @@ test.describe("可用应用关键旅程", () => {
     await page.keyboard.press("Space");
     await expect(secondCard).toHaveAttribute("data-selected", "false");
 
-    await page.keyboard.press("x");
-    await expect(window.getByRole("button", { name: "关闭放大镜" })).toHaveAttribute("aria-pressed", "true");
-    const preview = secondCard.locator("[data-review-engine-image]");
-    const pointer = await preview.evaluate((element) => {
-      const rect = element.getBoundingClientRect();
-      const image = element as HTMLImageElement;
-      const scale = Math.min(rect.width / image.naturalWidth, rect.height / image.naturalHeight);
-      const width = image.naturalWidth * scale;
-      const height = image.naturalHeight * scale;
-      const left = rect.left + (rect.width - width) / 2;
-      const top = rect.top + (rect.height - height) / 2;
-      return { x: left + width * 0.23, y: top + height * 0.31 };
-    });
-    await page.mouse.move(pointer.x, pointer.y);
-    const crosshair = secondCard.locator("[data-review-engine-crosshair]");
-    await expect(crosshair).toBeVisible();
+    const previews = window.locator("[data-review-engine-image]");
+    const secondPreview = previews.nth(1);
+    const before = await previews.evaluateAll((elements) => elements.map((element) => element.getAttribute("style") ?? ""));
+    const box = await secondPreview.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.wheel(0, -240);
     await expect.poll(async () => {
-      const box = await crosshair.boundingBox();
-      return box ? Math.hypot(box.x + box.width / 2 - pointer.x, box.y + box.height / 2 - pointer.y) : Number.POSITIVE_INFINITY;
-    }).toBeLessThan(2);
-
-    const scroller = window.locator(".review-deck-cards");
-    await scroller.evaluate((element) => {
-      const spacer = document.createElement("div");
-      spacer.dataset.reviewScrollFixture = "true";
-      spacer.style.height = "600px";
-      spacer.style.gridColumn = "1 / -1";
-      element.append(spacer);
-    });
-    const cardBox = await secondCard.boundingBox();
-    expect(cardBox).not.toBeNull();
-    await page.mouse.move(cardBox!.x + cardBox!.width / 2, cardBox!.y + cardBox!.height / 2);
-    await page.mouse.wheel(0, 320);
-    await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    const wheelCancellation = await secondCard.evaluate((element) => {
-      const rect = element.getBoundingClientRect();
-      const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 });
-      element.dispatchEvent(event);
-      return event.defaultPrevented;
-    });
-    expect(wheelCancellation).toBe(true);
-    await scroller.evaluate((element) => {
-      element.querySelector('[data-review-scroll-fixture="true"]')?.remove();
-      element.scrollTop = 0;
-    });
+      const after = await previews.evaluateAll((elements) => elements.map((element) => element.getAttribute("style") ?? ""));
+      return after[0] !== before[0] && after[1] !== before[1];
+    }).toBe(true);
+    // 放大后拖拽平移；随后双击复位——适配状态下拖不动（边缘约束）。
+    await page.mouse.down();
+    await page.mouse.move(box!.x - 40, box!.y - 30, { steps: 4 });
+    await page.mouse.up();
+    await page.mouse.dblclick(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await expect.poll(() => previews.evaluateAll((elements) => elements.map((element) => element.getAttribute("style") ?? ""))).toEqual(before);
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box!.x - 80, box!.y - 60, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(() => previews.evaluateAll((elements) => elements.map((element) => element.getAttribute("style") ?? ""))).toEqual(before);
 
     await page.keyboard.press("Enter");
     await expect(window.getByRole("heading", { name: /组 2/ })).toBeVisible();
+    await expect.poll(() => api.count("POST", "/api/v1/gallery/reviews/review-created-1/groups/group-1/adopt")).toBe(1);
     await page.keyboard.press("Escape");
     await expect(window.getByRole("heading", { name: /组 1/ })).toBeVisible();
+    await page.keyboard.press("ArrowRight");
+    const secondCardAgain = window.locator('[data-review-engine-card="gal-asset-02"]');
+    await expect(secondCardAgain).toBeFocused();
+    await expect(secondCardAgain).toHaveAttribute("data-selected", "false");
+    await page.keyboard.press("Space");
+    await expect(secondCardAgain).toHaveAttribute("data-selected", "true");
     await page.keyboard.press("Enter");
     await expect(window.getByRole("heading", { name: /组 2/ })).toBeVisible();
+    await expect.poll(() => api.count("POST", "/api/v1/gallery/reviews/review-created-1/groups/group-1/adopt")).toBe(2);
     await page.keyboard.press("ArrowRight");
     const fourthCard = window.locator('[data-review-engine-card="gal-asset-04"]');
     await expect(fourthCard).toBeFocused();
     await page.keyboard.press("Space");
     await expect(fourthCard).toHaveAttribute("data-selected", "false");
     await page.keyboard.press("Enter");
+    await expect.poll(() => api.count("POST", "/api/v1/gallery/reviews/review-created-1/groups/group-2/adopt")).toBe(1);
 
-    await expect.poll(() => api.count("PUT", "/api/v1/gallery/reviews/review-fixture/decisions")).toBeGreaterThan(0);
-    const apply = window.getByRole("button", { name: "送入回收区" });
-    await expect(apply).toBeEnabled();
-    await apply.click();
-    const confirmation = window.locator("[data-review-confirmation=\"apply\"]");
-    await confirmation.getByRole("button", { name: "确认送入回收区" }).click();
-    await expect.poll(() => api.count("POST", "/api/v1/gallery/reviews/review-fixture/apply")).toBe(1);
+    await window.getByRole("button", { name: "完成", exact: true }).click();
+    await expect.poll(() => api.count("POST", "/api/v1/gallery/reviews/review-created-1/finish")).toBe(1);
+    await expect(window.getByRole("heading", { name: "尚无去重任务" })).toBeVisible();
     expect(api.unhandled).toEqual([]);
   });
 

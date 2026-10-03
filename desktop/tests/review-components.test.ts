@@ -10,7 +10,6 @@ import modelSource from "../src/apps/review/model.ts?raw";
 import serviceSource from "../src/apps/review/service.ts?raw";
 import stateSource from "../src/apps/review/state.ts?raw";
 import type { ApiClient } from "../src/core/api/client";
-import type { PersistenceService } from "../src/core/persistence/service";
 import type { PollingService } from "../src/core/polling/service";
 import Desktop from "../src/shell/Desktop.svelte";
 import desktopSource from "../src/shell/Desktop.svelte?raw";
@@ -18,19 +17,17 @@ import { createDesktopRuntime } from "./fixtures/desktop";
 
 const api = Object.freeze({}) as ApiClient;
 const polling = Object.freeze({}) as PollingService;
-const persistence = Object.freeze({ readActiveReviewId: () => null, writeActiveReviewId: () => true }) as unknown as PersistenceService;
 const css = readFileSync(new URL("../src/apps/review/review.css", import.meta.url), "utf8");
 
 describe("Svelte Review integration", () => {
   it("renders the real accessible Review workspace without projecting media paths", () => {
-    const body = render(Review, { props: { api, polling, persistence, onNavigate: vi.fn() } }).body;
+    const body = render(Review, { props: { api, polling, onNavigate: vi.fn() } }).body;
     for (const marker of [
       "data-review-app",
       'data-domain-owner="review"',
       '<h1 id="review-heading">去重</h1>',
-      "已提交审核任务",
       "打开图库",
-      "尚无审核任务",
+      "尚无去重任务",
       'aria-live="polite"',
     ]) expect(body).toContain(marker);
     expect(reviewSource).toContain('aria-label="审核工具栏"');
@@ -54,7 +51,7 @@ describe("Svelte Review integration", () => {
     expect(body).toContain('data-app-page="" data-app-id="review"');
     expect(body).toContain("data-review-app");
     expect(body).not.toContain('data-application-content="review"');
-    expect(desktopSource).toContain('<Review {api} {polling} {persistence} active={snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate}');
+    expect(desktopSource).toContain('<Review {api} {polling} active={snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate}');
     expect(desktopSource).toContain('shell.registerUnsavedChanges("review", reader, discard, prepare)');
   });
 
@@ -79,15 +76,12 @@ describe("Svelte Review integration", () => {
       'crossorigin="anonymous"',
       'decoding="async"',
       "new globalThis.ResizeObserver",
-      "REVIEW_MAX_CANVAS_DPR = 2",
-      "context.imageSmoothingEnabled = false",
       "element.removeAttribute(\"src\")",
-      "canvas.width = 1",
     ]) expect(`${reviewSource}\n${engineSource}`).toContain(marker);
     expect(stateSource).not.toMatch(/canvas|pixel|magnification|objectUrl|mediaUrl|imageUrl/i);
     expect(engineSource).not.toMatch(/URL\.createObjectURL|new Blob|localStorage|sessionStorage|\bfetch\s*\(/);
     expect(reviewSource).toContain("registerUnsavedChanges");
-    expect(reviewSource).toContain("controller.beforeLeave");
+    expect(reviewSource).toContain("updateReviewZoom");
     expect(reviewSource).toContain("beforeunload");
   });
 
@@ -106,7 +100,7 @@ describe("Svelte Review integration", () => {
       /data:image/,
     ]) expect(combined).not.toMatch(forbidden);
     expect(serviceSource.match(/"\/api\/v1\//g)).toHaveLength(2);
-    expect(serviceSource.match(/view=desktop/g)).toHaveLength(2);
+    expect(serviceSource.match(/view=desktop/g)).toHaveLength(1);
     expect(serviceSource).toContain("REVIEW_PAGE_LIMIT = 50");
     expect(serviceSource).not.toContain("all=true");
     expect(controllerSource).toContain('REVIEW_POLL_KEY = "review.active"');
@@ -123,11 +117,11 @@ describe("Svelte Review integration", () => {
       "grid-template-rows: auto minmax(0, 1fr) auto",
       "overflow: hidden",
       '.review-operation-live[data-review-dirty="true"]',
-      'content: "△ 未保存 · "',
+      'content: "△ 未采纳 · "',
       ".review-tab--active::before",
       ".review-image-card[data-selected=\"true\"]",
       ".review-image-card[data-active=\"true\"]",
-      "image-rendering: pixelated",
+      "data-review-panning",
       "@supports not",
       "@media (prefers-contrast: more)",
       "@media (forced-colors: active)",

@@ -163,23 +163,6 @@ describe("persistence sanitizers and migrations", () => {
 });
 
 describe("persistence service", () => {
-  it("persists an independent review identity without changing Tasks or appearance", () => {
-    const adapter = new RecordingAdapter();
-    const service = createPersistenceService(adapter);
-    service.writeActiveBatchId("batch-tasks");
-    service.writeUiPreferences({ animations: "off", wallpaperColor: "forest" });
-    expect(service.writeActiveReviewId("review-gallery")).toBe(true);
-    const restarted = createPersistenceService(adapter);
-    expect(restarted.readActiveReviewId()).toBe("review-gallery");
-    expect(restarted.readActiveBatchId()).toBe("batch-tasks");
-    expect(restarted.readUiPreferences()).toEqual({ animations: "off", wallpaperColor: "forest" });
-    restarted.writeUiPreferences({ animations: "on", wallpaperColor: "slate" });
-    expect(restarted.readActiveReviewId()).toBe("review-gallery");
-    expect(restarted.writeActiveReviewId(null)).toBe(true);
-    expect(restarted.readActiveReviewId()).toBeNull();
-    expect(restarted.readActiveBatchId()).toBe("batch-tasks");
-    expect(() => restarted.writeActiveReviewId("../unsafe")).toThrow(TypeError);
-  });
   it("sanitizes session snapshots and never uses current-app as a startup workspace", () => {
     const adapter = new RecordingAdapter();
     const service = createPersistenceService(adapter, { viewport: () => viewport });

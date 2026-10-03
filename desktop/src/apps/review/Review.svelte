@@ -4,16 +4,15 @@
   import { restoreFocus, trappedTabIndex, type FocusTarget } from "../../core/a11y/focus";
   import type { ApplicationId } from "../../core/applications/definitions";
   import type { ApiClient } from "../../core/api/client";
-  import type { PersistenceService } from "../../core/persistence/service";
   import type { PollingHandle, PollingService } from "../../core/polling/service";
   import { createReviewController } from "./controller";
   import {
-    REVIEW_DEFAULT_MAGNIFICATION,
     buildReviewEngineFrame,
     createReviewEngine,
-    formatReviewMagnification,
+    clampReviewPan,
+    panReviewZoom,
+    updateReviewZoom,
     type ReviewEngine,
-    type ReviewLoupeState,
   } from "./engine";
   import {
     REVIEW_FILTERS,
@@ -26,10 +25,9 @@
   import { createReviewStore, focusedReviewGroup, reviewGroupsFromState } from "./state";
   import "./review.css";
 
-  let { api, polling, persistence, onNavigate, reviewId = "", active = true, registerUnsavedChanges }: {
+  let { api, polling, onNavigate, reviewId = "", active = true, registerUnsavedChanges }: {
     api: ApiClient;
     polling: PollingService;
-    persistence: PersistenceService;
     onNavigate: (appId: ApplicationId) => void;
     reviewId?: string;
     active?: boolean;
@@ -39,7 +37,7 @@
   const runtime = untrack(() => {
     const store = createReviewStore();
     const service = createReviewService(api);
-    const controller = createReviewController({ store, service, polling, persistence });
+    const controller = createReviewController({ store, service, polling });
     return { store, service, controller };
   });
   const { store, service, controller } = runtime;
@@ -50,6 +48,7 @@
   const listable = $derived(reviewCanList(snapshot.snapshot?.summary ?? null));
   let engineHost = $state<HTMLElement>();
   let reviewDeck = $state<HTMLElement>();
+  let reviewDeckStage = $state<HTMLElement>();
   let confirmationDialog = $state<HTMLDialogElement>();
   let returnFocus: FocusTarget | null = null;
   let modelConfirmationDialog = $state<HTMLDialogElement>();
@@ -61,8 +60,11 @@
   let modelConfirmationOpen = $state(false);
   let modelRequest = $state<AbortController | null>(null);
   let modelPoll: PollingHandle | null = null;
-  let loupeEnabled = $state(false);
-  let loupeState = $state<ReviewLoupeState>({ active: false, pinned: false, magnification: REVIEW_DEFAULT_MAGNIFICATION });
+  let zoom = $state({ scale: 1, offsetX: 0, offsetY: 0 });
+  let panning = $state(false);
+  let panMoved = false;
+  let panPointer: number | null = null;
+  let panLast = { x: 0, y: 0 };
   let engine: ReviewEngine | null = null;
   let engineSequence = 0;
   let mounted = $state(false);
@@ -99,7 +101,7 @@
     void tick().then(() => {
       if (!engine || sequence !== engineSequence) return;
       if (!active) { engine.release(); return; }
-      const frame = buildReviewEngineFrame(state.snapshot, state.focusedGroupId, state.activeImageId, loupeEnabled, service.imageUrl);
+      const frame = buildReviewEngineFrame(state.snapshot, state.focusedGroupId, state.activeImageId, service.imageUrl);
       if (frame) engine.update(frame);
       else engine.release();
     });
@@ -119,26 +121,74 @@
     if (await controller.setFilter(filter)) focusActiveImage();
   }
   function moveGroupAndFocus(direction: -1 | 1): void {
-    if (controller.moveGroup(direction)) focusActiveImage();
+    if (controller.moveGroup(direction)) { resetZoom(); focusActiveImage(); }
   }
   function moveImageAndFocus(direction: -1 | 1): void {
     if (controller.moveImage(direction)) focusActiveImage();
   }
-  async function confirmAndAdvanceAndFocus(): Promise<void> {
-    if (await controller.confirmAndAdvance()) focusActiveImage();
+  async function adoptAndFocus(): Promise<void> {
+    if (await controller.adoptFocused()) focusActiveImage();
   }
-  async function saveAndFocus(): Promise<void> {
-    if (await controller.save()) focusActiveImage();
+  function resetZoom(): void {
+    zoom = { scale: 1, offsetX: 0, offsetY: 0 };
   }
-  function toggleLoupe(): void {
-    loupeEnabled = !loupeEnabled;
-    if (!loupeEnabled) engine?.setPinned(false);
-    updateEngine();
-    focusActiveImage();
+  /** 以焦点图为基准做边缘约束：放大时图片盖住视口，适配时回到居中（视窗查看器手感）。 */
+  function clampZoomToActive(state: Readonly<{ scale: number; offsetX: number; offsetY: number }>): Readonly<{ scale: number; offsetX: number; offsetY: number }> {
+    const media = reviewDeckStage?.querySelector<HTMLElement>('[data-review-engine-card][data-active="true"] .review-image-media');
+    const img = media?.querySelector<HTMLImageElement>("img");
+    if (!media || !img || !img.naturalWidth || !img.naturalHeight) return state;
+    return clampReviewPan(state, img.naturalWidth, img.naturalHeight, { width: media.clientWidth, height: media.clientHeight });
   }
-  function toggleLoupePin(): void {
-    engine?.setPinned(!loupeState.pinned);
-    focusActiveImage();
+  function onStageWheel(event: WheelEvent): void {
+    if (!images.some((image) => image.readable)) return;
+    event.preventDefault();
+    const rect = reviewDeckStage?.getBoundingClientRect();
+    if (!rect) return;
+    zoom = clampZoomToActive(updateReviewZoom(
+      zoom,
+      { deltaY: event.deltaY, anchorX: event.clientX - rect.left - rect.width / 2, anchorY: event.clientY - rect.top - rect.height / 2 },
+      { width: rect.width, height: rect.height },
+    ));
+  }
+  function onStagePointerDown(event: PointerEvent): void {
+    if (event.button !== 0) return;
+    const target = event.target as Element | null;
+    if (!target?.closest?.("[data-review-engine-card]")) return;
+    panPointer = event.pointerId;
+    panLast = { x: event.clientX, y: event.clientY };
+    panMoved = false;
+    panning = true;
+  }
+  function onStagePointerMove(event: PointerEvent): void {
+    if (panPointer !== event.pointerId) return;
+    // 主键已松开（原生拖拽/系统手势吞掉 pointerup 的场景）：立即结束平移。
+    if ((event.buttons & 1) === 0) {
+      panning = false;
+      panPointer = null;
+      return;
+    }
+    const delta = { x: event.clientX - panLast.x, y: event.clientY - panLast.y };
+    panLast = { x: event.clientX, y: event.clientY };
+    if (!panMoved && Math.abs(delta.x) + Math.abs(delta.y) < 2) return;
+    if (!panMoved) {
+      panMoved = true;
+      reviewDeckStage?.setPointerCapture(event.pointerId);
+    }
+    zoom = clampZoomToActive(panReviewZoom(zoom, delta));
+  }
+  function onStagePointerUp(event: PointerEvent): void {
+    if (panPointer !== event.pointerId) return;
+    panning = false;
+    panPointer = null;
+  }
+  function onStagePointerCancel(event: PointerEvent): void {
+    if (panPointer !== event.pointerId) return;
+    panning = false;
+    panPointer = null;
+  }
+  function onImageClick(groupId: string, imageId: string): void {
+    if (panMoved) return;
+    toggleImage(groupId, imageId);
   }
   function toggleImage(groupId: string, imageId: string): void {
     controller.setActiveImage(imageId);
@@ -276,7 +326,6 @@
       editable: snapshot.snapshot?.summary.status === "ready" && Boolean(focusedGroup?.imageOrder.length),
       readOnly: Boolean(snapshot.snapshot && snapshot.snapshot.summary.status !== "ready"),
       hasImages: Boolean(focusedGroup?.imageOrder.length),
-      loupeAvailable: images.some((image) => image.readable),
     });
     if (!command) return;
     event.preventDefault();
@@ -284,12 +333,8 @@
     else if (command === "focus-previous-image") moveImageAndFocus(-1);
     else if (command === "focus-next-image") moveImageAndFocus(1);
     else if (command === "toggle-active-image" && focusedGroup && snapshot.activeImageId) controller.toggleImage(focusedGroup.id, snapshot.activeImageId);
-    else if (command === "accept-advance") void confirmAndAdvanceAndFocus();
+    else if (command === "accept-advance") void adoptAndFocus();
     else if (command === "browse-next-group") moveGroupAndFocus(1);
-    else if (command === "toggle-loupe") toggleLoupe();
-  }
-  function formatTime(value: number | null): string {
-    return value === null ? "时间未知" : new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short", hourCycle: "h23" }).format(new Date(value * 1_000));
   }
 
   $effect(() => {
@@ -311,7 +356,7 @@
 
   onMount(() => {
     if (!engineHost) return;
-    engine = createReviewEngine({ host: engineHost, onLoupeState: (state) => { loupeState = state; } });
+    engine = createReviewEngine({ host: engineHost });
     const unsubscribe = store.subscribe((state) => updateEngine(state));
     const unregister = registerUnsavedChanges?.(
       () => Boolean(store.getState().snapshot?.dirty),
@@ -365,35 +410,27 @@
   {#if snapshot.error}
     <section class="review-error" role="alert" aria-labelledby="review-error-title">
       <div><strong id="review-error-title">{snapshot.error.title}</strong><p>{displayMessage(`${snapshot.error.message} ${snapshot.error.nextStep}`)}</p><small>错误码：{snapshot.error.code}{snapshot.error.requestId ? ` · 请求 ${snapshot.error.requestId}` : ""}</small></div>
-      <div><button type="button" onclick={() => onNavigate("diagnostics")}>打开系统诊断</button>{#if snapshot.error.conflict && snapshot.snapshot?.dirty}<button type="button" class="review-button review-button--dangerous" onclick={() => controller.requestDiscardReload()}>放弃草稿并刷新</button>{/if}</div>
+      <div><button type="button" onclick={() => onNavigate("diagnostics")}>打开系统诊断</button>{#if snapshot.error.conflict && snapshot.snapshot?.dirty}<button type="button" class="review-button review-button--dangerous" onclick={() => controller.discardDraft()}>放弃未采纳更改</button>{/if}</div>
     </section>
   {/if}
 
-  <section class="review-picker" aria-labelledby="review-picker-heading">
-    <h2 id="review-picker-heading">审核任务</h2>
-    <label><span class="visually-hidden">已提交审核任务</span><select aria-label="已提交审核任务" value={snapshot.snapshot?.reviewId ?? ""} disabled={Boolean(snapshot.busy)} onchange={(event) => void openReviewAndFocus(selectValue(event))}>
-      <option value="" disabled>{snapshot.recent.length ? "打开已提交任务" : "暂无审核任务"}</option>
-      {#if snapshot.snapshot && !snapshot.recent.some((task) => task.reviewId === snapshot.snapshot?.reviewId)}<option value={snapshot.snapshot.reviewId}>{snapshot.snapshot.summary.statusLabel} · {snapshot.snapshot.reviewId.slice(0, 12)}</option>{/if}
-      {#each snapshot.recent as task (task.reviewId)}<option value={task.reviewId}>{task.summary.statusLabel} · {formatTime(task.createdAt)} · {task.directories.map((directory) => `${directory.sourceLabel}/${directory.relativePath || "来源根目录"}`).join(" · ")}</option>{/each}
-    </select></label>
+  <section class="review-picker" aria-label="审核任务操作">
     <div class="review-picker-actions">
-      <button type="button" disabled={Boolean(snapshot.busy) || snapshot.recentOffset === 0} onclick={() => void controller.listTasks(Math.max(0, snapshot.recentOffset - 50))}>上一页任务</button>
-      <button type="button" disabled={Boolean(snapshot.busy) || snapshot.recentOffset + snapshot.recent.length >= snapshot.recentTotal} onclick={() => void controller.listTasks(snapshot.recentOffset + snapshot.recent.length)}>下一页任务</button>
       <button type="button" disabled={Boolean(snapshot.busy)} onclick={() => void controller.refresh()}>刷新</button>
       <button type="button" onclick={() => onNavigate("gallery")}>打开图库</button>
     </div>
   </section>
 
-  {#if snapshot.pendingReviewId}
+  {#if snapshot.pendingReviewId && snapshot.snapshot}
     <section class="review-switch" role="status" data-review-pending={snapshot.pendingReviewId}>
-      <p>新审核任务已收到；当前草稿仍保留。请保存或放弃后切换。</p>
-      <button type="button" disabled={Boolean(snapshot.busy)} onclick={() => void controller.saveAndSwitch()}>保存并切换</button>
-      <button type="button" disabled={Boolean(snapshot.busy)} onclick={() => controller.requestDiscardSwitch()}>放弃草稿并切换</button>
+      <p>新去重任务已收到；切换将结束当前任务，未采纳的筛选结果会丢弃。</p>
+      <button type="button" disabled={Boolean(snapshot.busy)} onclick={() => void controller.switchToPending()}>结束当前任务并切换</button>
+      <button type="button" disabled={Boolean(snapshot.busy)} onclick={() => controller.stayOnTask()}>留在当前任务</button>
     </section>
   {/if}
 
   {#if snapshot.snapshot}
-    <p class="review-directory-summary" data-review-directories>{snapshot.snapshot.directories.map((directory) => `${directory.sourceLabel} / ${directory.relativePath || "来源根目录"}`).join(" · ")} · 递归子目录，整组选区跨目录比较 · {snapshot.snapshot.summary.totalImageCount} 张图片 · 机器初筛回收 {snapshot.snapshot.summary.automaticRejectedImageCount} 张</p>
+    <p class="review-directory-summary" data-review-directories>{#if snapshot.snapshot.directories.length}{snapshot.snapshot.directories.map((directory) => `${directory.sourceLabel} / ${directory.relativePath || "来源根目录"}`).join(" · ")} · 递归子目录，整组选区跨目录比较 · {:else}勾选图片 · {/if}{snapshot.snapshot.summary.totalImageCount} 张图片 · 机器初筛回收 {snapshot.snapshot.summary.automaticRejectedImageCount} 张</p>
   {/if}
 
   <p class="review-operation-live" data-review-dirty={Boolean(snapshot.snapshot?.dirty)} role="status" aria-live="polite">{displayMessage(snapshot.message)}</p>
@@ -403,28 +440,24 @@
       <section class="review-toolbar" aria-label="审核工具栏">
         <div class="review-tabs" role="tablist" aria-label="审核组筛选">{#each REVIEW_FILTERS as filter (filter.id)}<button type="button" role="tab" class:review-tab--active={snapshot.snapshot.filter === filter.id} aria-selected={snapshot.snapshot.filter === filter.id} disabled={Boolean(snapshot.busy)} onclick={() => void setFilterAndFocus(filter.id)}>{filter.label}</button>{/each}</div>
         <div class="review-toolbar-actions">
-          <button type="button" disabled={Boolean(snapshot.busy || !snapshot.snapshot.dirty)} onclick={() => void saveAndFocus()}>保存待提交组</button>
-          <button type="button" aria-pressed={loupeEnabled} disabled={!images.some((image) => image.readable)} onclick={toggleLoupe}>{loupeEnabled ? "关闭放大镜" : "开启放大镜"}</button>
-          <button type="button" aria-pressed={loupeState.pinned} disabled={!loupeEnabled || !images.some((image) => image.readable)} onclick={toggleLoupePin}>{loupeState.pinned ? "解除锁定" : "锁定坐标"}</button>
-          {#if snapshot.snapshot.summary.status === "failed" || snapshot.snapshot.summary.status === "blocked"}<button type="button" class="review-button review-button--primary" disabled={Boolean(snapshot.busy)} onclick={() => void controller.run("retry")}>重试分析</button>{/if}
-          {#if snapshot.snapshot.summary.status === "ready" || snapshot.snapshot.summary.status === "apply_failed"}<button type="button" class="review-button review-button--dangerous" disabled={Boolean(snapshot.busy || snapshot.snapshot.dirty || snapshot.snapshot.summary.decidedGroupCount < snapshot.snapshot.summary.totalGroupCount)} onclick={() => controller.requestApply()}>{snapshot.snapshot.summary.status === "apply_failed" ? "重试回收" : "送入回收区"}</button>{/if}
+          <button type="button" class="review-button review-button--primary review-finish" data-review-finish disabled={Boolean(snapshot.busy)} onclick={() => void controller.finish()}>完成</button>
         </div>
       </section>
 
       {#if listable && focusedGroup}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-operated review deck) -->
-        <section class="review-deck" data-review-deck bind:this={reviewDeck} tabindex="0" aria-label="去重审核全高分拣台；左右键移动图片，空格切换保留，Enter 采纳并前进，Escape 返回上一组，X 切换放大镜">
+        <section class="review-deck" data-review-deck bind:this={reviewDeck} tabindex="0" aria-label="去重审核全高分拣台；左右键移动图片，空格切换保留，Enter 采纳并前进，Escape 返回上一组">
           <header class="review-deck-header">
             <h2>组 {focusedGroup.ordinal} · {focusedGroup.kind === "duplicate" ? "重复组" : focusedGroup.kind === "single" ? "独立图片" : "读取受限"}</h2>
-            <div class="review-group-controls"><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === 0} onclick={() => moveGroupAndFocus(-1)}>上一组</button><label><span class="visually-hidden">当前筛选全量组选择器</span><select data-review-group-select aria-label="当前筛选全量组选择器" value={focusedGroup.id} disabled={Boolean(snapshot.busy)} onchange={(event) => { if (controller.setFocusedGroup(selectValue(event))) focusActiveImage(); }}>{#each groups as group (group.id)}<option value={group.id}>{group.ordinal}. {group.kind === "duplicate" ? "重复组" : group.kind === "single" ? "独立图片" : "读取受限"} · {group.selectedImageCount}/{group.imageCount} 保留{group.decided ? " · 已确认" : ""}</option>{/each}</select></label><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === snapshot.snapshot.groupOrder.length - 1} onclick={() => moveGroupAndFocus(1)}>下一组</button></div>
+            <div class="review-group-controls"><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === 0} onclick={() => moveGroupAndFocus(-1)}>上一组</button><label><span class="visually-hidden">当前筛选全量组选择器</span><select data-review-group-select aria-label="当前筛选全量组选择器" value={focusedGroup.id} disabled={Boolean(snapshot.busy)} onchange={(event) => { if (controller.setFocusedGroup(selectValue(event))) focusActiveImage(); }}>{#each groups as group (group.id)}<option value={group.id}>{group.ordinal}. {group.kind === "duplicate" ? "重复组" : group.kind === "single" ? "独立图片" : "读取受限"} · {group.selectedImageCount}/{group.imageCount} 保留{group.decided ? " · 已采纳" : ""}</option>{/each}</select></label><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === snapshot.snapshot.groupOrder.length - 1} onclick={() => moveGroupAndFocus(1)}>下一组</button></div>
           </header>
 
-          <section class="review-deck-stage" aria-label={`组 ${focusedGroup.ordinal} 图片比较舞台`}>
+          <section class="review-deck-stage" aria-label={`组 ${focusedGroup.ordinal} 图片比较舞台`} bind:this={reviewDeckStage} data-review-panning={panning} data-review-zoomed={zoom.scale !== 1 || zoom.offsetX !== 0 || zoom.offsetY !== 0} onwheel={onStageWheel} onpointerdown={onStagePointerDown} onpointermove={onStagePointerMove} onpointerup={onStagePointerUp} onpointercancel={onStagePointerCancel} ondblclick={resetZoom}>
             <div class="review-deck-cards" data-review-engine-grid>
               {#each images as image (image.id)}
-                <button type="button" class="review-image-card" data-review-engine-card={image.id} data-selected={image.selected} data-active={snapshot.activeImageId === image.id} aria-checked={image.selected} aria-current={snapshot.activeImageId === image.id} aria-disabled={snapshot.snapshot.summary.status !== "ready" || Boolean(snapshot.busy)} role="checkbox" onclick={() => toggleImage(focusedGroup.id, image.id)} onfocus={() => controller.setActiveImage(image.id)}>
-                  <span class="review-image-media"><img data-review-engine-image data-review-engine-decoded="false" alt={`组 ${focusedGroup.ordinal} 图 ${image.ordinal}`} crossorigin="anonymous" decoding="async" /><span class="review-image-fallback">{image.readable ? "预览加载失败" : "图片不可读"}</span><span class="review-image-crosshair" data-review-engine-crosshair hidden></span><canvas class="review-loupe-lens" data-review-engine-lens width="1" height="1" hidden aria-hidden="true"></canvas></span>
-                  <span class="review-image-card-copy"><strong>图 {image.ordinal}{image.recommended ? " · 推荐项" : ""}</strong><span title={`${image.sourceLabel} / ${image.relativePath}`}>{image.sourceLabel} / {image.relativePath}</span><span>{image.width} × {image.height}</span><span class="review-image-stamp" data-state={image.selected ? "keep" : "drop"}>{image.selected ? "✓ 保留" : "✗ 回收"}</span><span class="review-image-active-marker">当前检查</span></span>
+                <button type="button" class="review-image-card" data-review-engine-card={image.id} data-selected={image.selected} data-active={snapshot.activeImageId === image.id} data-failed={image.failed || undefined} aria-checked={image.selected} aria-current={snapshot.activeImageId === image.id} aria-disabled={snapshot.snapshot.summary.status !== "ready" || Boolean(snapshot.busy)} role="checkbox" onclick={() => onImageClick(focusedGroup.id, image.id)} onfocus={() => controller.setActiveImage(image.id)}>
+                  <span class="review-image-media"><img data-review-engine-image draggable="false" data-review-engine-decoded="false" alt={`组 ${focusedGroup.ordinal} 图 ${image.ordinal}`} crossorigin="anonymous" decoding="async" style:transform={`translate(${zoom.offsetX}px, ${zoom.offsetY}px) scale(${zoom.scale})`} /><span class="review-image-fallback">{image.readable ? "预览加载失败" : "图片不可读"}</span></span>
+                  <span class="review-image-card-copy"><strong>图 {image.ordinal}{image.recommended ? " · 推荐项" : ""}</strong><span title={`${image.sourceLabel} / ${image.relativePath}`}>{image.sourceLabel} / {image.relativePath}</span><span>{image.width} × {image.height}</span><span class="review-image-stamp" data-state={image.selected ? "keep" : "drop"}>{image.selected ? "✓ 保留" : "✗ 回收"}</span>{#if image.failed}<span class="review-image-error-marker" role="status">落地失败</span>{/if}<span class="review-image-active-marker">当前检查</span></span>
                 </button>
               {/each}
             </div>
@@ -432,16 +465,16 @@
           </section>
 
           <footer class="review-deck-statusbar">
-            <div><span>{snapshot.snapshot.summary.decidedGroupCount} / {snapshot.snapshot.summary.totalGroupCount} 组已确认</span><span>当前组 {focusedGroup.selectedImageCount} / {focusedGroup.imageCount} 保留</span><span>{loupeEnabled ? `同步放大镜 ${formatReviewMagnification(loupeState.magnification)}${loupeState.pinned ? " · 坐标已锁定" : loupeState.active ? " · 正在检查" : ""}` : "放大镜已关闭"}</span></div>
-            <details class="review-shortcut-hints"><summary>快捷键</summary><div><kbd>←/→</kbd> 图片 <kbd>Space</kbd> 保留/移除 <kbd>Enter</kbd> 采纳并前进 <kbd>Esc</kbd> 上一组 <kbd>X</kbd> 放大镜 <kbd>Ctrl+滚轮</kbd> 缩放</div></details>
-            <button type="button" class="review-button review-button--primary" disabled={snapshot.snapshot.summary.status !== "ready" || Boolean(snapshot.busy)} onclick={() => void confirmAndAdvanceAndFocus()}>采纳并前进</button>
+            <div><span>{snapshot.snapshot.summary.decidedGroupCount} / {snapshot.snapshot.summary.totalGroupCount} 组已采纳</span><span>当前组 {focusedGroup.selectedImageCount} / {focusedGroup.imageCount} 保留</span><span data-review-zoom>缩放 {Math.round(zoom.scale * 100)}%</span></div>
+            <details class="review-shortcut-hints"><summary>快捷键</summary><div><kbd>←/→</kbd> 图片 <kbd>Space</kbd> 保留/回收 <kbd>Enter</kbd> 采纳并前进 <kbd>Esc</kbd> 上一组 <kbd>滚轮</kbd> 同步缩放 <kbd>拖动</kbd> 平移 <kbd>双击</kbd> 复位</div></details>
+            <button type="button" class="review-button review-button--primary" disabled={snapshot.snapshot.summary.status !== "ready" || Boolean(snapshot.busy)} onclick={() => void adoptAndFocus()}>采纳并前进</button>
           </footer>
         </section>
       {:else}
         <section class="review-panel" aria-labelledby="review-state-heading"><h2 id="review-state-heading">{snapshot.snapshot.summary.statusLabel}</h2><p>{displayMessage(snapshot.presentation.message)}</p><dl><div><dt>图片</dt><dd>{snapshot.snapshot.summary.totalImageCount}</dd></div><div><dt>审核组</dt><dd>{snapshot.snapshot.summary.totalGroupCount}</dd></div><div><dt>重复组</dt><dd>{snapshot.snapshot.summary.duplicateGroupCount}</dd></div><div><dt>读取失败</dt><dd>{snapshot.snapshot.summary.unreadableImageCount}</dd></div></dl></section>
       {/if}
     {:else}
-      <section class="review-panel review-empty" aria-labelledby="review-empty-heading"><h2 id="review-empty-heading">尚无审核任务</h2><p>请在图库选择目录发起去重。</p><button type="button" onclick={() => onNavigate("gallery")}>打开图库</button></section>
+      <section class="review-panel review-empty" aria-labelledby="review-empty-heading"><h2 id="review-empty-heading">尚无去重任务</h2><p>请在图库勾选图片或目录发起去重。</p><button type="button" onclick={() => onNavigate("gallery")}>打开图库</button></section>
     {/if}
   </section>
 </section>

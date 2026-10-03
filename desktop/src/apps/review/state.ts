@@ -1,5 +1,4 @@
 import {
-  confirmReviewGroup,
   deriveReviewPresentation,
   reviewCanList,
   updateReviewImageSelection,
@@ -8,13 +7,11 @@ import {
   type ReviewErrorPresentation,
   type ReviewOperation,
   type ReviewPhase,
-  type ReviewRecentTask,
-  type ReviewTaskPage,
   type ReviewSnapshot,
 } from "./model";
 
 export type ReviewConfirmation = Readonly<{
-  action: "apply" | "discard-reload" | "discard-switch";
+  action: "switch-task" | "discard-local";
   title: string;
   message: string;
   confirmLabel: string;
@@ -22,11 +19,8 @@ export type ReviewConfirmation = Readonly<{
 }>;
 
 export interface ReviewState {
-  readonly recent: readonly ReviewRecentTask[];
   readonly selectedReviewId: string;
   readonly pendingReviewId: string;
-  readonly recentOffset: number;
-  readonly recentTotal: number;
   readonly snapshot: ReviewSnapshot | null;
   readonly focusedGroupId: string;
   readonly activeImageId: string;
@@ -41,9 +35,9 @@ export interface ReviewState {
 export interface ReviewStore {
   subscribe(listener: (state: ReviewState) => void): () => void;
   getState(): ReviewState;
-  commitRecent(page: ReviewTaskPage): boolean;
   selectReview(reviewId: string): boolean;
   queueReview(reviewId: string): boolean;
+  clearPending(): boolean;
   updateDraftVersion(version: number): boolean;
   begin(operation: Exclude<ReviewOperation, "">, message: string): boolean;
   commitSnapshot(snapshot: ReviewSnapshot, message?: string): boolean;
@@ -52,7 +46,7 @@ export interface ReviewStore {
   setFocusedGroup(groupId: string): boolean;
   setActiveImage(imageId: string): boolean;
   toggleImage(groupId: string, imageId: string): boolean;
-  confirmGroup(groupId: string): boolean;
+  reset(message: string): boolean;
   clearDraft(message?: string): boolean;
   requestConfirmation(confirmation: ReviewConfirmation): boolean;
   dismissConfirmation(message?: string): boolean;
@@ -64,7 +58,6 @@ type InternalState = Omit<ReviewState, "presentation">;
 function freezeState(source: InternalState): ReviewState {
   return Object.freeze({
     ...source,
-    recent: Object.freeze([...source.recent]),
     presentation: deriveReviewPresentation(source.phase, source.snapshot?.summary ?? null),
   });
 }
@@ -85,18 +78,15 @@ export function focusedReviewGroup(state: ReviewState) {
 
 export function createReviewStore(): ReviewStore {
   let state = freezeState({
-    recent: Object.freeze([]),
     selectedReviewId: "",
     pendingReviewId: "",
-    recentOffset: 0,
-    recentTotal: 0,
     snapshot: null,
     focusedGroupId: "",
     activeImageId: "",
     phase: "empty",
     busy: "",
     error: null,
-    message: "请在图库选择目录发起去重。",
+    message: "请在图库勾选图片或目录发起去重。",
     confirmation: null,
   });
   const listeners = new Set<(value: ReviewState) => void>();
@@ -117,16 +107,17 @@ export function createReviewStore(): ReviewStore {
       return () => listeners.delete(listener);
     },
     getState: () => state,
-    commitRecent(page) {
-      return publish({ ...state, recent: page.items, recentOffset: page.offset, recentTotal: page.total });
-    },
     selectReview(reviewId) {
       const id = reviewId ? validateReviewId(reviewId) : "";
       if (state.selectedReviewId === id && !state.pendingReviewId) return false;
       return publish({ ...state, selectedReviewId: id, pendingReviewId: "" });
     },
     queueReview(reviewId) {
-      return publish({ ...state, pendingReviewId: validateReviewId(reviewId), message: "新审核任务已收到；请保存或放弃当前草稿后切换。" });
+      return publish({ ...state, pendingReviewId: validateReviewId(reviewId), message: "新审核任务已收到。" });
+    },
+    clearPending() {
+      if (!state.pendingReviewId) return false;
+      return publish({ ...state, pendingReviewId: "", message: "已留在当前任务。" });
     },
     updateDraftVersion(version) {
       if (!state.snapshot?.dirty || !Number.isSafeInteger(version) || version <= state.snapshot.version) return false;
@@ -180,14 +171,24 @@ export function createReviewStore(): ReviewStore {
       const image = group?.images[imageId];
       if (!group || !image) return false;
       const snapshot = updateReviewImageSelection(state.snapshot, groupId, imageId, !image.selected);
-      return snapshot !== state.snapshot && publish({ ...state, snapshot, activeImageId: imageId, message: `组 ${group.ordinal}：图 ${image.ordinal} ${image.selected ? "移除" : "保留"}。`, error: null });
+      return snapshot !== state.snapshot && publish({ ...state, snapshot, activeImageId: imageId, message: `组 ${group.ordinal}：图 ${image.ordinal} 标记为${image.selected ? "回收" : "保留"}，采纳后生效。`, error: null });
     },
-    confirmGroup(groupId) {
-      if (!state.snapshot || state.snapshot.summary.status !== "ready" || state.busy) return false;
-      const snapshot = confirmReviewGroup(state.snapshot, groupId);
-      return snapshot !== state.snapshot && publish({ ...state, snapshot, message: `已确认组 ${snapshot.groups[groupId].ordinal}，等待保存。`, error: null });
+    reset(message) {
+      return publish({
+        ...state,
+        selectedReviewId: "",
+        pendingReviewId: "",
+        snapshot: null,
+        focusedGroupId: "",
+        activeImageId: "",
+        phase: "empty",
+        busy: "",
+        error: null,
+        message,
+        confirmation: null,
+      });
     },
-    clearDraft(message = "未保存的待提交组已放弃，正在读取权威审核状态。") {
+    clearDraft(message = "未采纳的更改已放弃，正在读取最新状态。") {
       if (!state.snapshot?.dirty) return false;
       return publish({
         ...state,

@@ -1,23 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
-  REVIEW_MAX_CANVAS_DPR,
-  calculateReviewCrop,
   calculateReviewLayout,
   createReviewEngine,
-  formatReviewMagnification,
-  getReviewContainRect,
   normalizeReviewImageDimensions,
-  normalizeReviewPointer,
-  projectReviewPointer,
-  selectReviewReferenceImage,
-  updateReviewMagnification,
+  clampReviewPan,
+  panReviewZoom,
+  updateReviewZoom,
   type ReviewEngineFrame,
 } from "./engine";
 import type { ReviewImage } from "./model";
 
 function image(id: string, width: number, height: number, recommended = false): ReviewImage {
-  return Object.freeze({ id, ordinal: 1, readable: true, recommended, selected: true, width, height, sourceLabel: "Source", relativePath: `${id}.jpg` });
+  return Object.freeze({ id, ordinal: 1, readable: true, recommended, selected: true, width, height, sourceLabel: "Source", relativePath: `${id}.jpg`, failed: false });
 }
 
 class FakeImage {
@@ -43,38 +38,16 @@ class FakeImage {
   }
   removeEventListener(type: string, listener: EventListener) { this.listeners.get(type)?.delete(listener); }
   removeAttribute(name: string) { if (name === "src") this.value = ""; }
-  getBoundingClientRect() { return { left: 0, top: 0, width: 180, height: 120, right: 180, bottom: 120, x: 0, y: 0, toJSON: () => ({}) }; }
-}
-
-class FakeCanvas {
-  width = 1;
-  height = 1;
-  hidden = true;
-  readonly context = { imageSmoothingEnabled: true, clearRect: vi.fn(), drawImage: vi.fn() };
-  getContext(contextId: "2d") { return contextId === "2d" ? this.context : null; }
-  getBoundingClientRect() { return { left: 0, top: 0, width: 180, height: 120, right: 180, bottom: 120, x: 0, y: 0, toJSON: () => ({}) }; }
-}
-
-class FakeCrosshair {
-  hidden = true;
-  readonly style = { left: "", top: "" };
 }
 
 class FakeCard {
   readonly preview = new FakeImage();
-  readonly canvas = new FakeCanvas();
-  readonly crosshair = new FakeCrosshair();
-  readonly attributes = new Map<string, string>();
   readonly dataset: { reviewEngineCard: string };
   constructor(id: string) { this.dataset = { reviewEngineCard: id }; }
   querySelector(selector: string) {
     if (selector === "[data-review-engine-image]") return this.preview;
-    if (selector === "[data-review-engine-lens]") return this.canvas;
-    if (selector === "[data-review-engine-crosshair]") return this.crosshair;
     return null;
   }
-  removeAttribute(name: string) { this.attributes.delete(name); }
-  setAttribute(name: string, value: string) { this.attributes.set(name, value); }
 }
 
 class FakeHost {
@@ -84,7 +57,6 @@ class FakeHost {
     style: { gridTemplateColumns: "" },
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 600, height: 400, right: 600, bottom: 400, x: 0, y: 0, toJSON: () => ({}) }),
   };
-  clientHeight = 400;
   constructor(ids: readonly string[]) { for (const id of ids) this.cards.set(id, new FakeCard(id)); }
   addEventListener(type: string, listener: EventListener) {
     const set = this.listeners.get(type) ?? new Set<EventListener>();
@@ -99,11 +71,7 @@ class FakeHost {
     const card = this.cards.get(id) ?? null;
     return selector.includes("data-review-engine-image") ? card?.preview ?? null : card;
   }
-  querySelectorAll(selector: string) {
-    if (selector === "[data-review-engine-lens]") return [...this.cards.values()].map((card) => card.canvas);
-    if (selector === "[data-review-engine-crosshair]") return [...this.cards.values()].map((card) => card.crosshair);
-    return [];
-  }
+  querySelectorAll(_selector: string) { return []; }
 }
 
 function engineHarness() {
@@ -122,25 +90,23 @@ function engineHarness() {
       observers.push(state);
       return { observe: () => { state.connected = true; }, disconnect: () => { state.connected = false; } };
     }),
-    devicePixelRatio: () => 4,
   });
   return { engine, host, frames, preloads, observers };
 }
 
 function frame(overrides: Partial<ReviewEngineFrame> = {}): ReviewEngineFrame {
   const images = Object.freeze([
-    Object.freeze({ id: "image-1", url: "http://127.0.0.1:8787/api/v1/crawls/batch/review/images/image-1", width: 1200, height: 1800, readable: true, recommended: false }),
-    Object.freeze({ id: "image-2", url: "http://localhost:8787/api/v1/crawls/batch/review/images/image-2", width: 800, height: 1200, readable: true, recommended: true }),
+    Object.freeze({ id: "image-1", url: "http://127.0.0.1:8787/api/v1/gallery/reviews/batch/images/image-1", width: 1200, height: 1800, readable: true, recommended: false }),
+    Object.freeze({ id: "image-2", url: "http://localhost:8787/api/v1/gallery/reviews/batch/images/image-2", width: 800, height: 1200, readable: true, recommended: true }),
   ]);
-  return Object.freeze({ key: "batch:group", images, preloadUrls: Object.freeze([images[1].url]), activeImageId: "image-1", loupeEnabled: true, ...overrides });
+  return Object.freeze({ key: "batch:group", images, preloadUrls: Object.freeze([images[1].url]), activeImageId: "image-1", ...overrides });
 }
 
 describe("review engine kernel", () => {
-  it("normalizes dimensions, reference choice, and layout without mutating inputs", () => {
+  it("normalizes dimensions and layout without mutating inputs", () => {
     expect(normalizeReviewImageDimensions({ metadata: { w: 1448, h: 2048 }, readable: true })).toMatchObject({ width: 1448, height: 2048 });
     expect(normalizeReviewImageDimensions({ metadata: { w: 0, h: 10 }, readable: true })).toBeNull();
     const pool = [image("one", 800, 1200), image("two", 800, 1200, true)];
-    expect(selectReviewReferenceImage(pool)).toMatchObject({ available: true, index: 1 });
     const before = [...pool];
     const layout = calculateReviewLayout(pool, 360, 240);
     expect(layout.readable).toBe(true);
@@ -150,24 +116,41 @@ describe("review engine kernel", () => {
     expect(calculateReviewLayout([], 400, 200).readable).toBe(false);
   });
 
-  it("normalizes contain geometry, pointers, crop boundaries, and magnification", () => {
-    expect(getReviewContainRect({ width: 400, height: 200 }, { left: 10, top: 20, width: 500, height: 300 })).toEqual({ left: 10, top: 45, width: 500, height: 250 });
-    expect(normalizeReviewPointer({ x: 260, y: 170 }, { left: 10, top: 20, width: 500, height: 300 })).toEqual({ u: 0.5, v: 0.5 });
-    expect(normalizeReviewPointer({ x: -1, y: 999 }, { left: 0, top: 0, width: 500, height: 300 })).toEqual({ u: 0, v: 1 });
-    expect(projectReviewPointer({ u: 0.25, v: 0.8 }, { left: 60, top: 45, width: 400, height: 250 }, { left: 10, top: 20 })).toEqual({ left: 150, top: 225 });
-    expect(() => projectReviewPointer({ u: 1.1, v: 0.5 }, { left: 0, top: 0, width: 10, height: 10 }, { left: 0, top: 0 })).toThrow(TypeError);
-    const crop = calculateReviewCrop({ target: image("target", 1200, 1800), reference: image("reference", 1448, 2048), outputWidth: 180, outputHeight: 120, magnification: 0.5, u: 1, v: 1 });
-    expect(crop).not.toBeNull();
-    expect((crop?.x ?? 0) + (crop?.sourceWidth ?? 0)).toBeLessThanOrEqual(1200);
-    expect((crop?.y ?? 0) + (crop?.sourceHeight ?? 0)).toBeLessThanOrEqual(1800);
-    expect(updateReviewMagnification(0.5, -100)).toBe(0.59);
-    expect(updateReviewMagnification(0.5, 100)).toBe(0.42372881355932207);
-    expect(updateReviewMagnification(0.5, -1, 1)).toBeCloseTo(0.5134180412656631);
-    expect(formatReviewMagnification(0.25)).toBe("0.25x");
-    expect(formatReviewMagnification(0.5)).toBe("0.50x");
-    expect(formatReviewMagnification(1)).toBe("1:1");
-    expect(() => updateReviewMagnification(0, -1)).toThrow(RangeError);
-    expect(() => updateReviewMagnification(0.5, 1, 4)).toThrow(TypeError);
+  it("zooms around the pointer and pans without touching scale", () => {
+    const zoomed = updateReviewZoom({ scale: 1, offsetX: 0, offsetY: 0 }, { deltaY: -100, anchorX: 50, anchorY: 0 }, { width: 400, height: 300 });
+    expect(zoomed.scale).toBeGreaterThan(1);
+    // 锚点在指针处：内容点保持在指针下方，偏移向锚点对侧收缩。
+    expect(zoomed.offsetX).toBeCloseTo(50 - 50 * zoomed.scale, 6);
+    const anchorKept = updateReviewZoom(zoomed, { deltaY: -100, anchorX: 50, anchorY: 0 }, { width: 400, height: 300 });
+    const contentU = (50 - zoomed.offsetX) / zoomed.scale;
+    expect((50 - anchorKept.offsetX) / anchorKept.scale).toBeCloseTo(contentU, 6);
+    let clamped = zoomed;
+    for (let index = 0; index < 200; index += 1) clamped = updateReviewZoom(clamped, { deltaY: -500, anchorX: 0, anchorY: 0 }, { width: 400, height: 300 });
+    expect(clamped.scale).toBeLessThanOrEqual(8);
+    for (let index = 0; index < 200; index += 1) clamped = updateReviewZoom(clamped, { deltaY: 500, anchorX: 0, anchorY: 0 }, { width: 400, height: 300 });
+    expect(clamped.scale).toBe(1);
+    const panned = panReviewZoom(clamped, { x: 12, y: -8 });
+    expect(panned).toEqual({ scale: clamped.scale, offsetX: clamped.offsetX + 12, offsetY: clamped.offsetY - 8 });
+    expect(() => updateReviewZoom({ scale: 0.5, offsetX: 0, offsetY: 0 }, { deltaY: 0, anchorX: 0, anchorY: 0 }, { width: 400, height: 300 })).toThrow(RangeError);
+    expect(() => updateReviewZoom(clamped, { deltaY: 0, anchorX: 0, anchorY: 0 }, { width: 0, height: 300 })).toThrow(TypeError);
+  });
+
+  it("clamps panning to the image edges like the Windows viewer", () => {
+    // 400×300 视口内的 800×600 图：fit 后 400×300，恰好适配，任何偏移都回到 0。
+    const fitted = clampReviewPan({ scale: 1, offsetX: 120, offsetY: -80 }, 800, 600, { width: 400, height: 300 });
+    expect(fitted.offsetX).toBe(0);
+    expect(fitted.offsetY).toBe(0);
+    // 放大 2 倍：内容 800×600，水平/垂直各余量 200/150，越界偏移被夹回边缘。
+    const zoomed = clampReviewPan({ scale: 2, offsetX: 400, offsetY: -300 }, 800, 600, { width: 400, height: 300 });
+    expect(zoomed).toEqual({ scale: 2, offsetX: 200, offsetY: -150 });
+    const inside = clampReviewZoomInside();
+    function clampReviewZoomInside() { return clampReviewPan({ scale: 2, offsetX: 50, offsetY: 25 }, 800, 600, { width: 400, height: 300 }); }
+    expect(inside).toEqual({ scale: 2, offsetX: 50, offsetY: 25 });
+    // 竖图 600×1200：fit 后 150×300，放大 2 倍后水平仍适配（余量 0），垂直余量 150。
+    const portrait = clampReviewPan({ scale: 2, offsetX: 90, offsetY: -200 }, 600, 1200, { width: 400, height: 300 });
+    expect(portrait).toEqual({ scale: 2, offsetX: 0, offsetY: -150 });
+    expect(() => clampReviewPan({ scale: 0.5, offsetX: 0, offsetY: 0 }, 800, 600, { width: 400, height: 300 })).toThrow(RangeError);
+    expect(() => clampReviewPan({ scale: 2, offsetX: 0, offsetY: 0 }, 0, 600, { width: 400, height: 300 })).toThrow(TypeError);
   });
 });
 
@@ -175,7 +158,6 @@ describe("review imperative engine lifecycle", () => {
   it("requests loopback media with anonymous CORS and releases every resource", async () => {
     const { engine, host, frames, preloads, observers } = engineHarness();
     engine.update(frame());
-    engine.setPinned(true);
     await Promise.resolve();
     expect([...host.cards.values()].every(({ preview }) => preview.crossOrigin === "anonymous" && preview.decoding === "async" && preview.loading === "eager")).toBe(true);
     expect(preloads.every((entry) => entry.crossOrigin === "anonymous" && entry.decoding === "async")).toBe(true);
@@ -184,34 +166,14 @@ describe("review imperative engine lifecycle", () => {
     const [[id, callback]] = frames;
     frames.delete(id);
     callback(0);
-    const canvas = host.cards.get("image-1")?.canvas;
-    expect(canvas?.width).toBe(180 * REVIEW_MAX_CANVAS_DPR);
-    expect(canvas?.context.imageSmoothingEnabled).toBe(false);
-    expect(host.cards.get("image-1")?.crosshair.style).toEqual({ left: "90px", top: "60px" });
+    expect(host.grid.style.gridTemplateColumns).not.toBe("");
     engine.release();
-    expect(engine.getResourceCounts()).toEqual({ listeners: 3, observer: 0, frame: 0, images: 0, preloads: 0 });
+    expect(engine.getResourceCounts()).toEqual({ listeners: 0, observer: 0, frame: 0, images: 0, preloads: 0 });
     expect([...host.cards.values()].every(({ preview }) => preview.src === "")).toBe(true);
     expect(preloads.every((entry) => entry.src === "")).toBe(true);
     expect(observers.every((entry) => !entry.connected)).toBe(true);
     engine.destroy();
     expect(engine.getResourceCounts()).toEqual({ listeners: 0, observer: 0, frame: 0, images: 0, preloads: 0 });
-  });
-
-  it("leaves ordinary wheel scrolling available and reserves modified wheel for loupe zoom", () => {
-    const { engine, host } = engineHarness();
-    engine.update(frame());
-    const card = host.cards.get("image-1")!;
-    const listener = [...(host.listeners.get("wheel") ?? [])][0]!;
-    const target = { closest: () => card };
-    const ordinaryPreventDefault = vi.fn();
-    listener({ target, ctrlKey: false, metaKey: false, deltaY: -100, deltaMode: 0, clientX: 90, clientY: 60, preventDefault: ordinaryPreventDefault } as unknown as Event);
-    expect(ordinaryPreventDefault).not.toHaveBeenCalled();
-    const initial = engine.getLoupeState().magnification;
-    const zoomPreventDefault = vi.fn();
-    listener({ target, ctrlKey: true, metaKey: false, deltaY: -100, deltaMode: 0, clientX: 90, clientY: 60, preventDefault: zoomPreventDefault } as unknown as Event);
-    expect(zoomPreventDefault).toHaveBeenCalledOnce();
-    expect(engine.getLoupeState().magnification).toBeGreaterThan(initial);
-    engine.destroy();
   });
 
   it("returns to baseline over twenty update/release cycles and rejects unsafe media URLs", () => {

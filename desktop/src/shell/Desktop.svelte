@@ -149,7 +149,7 @@
           {:else if appId === "gallery"}
             <Gallery {api} active={snapshot.focusedAppId === "gallery"} onReviewCreated={openCreatedReview} />
           {:else if appId === "review"}
-            <Review {api} {polling} {persistence} active={snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate} registerUnsavedChanges={(reader, discard, prepare) => shell.registerUnsavedChanges("review", reader, discard, prepare)} />
+            <Review {api} {polling} active={snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate} registerUnsavedChanges={(reader, discard, prepare) => shell.registerUnsavedChanges("review", reader, discard, prepare)} />
           {:else if appId === "proxy"}
             <Proxy {api} {polling} />
           {:else if appId === "vault"}

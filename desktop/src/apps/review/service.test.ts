@@ -48,28 +48,23 @@ describe("review service", () => {
     const calls = api();
     const service = createReviewService(calls.client);
     const signal = new AbortController().signal;
-    const operation = { ...rawPage, response_profile: "desktop-gallery-review-operation-v1" };
-    calls.get.mockResolvedValueOnce({ response_profile: "desktop-gallery-review-list-v1", items: [operation], limit: 50, offset: 50, total: 51 });
-    expect(await service.readRecent(signal, 50)).toMatchObject({ total: 51, offset: 50, items: [{ reviewId: "review-one" }] });
-    expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.reviews}?limit=50&offset=50&view=desktop`, { signal });
-
     calls.get.mockResolvedValueOnce(rawPage);
     const page = await service.readPage("review-one", "duplicate", signal);
     expect(page.reviewId).toBe("review-one");
     expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.reviews}/review-one?limit=50&offset=0&view=desktop&kind=duplicate`, { signal });
 
-    const payload = { version: 1, groups: [{ group_id: "group-1", selected_image_ids: ["image-1"] }] };
-    calls.put.mockResolvedValueOnce({ ...operation, version: 2 });
-    expect(await service.writeDecisions("review-one", payload, signal)).toMatchObject({ version: 2 });
-    expect(calls.put).toHaveBeenCalledWith(`${REVIEW_ENDPOINTS.reviews}/review-one/decisions`, payload, { signal });
-    for (const mutation of ["retry", "apply"] as const) {
-      calls.post.mockResolvedValueOnce(operation);
-      await service.run(mutation, "review-one", 2, signal);
-      expect(calls.post).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.reviews}/review-one/${mutation}`, mutation === "apply" ? { version: 2 } : {}, { signal });
-    }
+    const operation = { ...rawPage, response_profile: "desktop-gallery-review-operation-v1" };
+    calls.post.mockResolvedValueOnce({ ...operation, version: 2 });
+    expect(await service.adoptGroup("review-one", "group-1", ["image-1", "image-1"], 1, signal)).toMatchObject({ version: 2 });
+    expect(calls.post).toHaveBeenCalledWith(`${REVIEW_ENDPOINTS.reviews}/review-one/groups/group-1/adopt`, { version: 1, selected_image_ids: ["image-1"] }, { signal });
+    calls.post.mockResolvedValueOnce(operation);
+    await service.run("retry", "review-one", 2, signal);
+    expect(calls.post).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.reviews}/review-one/retry`, {}, { signal });
+    await service.finishReview("review-one", signal);
+    expect(calls.post).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.reviews}/review-one/finish`, {}, { signal });
     expect(service.imageUrl("review-one", "image-1")).toBe("http://127.0.0.1:8787/api/v1/gallery/reviews/review-one/images/image-1");
     expect(calls.resourceUrl).toHaveBeenCalledWith("/api/v1/gallery/reviews/review-one/images/image-1");
-    expect(JSON.stringify(calls.put.mock.calls)).not.toContain("url");
+    expect(JSON.stringify(calls.post.mock.calls)).not.toContain("url");
   });
 
   it("reads and starts the optional model setup through fixed endpoints", async () => {
@@ -143,8 +138,9 @@ describe("review service", () => {
     const calls = api();
     const service = createReviewService(calls.client);
     await expect(service.run("invalid" as "retry", "review-one", 1, new AbortController().signal)).rejects.toThrow(TypeError);
+    await expect(service.adoptGroup("review-one", "group-1", ["bad id"], 1, new AbortController().signal)).rejects.toThrow(TypeError);
     const abort = new DOMException("aborted", "AbortError");
     calls.get.mockRejectedValueOnce(abort);
-    await expect(service.readRecent(new AbortController().signal)).rejects.toBe(abort);
+    await expect(service.readPage("review-one", "", new AbortController().signal)).rejects.toBe(abort);
   });
 });

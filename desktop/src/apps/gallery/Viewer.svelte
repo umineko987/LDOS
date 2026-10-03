@@ -291,7 +291,7 @@
     >
       <div class="gallery-viewer__identity">
         <strong>{currentAsset?.name ?? "图片"}</strong>
-        <span>{snapshot.viewerIndex + 1} / {snapshot.viewerAssets.length}{snapshot.viewerAssetCursor ? "+" : ""}{currentAsset?.dedup_visibility === "candidate" ? " · 待去重候选" : ""}</span>
+        <span>{snapshot.viewerIndex + 1} / {snapshot.viewerAssets.length}{snapshot.viewerAssetCursor ? "+" : ""}</span>
       </div>
       <div class="gallery-viewer__actions">
         <button

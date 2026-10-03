@@ -6,7 +6,7 @@ const APPLICATION_LABELS = {
   tasks: ["Batch", "Recent batches"],
   proxy: ["Proxy", "Runtime status"],
   vault: ["Authorization", "Choose a site"],
-  review: ["Deduplication", "Review tasks"],
+  review: ["Deduplication", "No deduplication task yet"],
   policy: ["Site", "Choose a site"],
   diagnostics: ["Diagnostics", "Connection and checks"],
   personalization: ["Appearance", "Workbench palette"],

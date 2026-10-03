@@ -1,15 +1,12 @@
 import type { ReviewSnapshot } from "./model";
 
-export const REVIEW_REFERENCE_PIXEL_HEIGHT = 160;
-export const REVIEW_MIN_MAGNIFICATION = 0.25;
-export const REVIEW_MAX_MAGNIFICATION = 1;
-export const REVIEW_DEFAULT_MAGNIFICATION = 0.5;
-export const REVIEW_MAX_CANVAS_DPR = 2;
-const REVIEW_LAYOUT_GAP = 12;
+export const REVIEW_LAYOUT_GAP = 12;
 const REVIEW_MIN_TILE = 1;
 const REVIEW_MIN_RATIO = 0.38;
 const REVIEW_MAX_RATIO = 2.6;
-const MAGNIFICATION_STEP_BASE = 1.18;
+const REVIEW_ZOOM_MIN = 1;
+const REVIEW_ZOOM_MAX = 8;
+const REVIEW_ZOOM_STEP = 1.0015;
 
 export interface ReviewEngineImage {
   readonly id: string;
@@ -25,7 +22,6 @@ export interface ReviewEngineFrame {
   readonly images: readonly ReviewEngineImage[];
   readonly preloadUrls: readonly string[];
   readonly activeImageId: string;
-  readonly loupeEnabled: boolean;
 }
 
 export interface NormalizedReviewImage {
@@ -44,18 +40,10 @@ export interface ReviewLayout {
   readonly readable: boolean;
 }
 
-export interface ReviewLoupeState {
-  readonly active: boolean;
-  readonly pinned: boolean;
-  readonly magnification: number;
-}
-
 export interface ReviewEngine {
   update(frame: ReviewEngineFrame): void;
-  setPinned(pinned: boolean): void;
   release(): void;
   destroy(): void;
-  getLoupeState(): ReviewLoupeState;
   getResourceCounts(): Readonly<{ listeners: number; observer: number; frame: number; images: number; preloads: number }>;
 }
 
@@ -101,16 +89,6 @@ export function normalizeReviewImageDimensions(value: unknown): NormalizedReview
   } catch {
     return null;
   }
-}
-
-export function selectReviewReferenceImage(images: readonly unknown[]): Readonly<{ available: boolean; index: number; image: NormalizedReviewImage | null }> {
-  if (!Array.isArray(images)) throw new TypeError("invalid_review_images");
-  const readable = images
-    .map((value, index) => ({ index, image: normalizeReviewImageDimensions(value) }))
-    .filter((entry): entry is { index: number; image: NormalizedReviewImage } => Boolean(entry.image?.readable));
-  if (!readable.length) return freeze({ available: false, index: -1, image: null });
-  const selected = readable.find(({ image }) => image.recommended) ?? readable[0];
-  return freeze({ available: true, index: selected.index, image: selected.image });
 }
 
 function median(values: readonly number[]): number | null {
@@ -161,98 +139,49 @@ export function calculateReviewLayout(
   });
 }
 
-export function getReviewContainRect(
-  image: unknown,
-  container: Readonly<{ left: number; top: number; width: number; height: number }>,
-): Readonly<{ left: number; top: number; width: number; height: number }> | null {
-  const dimensions = normalizeReviewImageDimensions(image);
-  if (!dimensions?.readable || !finite(container.left) || !finite(container.top) || !finite(container.width) || container.width <= 0 || !finite(container.height) || container.height <= 0) return null;
-  const scale = Math.min(container.width / dimensions.width, container.height / dimensions.height);
-  const width = dimensions.width * scale;
-  const height = dimensions.height * scale;
+/** 组内所有对比图共用的同步缩放变换：滚轮以指针为锚点缩放，拖拽平移。 */
+export function updateReviewZoom(
+  state: Readonly<{ scale: number; offsetX: number; offsetY: number }>,
+  wheel: Readonly<{ deltaY: number; anchorX: number; anchorY: number }>,
+  viewport: Readonly<{ width: number; height: number }>,
+): Readonly<{ scale: number; offsetX: number; offsetY: number }> {
+  if (!finite(state.scale) || state.scale < REVIEW_ZOOM_MIN || state.scale > REVIEW_ZOOM_MAX) throw new RangeError("invalid_review_zoom");
+  positive(viewport.width, "invalid_review_zoom_viewport");
+  positive(viewport.height, "invalid_review_zoom_viewport");
+  const factor = Math.pow(REVIEW_ZOOM_STEP, -wheel.deltaY);
+  const scale = clamp(state.scale * factor, REVIEW_ZOOM_MIN, REVIEW_ZOOM_MAX);
+  const growth = scale / state.scale;
   return freeze({
-    left: container.left + (container.width - width) / 2,
-    top: container.top + (container.height - height) / 2,
-    width,
-    height,
+    scale,
+    offsetX: wheel.anchorX - (wheel.anchorX - state.offsetX) * growth,
+    offsetY: wheel.anchorY - (wheel.anchorY - state.offsetY) * growth,
   });
 }
 
-export function normalizeReviewPointer(
-  point: Readonly<{ x: number; y: number }>,
-  content: Readonly<{ left: number; top: number; width: number; height: number }>,
-): Readonly<{ u: number; v: number }> {
-  if (!finite(point.x) || !finite(point.y) || !finite(content.left) || !finite(content.top) || !finite(content.width) || content.width <= 0 || !finite(content.height) || content.height <= 0) throw new TypeError("invalid_review_pointer");
-  return freeze({
-    u: clamp((point.x - content.left) / content.width, 0, 1),
-    v: clamp((point.y - content.top) / content.height, 0, 1),
-  });
+export function panReviewZoom(
+  state: Readonly<{ scale: number; offsetX: number; offsetY: number }>,
+  delta: Readonly<{ x: number; y: number }>,
+): Readonly<{ scale: number; offsetX: number; offsetY: number }> {
+  if (!finite(state.scale) || state.scale < REVIEW_ZOOM_MIN || state.scale > REVIEW_ZOOM_MAX) throw new RangeError("invalid_review_zoom");
+  if (!finite(delta.x) || !finite(delta.y)) throw new TypeError("invalid_review_zoom_pan");
+  return freeze({ scale: state.scale, offsetX: state.offsetX + delta.x, offsetY: state.offsetY + delta.y });
 }
 
-export function projectReviewPointer(
-  pointer: Readonly<{ u: number; v: number }>,
-  content: Readonly<{ left: number; top: number; width: number; height: number }>,
-  container: Readonly<{ left: number; top: number }>,
-): Readonly<{ left: number; top: number }> {
-  if (!finite(pointer.u) || !finite(pointer.v) || !finite(container.left) || !finite(container.top)) throw new TypeError("invalid_review_pointer_projection");
-  if (pointer.u < 0 || pointer.u > 1 || pointer.v < 0 || pointer.v > 1 || !finite(content.left) || !finite(content.top) || !finite(content.width) || content.width <= 0 || !finite(content.height) || content.height <= 0) {
-    throw new TypeError("invalid_review_pointer_projection");
-  }
-  return freeze({
-    left: content.left - container.left + pointer.u * content.width,
-    top: content.top - container.top + pointer.v * content.height,
-  });
-}
-
-export function calculateReviewCrop({
-  target,
-  reference,
-  outputWidth,
-  outputHeight,
-  magnification = REVIEW_DEFAULT_MAGNIFICATION,
-  u = 0.5,
-  v = 0.5,
-}: {
-  readonly target: unknown;
-  readonly reference: unknown;
-  readonly outputWidth: number;
-  readonly outputHeight: number;
-  readonly magnification?: number;
-  readonly u?: number;
-  readonly v?: number;
-}): Readonly<{ x: number; y: number; sourceWidth: number; sourceHeight: number }> | null {
-  const targetImage = normalizeReviewImageDimensions(target);
-  const referenceImage = normalizeReviewImageDimensions(reference);
-  if (!targetImage || !referenceImage) throw new TypeError("invalid_review_crop_image");
-  if (!targetImage.readable || !referenceImage.readable) return null;
-  positive(outputWidth, "invalid_review_crop_width");
-  positive(outputHeight, "invalid_review_crop_height");
-  if (!finite(magnification) || magnification < REVIEW_MIN_MAGNIFICATION || magnification > REVIEW_MAX_MAGNIFICATION) throw new TypeError("invalid_review_magnification");
-  const normalizedU = clamp(u, 0, 1);
-  const normalizedV = clamp(v, 0, 1);
-  const theoreticalHeight = (REVIEW_REFERENCE_PIXEL_HEIGHT / magnification) * (targetImage.height / referenceImage.height);
-  const theoreticalWidth = theoreticalHeight * (outputWidth / outputHeight);
-  const fitScale = Math.min(1, targetImage.width / theoreticalWidth, targetImage.height / theoreticalHeight);
-  const sourceWidth = theoreticalWidth * fitScale;
-  const sourceHeight = theoreticalHeight * fitScale;
-  const maximumX = Math.max(0, targetImage.width - sourceWidth);
-  const maximumY = Math.max(0, targetImage.height - sourceHeight);
-  const x = clamp(normalizedU * targetImage.width - sourceWidth / 2, 0, maximumX);
-  const y = clamp(normalizedV * targetImage.height - sourceHeight / 2, 0, maximumY);
-  return freeze({ x, y, sourceWidth, sourceHeight });
-}
-
-export function updateReviewMagnification(current: number, delta: number, deltaMode = 0, pageSize = 800): number {
-  if (!finite(current) || current < REVIEW_MIN_MAGNIFICATION || current > REVIEW_MAX_MAGNIFICATION) throw new RangeError("invalid_review_magnification");
-  if (!finite(delta) || !Number.isInteger(deltaMode) || ![0, 1, 2].includes(deltaMode) || !finite(pageSize) || pageSize <= 0) throw new TypeError("invalid_review_magnification");
-  const normalizedDelta = delta * (deltaMode === 1 ? 16 : deltaMode === 2 ? pageSize : 1);
-  const steps = clamp(-normalizedDelta / 100, -3, 3);
-  return clamp(current * Math.pow(MAGNIFICATION_STEP_BASE, steps), REVIEW_MIN_MAGNIFICATION, REVIEW_MAX_MAGNIFICATION);
-}
-
-export function formatReviewMagnification(value: number): string {
-  if (!finite(value) || value < REVIEW_MIN_MAGNIFICATION || value > REVIEW_MAX_MAGNIFICATION) throw new RangeError("invalid_review_magnification");
-  return value === REVIEW_MAX_MAGNIFICATION ? "1:1" : `${value.toFixed(2)}x`;
+/** 视窗查看器手感：图片边缘不越出视口——放大时平移被边缘约束，适配（fit）时回到居中。 */
+export function clampReviewPan(
+  state: Readonly<{ scale: number; offsetX: number; offsetY: number }>,
+  imageWidth: number,
+  imageHeight: number,
+  viewport: Readonly<{ width: number; height: number }>,
+): Readonly<{ scale: number; offsetX: number; offsetY: number }> {
+  if (!finite(state.scale) || state.scale < REVIEW_ZOOM_MIN || state.scale > REVIEW_ZOOM_MAX) throw new RangeError("invalid_review_zoom");
+  if (!finite(imageWidth) || !finite(imageHeight) || imageWidth <= 0 || imageHeight <= 0) throw new TypeError("invalid_review_zoom_image");
+  positive(viewport.width, "invalid_review_zoom_viewport");
+  positive(viewport.height, "invalid_review_zoom_viewport");
+  const fit = Math.min(viewport.width / imageWidth, viewport.height / imageHeight);
+  const spanX = Math.max(0, (imageWidth * fit * state.scale - viewport.width) / 2);
+  const spanY = Math.max(0, (imageHeight * fit * state.scale - viewport.height) / 2);
+  return freeze({ scale: state.scale, offsetX: clamp(state.offsetX, -spanX, spanX) + 0, offsetY: clamp(state.offsetY, -spanY, spanY) + 0 });
 }
 
 export function reviewImageWindow(groupCount: number, focusedIndex: number): readonly number[] {
@@ -266,7 +195,6 @@ export function buildReviewEngineFrame(
   snapshot: ReviewSnapshot | null,
   focusedGroupId: string,
   activeImageId: string,
-  loupeEnabled: boolean,
   imageUrl: (reviewId: string, imageId: string) => string,
 ): ReviewEngineFrame | null {
   if (!snapshot) return null;
@@ -290,7 +218,6 @@ export function buildReviewEngineFrame(
     images: Object.freeze(images),
     preloadUrls: Object.freeze(preloadUrls),
     activeImageId,
-    loupeEnabled,
   });
 }
 
@@ -328,16 +255,6 @@ function defaultResizeObserver(callback: ResizeObserverCallback): ResizeObserver
   }
 }
 
-function decodedReviewImage(image: ReviewEngineImage, preview: HTMLImageElement): NormalizedReviewImage | null {
-  if (!preview.complete || preview.naturalWidth <= 0 || preview.naturalHeight <= 0) return null;
-  return freeze({
-    width: preview.naturalWidth,
-    height: preview.naturalHeight,
-    readable: image.readable,
-    recommended: image.recommended,
-  });
-}
-
 function sameMedia(left: ReviewEngineFrame | null, right: ReviewEngineFrame): boolean {
   return Boolean(left && left.key === right.key && left.images.length === right.images.length && left.images.every((image, index) => {
     const candidate = right.images[index];
@@ -351,42 +268,26 @@ export function createReviewEngine({
   cancelFrame = defaultCancelFrame,
   createImage = defaultImageFactory,
   createObserver = defaultResizeObserver,
-  devicePixelRatio = () => globalThis.devicePixelRatio || 1,
-  onLoupeState = () => {},
 }: {
   readonly host: HTMLElement;
   readonly requestFrame?: RequestFrame;
   readonly cancelFrame?: CancelFrame;
   readonly createImage?: ImageFactory;
   readonly createObserver?: (callback: ResizeObserverCallback) => ResizeObserverLike | null;
-  readonly devicePixelRatio?: () => number;
-  readonly onLoupeState?: (state: ReviewLoupeState) => void;
 }): ReviewEngine {
   if (!host || typeof host.addEventListener !== "function") throw new TypeError("invalid_review_engine_host");
   let frame: ReviewEngineFrame | null = null;
   let frameHandle: FrameHandle | null = null;
-  let pointer: Readonly<{ u: number; v: number }> | null = null;
-  let magnification = REVIEW_DEFAULT_MAGNIFICATION;
-  let pinned = false;
   let destroyed = false;
   let observerConnected = false;
   let mediaGeneration = 0;
   const attached = new Map<HTMLImageElement, { load: EventListener; error: EventListener }>();
   const preloads: HTMLImageElement[] = [];
 
-  const loupeState = (): ReviewLoupeState => freeze({ active: Boolean(frame?.loupeEnabled && pointer), pinned, magnification });
-  const publishLoupe = (): void => {
-    try { onLoupeState(loupeState()); } catch { /* UI projection must not break media cleanup. */ }
-  };
   const cancelPendingFrame = (): void => {
     if (frameHandle === null) return;
     cancelFrame(frameHandle);
     frameHandle = null;
-  };
-
-  const hideLenses = (): void => {
-    for (const canvas of host.querySelectorAll<HTMLCanvasElement>("[data-review-engine-lens]")) canvas.hidden = true;
-    for (const crosshair of host.querySelectorAll<HTMLElement>("[data-review-engine-crosshair]")) crosshair.hidden = true;
   };
 
   const draw = (): void => {
@@ -398,55 +299,6 @@ export function createReviewEngine({
       if (rect.width > 0 && rect.height > 0 && frame.images.length) {
         const layout = calculateReviewLayout(frame.images, rect.width, rect.height);
         grid.style.gridTemplateColumns = `repeat(${Math.max(1, layout.columns)}, minmax(0, 1fr))`;
-      }
-    }
-    if (!frame.loupeEnabled || !pointer) {
-      hideLenses();
-      return;
-    }
-    const reference = selectReviewReferenceImage(frame.images);
-    const referenceItem = reference.available ? frame.images[reference.index] : null;
-    const referenceCard = referenceItem ? host.querySelector<HTMLElement>(`[data-review-engine-card="${referenceItem.id}"]`) : null;
-    const referencePreview = referenceCard?.querySelector<HTMLImageElement>("[data-review-engine-image]") ?? null;
-    const referenceImage = referenceItem && referencePreview ? decodedReviewImage(referenceItem, referencePreview) : null;
-    if (!referenceImage) {
-      hideLenses();
-      return;
-    }
-    for (const image of frame.images) {
-      if (!image.readable) continue;
-      const card = host.querySelector<HTMLElement>(`[data-review-engine-card="${image.id}"]`);
-      const preview = card?.querySelector<HTMLImageElement>("[data-review-engine-image]");
-      const canvas = card?.querySelector<HTMLCanvasElement>("[data-review-engine-lens]");
-      const crosshair = card?.querySelector<HTMLElement>("[data-review-engine-crosshair]");
-      if (!card || !preview || !canvas || !crosshair) continue;
-      const targetImage = decodedReviewImage(image, preview);
-      if (!targetImage) continue;
-      const previewRect = preview.getBoundingClientRect();
-      const contentRect = getReviewContainRect(targetImage, previewRect);
-      if (!contentRect) continue;
-      const crosshairPoint = projectReviewPointer(pointer, contentRect, previewRect);
-      const rect = canvas.getBoundingClientRect();
-      const ratio = Math.min(REVIEW_MAX_CANVAS_DPR, Math.max(1, devicePixelRatio()));
-      canvas.width = Math.max(1, Math.floor(rect.width * ratio));
-      canvas.height = Math.max(1, Math.floor(rect.height * ratio));
-      const crop = calculateReviewCrop({ target: targetImage, reference: referenceImage, outputWidth: canvas.width, outputHeight: canvas.height, magnification, ...pointer });
-      const context = crop ? canvas.getContext("2d") : null;
-      if (!crop || !context) continue;
-      try {
-        context.imageSmoothingEnabled = false;
-        context.drawImage(preview, crop.x, crop.y, crop.sourceWidth, crop.sourceHeight, 0, 0, canvas.width, canvas.height);
-        canvas.hidden = false;
-        crosshair.style.left = `${crosshairPoint.left}px`;
-        crosshair.style.top = `${crosshairPoint.top}px`;
-        crosshair.hidden = false;
-        card.removeAttribute("data-review-engine-error");
-      } catch {
-        canvas.width = 1;
-        canvas.height = 1;
-        canvas.hidden = true;
-        crosshair.hidden = true;
-        card.setAttribute("data-review-engine-error", "canvas-unavailable");
       }
     }
   };
@@ -480,12 +332,6 @@ export function createReviewEngine({
       image.onerror = null;
       image.removeAttribute("src");
     }
-    for (const canvas of host.querySelectorAll<HTMLCanvasElement>("[data-review-engine-lens]")) {
-      canvas.width = 1;
-      canvas.height = 1;
-      canvas.hidden = true;
-    }
-    hideLenses();
   };
 
   const loadMedia = (): void => {
@@ -530,46 +376,6 @@ export function createReviewEngine({
       preloads.push(image);
     }
   };
-  const updatePointer = (event: PointerEvent | WheelEvent): boolean => {
-    const target = event.target as Element | null;
-    const card = target?.closest?.("[data-review-engine-card]") as HTMLElement | null;
-    const imageId = card?.dataset.reviewEngineCard ?? "";
-    const item = frame?.images.find((image) => image.id === imageId);
-    const preview = card?.querySelector<HTMLImageElement>("[data-review-engine-image]");
-    if (!item || !preview) return false;
-    const targetImage = decodedReviewImage(item, preview);
-    if (!targetImage) return false;
-    const content = getReviewContainRect(targetImage, preview.getBoundingClientRect());
-    if (!content) return false;
-    pointer = normalizeReviewPointer({ x: event.clientX, y: event.clientY }, content);
-    return true;
-  };
-
-  const pointerMove = (event: PointerEvent): void => {
-    if (!frame?.loupeEnabled || pinned || !updatePointer(event)) return;
-    publishLoupe();
-    schedule();
-  };
-
-  const pointerLeave = (): void => {
-    if (pinned) return;
-    pointer = null;
-    hideLenses();
-    publishLoupe();
-  };
-
-  const wheel = (event: WheelEvent): void => {
-    const target = event.target as Element | null;
-    if (!(event.ctrlKey || event.metaKey) || !frame?.loupeEnabled || !target?.closest?.("[data-review-engine-card]") || (!pinned && !updatePointer(event))) return;
-    event.preventDefault();
-    magnification = updateReviewMagnification(magnification, event.deltaY, event.deltaMode, Math.max(1, host.clientHeight || 800));
-    publishLoupe();
-    schedule();
-  };
-
-  host.addEventListener("pointermove", pointerMove);
-  host.addEventListener("pointerleave", pointerLeave);
-  host.addEventListener("wheel", wheel, { passive: false });
 
   const engine: ReviewEngine = {
     update(nextFrame) {
@@ -580,26 +386,12 @@ export function createReviewEngine({
       frame = freeze({ ...nextFrame, images: Object.freeze([...nextFrame.images]), preloadUrls: Object.freeze([...nextFrame.preloadUrls]) });
       if (replaceMedia) {
         cancelPendingFrame();
-        pointer = null;
-        pinned = false;
         observer?.disconnect();
         observerConnected = false;
         releaseMedia();
         loadMedia();
         reconnectObserver();
-      } else if (!frame.loupeEnabled) {
-        pointer = null;
-        pinned = false;
-        hideLenses();
       }
-      publishLoupe();
-      schedule();
-    },
-    setPinned(nextPinned) {
-      if (destroyed || !frame?.loupeEnabled) return;
-      pinned = Boolean(nextPinned);
-      if (pinned && !pointer) pointer = freeze({ u: 0.5, v: 0.5 });
-      publishLoupe();
       schedule();
     },
     release() {
@@ -608,24 +400,16 @@ export function createReviewEngine({
       observer?.disconnect();
       observerConnected = false;
       frame = null;
-      pointer = null;
-      pinned = false;
       releaseMedia();
-      publishLoupe();
     },
     destroy() {
       if (destroyed) return;
       engine.release();
       destroyed = true;
-      host.removeEventListener("pointermove", pointerMove);
-      host.removeEventListener("pointerleave", pointerLeave);
-      host.removeEventListener("wheel", wheel);
     },
-    getLoupeState: loupeState,
     getResourceCounts() {
-      return freeze({ listeners: destroyed ? 0 : 3, observer: observerConnected ? 1 : 0, frame: frameHandle === null ? 0 : 1, images: attached.size, preloads: preloads.length });
+      return freeze({ listeners: 0, observer: observerConnected ? 1 : 0, frame: frameHandle === null ? 0 : 1, images: attached.size, preloads: preloads.length });
     },
   };
-  publishLoupe();
   return Object.freeze(engine);
 }

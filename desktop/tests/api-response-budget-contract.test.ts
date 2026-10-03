@@ -37,7 +37,8 @@ describe("desktop API response-budget contract", () => {
       ]],
       ["review", reviewServiceSource, [
         "limit=${REVIEW_PAGE_LIMIT}&offset=${offset}&view=desktop",
-        'reviewPath(reviewId, "/decisions")',
+        'reviewPath(reviewId, `/groups/${encodeURIComponent(groupId)}/adopt`)',
+        'reviewPath(reviewId, "/finish")',
         'reviewPath(reviewId, `/${operation}`)',
       ]],
       ["proxy", proxyServiceSource, [
@@ -78,7 +79,7 @@ describe("desktop API response-budget contract", () => {
     expect(count(galleryServiceSource, /view=desktop/g)).toBe(7);
     expect(count(crawlServiceSource, /view=desktop/g)).toBe(2);
     expect(count(tasksServiceSource, /view=(?:desktop|tasks)/g)).toBe(5);
-    expect(count(reviewServiceSource, /view=desktop/g)).toBe(2);
+    expect(count(reviewServiceSource, /view=desktop/g)).toBe(1);
     expect(count(proxyServiceSource, /view=desktop/g)).toBe(11);
   });
 

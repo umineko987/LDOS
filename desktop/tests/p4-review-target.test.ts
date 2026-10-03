@@ -72,17 +72,17 @@ describe("P4 Review target ownership", () => {
     expect(engineSource).toContain("observer?.disconnect()");
     expect(engineSource).toContain("cancelFrame(frameHandle)");
     expect(engineSource).toContain('image.removeAttribute("src")');
-    expect(engineSource).toContain("canvas.width = 1");
     expect(stateSource).not.toMatch(/canvas|pixel|magnification|objectUrl|mediaUrl|imageUrl/i);
   });
 
   it("keeps release orchestration and the one shared API/polling path", () => {
     expect(controllerSource).toContain('REVIEW_POLL_KEY = "review.active"');
-    expect(controllerSource).toContain("splitReviewDecisionPayload(buildReviewDecisionPayload(snapshot))");
+    expect(controllerSource).toContain("service.adoptGroup(");
+    expect(controllerSource).toContain("service.finishReview");
     expect(controllerSource).toContain("queueMicrotask(() =>");
-    expect(controllerSource).toContain("beforeLeave: save");
+    expect(controllerSource).toContain('beforeLeave: () => Promise.resolve(true)');
     expect(serviceSource.match(/"\/api\/v1\//g)).toHaveLength(2);
-    expect(serviceSource.match(/view=desktop/g)).toHaveLength(2);
+    expect(serviceSource.match(/view=desktop/g)).toHaveLength(1);
     expect(serviceSource).toContain("REVIEW_PAGE_LIMIT = 50");
     expect(serviceSource).not.toContain("all=true");
     const combined = [reviewSource, controllerSource, modelSource, serviceSource, stateSource].join("\n");

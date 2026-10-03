@@ -50,9 +50,9 @@ describe("UI localization", () => {
       ["当前页错误分类（3 个任务）", "Error categories for this page (3 tasks)"],
       ["Pixiv 正等待授权浏览器操作。", "Pixiv is waiting for authorization browser interaction."],
       ["组 1 · 重复组", "Group 1 · Duplicate groups"],
-      ["1. 独立图片 · 1/1 保留 · 已确认", "1. Single images · 1/1 kept · Confirmed"],
+      ["1. 独立图片 · 1/1 保留 · 已采纳", "1. Single images · 1/1 kept · Adopted"],
       ["图 2 · 推荐项", "Image 2 · Recommended"],
-      ["1 / 2 组已确认", "1 / 2 groups confirmed"],
+      ["1 / 2 组已采纳", "1 / 2 groups adopted"],
       ["当前组 2 / 3 保留", "Current group 2 / 3 kept"],
     ] as const;
 

@@ -13,7 +13,6 @@ const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 export const REVIEW_GROUP_LIMIT = 10_000;
-export const REVIEW_DECISION_BATCH_LIMIT = 50;
 export const REVIEW_POLL_INTERVAL_MS = 1_500;
 export const REVIEW_FILTERS = Object.freeze([
   Object.freeze({ id: "", label: "全部" }),
@@ -27,7 +26,7 @@ export type ReviewFilter = typeof REVIEW_FILTERS[number]["id"];
 export type ReviewGroupKind = "duplicate" | "single" | "unreadable";
 export type ReviewStatusKind = "ready" | "running" | "warning" | "error" | "disabled";
 export type ReviewPhase = "empty" | "loading" | "content" | "polling" | "writing" | "error";
-export type ReviewOperation = "load" | "refresh" | "save" | "retry" | "apply" | "";
+export type ReviewOperation = "load" | "refresh" | "adopt" | "retry" | "finish" | "";
 
 export interface ReviewImage {
   readonly id: string;
@@ -39,6 +38,7 @@ export interface ReviewImage {
   readonly height: number;
   readonly sourceLabel: string;
   readonly relativePath: string;
+  readonly failed: boolean;
 }
 
 export interface ReviewGroup {
@@ -109,14 +109,6 @@ export interface ReviewOperationResult {
   readonly updatedAt: number | null;
 }
 
-export interface ReviewRecentTask extends ReviewOperationResult {}
-
-export interface ReviewTaskPage {
-  readonly items: readonly ReviewRecentTask[];
-  readonly total: number;
-  readonly offset: number;
-  readonly limit: number;
-}
 
 export type ModelSetupPhase = "idle" | "installing" | "ready" | "failed";
 
@@ -132,14 +124,6 @@ export interface ModelSetupSnapshot {
     sscd: Readonly<{ installed: boolean }>;
     dino: Readonly<{ installed: boolean }>;
   }>;
-}
-
-export interface ReviewDecisionPayload {
-  readonly version: number;
-  readonly groups: readonly Readonly<{
-    group_id: string;
-    selected_image_ids: readonly string[];
-  }>[];
 }
 
 export interface ReviewErrorPresentation {
@@ -340,6 +324,8 @@ function sanitizeImage(value: unknown, index: number): ReviewImage {
   const metadataValue = own(record, "metadata");
   const metadata = metadataValue === undefined ? { descriptors: Object.create(null) as PropertyDescriptorMap } : requireRecord(metadataValue, "invalid_review_image_metadata");
   const ordinal = strictCount(own(record, "ordinal"), "invalid_review_image_ordinal", 100_000);
+  const galleryValue = own(record, "gallery");
+  const gallery = galleryValue === undefined ? null : requireRecord(galleryValue, "invalid_review_image_gallery");
   return Object.freeze({
     id,
     ordinal: ordinal || index + 1,
@@ -350,6 +336,7 @@ function sanitizeImage(value: unknown, index: number): ReviewImage {
     height: strictCount(own(metadata, "h") ?? 0, "invalid_review_image_height", 1_000_000),
     sourceLabel: displayText(own(record, "source_display_name")),
     relativePath,
+    failed: gallery !== null && strictBoolean(own(gallery, "hasError"), "invalid_review_image_error"),
   });
 }
 
@@ -418,7 +405,7 @@ function displayText(value: unknown): string {
 }
 
 function sanitizeDirectories(value: unknown): readonly ReviewDirectory[] {
-  if (!Array.isArray(value) || !value.length || value.length > 200) throw new TypeError("invalid_review_directories");
+  if (!Array.isArray(value) || value.length > 200) throw new TypeError("invalid_review_directories");
   const seen = new Set<string>();
   return Object.freeze(value.map((raw) => {
     const record = requireRecord(raw, "invalid_review_directory");
@@ -555,7 +542,7 @@ export function sanitizeReviewPage(value: unknown, options: {
 }
 
 export function validateReviewSnapshot(value: ReviewSnapshot): ReviewSnapshot {
-  if (!Number.isSafeInteger(value.version) || value.version < 1 || !Array.isArray(value.directories) || !value.directories.length) throw new TypeError("invalid_review_snapshot");
+  if (!Number.isSafeInteger(value.version) || value.version < 1 || !Array.isArray(value.directories)) throw new TypeError("invalid_review_snapshot");
   if (!safeId(value.reviewId) || value.summary.reviewId !== value.reviewId || !REVIEW_FILTER_SET.has(value.filter) || !Array.isArray(value.groupOrder) || value.groupOrder.length > REVIEW_GROUP_LIMIT || !safeRecord(value.groups) || !Array.isArray(value.dirtyGroupIds)) {
     throw new TypeError("invalid_review_snapshot");
   }
@@ -608,62 +595,6 @@ export function updateReviewImageSelection(snapshot: ReviewSnapshot, groupId: st
   });
 }
 
-export function confirmReviewGroup(snapshot: ReviewSnapshot, groupId: string): ReviewSnapshot {
-  validateReviewSnapshot(snapshot);
-  const group = snapshot.groups[safeId(groupId)];
-  if (!group || !group.imageOrder.length) return snapshot;
-  const dirtyGroupIds = addDirtyGroup(snapshot, group.id);
-  const nextGroup = group.decided ? group : Object.freeze({ ...group, decided: true });
-  if (nextGroup === group && dirtyGroupIds === snapshot.dirtyGroupIds) return snapshot;
-  return Object.freeze({
-    ...snapshot,
-    groups: nextGroup === group ? snapshot.groups : Object.freeze({ ...snapshot.groups, [group.id]: nextGroup }),
-    dirty: true,
-    dirtyGroupIds,
-  });
-}
-
-export function buildReviewDecisionPayload(snapshot: ReviewSnapshot): ReviewDecisionPayload {
-  validateReviewSnapshot(snapshot);
-  if (snapshot.summary.status !== "ready" || !snapshot.dirtyGroupIds.length) throw new TypeError("invalid_review_decisions");
-  return Object.freeze({
-    version: snapshot.version,
-    groups: Object.freeze(snapshot.dirtyGroupIds.map((groupId) => {
-      const group = snapshot.groups[groupId];
-      return Object.freeze({
-        group_id: group.id,
-        selected_image_ids: Object.freeze(group.imageOrder.filter((imageId) => group.images[imageId].selected)),
-      });
-    })),
-  });
-}
-
-export function splitReviewDecisionPayload(payload: ReviewDecisionPayload): readonly ReviewDecisionPayload[] {
-  if (!payload || !Array.isArray(payload.groups) || !payload.groups.length) throw new TypeError("invalid_review_decisions");
-  const chunks: ReviewDecisionPayload[] = [];
-  for (let index = 0; index < payload.groups.length; index += REVIEW_DECISION_BATCH_LIMIT) {
-    chunks.push(Object.freeze({ version: payload.version, groups: Object.freeze(payload.groups.slice(index, index + REVIEW_DECISION_BATCH_LIMIT)) }));
-  }
-  return Object.freeze(chunks);
-}
-
-export function sanitizeReviewTaskPage(value: unknown, requestedOffset = 0): ReviewTaskPage {
-  const record = requireRecord(value, "invalid_review_tasks");
-  const items = own(record, "items");
-  const offset = strictCount(own(record, "offset"), "invalid_review_tasks_offset");
-  const total = strictCount(own(record, "total"), "invalid_review_tasks_total");
-  const limit = strictCount(own(record, "limit"), "invalid_review_tasks_limit", 100);
-  if (own(record, "response_profile") !== "desktop-gallery-review-list-v1" || !Array.isArray(items) || offset !== requestedOffset || items.length > limit || offset + items.length > total || (offset < total && !items.length)) throw new TypeError("invalid_review_tasks_boundary");
-  const seen = new Set<string>();
-  const tasks = items.map((raw) => {
-    const task = sanitizeReviewOperation(raw);
-    if (seen.has(task.reviewId)) throw new TypeError("duplicate_review_task");
-    seen.add(task.reviewId);
-    return task;
-  });
-  return Object.freeze({ items: Object.freeze(tasks), offset, total, limit });
-}
-
 export function shouldPollReview(summary: ReviewSummary | null): boolean {
   return Boolean(summary && ACTIVE_STATUS_SET.has(summary.status));
 }
@@ -680,20 +611,17 @@ export function resolveReviewCommand(key: string, {
   editable,
   readOnly,
   hasImages,
-  loupeAvailable,
 }: {
   readonly editable: boolean;
   readonly readOnly: boolean;
   readonly hasImages: boolean;
-  readonly loupeAvailable: boolean;
-}): "previous-group" | "focus-previous-image" | "focus-next-image" | "toggle-active-image" | "accept-advance" | "browse-next-group" | "toggle-loupe" | null {
+}): "previous-group" | "focus-previous-image" | "focus-next-image" | "toggle-active-image" | "accept-advance" | "browse-next-group" | null {
   if (key === "Escape" || key === "Backspace") return "previous-group";
   if (hasImages && key === "ArrowLeft") return "focus-previous-image";
   if (hasImages && key === "ArrowRight") return "focus-next-image";
   if (key === " " && editable) return "toggle-active-image";
   if (key === "Enter" && editable) return "accept-advance";
   if (key === "Enter" && readOnly) return "browse-next-group";
-  if ((key === "x" || key === "X") && loupeAvailable) return "toggle-loupe";
   return null;
 }
 
@@ -715,10 +643,10 @@ export function reviewCompletionPresentation(summary: ReviewSummary, filter: Rev
   const remaining = Math.max(0, summary.totalGroupCount - Math.min(summary.totalGroupCount, summary.decidedGroupCount));
   if (remaining) {
     const label = REVIEW_FILTERS.find((item) => item.id === filter)?.label ?? "当前";
-    return Object.freeze({ reviewComplete: false, title: "当前筛选已过一遍", message: `“${label}”仍有 ${remaining} 组未确认；请切换筛选继续。` });
+    return Object.freeze({ reviewComplete: false, title: "当前筛选已到最后一组", message: `“${label}”仍有 ${remaining} 组未采纳；可切换筛选继续。` });
   }
   const counts = reviewApplyCounts(summary);
-  return Object.freeze({ reviewComplete: true, title: "本次审核已全部过一遍", message: `机器初筛回收 ${counts.automatic} 张；原位保留 ${counts.selected} 张，人工回收 ${counts.rejected} 张。` });
+  return Object.freeze({ reviewComplete: true, title: "本次任务已全部采纳", message: `原位保留 ${counts.selected} 张，回收 ${counts.automatic + counts.rejected} 张；点击“完成”结束本次任务。` });
 }
 
 function errorField(value: unknown, key: string): unknown {
@@ -759,8 +687,8 @@ export function reviewErrorPresentation(error: unknown): ReviewErrorPresentation
 
 export function deriveReviewPresentation(phase: ReviewPhase, summary: ReviewSummary | null): Readonly<{ kind: ReviewStatusKind; label: string; message: string }> {
   if (phase === "loading") return Object.freeze({ kind: "running", label: "正在加载", message: "正在读取审核任务与图片。" });
-  if (phase === "writing") return Object.freeze({ kind: "running", label: "正在写入", message: "正在保存审核结果。" });
+  if (phase === "writing") return Object.freeze({ kind: "running", label: "正在写入", message: "正在落地采纳结果。" });
   if (phase === "error") return Object.freeze({ kind: "error", label: "审核读取失败", message: "草稿和最后一次安全快照已保留。" });
-  if (!summary) return Object.freeze({ kind: "disabled", label: "尚无审核任务", message: "请在图库选择目录发起去重。" });
+  if (!summary) return Object.freeze({ kind: "disabled", label: "尚无去重任务", message: "请在图库勾选图片或目录发起去重。" });
   return Object.freeze({ kind: summary.statusKind, label: summary.statusLabel, message: reviewCanList(summary) ? "当前筛选的全部审核组已加载。" : "分析会自动开始；失败或受阻时可重试。" });
 }

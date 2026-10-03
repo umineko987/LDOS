@@ -1,19 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  REVIEW_DECISION_BATCH_LIMIT,
   REVIEW_GROUP_LIMIT,
   REVIEW_POLL_INTERVAL_MS,
-  buildReviewDecisionPayload,
   mergeReviewPageChunks,
   createReviewRequestGate,
   resolveReviewCommand,
   reviewErrorPresentation,
-  reviewApplyCounts,
   reviewImagePath,
   sanitizeReviewPage,
   sanitizeReviewPageChunk,
-  splitReviewDecisionPayload,
   updateReviewImageSelection,
   type ReviewSnapshot,
 } from "./model";
@@ -69,9 +65,11 @@ function sanitize(groups = [rawGroup(1)]): ReviewSnapshot {
 }
 
 describe("review model", () => {
-  it("separates automatic and manual rejections in completion counts", () => {
-    const summary = { ...sanitize().summary, totalImageCount: 10, selectedImageCount: 4, automaticRejectedImageCount: 3 };
-    expect(reviewApplyCounts(summary)).toEqual({ automatic: 3, selected: 4, rejected: 3 });
+  it("keeps per-image adoption failure flags from the gallery binding", () => {
+    const snapshot = sanitize([rawGroup(1, [rawImage(1, { gallery: { hasError: true } }), rawImage(2)])]);
+    expect(snapshot.groups["group-1"].images["image-1"].failed).toBe(true);
+    expect(snapshot.groups["group-1"].images["image-2"].failed).toBe(false);
+    expect(() => sanitize([rawGroup(1, [rawImage(1, { gallery: { hasError: "yes" } })])])).toThrow(TypeError);
   });
   it("strictly sanitizes review pages without retaining paths, URLs, or secrets", () => {
     const snapshot = sanitize();
@@ -128,14 +126,8 @@ describe("review model", () => {
     expect(snapshot.groups["group-1"].images["image-1"].selected).toBe(false);
     expect(snapshot.groups["group-2"]).toBe(untouchedGroup);
 
-    const dirtyGroupIds = Object.freeze([...snapshot.groupOrder]);
-    const dirtyGroups = Object.freeze(Object.fromEntries(snapshot.groupOrder.map((groupId) => [groupId, Object.freeze({ ...snapshot.groups[groupId], decided: true })])));
-    const dirty = Object.freeze({ ...snapshot, groups: dirtyGroups, dirty: true, dirtyGroupIds });
-    const chunks = splitReviewDecisionPayload(buildReviewDecisionPayload(dirty));
-    expect(chunks.map(({ groups: items }) => items.length)).toEqual([50, 50, 1]);
-    expect(chunks.flatMap(({ groups: items }) => items).every((item) => Object.keys(item).sort().join(",") === "group_id,selected_image_ids")).toBe(true);
+    expect(snapshot.groups["group-1"].decided).toBe(false);
     expect(REVIEW_GROUP_LIMIT).toBe(10_000);
-    expect(REVIEW_DECISION_BATCH_LIMIT).toBe(50);
     expect(REVIEW_POLL_INTERVAL_MS).toBe(1_500);
   });
 
@@ -158,13 +150,13 @@ describe("review model", () => {
   });
 
   it("keeps command, media-path, and safe error projections closed", () => {
-    expect(resolveReviewCommand("Enter", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBe("accept-advance");
-    expect(resolveReviewCommand("Escape", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBe("previous-group");
-    expect(resolveReviewCommand("ArrowLeft", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBe("focus-previous-image");
-    expect(resolveReviewCommand("ArrowRight", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBe("focus-next-image");
-    expect(resolveReviewCommand("ArrowUp", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBeNull();
-    expect(resolveReviewCommand("ArrowDown", { editable: true, readOnly: false, hasImages: true, loupeAvailable: true })).toBeNull();
-    expect(resolveReviewCommand("X", { editable: false, readOnly: true, hasImages: true, loupeAvailable: true })).toBe("toggle-loupe");
+    expect(resolveReviewCommand("Enter", { editable: true, readOnly: false, hasImages: true })).toBe("accept-advance");
+    expect(resolveReviewCommand("Escape", { editable: true, readOnly: false, hasImages: true })).toBe("previous-group");
+    expect(resolveReviewCommand("ArrowLeft", { editable: true, readOnly: false, hasImages: true })).toBe("focus-previous-image");
+    expect(resolveReviewCommand("ArrowRight", { editable: true, readOnly: false, hasImages: true })).toBe("focus-next-image");
+    expect(resolveReviewCommand("ArrowUp", { editable: true, readOnly: false, hasImages: true })).toBeNull();
+    expect(resolveReviewCommand("ArrowDown", { editable: true, readOnly: false, hasImages: true })).toBeNull();
+    expect(resolveReviewCommand("X", { editable: false, readOnly: true, hasImages: true })).toBeNull();
     expect(reviewImagePath("review-one", "image-1")).toBe("/api/v1/gallery/reviews/review-one/images/image-1");
     for (const value of ["", "../batch", "batch/child", SECRET]) expect(() => reviewImagePath(value, "image-1")).toThrow(TypeError);
     const presentation = reviewErrorPresentation(Object.assign(new Error(SECRET), { code: `oauth_${SECRET}`, status: 409, requestId: "request-safe", details: { token: SECRET } }));

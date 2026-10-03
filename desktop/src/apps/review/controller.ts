@@ -1,16 +1,12 @@
-import type { PersistenceService } from "../../core/persistence/service";
 import type { PollingHandle, PollingService } from "../../core/polling/service";
 import {
   REVIEW_FILTERS,
   REVIEW_POLL_INTERVAL_MS,
-  buildReviewDecisionPayload,
   createReviewRequestGate,
   reviewCanList,
-  reviewCompletionPresentation,
   reviewErrorPresentation,
   reviewStepIndex,
   shouldPollReview,
-  splitReviewDecisionPayload,
   validateReviewId,
   type ReviewFilter,
 } from "./model";
@@ -20,20 +16,15 @@ import { focusedReviewGroup, type ReviewStore } from "./state";
 export const REVIEW_POLL_KEY = "review.active";
 export const REVIEW_SCOPE = "app:review";
 
-const APPLY_CONFIRMATION = Object.freeze({
-  action: "apply" as const,
-  title: "将剔除图片送入回收区？",
-  message: "保留图片原地不动，人工剔除的图片及配对 TXT 将进入图库回收区。",
-  confirmLabel: "确认送入回收区",
-  warning: "不会永久删除；永久删除仅能在图库回收区主动操作。请先确认所有组并保存决策。",
+const DISCARD_LOCAL_CONFIRMATION = Object.freeze({
+  action: "discard-local" as const,
+  title: "放弃未采纳的更改？",
+  message: "当前组有未采纳的标记更改；继续操作将丢弃这些标记。",
+  confirmLabel: "放弃更改并继续",
+  warning: "只会丢弃未采纳的标记，已采纳的结果不受影响。",
 });
-const DISCARD_CONFIRMATION = Object.freeze({
-  action: "discard-reload" as const,
-  title: "放弃未保存的更改？",
-  message: "审核状态已经变化，待提交组无法继续保存。可以放弃更改并重新加载最新内容。",
-  confirmLabel: "放弃更改并重新加载",
-  warning: "只会清除待提交组的未保存更改，不会修改文件或已确认结果。",
-});
+
+type PendingIntent = Readonly<{ kind: "filter"; filter: ReviewFilter } | { kind: "refresh" }> | null;
 
 export interface ReviewController {
   activate(): void;
@@ -41,9 +32,6 @@ export interface ReviewController {
   openReview(reviewId: string): Promise<boolean>;
   selectReview(reviewId: string): boolean;
   loadSelected(): Promise<boolean>;
-  listTasks(offset: number): Promise<boolean>;
-  saveAndSwitch(): Promise<boolean>;
-  requestDiscardSwitch(): boolean;
   refresh(): Promise<boolean>;
   setFilter(filter: ReviewFilter): Promise<boolean>;
   setFocusedGroup(groupId: string): boolean;
@@ -51,11 +39,11 @@ export interface ReviewController {
   toggleImage(groupId: string, imageId: string): boolean;
   moveGroup(direction: -1 | 1): boolean;
   moveImage(direction: -1 | 1): boolean;
-  confirmAndAdvance(): Promise<boolean>;
-  save(): Promise<boolean>;
-  run(operation: Exclude<ReviewStatusOperation, "apply">): Promise<boolean>;
-  requestApply(): boolean;
-  requestDiscardReload(): boolean;
+  adoptFocused(): Promise<boolean>;
+  finish(): Promise<boolean>;
+  switchToPending(): Promise<boolean>;
+  stayOnTask(): boolean;
+  run(operation: ReviewStatusOperation): Promise<boolean>;
   confirmAction(confirmed: boolean): Promise<boolean>;
   beforeLeave(): Promise<boolean>;
   beforeWindowHide(visibility: "minimized" | "closed"): Promise<boolean>;
@@ -71,22 +59,19 @@ export function createReviewController({
   store,
   service,
   polling,
-  persistence,
 }: {
   readonly store: ReviewStore;
   readonly service: ReviewService;
   readonly polling: PollingService;
-  readonly persistence: PersistenceService;
 }): ReviewController {
   let active = false;
   let destroyed = false;
   const requestGate = createReviewRequestGate();
   let pollVersion = 0;
-  let recentController: AbortController | null = null;
   let pageController: AbortController | null = null;
   let operationController: AbortController | null = null;
   let pollHandle: PollingHandle | null = null;
-  let savePromise: Promise<boolean> | null = null;
+  let pendingIntent: PendingIntent = null;
 
   const stopPolling = (): void => {
     pollVersion += 1;
@@ -120,26 +105,6 @@ export function createReviewController({
     });
   };
 
-  const readRecent = async ({ offset = store.getState().recentOffset }: { readonly offset?: number } = {}): Promise<boolean> => {
-    if (!active || destroyed) return false;
-    recentController?.abort();
-    const controller = new AbortController();
-    const ticket = requestGate.beginRead("recent", "", "", 0);
-    recentController = controller;
-    try {
-      const recent = await service.readRecent(controller.signal, offset);
-      if (!active || destroyed || controller.signal.aborted || !requestGate.isReadCurrent(ticket)) return false;
-      store.commitRecent(recent);
-      return true;
-    } catch (error) {
-      if (isAbortError(error) || controller.signal.aborted || !active || destroyed || !requestGate.isReadCurrent(ticket)) return false;
-      store.fail(reviewErrorPresentation(error), "审核任务列表读取失败；当前草稿未改变。请刷新重试。");
-      return false;
-    } finally {
-      if (recentController === controller) recentController = null;
-    }
-  };
-
   const readPage = async (
     reviewId: string,
     filter: ReviewFilter,
@@ -164,69 +129,24 @@ export function createReviewController({
     }
   };
 
-  const save = (): Promise<boolean> => {
-    if (!active || destroyed) return Promise.resolve(false);
-    if (savePromise) return savePromise;
-    const snapshot = store.getState().snapshot;
-    if (!snapshot?.dirty) return Promise.resolve(true);
-    if (store.getState().busy || snapshot.summary.status !== "ready") return Promise.resolve(false);
-    let chunks;
-    try {
-      chunks = splitReviewDecisionPayload(buildReviewDecisionPayload(snapshot));
-    } catch (error) {
-      store.fail(reviewErrorPresentation(Object.assign(new Error("invalid_review_decisions"), { code: "invalid_review_decisions", status: 422 })));
-      return Promise.resolve(false);
-    }
-    if (!store.begin("save", "正在串行保存待提交组……")) return Promise.resolve(false);
-    stopPolling();
-    pageController?.abort();
-    const controller = new AbortController();
-    const ticket = requestGate.beginWrite();
-    operationController = controller;
-    let promise!: Promise<boolean>;
-    promise = (async () => {
-      try {
-        let version = snapshot.version;
-        for (const chunk of chunks) {
-          const result = await service.writeDecisions(snapshot.reviewId, { ...chunk, version }, controller.signal);
-          if (!active || destroyed || controller.signal.aborted || !requestGate.isWriteCurrent(ticket)) return false;
-          if (result.reviewId !== snapshot.reviewId || result.version <= version) throw Object.assign(new Error("review_state_conflict"), { code: "review_state_conflict", status: 409 });
-          version = result.version;
-          store.updateDraftVersion(version);
-        }
-        const authority = await service.readPage(snapshot.reviewId, snapshot.filter, controller.signal);
-        if (!active || destroyed || controller.signal.aborted || !requestGate.isWriteCurrent(ticket)) return false;
-        store.commitSnapshot(authority, "审核决策已保存。");
-        syncPolling();
-        return true;
-      } catch (error) {
-        if (isAbortError(error) || controller.signal.aborted || !active || destroyed || !requestGate.isWriteCurrent(ticket)) return false;
-        store.fail(reviewErrorPresentation(error), "保存失败，完整草稿与待提交组已保留。请重试后再切换筛选、任务或离开。");
-        return false;
-      } finally {
-        if (operationController === controller) operationController = null;
-        if (savePromise === promise) savePromise = null;
-      }
-    })();
-    savePromise = promise;
-    return promise;
-  };
-
   const openReview = async (value: string): Promise<boolean> => {
     const reviewId = validateReviewId(value);
     const state = store.getState();
     if (!active || destroyed) return false;
     if (state.snapshot?.reviewId === reviewId && !state.pendingReviewId) return true;
-    if (state.busy || state.snapshot?.dirty) {
+    if (state.busy) {
+      store.queueReview(reviewId);
+      return false;
+    }
+    if (state.snapshot) {
+      // 旧任务尚未完成：按一次性任务语义，横幅确认后结束旧任务再切换。
       store.queueReview(reviewId);
       return false;
     }
     store.selectReview(reviewId);
     if (!store.begin("load", "正在加载审核任务……")) return false;
     stopPolling();
-    const loaded = await readPage(reviewId, "", "审核任务已打开；保留图片原位，剔除图片进入回收区。");
-    if (loaded) persistence.writeActiveReviewId(reviewId);
-    return loaded;
+    return readPage(reviewId, "", "审核任务已打开；逐组采纳后点击“完成”结束。");
   };
 
   const loadSelected = (): Promise<boolean> => {
@@ -238,20 +158,25 @@ export function createReviewController({
     if (!REVIEW_FILTERS.some((item) => item.id === filter)) return false;
     const current = store.getState().snapshot;
     if (!active || destroyed || store.getState().busy || !current || current.filter === filter) return false;
-    if (current.dirty && !await save()) return false;
-    const authority = store.getState().snapshot;
-    if (!authority || !store.begin("load", "正在切换审核筛选……")) return false;
+    if (current.dirty) {
+      pendingIntent = { kind: "filter", filter };
+      return store.requestConfirmation(DISCARD_LOCAL_CONFIRMATION);
+    }
+    if (!store.begin("load", "正在切换审核筛选……")) return false;
     stopPolling();
-    return readPage(authority.reviewId, filter);
+    return readPage(current.reviewId, filter);
   };
 
   const runStatus = async (operation: ReviewStatusOperation): Promise<boolean> => {
     const state = store.getState();
     const snapshot = state.snapshot;
     if (!active || destroyed || state.busy || !snapshot) return false;
-    if (snapshot.dirty && !await save()) return false;
+    if (snapshot.dirty) {
+      store.fail(reviewErrorPresentation(Object.assign(new Error("review_dirty"), { code: "review_dirty", status: 409 })), "存在未采纳的更改；请先采纳当前组。");
+      return false;
+    }
     const current = store.getState().snapshot;
-    if (!current || (operation === "retry" && !["failed", "blocked"].includes(current.summary.status)) || !store.begin(operation, `正在${operation === "retry" ? "重新排队" : "应用审核结果"}……`)) return false;
+    if (!current || (operation === "retry" && !["failed", "blocked"].includes(current.summary.status)) || !store.begin(operation, "正在重新排队分析……")) return false;
     stopPolling();
     pageController?.abort();
     operationController?.abort();
@@ -263,10 +188,7 @@ export function createReviewController({
       if (!active || destroyed || controller.signal.aborted || !requestGate.isWriteCurrent(ticket)) return false;
       const authority = await service.readPage(current.reviewId, current.filter, controller.signal);
       if (!active || destroyed || controller.signal.aborted || !requestGate.isWriteCurrent(ticket)) return false;
-      store.commitSnapshot(authority, operation === "apply"
-        ? authority.summary.status === "applied" ? "审核结果已应用；剔除图片已进入图库回收区。" : "部分图片未能进入回收区；请检查审核状态后重试。"
-        : "去重分析已重新排队。");
-      void readRecent();
+      store.commitSnapshot(authority, "去重分析已重新排队。");
       syncPolling();
       return true;
     } catch (error) {
@@ -285,7 +207,7 @@ export function createReviewController({
     stopPolling();
     store.clearDraft();
     queueMicrotask(() => {
-      if (active && !destroyed) void readPage(reviewId, filter, "未保存的待提交组已放弃，权威审核状态已重新读取。");
+      if (active && !destroyed) void readPage(reviewId, filter, "未采纳的更改已放弃，最新审核状态已重新读取。");
     });
   };
 
@@ -293,57 +215,42 @@ export function createReviewController({
     activate() {
       if (active || destroyed) return;
       active = true;
-      void readRecent().then((loaded) => {
-        const state = store.getState();
-        if (!loaded || !active || destroyed || state.snapshot || state.busy || state.selectedReviewId) return;
-        const reviewId = persistence.readActiveReviewId() ?? state.recent.find((task) => task.summary.status !== "applied")?.reviewId;
-        if (reviewId) void openReview(reviewId);
-      });
+      const state0 = store.getState();
+      if (!state0.snapshot && !state0.busy && state0.selectedReviewId) void loadSelected();
       const snapshot = store.getState().snapshot;
       if (snapshot?.dirty) {
-        store.finish("存在未保存的待提交组，已恢复本地草稿。");
+        store.finish("存在未采纳的更改，已恢复本地标记。");
       } else if (snapshot) {
         void readPage(snapshot.reviewId, snapshot.filter);
       }
-      else if (store.getState().selectedReviewId) void loadSelected();
     },
     deactivate() {
       if (!active || destroyed) return;
       active = false;
       requestGate.advanceLifecycle();
       stopPolling();
-      recentController?.abort();
       pageController?.abort();
       operationController?.abort();
-      savePromise = null;
-      store.finish(store.getState().snapshot?.dirty ? "未保存的审核草稿已保留。" : "审核任务已保留。");
+      store.finish(store.getState().snapshot?.dirty ? "未采纳的更改已保留。" : "审核任务已保留。");
     },
     openReview,
-    listTasks: (offset) => readRecent({ offset }),
-    async saveAndSwitch() {
-      const reviewId = store.getState().pendingReviewId;
-      if (!reviewId || !await save()) return false;
-      return openReview(reviewId);
-    },
-    requestDiscardSwitch() {
-      return Boolean(store.getState().pendingReviewId && store.requestConfirmation({ ...DISCARD_CONFIRMATION, action: "discard-switch", message: "放弃当前未保存决策并打开另一个审核任务；已保存结果不受影响。", confirmLabel: "放弃草稿并切换" }));
-    },
     selectReview: (reviewId) => store.selectReview(reviewId),
     loadSelected,
     async refresh() {
       const state = store.getState();
       if (!active || destroyed || state.busy) return false;
-      if (state.snapshot?.dirty && !await save()) return false;
-      const current = store.getState().snapshot;
+      const current = state.snapshot;
+      if (!current) {
+        store.finish("当前没有进行中的去重任务。");
+        return true;
+      }
+      if (current.dirty) {
+        pendingIntent = { kind: "refresh" };
+        return store.requestConfirmation(DISCARD_LOCAL_CONFIRMATION);
+      }
       if (!store.begin("refresh", "正在刷新审核任务……")) return false;
       stopPolling();
-      const recentLoaded = await readRecent();
-      if (!recentLoaded) return false;
-      if (current) {
-        return readPage(current.reviewId, current.filter, "审核状态已刷新。");
-      }
-      store.finish("审核任务列表已刷新。");
-      return true;
+      return readPage(current.reviewId, current.filter, "审核状态已刷新。");
     },
     setFilter,
     setFocusedGroup: (groupId) => store.setFocusedGroup(groupId),
@@ -369,55 +276,117 @@ export function createReviewController({
       const next = reviewStepIndex(index, group.imageOrder.length, direction);
       return next === null ? false : store.setActiveImage(group.imageOrder[next]);
     },
-    async confirmAndAdvance() {
+    async adoptFocused() {
       const state = store.getState();
       const snapshot = state.snapshot;
       const group = focusedReviewGroup(state);
-      if (!snapshot || !group || (!group.decided && !store.confirmGroup(group.id))) return false;
+      if (!active || destroyed || state.busy || !snapshot || !group || snapshot.summary.status !== "ready" || !group.imageOrder.length) return false;
+      if (!store.begin("adopt", `正在采纳组 ${group.ordinal}……`)) return false;
       stopPolling();
-      const index = snapshot.groupOrder.indexOf(group.id);
-      const next = reviewStepIndex(index, snapshot.groupOrder.length, 1);
-      if (next !== null) return store.setFocusedGroup(snapshot.groupOrder[next]);
-      const saved = await save();
-      if (saved) {
-        const current = store.getState().snapshot;
-        if (current) {
-          const completion = reviewCompletionPresentation(current.summary, current.filter);
-          store.finish(`${completion.title}：${completion.message}`);
+      pageController?.abort();
+      const controller = new AbortController();
+      const ticket = requestGate.beginWrite();
+      operationController = controller;
+      try {
+        await service.adoptGroup(
+          snapshot.reviewId,
+          group.id,
+          group.imageOrder.filter((imageId) => group.images[imageId].selected),
+          snapshot.version,
+          controller.signal,
+        );
+        if (!active || destroyed || controller.signal.aborted || !requestGate.isWriteCurrent(ticket)) return false;
+        const authority = await service.readPage(snapshot.reviewId, snapshot.filter, controller.signal);
+        if (!active || destroyed || controller.signal.aborted || !requestGate.isWriteCurrent(ticket)) return false;
+        const adopted = authority.groups[group.id];
+        const failedImages = adopted ? adopted.imageOrder.filter((imageId) => authority.groups[group.id].images[imageId].failed).length : 0;
+        if (failedImages) {
+          store.commitSnapshot(authority, `组 ${group.ordinal} 有 ${failedImages} 张图片落地失败；调整后可重新采纳。`);
+        } else {
+          store.commitSnapshot(authority, `组 ${group.ordinal} 已采纳并落地。`);
+          const index = authority.groupOrder.indexOf(group.id);
+          const next = reviewStepIndex(index, authority.groupOrder.length, 1);
+          if (next !== null) store.setFocusedGroup(authority.groupOrder[next]);
+          else {
+            const remaining = Math.max(0, authority.summary.totalGroupCount - authority.summary.decidedGroupCount);
+            if (!remaining) store.finish("本次任务已全部采纳；点击“完成”结束本次任务。");
+          }
+        }
+        syncPolling();
+        return true;
+      } catch (error) {
+        if (isAbortError(error) || controller.signal.aborted || !active || destroyed || !requestGate.isWriteCurrent(ticket)) return false;
+        store.fail(reviewErrorPresentation(error), "采纳未完成；本地标记已保留，可重试。");
+        return false;
+      } finally {
+        if (operationController === controller) operationController = null;
+      }
+    },
+    async finish() {
+      const state = store.getState();
+      const snapshot = state.snapshot;
+      if (!active || destroyed || state.busy || !snapshot) return false;
+      if (!store.begin("finish", "正在结束本次任务……")) return false;
+      stopPolling();
+      pageController?.abort();
+      const controller = new AbortController();
+      const ticket = requestGate.beginWrite();
+      operationController = controller;
+      try {
+        await service.finishReview(snapshot.reviewId, controller.signal);
+        if (!active || destroyed || controller.signal.aborted || !requestGate.isWriteCurrent(ticket)) return false;
+        store.reset("本次任务已完成；已采纳的结果保持不变。");
+        return true;
+      } catch (error) {
+        if (isAbortError(error) || controller.signal.aborted || !active || destroyed || !requestGate.isWriteCurrent(ticket)) return false;
+        store.fail(reviewErrorPresentation(error), "结束失败；请重试。");
+        return false;
+      } finally {
+        if (operationController === controller) operationController = null;
+      }
+    },
+    run: (operation) => runStatus(operation),
+    stayOnTask: () => store.clearPending(),
+    async switchToPending() {
+      const reviewId = store.getState().pendingReviewId;
+      if (!reviewId || !active || destroyed) return false;
+      const current = store.getState().snapshot;
+      if (current) {
+        try {
+          await service.finishReview(current.reviewId, new AbortController().signal);
+        } catch {
+          // 结束旧任务失败不阻塞切换：物理结果已落地，遗留记录会在下次启动清理。
         }
       }
-      return saved;
-    },
-    save,
-    run: (operation) => runStatus(operation),
-    requestApply() {
-      const snapshot = store.getState().snapshot;
-      if (!snapshot || snapshot.dirty || snapshot.summary.decidedGroupCount < snapshot.summary.totalGroupCount || !["ready", "apply_failed"].includes(snapshot.summary.status)) return false;
-      return store.requestConfirmation({ ...APPLY_CONFIRMATION, title: snapshot.summary.status === "apply_failed" ? "重试送入回收区？" : APPLY_CONFIRMATION.title, confirmLabel: snapshot.summary.status === "apply_failed" ? "重试回收" : APPLY_CONFIRMATION.confirmLabel });
-    },
-    requestDiscardReload() {
-      return Boolean(store.getState().snapshot?.dirty && store.getState().error?.conflict && store.requestConfirmation(DISCARD_CONFIRMATION));
+      store.selectReview(reviewId);
+      if (!store.begin("load", "正在加载审核任务……")) return false;
+      stopPolling();
+      return readPage(reviewId, "", "审核任务已打开；逐组采纳后点击“完成”结束。");
     },
     async confirmAction(confirmed) {
       const confirmation = store.getState().confirmation;
       if (!confirmation) return false;
-      if (!confirmed) return store.dismissConfirmation();
-      store.dismissConfirmation("已确认操作。");
-      if (confirmation.action === "apply") return runStatus("apply");
-      if (confirmation.action === "discard-switch") {
-        const reviewId = store.getState().pendingReviewId;
-        if (!reviewId) return false;
-        store.clearDraft();
-        return openReview(reviewId);
+      if (!confirmed) {
+        pendingIntent = null;
+        store.dismissConfirmation();
+        return false;
       }
+      store.dismissConfirmation("已确认操作。");
+      const intent = pendingIntent;
+      pendingIntent = null;
       const snapshot = store.getState().snapshot;
-      if (!snapshot) return false;
-      const { reviewId, filter } = snapshot;
-      store.clearDraft();
-      return readPage(reviewId, filter, "未保存更改已放弃，最新审核状态已加载。");
+      if (!intent || !snapshot) return false;
+      if (intent.kind === "filter") {
+        if (!store.begin("load", "正在切换审核筛选……")) return false;
+        stopPolling();
+        return readPage(snapshot.reviewId, intent.filter);
+      }
+      if (!store.begin("refresh", "正在刷新审核任务……")) return false;
+      stopPolling();
+      return readPage(snapshot.reviewId, snapshot.filter, "审核状态已刷新。");
     },
-    beforeLeave: save,
-    beforeWindowHide: (_visibility) => save(),
+    beforeLeave: () => Promise.resolve(true),
+    beforeWindowHide: () => Promise.resolve(true),
     discardDraft,
     destroy() {
       if (destroyed) return;
@@ -426,13 +395,10 @@ export function createReviewController({
       requestGate.advanceLifecycle();
       stopPolling();
       polling.stopScope(REVIEW_SCOPE);
-      recentController?.abort();
       pageController?.abort();
       operationController?.abort();
-      recentController = null;
       pageController = null;
       operationController = null;
-      savePromise = null;
       store.destroy();
     },
   };

@@ -32,7 +32,13 @@ export async function prepareRichState(page: Page, appId: AppId): Promise<void> 
     await app.getByRole("button", { name: "查看所选批次" }).click();
     await expect(app.getByRole("heading", { name: "图片任务" })).toBeVisible();
   } else if (appId === "review") {
-    await app.getByRole("combobox", { name: "已提交审核任务" }).selectOption("review-fixture");
+    const navGallery = page.locator('[data-nav-app="gallery"]');
+    if (!await navGallery.isVisible()) await page.locator("[data-nav-settings]").click();
+    await navGallery.click();
+    await page.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+    await page.getByRole("checkbox", { name: "选择图片 image-01.jpg" }).check();
+    await page.locator("[data-gallery-dedup]").click();
+    await page.locator("[data-gallery-review-confirmation]").getByRole("button", { name: "确认发起去重" }).click();
     await expect(app.getByRole("heading", { name: /组 1/ })).toBeVisible();
     await expect(app.locator("[data-review-engine-image]").first()).toHaveAttribute("data-review-engine-decoded", "true");
   } else if (appId === "gallery") {

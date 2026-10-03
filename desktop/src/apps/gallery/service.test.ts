@@ -60,7 +60,7 @@ function api() {
 }
 
 describe("Gallery review creation service", () => {
-  it("submits only directory IDs and uses the returned independent review identity", async () => {
+  it("submits checked directory and asset IDs as one selection", async () => {
     const post = vi.fn(async () => ({
       response_profile: "desktop-gallery-review-operation-v1", review_id: "review-gallery", version: 1, status: "pending",
       directories: [{ directory_id: "dir-alpha", source_id: "source-one", source_display_name: "Source", relative_path: "alpha", name: "alpha" }],
@@ -70,10 +70,14 @@ describe("Gallery review creation service", () => {
     }));
     const service = createGalleryService({ post } as unknown as ApiClient);
     const signal = new AbortController().signal;
-    expect(await service.createReview(["dir-alpha"], signal)).toBe("review-gallery");
-    expect(post).toHaveBeenCalledWith("/api/v1/gallery/reviews", { directory_ids: ["dir-alpha"] }, { signal });
-    for (const invalid of [[], ["same", "same"], ["../unsafe"]]) await expect(service.createReview(invalid, signal)).rejects.toThrow(TypeError);
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(await service.createReview(["dir-alpha"], ["asset-one", "asset-two"], signal)).toBe("review-gallery");
+    expect(post).toHaveBeenCalledWith("/api/v1/gallery/reviews", { directory_ids: ["dir-alpha"], asset_ids: ["asset-one", "asset-two"] }, { signal });
+    expect(await service.createReview([], ["asset-one"], signal)).toBe("review-gallery");
+    expect(post).toHaveBeenCalledTimes(2);
+    for (const invalid of [[[], []], [["same", "same"], []], [[], ["../unsafe"]]] as const) {
+      await expect(service.createReview(invalid[0], invalid[1], signal)).rejects.toThrow(TypeError);
+    }
+    expect(post).toHaveBeenCalledTimes(2);
   });
 });
 describe("Gallery directory export service", () => {

@@ -108,7 +108,6 @@
 .gallery-list-row__thumb img { width: 100%; height: 100%; object-fit: cover; }
 .gallery-list-row__name, .gallery-list-row__path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gallery-list-row__path, .gallery-list-row__size, .gallery-list-row__dims { color: var(--ldos-text-secondary); font-variant-numeric: tabular-nums; }
-.gallery-list-row__candidate { color: var(--ldos-state-warning); font-size: 0.6875rem; }
 .gallery-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
 .gallery-source:focus-visible, .gallery-source__delete:focus-visible, .gallery-link:focus-visible, .gallery-folder:focus-visible, .gallery-card:focus-visible { outline: 2px solid var(--ldos-border-focus); }
 @container (max-width: 900px) { .gallery-body { grid-template-columns: 172px minmax(0, 1fr); } }

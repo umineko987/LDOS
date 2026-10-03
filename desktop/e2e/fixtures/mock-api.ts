@@ -784,14 +784,11 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
         const id = `review-created-${reviews.size}`;
         reviews.set(id, { decisions: new Map(), version: 1, status: "ready", directoryIds: body.directory_ids });
         await respond(route, reviewResponse(id, true), 202);
-      } else {
-        const offset = Number(url.searchParams.get("offset") ?? 0);
-        const items = [...reviews.keys()].reverse().map((id) => reviewResponse(id, true));
-        await respond(route, { response_profile: "desktop-gallery-review-list-v1", items: items.slice(offset, offset + 50), total: items.length, offset, limit: 50 });
       }
       return;
     }
-    const reviewMatch = url.pathname.match(/^\/api\/v1\/gallery\/reviews\/([^/]+)(?:\/(decisions|apply|retry|images)(?:\/([^/]+))?)?$/);
+    const reviewMatch = url.pathname.match(/^\/api\/v1\/gallery\/reviews\/([^/]+)(?:\/(retry|finish|images)(?:\/([^/]+))?)?$/);
+    const adoptMatch = !reviewMatch ? url.pathname.match(/^\/api\/v1\/gallery\/reviews\/([^/]+)\/groups\/([^/]+)\/adopt$/) : null;
     if (reviewMatch) {
       const [, id, action, imageId] = reviewMatch;
       const task = reviews.get(id);
@@ -800,14 +797,25 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
         await route.fulfill({ status: 200, contentType: "image/svg+xml", body: svgImage(decodeURIComponent(imageId)) });
       } else if (!action) {
         await respond(route, reviewResponse(id));
+      } else if (action === "finish") {
+        reviews.delete(id);
+        await route.fulfill({ status: 204, body: "" });
       } else {
-        const body = requestBody(request) as { version?: number; groups?: { group_id: string; selected_image_ids: string[] }[] };
-        if (action !== "retry" && body.version !== task.version) { await respond(route, { error: { code: "review_state_conflict", message: "version changed" } }, 409); return; }
-        if (action === "decisions") for (const group of body.groups ?? []) task.decisions.set(group.group_id, [...group.selected_image_ids]);
-        if (action === "apply") task.status = "applied";
+        if ((requestBody(request) as { version?: number }).version !== task.version) { await respond(route, { error: { code: "review_state_conflict", message: "version changed" } }, 409); return; }
         task.version += 1;
         await respond(route, reviewResponse(id, true));
       }
+      return;
+    }
+    if (adoptMatch) {
+      const [, id, groupId] = adoptMatch;
+      const task = reviews.get(id);
+      if (!task) { await respond(route, { error: { code: "review_not_found", message: "not found" } }, 404); return; }
+      const body = requestBody(request) as { version?: number; selected_image_ids?: string[] };
+      if (body.version !== task.version) { await respond(route, { error: { code: "review_state_conflict", message: "version changed" } }, 409); return; }
+      task.decisions.set(groupId, [...(body.selected_image_ids ?? [])]);
+      task.version += 1;
+      await respond(route, reviewResponse(id, true));
       return;
     }
     const batchMatch = url.pathname.match(/^\/api\/v1\/crawls\/(batch-[a-z0-9-]+)$/);

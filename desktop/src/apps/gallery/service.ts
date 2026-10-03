@@ -60,7 +60,7 @@ export interface GallerySearchRequest {
 }
 
 export interface GalleryService {
-  createReview(directoryIds: readonly string[], signal: AbortSignal): Promise<string>;
+  createReview(directoryIds: readonly string[], assetIds: readonly string[], signal: AbortSignal): Promise<string>;
   listSources(signal: AbortSignal): Promise<readonly GallerySourceSummary[]>;
   importSource(rootPath: string, displayName?: string | null): Promise<GallerySourceSummary>;
   renameSource(sourceId: string, displayName: string): Promise<GallerySourceSummary>;
@@ -166,10 +166,13 @@ export function createGalleryService(api: ApiClient): GalleryService {
   // 最近加载页面的 source_id -> 根目录缓存（跨页累积，搜索可跨来源）。
   let sourceRoots: GallerySourceRoots = Object.freeze({});
   const service: GalleryService = {
-    async createReview(directoryIds, signal) {
-      if (!Array.isArray(directoryIds) || !directoryIds.length || directoryIds.length > 200 || new Set(directoryIds).size !== directoryIds.length) throw new TypeError("invalid_gallery_review_selection");
-      for (const id of directoryIds) validateReviewId(id);
-      const result = sanitizeReviewOperation(await api.post("/api/v1/gallery/reviews", { directory_ids: [...directoryIds] }, { signal }));
+    async createReview(directoryIds, assetIds, signal) {
+      for (const ids of [directoryIds, assetIds]) {
+        if (!Array.isArray(ids) || ids.length > 200 || new Set(ids).size !== ids.length) throw new TypeError("invalid_gallery_review_selection");
+        for (const id of ids) validateReviewId(id);
+      }
+      if (!directoryIds.length && !assetIds.length) throw new TypeError("invalid_gallery_review_selection");
+      const result = sanitizeReviewOperation(await api.post("/api/v1/gallery/reviews", { directory_ids: [...directoryIds], asset_ids: [...assetIds] }, { signal }));
       return result.reviewId;
     },
     async listSources(signal) {
