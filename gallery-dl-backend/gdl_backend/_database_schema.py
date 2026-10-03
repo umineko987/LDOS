@@ -5,7 +5,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 14
 SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION = 8
 GALLERY_EXPORT_SCHEMA_VERSION = 9
 GALLERY_RECONCILIATION_SCHEMA_VERSION = 10
@@ -717,3 +717,13 @@ def initialize_schema(
             for table in ("gallery_review_images", "gallery_review_groups", "gallery_reviews"):
                 conn.execute(f"DELETE FROM {table}")
             conn.execute("UPDATE meta SET value='13' WHERE key='schema_version'")
+
+    if schema_version < 14:
+        with transaction() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS gallery_review_presets (id TEXT PRIMARY KEY, name TEXT NOT NULL, options_json TEXT NOT NULL)")
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(gallery_reviews)")}
+            if "filter_config_json" not in columns:
+                conn.execute("ALTER TABLE gallery_reviews ADD COLUMN filter_config_json TEXT")
+            if "reference_snapshot_json" not in columns:
+                conn.execute("ALTER TABLE gallery_reviews ADD COLUMN reference_snapshot_json TEXT NOT NULL DEFAULT '[]'")
+            conn.execute("UPDATE meta SET value='14' WHERE key='schema_version'")

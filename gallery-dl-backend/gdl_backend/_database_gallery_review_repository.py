@@ -5,18 +5,25 @@ import uuid
 from typing import Any
 
 from ._database_review_repository import ReviewRepository
+from .review_filters import BUILTIN_PRESETS
+from .schemas import FilterConfig, FilterPresetWrite
 
 
 class GalleryReviewRepository(ReviewRepository):
     """Independent identities; groups, decisions and result state reuse ReviewRepository."""
 
-    def create(self, selection: list[dict[str, Any]], snapshot: list[dict[str, Any]]) -> dict[str, Any]:
+    def create(self, selection: list[dict[str, Any]], snapshot: list[dict[str, Any]], *,
+               filter_config: dict[str, Any] | None = None,
+               reference_snapshot: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        config_json = FilterConfig.model_validate(filter_config).model_dump_json() if filter_config is not None else None
         review_id = str(uuid.uuid4())
         now = self._clock()
         with self._transaction() as conn:
             conn.execute("""INSERT INTO gallery_reviews(review_id,status,selection_json,snapshot_json,
-                         total_image_count,created_at,updated_at) VALUES (?,'pending',?,?,?,?,?)""",
-                         (review_id, json.dumps(selection), json.dumps(snapshot), len(snapshot), now, now))
+                         total_image_count,created_at,updated_at,filter_config_json,reference_snapshot_json)
+                         VALUES (?,'pending',?,?,?,?,?,?,?)""",
+                         (review_id, json.dumps(selection), json.dumps(snapshot), len(snapshot), now, now,
+                          config_json, json.dumps(reference_snapshot or [])))
         return self.get_crawl_review(review_id)
 
     def get_crawl_review(self, review_id: str) -> dict[str, Any] | None:
@@ -24,6 +31,14 @@ class GalleryReviewRepository(ReviewRepository):
         if review is not None:
             review["directories"] = json.loads(review.pop("selection_json"))
             review.pop("snapshot_json")
+            review["filter_config"] = json.loads(review.pop("filter_config_json") or "null")
+            review.pop("reference_snapshot_json")
+            with self._read() as conn:
+                review["filtered_image_count"] = conn.execute(
+                    "SELECT COUNT(*) FROM gallery_review_images i JOIN gallery_review_groups g"
+                    " ON g.review_id=i.review_id AND g.id=i.group_id WHERE i.review_id=? AND g.kind='auto_filtered'",
+                    (review_id,),
+                ).fetchone()[0]
         return review
 
     def snapshot(self, review_id: str) -> list[dict[str, Any]]:
@@ -32,6 +47,44 @@ class GalleryReviewRepository(ReviewRepository):
         if row is None:
             raise KeyError(review_id)
         return json.loads(row["snapshot_json"])
+
+    def worker_input(self, review_id: str) -> dict[str, Any]:
+        with self._read() as conn:
+            row = conn.execute("SELECT snapshot_json,filter_config_json,reference_snapshot_json FROM gallery_reviews WHERE review_id=?", (review_id,)).fetchone()
+        if row is None:
+            raise KeyError(review_id)
+        return {"review_id": review_id, "images": json.loads(row["snapshot_json"]),
+                "filter_config": json.loads(row["filter_config_json"] or "null"),
+                "references": json.loads(row["reference_snapshot_json"])}
+
+    def list_presets(self) -> list[dict[str, Any]]:
+        with self._read() as conn:
+            rows = conn.execute("SELECT * FROM gallery_review_presets ORDER BY name,id").fetchall()
+        # Fresh values: callers cannot mutate an in-process builtin template.
+        return json.loads(json.dumps(BUILTIN_PRESETS)) + [
+            {"id": row["id"], "name": row["name"], "builtin": False, "options": json.loads(row["options_json"])}
+            for row in rows]
+
+    def save_preset(self, name: str, options: dict[str, Any], *, preset_id: str | None = None) -> dict[str, Any]:
+        body = FilterPresetWrite.model_validate({"name": name, "options": options})
+        if preset_id in {preset["id"] for preset in BUILTIN_PRESETS}:
+            raise RuntimeError("review_preset_builtin")
+        identity = preset_id or str(uuid.uuid4())
+        with self._transaction() as conn:
+            if preset_id is None:
+                conn.execute("INSERT INTO gallery_review_presets(id,name,options_json) VALUES (?,?,?)",
+                             (identity, body.name, body.options.model_dump_json()))
+            elif not conn.execute("UPDATE gallery_review_presets SET name=?,options_json=? WHERE id=?",
+                                  (body.name, body.options.model_dump_json(), identity)).rowcount:
+                raise KeyError(identity)
+        return {"id": identity, "name": body.name, "builtin": False, "options": body.options.model_dump()}
+
+    def delete_preset(self, preset_id: str) -> None:
+        if preset_id in {preset["id"] for preset in BUILTIN_PRESETS}:
+            raise RuntimeError("review_preset_builtin")
+        with self._transaction() as conn:
+            if not conn.execute("DELETE FROM gallery_review_presets WHERE id=?", (preset_id,)).rowcount:
+                raise KeyError(preset_id)
 
     def refresh_snapshot_asset(self, review_id: str, asset_id: str, content_version: int, txt_version: int) -> None:
         """恢复/回收会抬升资产版本号；同步进冻结快照，保证后续校验与预览不误报。"""
@@ -55,12 +108,12 @@ class GalleryReviewRepository(ReviewRepository):
             if row is None:
                 return None
             conn.execute("UPDATE gallery_reviews SET status='analyzing',version=version+1,started_at=?,updated_at=?,error='' WHERE review_id=?", (now, now, row["review_id"]))
-        return {"review_id": row["review_id"], "images": self.snapshot(row["review_id"])}
+        return self.worker_input(row["review_id"])
 
     def next_crawl_review_automatic(self) -> dict[str, Any] | None:
         with self._read() as conn:
             row = conn.execute("SELECT review_id FROM gallery_reviews WHERE status='auto_applying' ORDER BY created_at LIMIT 1").fetchone()
-        return {"review_id": row["review_id"], "images": self.snapshot(row["review_id"])} if row else None
+        return self.worker_input(row["review_id"]) if row else None
 
     def crawl_review_group_images(self, review_id: str, group_id: str) -> list[dict[str, Any]]:
         with self._read() as conn:

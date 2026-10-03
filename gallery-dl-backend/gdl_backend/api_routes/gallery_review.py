@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..review_filters import FilterConfigurationError
+from ..schemas import FilterConfig, FilterPresetWrite
 from .dependencies import get_service
 from .errors import ApiError
 from .review import _desktop_review_operation, _desktop_review_response
@@ -17,6 +19,7 @@ class GalleryReviewCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     directory_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(default_factory=list, max_length=200)
     asset_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(default_factory=list, max_length=200)
+    filter_config: FilterConfig | None = None
 
 
 class GalleryReviewAdopt(BaseModel):
@@ -43,16 +46,53 @@ def gallery_review_response(review: dict[str, Any], page: dict[str, Any] | None 
     result.pop("batch_id", None)
     result.update(response_profile="desktop-gallery-review-v1" if page is not None else "desktop-gallery-review-operation-v1",
                   review_id=review["review_id"], version=review["version"], directories=review["directories"],
-                  created_at=review["created_at"], updated_at=review["updated_at"])
+                  created_at=review["created_at"], updated_at=review["updated_at"], filter_config=review.get("filter_config"),
+                  filteredImageCount=review.get("filtered_image_count", 0))
     return result
 
 
 def review_error(exc: Exception) -> ApiError:
+    if isinstance(exc, FilterConfigurationError):
+        status = 409 if exc.code == "review_filter_unavailable" else 422
+        return ApiError(status, exc.code, str(exc), details=exc.details)
     if isinstance(exc, KeyError):
         return ApiError(404, "review_not_found", "图库审核或目录、图片不存在")
     if isinstance(exc, ValueError):
         return ApiError(409, "review_selection_invalid", "图库审核选择无效或没有可审核图片")
     return ApiError(409, "review_state_conflict", "图库审核状态、版本或文件快照已冲突")
+
+def create_gallery_review_presets_router() -> APIRouter:
+    router = APIRouter(prefix="/gallery/review-presets")
+
+    def preset_error(exc: Exception) -> ApiError:
+        if isinstance(exc, KeyError):
+            return ApiError(404, "review_preset_not_found", "筛选预设不存在")
+        return ApiError(409, "review_preset_builtin", "内置预设不可覆盖或删除；修改后请另存为自定义预设")
+
+    @router.get("")
+    async def list_presets(container: Any = Depends(get_service)):
+        return {"items": await asyncio.to_thread(container.db.gallery_reviews.list_presets)}
+
+    @router.post("", status_code=201)
+    async def create_preset(body: FilterPresetWrite, container: Any = Depends(get_service)):
+        return await asyncio.to_thread(container.db.gallery_reviews.save_preset, body.name, body.options.model_dump())
+
+    @router.put("/{preset_id}")
+    async def update_preset(preset_id: str, body: FilterPresetWrite, container: Any = Depends(get_service)):
+        try:
+            return await asyncio.to_thread(container.db.gallery_reviews.save_preset, body.name, body.options.model_dump(), preset_id=preset_id)
+        except (KeyError, RuntimeError) as exc:
+            raise preset_error(exc) from None
+
+    @router.delete("/{preset_id}", status_code=204)
+    async def delete_preset(preset_id: str, container: Any = Depends(get_service)):
+        try:
+            await asyncio.to_thread(container.db.gallery_reviews.delete_preset, preset_id)
+        except (KeyError, RuntimeError) as exc:
+            raise preset_error(exc) from None
+        return Response(status_code=204)
+
+    return router
 
 
 def create_gallery_review_router() -> APIRouter:
@@ -63,7 +103,8 @@ def create_gallery_review_router() -> APIRouter:
         if not container.settings.dedup.enabled:
             raise ApiError(409, "dedup_disabled", "去重功能未启用")
         try:
-            result = await asyncio.to_thread(container.gallery_reviews.create, body.directory_ids, body.asset_ids)
+            result = await asyncio.to_thread(container.gallery_reviews.create, body.directory_ids, body.asset_ids,
+                                             body.filter_config.model_dump() if body.filter_config is not None else None)
         except (KeyError, ValueError, RuntimeError, OSError) as exc:
             raise review_error(exc) from None
         return gallery_review_response(result)

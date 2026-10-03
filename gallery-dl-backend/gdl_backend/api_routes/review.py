@@ -340,6 +340,7 @@ def create_review_router() -> APIRouter:
                 return FileResponse(target)
         raise ApiError(404, "review_image_not_found", "审核图片文件不存在")
 
-    from .gallery_review import create_gallery_review_router
+    from .gallery_review import create_gallery_review_router, create_gallery_review_presets_router
     router.include_router(create_gallery_review_router())
+    router.include_router(create_gallery_review_presets_router())
     return router

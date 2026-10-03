@@ -40,6 +40,10 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("DELETE", "/api/v1/auth/browser"): ("auth_clear_browser_api_v1_auth_browser_delete", ("200", "422")),
     ("GET", "/api/v1/setup/models"): ("model_status_api_v1_setup_models_get", ("200",)),
     ("POST", "/api/v1/setup/models/install"): ("install_models_api_v1_setup_models_install_post", ("202", "422")),
+    ("GET", "/api/v1/gallery/review-presets"): ("list_presets_api_v1_gallery_review_presets_get", ("200",)),
+    ("POST", "/api/v1/gallery/review-presets"): ("create_preset_api_v1_gallery_review_presets_post", ("201", "422")),
+    ("PUT", "/api/v1/gallery/review-presets/{preset_id}"): ("update_preset_api_v1_gallery_review_presets__preset_id__put", ("200", "422")),
+    ("DELETE", "/api/v1/gallery/review-presets/{preset_id}"): ("delete_preset_api_v1_gallery_review_presets__preset_id__delete", ("204", "422")),
     ("POST", "/api/v1/gallery/reviews"): ("create_review_api_v1_gallery_reviews_post", ("202", "422")),
     ("GET", "/api/v1/gallery/reviews/{review_id}"): ("get_review_api_v1_gallery_reviews__review_id__get", ("200", "422")),
     ("POST", "/api/v1/gallery/reviews/{review_id}/groups/{group_id}/adopt"): ("adopt_api_v1_gallery_reviews__review_id__groups__group_id__adopt_post", ("200", "422")),
@@ -238,7 +242,7 @@ class AppRoutingContractTests(unittest.TestCase):
                 domain = "tasks"
             elif path.startswith("/api/v1/search"):
                 domain = "discovery"
-            elif path.startswith("/api/v1/gallery/reviews"):
+            elif path.startswith(("/api/v1/gallery/reviews", "/api/v1/gallery/review-presets")):
                 domain = "gallery_review"
             elif "/review" in path:
                 domain = "review"

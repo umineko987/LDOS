@@ -8,6 +8,8 @@ from typing import Any
 from .gallery_review_selection import select_review_assets, validate_snapshot
 from .gallery_safe_paths import SafeSourceRoot
 from .review import DedupReviewManager, ensure_private_directory
+from .review_filters import FilterConfigurationError, require_filter_capabilities
+from .schemas import FilterConfig
 
 
 def review_trash_operation_id(review_id: str, image_id: str, attempt: int = 0) -> str:
@@ -20,13 +22,34 @@ class GalleryDedupReviewManager(DedupReviewManager):
         super().__init__(*args, **kwargs)
         self.repository = self.db.gallery_reviews
 
-    def create(self, directory_ids: list[str], asset_ids: list[str] | None = None) -> dict[str, Any]:
+    def create(self, directory_ids: list[str], asset_ids: list[str] | None = None,
+               filter_config: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self.settings.enabled:
             raise RuntimeError("去重功能未启用")
         if not directory_ids and not asset_ids:
             raise ValueError("review_selection_empty")
+        config = FilterConfig.model_validate(filter_config).model_dump() if filter_config is not None else None
+        references = []
+        if config is not None:
+            options = config["options"]
+            if options["filter_character"] and not options["reference_asset_ids"]:
+                raise FilterConfigurationError("filter_reference_required", "角色过滤必须指定有效参考图")
+            if options["reference_asset_ids"]:
+                try:
+                    _, references = select_review_assets(self.catalog, [], options["reference_asset_ids"])
+                    from PIL import Image
+                    with self.catalog._filesystem_locks.hold(*(f"source:{s['source_id']}" for s in references)):
+                        for reference in references:
+                            with SafeSourceRoot(reference["root_path"]) as safe:
+                                validate_snapshot(self.db.gallery, reference, safe)
+                                with safe.open_binary(reference["relative_path"]) as handle:
+                                    with Image.open(handle) as image:
+                                        image.verify()
+                except (KeyError, ValueError, RuntimeError, OSError) as exc:
+                    raise FilterConfigurationError("filter_reference_invalid", "参考图不存在、不可读取或安全快照无效") from exc
+            require_filter_capabilities(options)
         selection, snapshot = select_review_assets(self.catalog, directory_ids, asset_ids or ())
-        result = self.repository.create(selection, snapshot)
+        result = self.repository.create(selection, snapshot, filter_config=config, reference_snapshot=references)
         self.notify()
         return result
 
@@ -50,7 +73,7 @@ class GalleryDedupReviewManager(DedupReviewManager):
         return retried
 
     def _validate_input(self, claimed: dict[str, Any]) -> None:
-        snapshots = claimed["images"]
+        snapshots = claimed["images"] + claimed.get("references", [])
         with self.catalog._filesystem_locks.hold(*(f"source:{s['source_id']}" for s in snapshots)):
             for snapshot in snapshots:
                 with SafeSourceRoot(snapshot["root_path"]) as safe:
