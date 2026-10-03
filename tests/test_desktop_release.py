@@ -230,6 +230,8 @@ class DesktopReleaseTests(unittest.TestCase):
                     ROOT, "gallery-dl-backend/gdl_backend"
                 )
             }
+            expected.add("gdl_backend/review_filter_models.py")
+            self.assertTrue((package / "review_filter_models.py").is_file())
             actual = {
                 item.relative_to(app).as_posix()
                 for item in app.rglob("*")

@@ -12,6 +12,7 @@ EXPECTED = {
     "torch": "2.11.0+cpu",
     "torchvision": "0.26.0+cpu",
     "tqdm": "4.67.3",
+    "onnxruntime": "1.24.4",
 }
 FORBIDDEN_EXACT = {
     "cuda-bindings",

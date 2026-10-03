@@ -35,19 +35,21 @@ class GalleryDedupReviewManager(DedupReviewManager):
             if options["filter_character"] and not options["reference_asset_ids"]:
                 raise FilterConfigurationError("filter_reference_required", "角色过滤必须指定有效参考图")
             if options["reference_asset_ids"]:
+                from PIL import Image
                 try:
                     _, references = select_review_assets(self.catalog, [], options["reference_asset_ids"])
-                    from PIL import Image
                     with self.catalog._filesystem_locks.hold(*(f"source:{s['source_id']}" for s in references)):
                         for reference in references:
                             with SafeSourceRoot(reference["root_path"]) as safe:
                                 validate_snapshot(self.db.gallery, reference, safe)
                                 with safe.open_binary(reference["relative_path"]) as handle:
                                     with Image.open(handle) as image:
-                                        image.verify()
-                except (KeyError, ValueError, RuntimeError, OSError) as exc:
+                                        if options["filter_character"] and getattr(image, "n_frames", 1) != 1:
+                                            raise ValueError("角色参考图必须是静态图片")
+                                        image.load()
+                except (KeyError, ValueError, RuntimeError, OSError, Image.DecompressionBombError) as exc:
                     raise FilterConfigurationError("filter_reference_invalid", "参考图不存在、不可读取或安全快照无效") from exc
-            require_filter_capabilities(options)
+            require_filter_capabilities(options, self.settings.model_dir, self.settings.python_executable)
         selection, snapshot = select_review_assets(self.catalog, directory_ids, asset_ids or ())
         result = self.repository.create(selection, snapshot, filter_config=config, reference_snapshot=references)
         self.notify()

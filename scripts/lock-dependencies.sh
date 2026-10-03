@@ -10,9 +10,10 @@ mode="check"
 
 usage() {
     cat <<'EOF'
-用法：./scripts/lock-dependencies.sh [--check | --upgrade]
+用法：./scripts/lock-dependencies.sh [--check | --update | --upgrade]
 
   --check    按现有固定版本重新生成到临时目录并检查漂移（默认）
+  --update   保留已有兼容版本，仅解析新增或变更的依赖并更新锁文件
   --upgrade  重新解析受支持 Python/平台的最新兼容传递依赖并更新锁文件
 EOF
 }
@@ -20,6 +21,7 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --check) mode="check"; shift ;;
+        --update) mode="update"; shift ;;
         --upgrade) mode="upgrade"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) printf '错误：未知选项：%s\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -102,7 +104,7 @@ compile_lock() {
     local torch_backend="$3"
     shift 3
     local temporary="$work_dir/$name.txt"
-    if [[ "$mode" == "check" ]]; then
+    if [[ "$mode" != "upgrade" ]]; then
         [[ -f "$output" ]] || {
             printf '错误：锁文件缺失：%s\n' "$output" >&2
             return 1

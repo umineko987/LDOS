@@ -419,7 +419,7 @@ def analyze_with_filters(core: Any, image_infos: list[dict[str, Any]], core_args
     try:
         if options["filter_character"] and not references:
             raise review_filters.FilterConfigurationError("filter_reference_required", "角色过滤必须指定有效参考图")
-        review_filters.require_filter_capabilities(options)
+        filter_models = review_filters.require_filter_capabilities(options, getattr(core_args, "model_dir", None))
         import copy
         basic_args = copy.copy(core_args)
         # An unavailable SSCD must never relax the strict automatic compression gate.
@@ -436,7 +436,10 @@ def analyze_with_filters(core: Any, image_infos: list[dict[str, Any]], core_args
         rejected = {normalized_path(member["path"]) for group in automatic for member in group["members"]
                     if normalized_path(member["path"]) != normalized_path(group["winner"]["path"])}
         survivors = [info for info in image_infos if normalized_path(info["path"]) not in rejected]
-        filtered = review_filters.filter_images(survivors, options, references if options["filter_character"] else [])
+        filtered = review_filters.filter_images(
+            survivors, options, references if options["filter_character"] else [],
+            models=filter_models, open_image=getattr(getattr(core, "Image", None), "open", None),
+        )
         filtered_paths = {normalized_path(item["image"]["path"]) for item in filtered}
         survivors = [info for info in survivors if normalized_path(info["path"]) not in filtered_paths]
         candidates = []
@@ -630,7 +633,11 @@ def run_analysis(args: Any, started_at: float, stack: ExitStack) -> int:
         for handle in reference_handles:
             handle.seek(0)
             with Image.open(handle) as reference:
-                references.append(reference.convert("RGB"))
+                if getattr(reference, "n_frames", 1) != 1:
+                    from gdl_backend.review_filters import FilterConfigurationError
+                    raise FilterConfigurationError("filter_reference_invalid", "角色参考图必须是可解码的静态图片")
+                from gdl_backend.review_filter_models import rgb_image
+                references.append(rgb_image(reference))
     auto_groups, review_groups, filtered = analyze_with_filters(
         core, image_infos, core_args, selection.get("filter_config") if selection is not None else None, references,
     )

@@ -34,6 +34,7 @@ dedup-common = [
   "opencv-python-headless==4.13.0.92",
   "Pillow==12.1.1",
   "tqdm==4.67.3",
+  "onnxruntime==1.24.4",
 ]
 dedup-cpu = [
   { include-group = "dedup-common" },

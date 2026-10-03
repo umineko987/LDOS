@@ -118,7 +118,7 @@ class FilterPipelineTests(unittest.TestCase):
             for similarity, exclude_all in ((False, False), (True, True), (True, False)):
                 with self.subTest(similarity=similarity, exclude_all=exclude_all):
                     infos = [CORE.get_image_info(str(path)) for path in paths]
-                    def exclude(selected, options, references):
+                    def exclude(selected, options, references, **kwargs):
                         return [{"image": info, "reason": "filter_monochrome"}
                                 for info in (selected if exclude_all else selected[:1])]
                     with mock.patch.object(review_filters, "require_filter_capabilities"), \
@@ -148,7 +148,7 @@ class FilterPipelineTests(unittest.TestCase):
                 return [], [selected]
             core = SimpleNamespace(analyze_images=analyze, release_image_arrays=CORE.release_image_arrays)
             reference = object()
-            def exclude(selected, options, references):
+            def exclude(selected, options, references, **kwargs):
                 self.assertEqual(selected, infos[1:])
                 self.assertEqual(references, [])  # References cannot affect non-character filtering.
                 return [{"image": infos[1], "reason": "filter_monochrome"}]
@@ -185,7 +185,7 @@ class FilterPipelineTests(unittest.TestCase):
             input_path, output = root / "input.json", root / "output.json"
             payload = {"review_id": "r", "filter_config": settings, "images": selected[:1], "references": selected[1:]}
             input_path.write_text(json.dumps(payload))
-            def exclude(infos, options, references):
+            def exclude(infos, options, references, **kwargs):
                 self.assertEqual(len(infos), 1)
                 self.assertEqual(references[0].getpixel((0, 0)), (0, 0, 255))
                 return [{"image": infos[0], "reason": "filter_character"}]

@@ -144,6 +144,14 @@ class FilterReviewsTests(unittest.TestCase):
             response = submit([ids[-1]])
             self.assertEqual(response.status_code, 409)
             self.assertEqual(response.json()["error"]["details"]["filters"][0]["option"], "filter_character")
+            from PIL import Image
+            with mock.patch("PIL.Image.open", side_effect=Image.DecompressionBombError("oversized")):
+                self.assertEqual(submit([ids[-1]]).json()["error"]["code"], "filter_reference_invalid")
+            with mock.patch("PIL.Image.open") as open_image:
+                open_image.return_value.__enter__.return_value.n_frames = 2
+                response = submit([ids[-1]])
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.json()["error"]["code"], "filter_reference_invalid")
             ref = self.container.db.gallery.get_asset(ids[-1])
             source = self.container.db.gallery.get_source(ref["source_id"])
             path = Path(source["root_path"]) / ref["relative_path"]

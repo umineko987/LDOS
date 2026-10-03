@@ -489,6 +489,7 @@ class ModelInstallRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     proxy_url: str = Field(default="", max_length=300)
+    models: list[Literal["dedup", "monochrome", "ccip"]] = Field(default_factory=lambda: ["dedup"], min_length=1, max_length=3)
 
 
 class BrowserExecutableUpdate(BaseModel):

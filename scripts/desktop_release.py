@@ -528,7 +528,7 @@ def copy_backend_sources(app: Path) -> None:
         target = app / package_relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-    if not (destination / "__main__.py").is_file():
+    if not all((destination / name).is_file() for name in ("__main__.py", "review_filters.py", "review_filter_models.py")):
         raise ReleaseError("backend source projection is incomplete")
     if (destination / "webui_dist").exists():
         raise ReleaseError("desktop backend must not contain a second frontend")
@@ -910,8 +910,9 @@ def verify_runtime(root: Path) -> dict[str, Any]:
         env = _runtime_environment(root, data_root, python)
         import_code = """
 import json, os, sys
-import cv2, fastapi, PIL, torch, torchvision, uvicorn
+import cv2, fastapi, onnxruntime, PIL, torch, torchvision, uvicorn
 import dedup_core, dedup_review_worker, gdl_backend
+from gdl_backend import review_filter_models
 expected = os.environ['LDOS_DESKTOP_PYTHON']
 if not os.path.samefile(sys.executable, expected):
     raise SystemExit('unexpected runtime interpreter')
