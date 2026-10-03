@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { EMPTY_FILTER_OPTIONS, type FilterConfig } from "../filter-presets/model";
 import {
   REVIEW_GROUP_LIMIT,
   REVIEW_POLL_INTERVAL_MS,
@@ -65,6 +66,21 @@ function sanitize(groups = [rawGroup(1)]): ReviewSnapshot {
 }
 
 describe("review model", () => {
+  it("freezes task configuration and reads filtered counts without counting them twice", () => {
+    const config = { preset_name: "Frozen", options: { ...EMPTY_FILTER_OPTIONS, basic_dedup: true, reference_asset_ids: ["reference-one"] } };
+    const snapshot = sanitizeReviewPage(rawPage([], { filter_config: config, automaticRejectedImageCount: 3, filteredImageCount: 2, totalImageCount: 3 }), { reviewId: "review-one" });
+    config.preset_name = "Changed"; config.options.reference_asset_ids.push("reference-two");
+    expect(snapshot.filterConfig?.preset_name).toBe("Frozen");
+    expect(snapshot.filterConfig?.options.reference_asset_ids).toEqual(["reference-one"]);
+    expect(Object.isFrozen(snapshot.filterConfig?.options.reference_asset_ids)).toBe(true);
+    expect(snapshot.summary.automaticRejectedImageCount).toBe(3);
+    expect(snapshot.summary.filteredImageCount).toBe(2);
+    expect(sanitize().filterConfig).toBeNull();
+    expect(sanitize().summary.filteredImageCount).toBe(0);
+    expect(sanitizeReviewPage(rawPage([], { filter_config: null }), { reviewId: "review-one" }).filterConfig).toBeNull();
+    expect(() => sanitizeReviewPage(rawPage([], { filter_config: { ...config, options: { ...config.options, basic_dedup: "yes" } } as unknown as FilterConfig }), { reviewId: "review-one" })).toThrow(TypeError);
+    expect(() => sanitizeReviewPage(rawPage([], { filteredImageCount: -1 }), { reviewId: "review-one" })).toThrow(TypeError);
+  });
   it("keeps per-image adoption failure flags from the gallery binding", () => {
     const snapshot = sanitize([rawGroup(1, [rawImage(1, { gallery: { hasError: true } }), rawImage(2)])]);
     expect(snapshot.groups["group-1"].images["image-1"].failed).toBe(true);

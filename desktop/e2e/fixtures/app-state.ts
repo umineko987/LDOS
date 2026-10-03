@@ -18,6 +18,13 @@ export function appPage(page: Page, appId: string): Locator {
   return page.locator(`[data-app-page][data-app-id="${appId}"]`);
 }
 
+export async function configureExistingDedup(panel: Locator): Promise<void> {
+  await panel.getByLabel("选择预设", { exact: true }).selectOption("builtin-style");
+  await panel.locator("[data-gallery-review-options] > summary").click();
+  await panel.getByRole("checkbox", { name: "单色 / 灰度", exact: true }).uncheck();
+  await panel.getByRole("checkbox", { name: "素描", exact: true }).uncheck();
+  await expect(panel.getByRole("button", { name: "开始处理", exact: true })).toBeEnabled();
+}
 export async function prepareRichState(page: Page, appId: AppId): Promise<void> {
   const app = appPage(page, appId);
   if (appId === "crawl") {
@@ -38,7 +45,8 @@ export async function prepareRichState(page: Page, appId: AppId): Promise<void> 
     await page.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
     await page.getByRole("checkbox", { name: "选择图片 image-01.jpg" }).check();
     await page.locator("[data-gallery-dedup]").click();
-    await page.locator("[data-gallery-review-confirmation]").getByRole("button", { name: "确认发起去重" }).click();
+    await configureExistingDedup(page.locator("[data-gallery-review-confirmation]"));
+    await page.locator("[data-gallery-review-confirmation]").getByRole("button", { name: "开始处理" }).click();
     await expect(app.getByRole("heading", { name: /组 1/ })).toBeVisible();
     await expect(app.locator("[data-review-engine-image]").first()).toHaveAttribute("data-review-engine-decoded", "true");
   } else if (appId === "gallery") {

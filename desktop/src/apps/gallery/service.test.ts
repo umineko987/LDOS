@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../core/api/client";
+import { sanitizeFilterConfig, EMPTY_FILTER_OPTIONS, type FilterConfig } from "../filter-presets/model";
 import { createGalleryService, GALLERY_ENDPOINTS, searchAssetsPath } from "./service";
 
 vi.mock("@tauri-apps/api/core", async (importOriginal) => {
@@ -70,13 +71,15 @@ describe("Gallery review creation service", () => {
     }));
     const service = createGalleryService({ post } as unknown as ApiClient);
     const signal = new AbortController().signal;
-    expect(await service.createReview(["dir-alpha"], ["asset-one", "asset-two"], signal)).toBe("review-gallery");
-    expect(post).toHaveBeenCalledWith("/api/v1/gallery/reviews", { directory_ids: ["dir-alpha"], asset_ids: ["asset-one", "asset-two"] }, { signal });
-    expect(await service.createReview([], ["asset-one"], signal)).toBe("review-gallery");
+    const config = sanitizeFilterConfig({ preset_name: "Custom", options: { ...EMPTY_FILTER_OPTIONS, basic_dedup: true, similarity_groups: true, reference_asset_ids: ["reference-one"] } });
+    expect(await service.createReview(["dir-alpha"], ["asset-one", "asset-two"], config, signal)).toBe("review-gallery");
+    expect(post).toHaveBeenCalledWith("/api/v1/gallery/reviews", { directory_ids: ["dir-alpha"], asset_ids: ["asset-one", "asset-two"], filter_config: config }, { signal });
+    expect(await service.createReview([], ["asset-one"], config, signal)).toBe("review-gallery");
     expect(post).toHaveBeenCalledTimes(2);
     for (const invalid of [[[], []], [["same", "same"], []], [[], ["../unsafe"]]] as const) {
-      await expect(service.createReview(invalid[0], invalid[1], signal)).rejects.toThrow(TypeError);
+      await expect(service.createReview(invalid[0], invalid[1], config, signal)).rejects.toThrow(TypeError);
     }
+    await expect(service.createReview([], ["asset-one"], { preset_name: "Custom", options: { ...config.options, filter_sketch: "yes" } } as unknown as FilterConfig, signal)).rejects.toThrow(TypeError);
     expect(post).toHaveBeenCalledTimes(2);
   });
 });

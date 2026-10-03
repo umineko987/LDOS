@@ -147,7 +147,7 @@
           {:else if appId === "tasks"}
             <Tasks {api} {polling} {persistence} onNavigate={navigate} />
           {:else if appId === "gallery"}
-            <Gallery {api} active={snapshot.focusedAppId === "gallery"} onReviewCreated={openCreatedReview} />
+            <Gallery {api} active={snapshot.focusedAppId === "gallery"} onReviewCreated={openCreatedReview} onManagePresets={() => navigate("filter-presets")} />
           {:else if appId === "review"}
             <Review {api} {polling} active={snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate} registerUnsavedChanges={(reader, discard, prepare) => shell.registerUnsavedChanges("review", reader, discard, prepare)} />
           {:else if appId === "proxy"}

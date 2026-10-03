@@ -1,5 +1,5 @@
 import type { Route } from "@playwright/test";
-import { appPage } from "./fixtures/app-state";
+import { appPage, configureExistingDedup } from "./fixtures/app-state";
 
 import {
   bootDesktop,
@@ -203,7 +203,8 @@ test.describe("可用应用关键旅程", () => {
     const dedupButton = gallery.locator("[data-gallery-dedup]");
     await gallery.getByRole("checkbox", { name: "选择图片 image-01.jpg" }).check();
     await dedupButton.click();
-    await gallery.locator("[data-gallery-review-confirmation]").getByRole("button", { name: "确认发起去重" }).click();
+    await configureExistingDedup(gallery.locator("[data-gallery-review-confirmation]"));
+    await gallery.locator("[data-gallery-review-confirmation]").getByRole("button", { name: "开始处理" }).click();
     await expect(page).toHaveURL(/#\/review$/);
     await expect(review.locator('[data-review-engine-card="gal-asset-02"]')).toBeVisible();
     await review.locator('[data-review-engine-card="gal-asset-02"]').click();
@@ -216,17 +217,19 @@ test.describe("可用应用关键旅程", () => {
     await gallery.getByRole("checkbox", { name: "选择图片 image-05.jpg" }).check();
     await dedupButton.click();
     const confirmation = gallery.locator("[data-gallery-review-confirmation]");
+    await confirmation.getByText("查看选区详情", { exact: true }).click();
     await expect(confirmation).toContainText("E2E 导入目录 / subdir");
     await expect(confirmation).toContainText("勾选的 1 张图片");
     await expect(confirmation).toContainText("同名 TXT");
     await confirmation.getByRole("button", { name: "取消", exact: true }).click();
     await expect(dedupButton).toBeFocused();
     await dedupButton.click();
-    await confirmation.getByRole("button", { name: "确认发起去重" }).click();
+    await configureExistingDedup(confirmation);
+    await confirmation.getByRole("button", { name: "开始处理" }).click();
     await expect(page).toHaveURL(/#\/review$/);
     await expect(review.locator("[data-review-pending]")).toBeVisible();
     await expect(review.locator('[data-review-engine-card="gal-asset-02"]')).toHaveAttribute("data-selected", "false");
-    expect(api.requests.filter(({ method, path }) => method === "POST" && path === "/api/v1/gallery/reviews").at(-1)?.body).toEqual({ directory_ids: ["gal-dir-sub"], asset_ids: ["gal-asset-05"] });
+    expect(api.requests.filter(({ method, path }) => method === "POST" && path === "/api/v1/gallery/reviews").at(-1)?.body).toEqual({ directory_ids: ["gal-dir-sub"], asset_ids: ["gal-asset-05"], filter_config: { preset_name: "画风", options: { basic_dedup: true, filter_monochrome: false, filter_sketch: false, filter_character: false, similarity_groups: true, reference_asset_ids: [] } } });
     await review.getByRole("button", { name: "结束当前任务并切换", exact: true }).click();
     await expect(review.locator("[data-review-pending]")).toBeHidden();
     await expect.poll(() => api.count("POST", "/api/v1/gallery/reviews/review-created-1/finish")).toBe(1);
@@ -248,10 +251,11 @@ test.describe("可用应用关键旅程", () => {
     await gallery.getByRole("checkbox", { name: "选择图片 image-01.jpg" }).check();
     await dedupButton.click();
     const confirmation = gallery.locator("[data-gallery-review-confirmation]");
-    await confirmation.getByRole("button", { name: "确认发起去重" }).click();
+    await configureExistingDedup(confirmation);
+    await confirmation.getByRole("button", { name: "开始处理" }).click();
     await expect(confirmation.getByRole("alert")).toContainText("fixture_failure");
     await expect(confirmation).toContainText("勾选的 1 张图片");
-    await expect(confirmation.getByRole("button", { name: "确认发起去重" })).toBeEnabled();
+    await expect(confirmation.getByRole("button", { name: "开始处理" })).toBeEnabled();
     await expect(page).toHaveURL(/#\/gallery$/);
     expect(api.count("POST", "/api/v1/gallery/reviews")).toBe(1);
     await confirmation.getByRole("button", { name: "取消", exact: true }).click();
@@ -264,7 +268,8 @@ test.describe("可用应用关键旅程", () => {
     await galleryHome.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
     await galleryHome.getByRole("checkbox", { name: "选择图片 image-01.jpg" }).check();
     await galleryHome.locator("[data-gallery-dedup]").click();
-    await galleryHome.locator("[data-gallery-review-confirmation]").getByRole("button", { name: "确认发起去重" }).click();
+    await configureExistingDedup(galleryHome.locator("[data-gallery-review-confirmation]"));
+    await galleryHome.locator("[data-gallery-review-confirmation]").getByRole("button", { name: "开始处理" }).click();
     await expect(page).toHaveURL(/#\/review$/);
     const window = appPage(page, "review");
     await expect(window.getByRole("heading", { name: /组 1/ })).toBeVisible();

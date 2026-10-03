@@ -1,4 +1,5 @@
 import type { Page, Request, Route } from "@playwright/test";
+import { sanitizeFilterConfig, filterConfigBlockers, type FilterConfig, type FilterCapabilities } from "../../src/apps/filter-presets/model";
 
 export interface RecordedRequest {
   readonly method: string;
@@ -664,17 +665,20 @@ function svgImage(id: string): string {
 export async function installMockApi(page: Page, options: MockApiOptions = {}): Promise<MockApi> {
   const requests: RecordedRequest[] = [];
   const unhandled: RecordedRequest[] = [];
+  type ReviewTask = { decisions: Map<string, readonly string[]>; version: number; status: string; directoryIds: readonly string[]; filterConfig: FilterConfig | null };
   const emptyFilterOptions = { basic_dedup: false, filter_monochrome: false, filter_sketch: false, filter_character: false, similarity_groups: false, reference_asset_ids: [] as string[] };
   const presets = new Map([
     ["builtin-style", { id: "builtin-style", name: "画风", builtin: true, options: { ...emptyFilterOptions, basic_dedup: true, filter_monochrome: true, filter_sketch: true, similarity_groups: true } }],
     ["builtin-character", { id: "builtin-character", name: "角色", builtin: true, options: { ...emptyFilterOptions, basic_dedup: true, filter_character: true, similarity_groups: true } }],
   ]);
   let presetSerial = 0;
-  const reviews = new Map<string, { decisions: Map<string, readonly string[]>; version: number; status: string; directoryIds: readonly string[] }>();
-  if (!options.emptyRecent) reviews.set("review-fixture", { decisions: new Map(), version: 1, status: "ready", directoryIds: [GALLERY_SUB_DIR] });
+  const reviews = new Map<string, ReviewTask>();
+  if (!options.emptyRecent) reviews.set("review-fixture", { decisions: new Map(), version: 1, status: "ready", directoryIds: [GALLERY_SUB_DIR], filterConfig: null });
   const reviewResponse = (id: string, operation = false) => {
     const task = reviews.get(id)!;
     const page = reviewPage(task.decisions, id, task.version, task.status, task.directoryIds);
+    page.filter_config = task.filterConfig;
+    page.filteredImageCount = 0;
     if (operation) { delete page.groups; page.response_profile = "desktop-gallery-review-operation-v1"; }
     return page;
   };
@@ -780,9 +784,18 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
     }
     if (url.pathname === "/api/v1/gallery/reviews") {
       if (request.method() === "POST") {
-        const body = requestBody(request) as { directory_ids: string[] };
+        const body = requestBody(request) as { directory_ids: string[]; asset_ids?: string[]; filter_config?: FilterConfig };
+        const config = body.filter_config ? sanitizeFilterConfig(body.filter_config) : null;
+        if (config) {
+          const blockers = filterConfigBlockers(config.options, modelSetupSnapshot().review_filters as FilterCapabilities);
+          if (blockers.length) {
+            const missingReferences = blockers.some((blocker) => blocker.option === "reference_asset_ids");
+            await respond(route, { error: { code: missingReferences ? "filter_reference_required" : "review_filter_unavailable", message: missingReferences ? "请添加角色参考图。" : "启用的自动过滤尚不可用。", details: { filters: blockers } } }, missingReferences ? 422 : 409);
+            return;
+          }
+        }
         const id = `review-created-${reviews.size}`;
-        reviews.set(id, { decisions: new Map(), version: 1, status: "ready", directoryIds: body.directory_ids });
+        reviews.set(id, { decisions: new Map(), version: 1, status: "ready", directoryIds: [...body.directory_ids], filterConfig: config });
         await respond(route, reviewResponse(id, true), 202);
       }
       return;

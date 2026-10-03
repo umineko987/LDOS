@@ -1,3 +1,4 @@
+import { sanitizeFilterConfig, type FilterConfig } from "../filter-presets/model";
 const REVIEW_STATUS_VALUES = [
   "pending", "analyzing", "auto_applying", "ready", "blocked", "failed",
   "applying", "apply_failed", "applied",
@@ -63,6 +64,8 @@ export interface ReviewSummary {
   readonly unreadableImageCount: number;
   readonly automaticGroupCount: number;
   readonly automaticRejectedImageCount: number;
+  /** Subset of automaticRejectedImageCount, not an additional rejection count. */
+  readonly filteredImageCount: number;
   readonly selectedImageCount: number;
   readonly decidedGroupCount: number;
   readonly keptImageCount: number;
@@ -74,6 +77,7 @@ export interface ReviewSummary {
 export interface ReviewSnapshot {
   readonly reviewId: string;
   readonly version: number;
+  readonly filterConfig: FilterConfig | null;
   readonly directories: readonly ReviewDirectory[];
   readonly createdAt: number | null;
   readonly updatedAt: number | null;
@@ -103,6 +107,7 @@ export interface ReviewDirectory {
 export interface ReviewOperationResult {
   readonly reviewId: string;
   readonly version: number;
+  readonly filterConfig: FilterConfig | null;
   readonly summary: ReviewSummary;
   readonly directories: readonly ReviewDirectory[];
   readonly createdAt: number | null;
@@ -390,6 +395,7 @@ export function sanitizeReviewSummary(value: unknown, expectedId?: string): Revi
     unreadableImageCount: count("unreadableImageCount"),
     automaticGroupCount: count("automaticGroupCount"),
     automaticRejectedImageCount: count("automaticRejectedImageCount"),
+    filteredImageCount: own(record, "filteredImageCount") === undefined ? 0 : count("filteredImageCount"),
     selectedImageCount: count("selectedImageCount"),
     decidedGroupCount: count("decidedGroupCount"),
     keptImageCount: count("keptImageCount"),
@@ -432,6 +438,7 @@ function reviewIdentity(value: unknown, profile: string, expectedId?: string): R
   return Object.freeze({
     reviewId: summary.reviewId,
     version,
+    filterConfig: own(record, "filter_config") == null ? null : sanitizeFilterConfig(own(record, "filter_config")),
     summary,
     directories: sanitizeDirectories(own(record, "directories")),
     createdAt: safeTime(own(record, "created_at")),
@@ -503,7 +510,7 @@ export function mergeReviewPageChunks(chunks: readonly ReviewPageChunk[]): Revie
   let expectedOffset = 0;
   for (const chunk of chunks) {
     const snapshot = validateReviewSnapshot(chunk.snapshot);
-    if (chunk.offset !== expectedOffset || chunk.total !== total || snapshot.reviewId !== reviewId || snapshot.version !== first.snapshot.version || JSON.stringify(snapshot.directories) !== JSON.stringify(first.snapshot.directories) || snapshot.filter !== filter || JSON.stringify(snapshot.summary) !== serializedSummary) {
+    if (chunk.offset !== expectedOffset || chunk.total !== total || snapshot.reviewId !== reviewId || snapshot.version !== first.snapshot.version || JSON.stringify(snapshot.directories) !== JSON.stringify(first.snapshot.directories) || JSON.stringify(snapshot.filterConfig) !== JSON.stringify(first.snapshot.filterConfig) || snapshot.filter !== filter || JSON.stringify(snapshot.summary) !== serializedSummary) {
       throw new TypeError("review_page_changed");
     }
     for (const groupId of snapshot.groupOrder) {

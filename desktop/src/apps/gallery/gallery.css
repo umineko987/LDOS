@@ -661,9 +661,16 @@
   background: rgb(0 0 0 / 72%);
 }
 
-.gallery-review-confirmation { margin: auto; color: var(--text-primary); }
+.gallery-review-confirmation { margin: auto; padding: 0; }
+.gallery-review-confirmation:not([open]) { display: none; }
 .gallery-review-confirmation::backdrop { background: rgb(3 7 18 / 0.68); }
 .gallery-review-confirmation li { overflow-wrap: anywhere; }
+.gallery-review-confirmation summary { margin: 12px 0; cursor: pointer; }
+.gallery-review-preset { display: grid; gap: 6px; flex: 1; min-width: 160px; }
+.gallery-review-preset select,
+.gallery-review-save input { padding: 8px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--surface-base); color: var(--text-primary); font: inherit; }
+.gallery-review-save { margin-top: 12px; }
+.gallery-review-save small { flex-basis: 100%; }
 .gallery-dialog {
   width: min(440px, calc(100vw - 48px));
   max-height: calc(100vh - 96px);

@@ -8,6 +8,13 @@
     createPlatformAdapter,
     type PlatformDirectoryPurpose,
   } from "../../core/platform/adapter";
+  import FilterOptionsEditor from "../filter-presets/FilterOptionsEditor.svelte";
+  import { createFilterPresetService } from "../filter-presets/service";
+  import {
+    cloneFilterOptions, FILTER_LABELS, filterOptionsSummary, filterConfigBlockers,
+    sanitizeFilterConfig, validateFilterName,
+    type FilterOptions, type FilterConfig, type FilterPreset, type FilterCapabilities,
+  } from "../filter-presets/model";
   import { createGalleryController } from "./controller";
   import {
     GALLERY_AVAILABILITY_LABELS,
@@ -27,7 +34,7 @@
   import Viewer from "./Viewer.svelte";
   import "./gallery.css";
 
-  let { api, active = true, onReviewCreated }: { api: ApiClient; active?: boolean; onReviewCreated?: (reviewId: string) => void } = $props();
+  let { api, active = true, onReviewCreated, onManagePresets }: { api: ApiClient; active?: boolean; onReviewCreated?: (reviewId: string) => void; onManagePresets?: () => void } = $props();
 
   const runtime = untrack(() => {
     const store = createGalleryStore();
@@ -686,65 +693,162 @@
     };
   }
 
-  // Review has its own immutable submission scope; export edits never alter it.
+  // The submission scope and configuration stay frozen while visiting preset settings.
+  const presetService = untrack(() => createFilterPresetService(api));
   let reviewSelections = $state<DirectoryExportSelection[]>([]);
   let reviewAssetIds = $state<string[]>([]);
   let reviewConfirmOpen = $state(false);
   let reviewCreating = $state(false);
   let reviewCreateError = $state("");
+  let reviewCreateReasons = $state<readonly string[]>([]);
   let reviewCreateRequest: AbortController | null = null;
   let reviewDialog = $state<HTMLDialogElement>();
   let reviewReturnFocus: FocusTarget | null = null;
+  let reviewPresets = $state<readonly FilterPreset[]>([]);
+  let reviewPresetId = $state("");
+  let reviewConfig = $state<FilterConfig | null>(null);
+  let reviewCapabilities = $state<FilterCapabilities | null>(null);
+  let reviewPresetsLoading = $state(false);
+  let reviewPresetsError = $state("");
+  let reviewCapabilitiesError = $state("");
+  let reviewPresetsRequest: AbortController | null = null;
+  let reviewCapabilitiesRequest: AbortController | null = null;
+  let reviewOptionsExpanded = $state(false);
+  let reviewEditorRevision = $state(0);
+  let reviewSaveOpen = $state(false);
+  let reviewSaveName = $state("");
+  let reviewSaveBusy = $state(false);
+  let reviewSaveMessage = $state("");
+  let reviewDestroyed = false;
+  const reviewBusy = $derived(reviewCreating || reviewSaveBusy);
+  const reviewBlockers = $derived(reviewConfig ? filterConfigBlockers(reviewConfig.options, reviewCapabilities) : []);
+  const reviewEnabledLabels = $derived(reviewConfig ? filterOptionsSummary(reviewConfig.options) : []);
+  const reviewSaveNameValid = $derived.by(() => { try { validateFilterName(reviewSaveName); return true; } catch { return false; } });
+
+  function chooseReviewPreset(id: string): void {
+    if (reviewBusy) return;
+    const preset = reviewPresets.find((item) => item.id === id);
+    reviewPresetId = preset?.id ?? "";
+    reviewConfig = preset ? sanitizeFilterConfig({ preset_name: preset.name, options: cloneFilterOptions(preset.options) }) : null;
+    reviewEditorRevision += 1;
+    reviewCreateError = ""; reviewCreateReasons = []; reviewSaveMessage = "";
+    reviewSaveOpen = false;
+  }
+
+  function changeReviewOptions(options: FilterOptions): void {
+    if (!reviewConfig || reviewBusy) return;
+    reviewConfig = sanitizeFilterConfig({ preset_name: reviewConfig.preset_name, options });
+    reviewCreateError = ""; reviewCreateReasons = []; reviewSaveMessage = "";
+  }
+
+  async function loadReviewPresets(): Promise<void> {
+    reviewPresetsRequest?.abort();
+    const request = new AbortController(); reviewPresetsRequest = request;
+    reviewPresetsLoading = true; reviewPresetsError = "";
+    try {
+      const items = await presetService.list(request.signal);
+      if (reviewPresetsRequest !== request || request.signal.aborted || reviewDestroyed) return;
+      reviewPresets = items;
+      // Only restore the session's selection. Never replace an open draft with a modified preset.
+      if (!reviewConfig && reviewPresetId) chooseReviewPreset(reviewPresetId);
+    } catch {
+      if (reviewPresetsRequest === request && !request.signal.aborted) reviewPresetsError = "筛选预设加载失败，请重试。";
+    } finally {
+      if (reviewPresetsRequest === request) { reviewPresetsRequest = null; reviewPresetsLoading = false; }
+    }
+  }
+
+  async function loadReviewCapabilities(): Promise<void> {
+    reviewCapabilitiesRequest?.abort();
+    const request = new AbortController(); reviewCapabilitiesRequest = request;
+    reviewCapabilities = null; reviewCapabilitiesError = "";
+    try {
+      const capabilities = await presetService.capabilities(request.signal);
+      if (reviewCapabilitiesRequest === request && !request.signal.aborted && !reviewDestroyed) reviewCapabilities = capabilities;
+    } catch {
+      if (reviewCapabilitiesRequest === request && !request.signal.aborted) reviewCapabilitiesError = "过滤能力加载失败；未加载的过滤项不可执行。";
+    } finally { if (reviewCapabilitiesRequest === request) reviewCapabilitiesRequest = null; }
+  }
 
   function openReviewConfirmation(): void {
-    if (reviewCreating) return;
+    if (reviewBusy) return;
     reviewSelections = [...selectedDirectorySelections];
     reviewAssetIds = [...snapshot.selectedAssetIds];
     if (!reviewSelections.length && !reviewAssetIds.length) return;
     reviewReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    reviewCreateError = "";
+    reviewConfig = null; reviewCreateError = ""; reviewCreateReasons = []; reviewSaveMessage = ""; reviewSaveOpen = false;
+    reviewOptionsExpanded = false; reviewSaveName = "";
     reviewConfirmOpen = true;
+    void loadReviewPresets(); void loadReviewCapabilities();
   }
 
   function closeReviewConfirmation(): void {
-    if (reviewCreating) return;
+    if (reviewBusy) return;
     reviewConfirmOpen = false;
     reviewDialog?.close();
+    reviewPresetsRequest?.abort(); reviewCapabilitiesRequest?.abort();
     const target = reviewReturnFocus;
     reviewReturnFocus = null;
     void tick().then(() => restoreFocus(target));
   }
 
+  function manageReviewPresets(): void {
+    if (reviewBusy || !onManagePresets) return;
+    // close() is presentation-only: navigation must not cancel the draft.
+    reviewDialog?.close();
+    onManagePresets();
+  }
+
+  async function saveReviewPreset(): Promise<void> {
+    if (reviewBusy || !reviewConfig || !reviewSaveNameValid) return;
+    reviewSaveBusy = true; reviewSaveMessage = "";
+    try {
+      const saved = await presetService.create(reviewSaveName, reviewConfig.options);
+      if (reviewDestroyed) return;
+      reviewPresets = [...reviewPresets, saved];
+      reviewPresetId = saved.id;
+      reviewConfig = sanitizeFilterConfig({ preset_name: saved.name, options: saved.options });
+      reviewSaveOpen = false; reviewSaveMessage = "筛选预设已保存。";
+    } catch {
+      if (!reviewDestroyed) reviewSaveMessage = "筛选预设保存失败，请重试。";
+    } finally { if (!reviewDestroyed) reviewSaveBusy = false; }
+  }
+
   function onReviewConfirmationKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape") { event.preventDefault(); closeReviewConfirmation(); return; }
-    if (event.key !== "Tab") return;
-    const items = [...(reviewDialog?.querySelectorAll<HTMLElement>("button:not([disabled])") ?? [])];
-    const next = trappedTabIndex(items.indexOf(document.activeElement as HTMLElement), items.length, event.shiftKey);
-    if (next !== null) { event.preventDefault(); restoreFocus(items[next]); }
+    if (event.defaultPrevented) return;
+    if (event.key === "Escape") { event.preventDefault(); closeReviewConfirmation(); }
+    // Native modal focus containment includes selects, summaries and reference-picker controls.
   }
 
   $effect(() => {
     if (!reviewConfirmOpen || !active) return;
     void tick().then(() => {
-      if (!reviewDialog?.open) reviewDialog?.showModal();
-      restoreFocus(reviewDialog?.querySelector<HTMLElement>("button") ?? reviewDialog);
+      if (!active || !reviewConfirmOpen || !reviewDialog || reviewDialog.open) return;
+      reviewDialog.showModal();
+      restoreFocus(reviewDialog.querySelector<HTMLElement>("select") ?? reviewDialog);
     });
   });
 
   async function createDirectoryReview(): Promise<void> {
-    if (reviewCreating || (!reviewSelections.length && !reviewAssetIds.length)) return;
+    if (!active || reviewBusy || !reviewConfig || reviewBlockers.length || (!reviewSelections.length && !reviewAssetIds.length)) return;
     reviewCreating = true;
-    reviewCreateError = "";
+    reviewCreateError = ""; reviewCreateReasons = [];
     const request = new AbortController();
     reviewCreateRequest = request;
     try {
-      const reviewId = await service.createReview(reviewSelections.map((item) => item.directoryId), reviewAssetIds, request.signal);
+      const reviewId = await service.createReview(reviewSelections.map((item) => item.directoryId), reviewAssetIds, reviewConfig, request.signal);
       if (request.signal.aborted) return;
       reviewCreating = false;
       closeReviewConfirmation();
       onReviewCreated?.(reviewId);
     } catch (error) {
-      if (!request.signal.aborted) reviewCreateError = `去重任务创建失败（${error instanceof ApiError ? error.code : "request_failed"}）；选区已保留，请刷新图库并重试。`;
+      if (!request.signal.aborted) {
+        reviewCreateError = `去重任务创建失败（${error instanceof ApiError ? error.code : "request_failed"}）；选区与本次配置已保留。`;
+        if (error instanceof ApiError && error.code === "review_filter_unavailable") {
+          const details = error.details as { filters?: readonly { reason?: unknown }[] } | null;
+          reviewCreateReasons = Array.isArray(details?.filters) ? details.filters.flatMap((item) => typeof item?.reason === "string" ? [item.reason] : []) : [];
+        } else if (error instanceof ApiError && error.code.startsWith("filter_reference_")) reviewCreateReasons = [error.message];
+      }
     } finally {
       reviewCreating = false;
       if (reviewCreateRequest === request) reviewCreateRequest = null;
@@ -1153,6 +1257,8 @@
     controller.activate();
     galleryMounted = true;
     return () => {
+      reviewDestroyed = true;
+      reviewPresetsRequest?.abort(); reviewCapabilitiesRequest?.abort();
       reviewCreateRequest?.abort();
       const activeExport = directoryExportOperation;
       clearDirectoryExportPolling();
@@ -1187,12 +1293,14 @@
     if (!galleryMounted) return;
     const nowActive = active;
     untrack(() => {
-      if (nowActive && galleryActivationSeen && !galleryWasActive) {
+      if (nowActive && galleryActivationSeen && !galleryWasActive && !reviewConfirmOpen) {
         galleryRefreshNotice = snapshot.txtDraft !== null && snapshot.txtDraft !== (snapshot.viewerAnnotation?.content ?? "")
           ? "正在刷新图库；打开的 TXT 草稿保持不变。若文件已移动，请先保存草稿或关闭查看器后再打开。" : "";
         void controller.reconcileOnFocus();
       }
       if (!nowActive) reviewDialog?.close();
+      if (nowActive && !galleryWasActive && reviewConfirmOpen) { void loadReviewPresets(); void loadReviewCapabilities(); }
+      if (!nowActive) { reviewPresetsRequest?.abort(); reviewCapabilitiesRequest?.abort(); }
       galleryWasActive = nowActive;
       galleryActivationSeen = true;
     });
@@ -1253,13 +1361,52 @@
 
 
 {#if reviewConfirmOpen}
-  <dialog class="gallery-dialog gallery-review-confirmation" bind:this={reviewDialog} data-gallery-review-confirmation aria-labelledby="gallery-review-title" onkeydown={onReviewConfirmationKeydown} oncancel={(event) => { event.preventDefault(); closeReviewConfirmation(); }}>
-    <h2 id="gallery-review-title">对勾选的内容发起去重？</h2>
-    <ul>{#each reviewSelections as directory (directory.directoryId)}<li>{directory.sourceLabel} / {directory.relativePath || directory.directoryName}</li>{/each}{#if reviewAssetIds.length > 0}<li>勾选的 {formatCount(reviewAssetIds.length)} 张图片</li>{/if}</ul>
-    <p>选区作为一个集合跨目录比较：目录包含其子目录，重叠目录只处理一次，同时勾选的图片只算一份。</p>
-    <p>机器初筛会先把明确重复的图片与同名 TXT 移入回收区；疑似重复项随后人工审核。可在回收区恢复，彻底删除不可撤销。</p>
-    {#if reviewCreateError}<p class="gallery-dialog__error" role="alert">{reviewCreateError}</p>{/if}
-    <div class="gallery-dialog__actions"><button type="button" disabled={reviewCreating} onclick={closeReviewConfirmation}>取消</button><button type="button" disabled={reviewCreating} onclick={() => void createDirectoryReview()}>{reviewCreating ? "正在发起…" : "确认发起去重"}</button></div>
+  <dialog class="gallery-export-sheet gallery-review-confirmation" bind:this={reviewDialog} data-gallery-review-confirmation aria-labelledby="gallery-review-title" tabindex="-1" onkeydown={onReviewConfirmationKeydown} oncancel={(event) => { event.preventDefault(); if (active) closeReviewConfirmation(); }}>
+    <header class="gallery-export-sheet__header"><h2 id="gallery-review-title">去重与筛选</h2></header>
+    <div class="gallery-export-sheet__body">
+      <section class="gallery-export-section" aria-label="本次处理范围">
+        <h3>本次处理范围</h3>
+        <p><span>勾选目录</span> <strong>{formatCount(reviewSelections.length)}</strong> · <span>勾选图片</span> <strong>{formatCount(reviewAssetIds.length)}</strong></p>
+        <details><summary>查看选区详情</summary><ul>{#each reviewSelections as directory (directory.directoryId)}<li>{directory.sourceLabel} / {directory.relativePath || directory.directoryName}</li>{/each}{#if reviewAssetIds.length}<li>勾选的 {formatCount(reviewAssetIds.length)} 张图片<ul>{#each reviewAssetIds as id (id)}<li>{id}</li>{/each}</ul></li>{/if}</ul></details>
+        <p class="gallery-export-sheet__hint">选区作为一个集合跨目录比较：目录包含其子目录，重叠目录只处理一次，同时勾选的图片只算一份。</p>
+      </section>
+      <section class="gallery-export-section" aria-label="本次筛选配置">
+        <div class="filter-toolbar">
+          <label class="gallery-review-preset"><span>选择预设</span><select aria-label="选择预设" data-gallery-review-preset value={reviewPresetId} disabled={reviewBusy || reviewPresetsLoading} onchange={(event) => chooseReviewPreset(event.currentTarget.value)}>
+            <option value="">请选择预设</option>
+            {#if reviewConfig && !reviewPresets.some((item) => item.id === reviewPresetId)}<option value={reviewPresetId}>{reviewConfig.preset_name}</option>{/if}
+            {#each reviewPresets as preset (preset.id)}<option value={preset.id}>{preset.name}</option>{/each}
+          </select></label>
+          <button type="button" disabled={reviewBusy || !onManagePresets} onclick={manageReviewPresets}>管理预设…</button>
+        </div>
+        {#if reviewPresetsLoading}<p role="status">正在加载筛选预设…</p>{/if}
+        {#if reviewPresetsError}<p class="gallery-export-sheet__error" role="alert">{reviewPresetsError}</p><button type="button" disabled={reviewBusy} onclick={() => void loadReviewPresets()}>重试</button>{/if}
+        {#if reviewConfig}
+          <div data-gallery-review-enabled><p><span>预设：</span>{reviewConfig.preset_name}</p><h3>已启用功能</h3><ul>{#each reviewEnabledLabels as label}<li>{label}</li>{:else}<li>未启用任何功能</li>{/each}</ul></div>
+          <p class="gallery-export-sheet__hint">临时调整仅用于本次任务，不会覆盖已有预设。</p>
+          <details bind:open={reviewOptionsExpanded} data-gallery-review-options><summary>展开并调整本次选项</summary>
+            {#key reviewEditorRevision}<FilterOptionsEditor {api} options={reviewConfig.options} onChange={changeReviewOptions} capabilities={reviewCapabilities} disabled={reviewBusy || !active} />{/key}
+          </details>
+          {#if reviewSaveOpen}
+            <form class="filter-toolbar gallery-review-save" onsubmit={(event) => { event.preventDefault(); void saveReviewPreset(); }}>
+              <label><span>新预设名称</span><input type="text" bind:value={reviewSaveName} disabled={reviewBusy} aria-describedby="gallery-review-name-help" /></label>
+              <button type="submit" disabled={reviewBusy || !reviewSaveNameValid}>保存预设</button>
+              <button type="button" disabled={reviewBusy} onclick={() => { reviewSaveOpen = false; reviewSaveMessage = ""; }}>取消另存</button>
+              <small id="gallery-review-name-help">名称需为 1–80 个字符，不能包含控制字符。</small>
+            </form>
+          {:else}<button type="button" disabled={reviewBusy} onclick={() => { reviewSaveOpen = true; reviewSaveName = ""; reviewSaveMessage = ""; }}>另存为预设</button>{/if}
+          {#if reviewSaveMessage}<p role="status">{reviewSaveMessage}</p>{/if}
+        {/if}
+        {#if reviewCapabilitiesError}<p class="gallery-export-sheet__error" role="alert">{reviewCapabilitiesError}</p><button type="button" disabled={reviewBusy} onclick={() => void loadReviewCapabilities()}>重试过滤能力</button>{/if}
+        {#if reviewBlockers.length}
+          <div class="gallery-export-sheet__error" role="alert" data-gallery-review-blockers><strong>以下已勾选功能暂不可执行，请取消对应选项后再开始：</strong><ul>{#each reviewBlockers as blocker}<li><strong>{blocker.option === "reference_asset_ids" ? "角色参考图" : FILTER_LABELS[blocker.option]}</strong>：{blocker.reason}</li>{/each}</ul></div>
+        {/if}
+      </section>
+      <p class="gallery-export-sheet__hint">自动排除的图片与同名 TXT 会移入回收区，可恢复；彻底删除不可撤销。</p>
+      <p class="gallery-export-sheet__hint">相似图片只分组供人工判断，不自动排除差分。</p>
+      {#if reviewCreateError}<div class="gallery-export-sheet__error" role="alert"><p>{reviewCreateError}</p>{#if reviewCreateReasons.length}<ul>{#each reviewCreateReasons as reason}<li>{reason}</li>{/each}</ul>{/if}</div>{/if}
+    </div>
+    <footer class="gallery-export-sheet__actions"><button type="button" disabled={reviewBusy} onclick={closeReviewConfirmation}>取消</button><button type="button" class="gallery-dialog__primary" disabled={reviewBusy || !reviewConfig || reviewBlockers.length > 0} onclick={() => void createDirectoryReview()}>{reviewCreating ? "正在发起…" : "开始处理"}</button></footer>
   </dialog>
 {/if}
 <svelte:window
@@ -1495,7 +1642,7 @@
               aria-pressed={snapshot.trashPanelPhase !== "closed"}
               onclick={toggleTrashPanel}
             >回收区</button>
-            <button type="button" data-gallery-dedup disabled={reviewCreating || selectedItemCount === 0} onclick={openReviewConfirmation}>去重…</button>
+            <button type="button" data-gallery-dedup disabled={reviewBusy || selectedItemCount === 0} onclick={openReviewConfirmation}>去重…</button>
             <button
               type="button"
               class="gallery-toolbar-export"

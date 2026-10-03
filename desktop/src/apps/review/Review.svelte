@@ -14,6 +14,7 @@
     updateReviewZoom,
     type ReviewEngine,
   } from "./engine";
+  import { FILTER_LABELS } from "../filter-presets/model";
   import {
     REVIEW_FILTERS,
     resolveReviewCommand,
@@ -430,7 +431,19 @@
   {/if}
 
   {#if snapshot.snapshot}
-    <p class="review-directory-summary" data-review-directories>{#if snapshot.snapshot.directories.length}{snapshot.snapshot.directories.map((directory) => `${directory.sourceLabel} / ${directory.relativePath || "来源根目录"}`).join(" · ")} · 递归子目录，整组选区跨目录比较 · {:else}勾选图片 · {/if}{snapshot.snapshot.summary.totalImageCount} 张图片 · 机器初筛回收 {snapshot.snapshot.summary.automaticRejectedImageCount} 张</p>
+    <p class="review-directory-summary" data-review-directories>{#if snapshot.snapshot.directories.length}{snapshot.snapshot.directories.map((directory) => `${directory.sourceLabel} / ${directory.relativePath || "来源根目录"}`).join(" · ")} · 递归子目录，整组选区跨目录比较 · {:else}勾选图片 · {/if}{snapshot.snapshot.summary.totalImageCount} 张图片 · 机器初筛回收 {snapshot.snapshot.summary.automaticRejectedImageCount} 张{#if snapshot.snapshot.summary.filteredImageCount > 0}<span data-review-filtered-count> · <span>其中自动过滤</span> {snapshot.snapshot.summary.filteredImageCount} <span>张</span></span>{/if}</p>
+    {#if snapshot.snapshot.filterConfig}
+      {@const config = snapshot.snapshot.filterConfig}
+      {#key snapshot.snapshot.reviewId}
+        <details class="review-filter-config" data-review-filter-config>
+          <summary><span>预设：</span>{config.preset_name} · <span>查看本次配置</span></summary>
+          <div><p>本次任务的冻结配置；之后修改预设不会影响本次任务。</p>
+            <dl>{#each Object.entries(FILTER_LABELS) as [key, label]}<div><dt>{label}</dt><dd>{config.options[key as keyof typeof FILTER_LABELS] ? "启用" : "未启用"}</dd></div>{/each}<div><dt>角色参考图</dt><dd data-review-reference-count>{config.options.reference_asset_ids.length}</dd></div></dl>
+            {#if config.options.reference_asset_ids.length}<ul aria-label="本次参考图">{#each config.options.reference_asset_ids as id, index (`${index}:${id}`)}<li>{id}</li>{/each}</ul>{/if}
+          </div>
+        </details>
+      {/key}
+    {/if}
   {/if}
 
   <p class="review-operation-live" data-review-dirty={Boolean(snapshot.snapshot?.dirty)} role="status" aria-live="polite">{displayMessage(snapshot.message)}</p>
