@@ -60,7 +60,7 @@ describe("single-content Svelte workbench", () => {
     const settings = render(Desktop, { props: runtime }).body;
     const nav = settings.match(/<nav[^>]*aria-label="设置导航"[^>]*>([\s\S]*?)<\/nav>/)?.[1];
     expect(nav?.match(/data-nav-app="([^"]+)"/g)).toEqual([
-      'data-nav-app="proxy"', 'data-nav-app="vault"', 'data-nav-app="policy"', 'data-nav-app="diagnostics"', 'data-nav-app="personalization"',
+      'data-nav-app="proxy"', 'data-nav-app="vault"', 'data-nav-app="policy"', 'data-nav-app="diagnostics"', 'data-nav-app="personalization"', 'data-nav-app="filter-presets"',
     ]);
     expect(nav).toContain('data-nav-app="policy" aria-current="page"');
     expect(settings).toContain('data-nav-settings="" aria-current="true"');

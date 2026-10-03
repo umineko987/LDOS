@@ -10,6 +10,7 @@
   import Policy from "../apps/policy/Policy.svelte";
   import Diagnostics from "../apps/diagnostics/Diagnostics.svelte";
   import Personalization from "../apps/personalization/Personalization.svelte";
+  import FilterPresets from "../apps/filter-presets/FilterPresets.svelte";
   import { getApplicationDefinition, type ApplicationId } from "../core/applications/definitions";
   import type { ApiClient } from "../core/api/client";
   import { language, toggleLanguage } from "../core/i18n";
@@ -41,6 +42,7 @@
     { id: "policy", label: "站点" },
     { id: "diagnostics", label: "诊断" },
     { id: "personalization", label: "外观" },
+    { id: "filter-presets", label: "筛选预设" },
   ] as const;
   let desktop = $state<HTMLElement>();
   let aboutOpen = $state(false);
@@ -158,6 +160,8 @@
             <Diagnostics {api} {polling} onNavigate={navigate} />
           {:else if appId === "personalization"}
             <Personalization {persistence} registerUnsavedChanges={(reader, discard) => shell.registerUnsavedChanges("personalization", reader, discard)} />
+          {:else if appId === "filter-presets"}
+            <FilterPresets {api} active={snapshot.focusedAppId === "filter-presets"} registerUnsavedChanges={(reader, discard) => shell.registerUnsavedChanges("filter-presets", reader, discard)} />
           {/if}
         </section>
       {/each}

@@ -83,6 +83,11 @@ function modelSetupSnapshot(): Record<string, unknown> {
     expected_bytes: 190_000_000,
     message: "相似图片模型已就绪。",
     models: { sscd: { installed: true }, dino: { installed: true } },
+    review_filters: {
+      filter_monochrome: { available: false, reason: "Monochrome classifier is not integrated; the installer only provisions SSCD/DINO." },
+      filter_sketch: { available: false, reason: "A reliable sketch classifier has not been confirmed." },
+      filter_character: { available: false, reason: "CCIP and character-reference rules are not integrated." },
+    },
   };
 }
 
@@ -659,6 +664,12 @@ function svgImage(id: string): string {
 export async function installMockApi(page: Page, options: MockApiOptions = {}): Promise<MockApi> {
   const requests: RecordedRequest[] = [];
   const unhandled: RecordedRequest[] = [];
+  const emptyFilterOptions = { basic_dedup: false, filter_monochrome: false, filter_sketch: false, filter_character: false, similarity_groups: false, reference_asset_ids: [] as string[] };
+  const presets = new Map([
+    ["builtin-style", { id: "builtin-style", name: "画风", builtin: true, options: { ...emptyFilterOptions, basic_dedup: true, filter_monochrome: true, filter_sketch: true, similarity_groups: true } }],
+    ["builtin-character", { id: "builtin-character", name: "角色", builtin: true, options: { ...emptyFilterOptions, basic_dedup: true, filter_character: true, similarity_groups: true } }],
+  ]);
+  let presetSerial = 0;
   const reviews = new Map<string, { decisions: Map<string, readonly string[]>; version: number; status: string; directoryIds: readonly string[] }>();
   if (!options.emptyRecent) reviews.set("review-fixture", { decisions: new Map(), version: 1, status: "ready", directoryIds: [GALLERY_SUB_DIR] });
   const reviewResponse = (id: string, operation = false) => {
@@ -708,6 +719,32 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       return;
     }
 
+    if (url.pathname === "/api/v1/gallery/review-presets") {
+      if (request.method() === "GET") await respond(route, { items: [...presets.values()] });
+      else if (request.method() === "POST") {
+        const body = requestBody(request) as { name: string; options: typeof emptyFilterOptions };
+        const preset = { id: `preset-${++presetSerial}`, name: body.name, options: body.options, builtin: false };
+        presets.set(preset.id, preset);
+        await respond(route, preset, 201);
+      }
+      return;
+    }
+    const presetMatch = url.pathname.match(/^\/api\/v1\/gallery\/review-presets\/([^/]+)$/);
+    if (presetMatch) {
+      const id = decodeURIComponent(presetMatch[1]);
+      const current = presets.get(id);
+      if (!current || current.builtin) { await respond(route, { error: { code: "preset_not_editable", message: "Preset is not editable" } }, 409); return; }
+      if (request.method() === "PUT") {
+        const body = requestBody(request) as { name: string; options: typeof emptyFilterOptions };
+        const saved = { ...current, ...body };
+        presets.set(id, saved);
+        await respond(route, saved);
+      } else if (request.method() === "DELETE") {
+        presets.delete(id);
+        await route.fulfill({ status: 204 });
+      }
+      return;
+    }
     if (url.pathname === "/healthz") {
       if (options.health === "failed") await respond(route, { ok: false, components: { process: { status: "error" }, database: { status: "ok" } }, time: 1_700_000_000 }, 503);
       else if (options.health === "invalid") await respond(route, { status: "unknown" });

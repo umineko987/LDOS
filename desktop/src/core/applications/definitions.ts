@@ -104,6 +104,18 @@ const definitions = [
     defaultWindow: { rect: DEFAULT_WINDOW_RECT, state: "normal" },
   },
   {
+    id: "filter-presets",
+    route: "/filter-presets",
+    title: "筛选预设",
+    icon: "sliders",
+    group: "system",
+    order: 2,
+    description: "管理独立筛选功能与角色参考图预设。",
+    availability: "ready",
+    dockOrder: null,
+    defaultWindow: { rect: DEFAULT_WINDOW_RECT, state: "normal" },
+  },
+  {
     id: "gallery",
     route: "/gallery",
     title: "图片库",
