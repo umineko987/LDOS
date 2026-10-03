@@ -60,24 +60,26 @@ class GalleryReviewRepository(ReviewRepository):
     def list_presets(self) -> list[dict[str, Any]]:
         with self._read() as conn:
             rows = conn.execute("SELECT * FROM gallery_review_presets ORDER BY name,id").fetchall()
-        # Fresh values: callers cannot mutate an in-process builtin template.
-        return json.loads(json.dumps(BUILTIN_PRESETS)) + [
-            {"id": row["id"], "name": row["name"], "builtin": False, "options": json.loads(row["options_json"])}
-            for row in rows]
+        # Defaults are starting points; saved values take precedence without duplicating IDs.
+        presets = {preset["id"]: preset for preset in json.loads(json.dumps(BUILTIN_PRESETS))}
+        for row in rows:
+            presets[row["id"]] = {"id": row["id"], "name": row["name"], "builtin": row["id"] in presets,
+                                  "options": json.loads(row["options_json"])}
+        return list(presets.values())
 
     def save_preset(self, name: str, options: dict[str, Any], *, preset_id: str | None = None) -> dict[str, Any]:
         body = FilterPresetWrite.model_validate({"name": name, "options": options})
-        if preset_id in {preset["id"] for preset in BUILTIN_PRESETS}:
-            raise RuntimeError("review_preset_builtin")
+        builtin = preset_id in {preset["id"] for preset in BUILTIN_PRESETS}
         identity = preset_id or str(uuid.uuid4())
         with self._transaction() as conn:
-            if preset_id is None:
-                conn.execute("INSERT INTO gallery_review_presets(id,name,options_json) VALUES (?,?,?)",
+            if preset_id is None or builtin:
+                conn.execute("INSERT INTO gallery_review_presets(id,name,options_json) VALUES (?,?,?)"
+                             " ON CONFLICT(id) DO UPDATE SET name=excluded.name,options_json=excluded.options_json",
                              (identity, body.name, body.options.model_dump_json()))
             elif not conn.execute("UPDATE gallery_review_presets SET name=?,options_json=? WHERE id=?",
                                   (body.name, body.options.model_dump_json(), identity)).rowcount:
                 raise KeyError(identity)
-        return {"id": identity, "name": body.name, "builtin": False, "options": body.options.model_dump()}
+        return {"id": identity, "name": body.name, "builtin": builtin, "options": body.options.model_dump()}
 
     def delete_preset(self, preset_id: str) -> None:
         if preset_id in {preset["id"] for preset in BUILTIN_PRESETS}:

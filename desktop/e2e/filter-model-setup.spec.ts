@@ -69,7 +69,7 @@ test("Settings prepares CCIP without editing builtin presets; Gallery refreshes 
   await launchApp(page, "filter-presets");
   const settings = appPage(page, "filter-presets");
   await settings.getByRole("button", { name: "角色 LoRA", exact: true }).click();
-  await expect(settings.getByRole("checkbox", { name: "非目标角色", exact: true })).toBeDisabled();
+  await expect(settings.getByRole("checkbox", { name: "非目标角色", exact: true })).toBeEnabled();
   const confirmation = await confirm(settings);
   await expect(confirmation.getByRole("list")).toContainText("150.3 MB");
   await expect(confirmation.getByRole("list")).not.toContainText("单色模型");

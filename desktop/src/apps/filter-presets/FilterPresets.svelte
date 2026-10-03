@@ -40,8 +40,8 @@
   const validName = $derived.by(() => { try { validateFilterName(name); return true; } catch { return false; } });
 
   function label(item: FilterPreset): string {
-    if (item.id === "builtin-style") return "画风 LoRA";
-    if (item.id === "builtin-character") return "角色 LoRA";
+    if (item.id === "builtin-style" && item.name === "画风") return "画风 LoRA";
+    if (item.id === "builtin-character" && item.name === "角色") return "角色 LoRA";
     return item.name;
   }
   function select(item: FilterPreset | null): void {
@@ -88,7 +88,7 @@
     } finally { if (capabilityRequest === next) capabilityRequest = null; }
   }
   async function save(): Promise<void> {
-    if (busy || !active || !validName || !dirty || selected?.builtin) return;
+    if (busy || !active || !validName || !dirty) return;
     busy = true; message = "";
     const revision = editorRevision;
     const id = selectedId;
@@ -148,16 +148,14 @@
           <button type="button" disabled={busy} onclick={() => newPreset(true)}>{selected?.builtin ? "另存为自定义" : "复制预设"}</button>
           {#if selected && !selected.builtin}<button type="button" disabled={busy} onclick={() => void remove()}>删除预设</button>{/if}
         </div>
-        {#if selected?.builtin}<p class="filter-help">内置预设只读；请另存为自定义后编辑。</p>{/if}
-        <label class="filter-preset-name"><span>预设名称</span><input type="text" value={name} maxlength="80" disabled={busy || selected?.builtin || !active} oninput={(event) => { name = event.currentTarget.value; }} aria-describedby="filter-name-help" /></label>
+        {#if selected?.builtin}<p class="filter-help">内置预设是初始配置，可直接修改并保存。</p>{/if}
+        <label class="filter-preset-name"><span>预设名称</span><input type="text" value={name} maxlength="80" disabled={busy || !active} oninput={(event) => { name = event.currentTarget.value; }} aria-describedby="filter-name-help" /></label>
         <p id="filter-name-help" class="filter-help">名称需为 1–80 个字符，不能包含控制字符。</p>
         {#if capabilityError}<p role="alert">{capabilityError}</p><button type="button" disabled={busy || !active} onclick={() => void loadCapabilities()}>重试过滤能力</button>{/if}
         {#key editorRevision}
-          <FilterOptionsEditor {api} {options} {capabilities} {active} setup={modelSetup} onModelSetup={updateModelSetup} prepareDisabled={busy} disabled={busy || !!selected?.builtin || !active} onChange={(next) => { options = cloneFilterOptions(next); }} />
+          <FilterOptionsEditor {api} {options} {capabilities} {active} setup={modelSetup} onModelSetup={updateModelSetup} prepareDisabled={busy} disabled={busy || !active} onChange={(next) => { options = cloneFilterOptions(next); }} />
         {/key}
-        {#if !selected?.builtin}
-          <div class="filter-toolbar filter-preset-actions"><button type="button" disabled={busy || !dirty || !validName || !active} onclick={() => void save()}>保存预设</button><button type="button" disabled={busy || !dirty} onclick={discard}>取消修改</button></div>
-        {/if}
+        <div class="filter-toolbar filter-preset-actions"><button type="button" disabled={busy || !dirty || !validName || !active} onclick={() => void save()}>保存预设</button><button type="button" disabled={busy || !dirty} onclick={discard}>取消修改</button></div>
       {:else if loaded}<p>新建预设或选择一个已有预设。</p>{/if}
       <p role="status" aria-live="polite">{message}</p>
     </section>

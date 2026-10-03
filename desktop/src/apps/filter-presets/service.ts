@@ -38,7 +38,7 @@ export function createFilterPresetService(api: ApiClient): {
     },
     async update(id: string, name: string, options: FilterOptions) {
       const preset = sanitizeFilterPreset(await api.request(path(id), "PUT", { body: body(name, options) }));
-      if (preset.id !== id || preset.builtin) throw new TypeError("invalid_filter_preset_update");
+      if (preset.id !== id) throw new TypeError("invalid_filter_preset_update");
       return preset;
     },
     async remove(id: string) {

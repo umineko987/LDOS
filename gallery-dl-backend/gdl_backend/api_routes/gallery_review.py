@@ -67,7 +67,7 @@ def create_gallery_review_presets_router() -> APIRouter:
     def preset_error(exc: Exception) -> ApiError:
         if isinstance(exc, KeyError):
             return ApiError(404, "review_preset_not_found", "筛选预设不存在")
-        return ApiError(409, "review_preset_builtin", "内置预设不可覆盖或删除；修改后请另存为自定义预设")
+        return ApiError(409, "review_preset_builtin", "内置预设不可删除")
 
     @router.get("")
     async def list_presets(container: Any = Depends(get_service)):

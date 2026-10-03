@@ -10,7 +10,7 @@ test("筛选预设：内置另存、自定义增改复制删除，保留隐藏�
   await launchApp(page, "filter-presets");
   const app = appPage(page, "filter-presets");
   await expect(app.getByLabel("预设名称")).toHaveValue("画风");
-  await expect(app.getByLabel("预设名称")).toBeDisabled();
+  await expect(app.getByLabel("预设名称")).toBeEnabled();
   await expect(app.getByRole("button", { name: "删除预设" })).toHaveCount(0);
   await app.getByRole("button", { name: "另存为自定义" }).click();
   await app.getByLabel("预设名称").fill("Style draft");
@@ -51,11 +51,41 @@ test("筛选预设：内置另存、自定义增改复制删除，保留隐藏�
   expect(api.unhandled).toEqual([]);
 });
 
+test("内置画风可直接修改保存，刷新后图库使用已保存配置", async ({ page }) => {
+  const api = await bootDesktop(page, {}, "/#/filter-presets");
+  const app = appPage(page, "filter-presets");
+  await app.getByLabel("预设名称").fill("My style");
+  await app.getByRole("checkbox", { name: "单色 / 灰度", exact: true }).uncheck();
+  await app.getByRole("checkbox", { name: "素描", exact: true }).uncheck();
+  await app.getByRole("button", { name: "保存预设", exact: true }).click();
+  await expect(app.getByText("筛选预设已保存。", { exact: true })).toBeVisible();
+  await expect(app.getByRole("button", { name: "My style", exact: true })).toBeVisible();
+  expect(api.count("PUT", `${endpoint}/builtin-style`)).toBe(1);
+  expect(api.count("POST", endpoint)).toBe(0);
+  await page.reload();
+  await expect(app.getByLabel("预设名称")).toHaveValue("My style");
+  await expect(app.getByRole("checkbox", { name: "素描", exact: true })).not.toBeChecked();
+  await app.getByRole("checkbox", { name: "素描", exact: true }).check();
+  await app.getByRole("button", { name: "取消修改", exact: true }).click();
+  await expect(app.getByRole("checkbox", { name: "素描", exact: true })).not.toBeChecked();
+  await launchApp(page, "gallery");
+  const gallery = appPage(page, "gallery");
+  await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+  await gallery.getByRole("checkbox", { name: "选择图片 image-01.jpg", exact: true }).check();
+  await gallery.locator("[data-gallery-dedup]").click();
+  const panel = gallery.locator("[data-gallery-review-confirmation]");
+  await panel.getByLabel("选择预设", { exact: true }).selectOption("builtin-style");
+  await panel.getByRole("button", { name: "开始处理", exact: true }).click();
+  await expect(page).toHaveURL(/#\/review$/);
+  expect(api.requests.find(({ method, path }) => method === "POST" && path === "/api/v1/gallery/reviews")?.body).toMatchObject({
+    filter_config: { preset_name: "My style", options: { filter_monochrome: false, filter_sketch: false } },
+  });
+});
+
 test("参考图：图库目录、跨页选择、旧引用可移除、取消不改集合", async ({ page }) => {
   const api = await bootDesktop(page, {}, "/#/filter-presets");
   const app = appPage(page, "filter-presets");
   await app.getByRole("button", { name: "角色 LoRA", exact: true }).click();
-  await app.getByRole("button", { name: "另存为自定义" }).click();
   await app.getByLabel("预设名称").fill("References");
   await app.getByRole("button", { name: "从图库添加" }).click();
   const picker = app.locator("[data-filter-reference-picker]");
@@ -88,7 +118,7 @@ test("参考图：图库目录、跨页选择、旧引用可移除、取消不�
   await picker.getByRole("button", { name: "使用所选参考图" }).click();
   await app.getByRole("button", { name: "保存预设" }).click();
   await expect(app.getByText("筛选预设已保存。", { exact: true })).toBeVisible();
-  expect(api.requests.find((request) => request.method === "POST" && request.path === endpoint)?.body).toMatchObject({ options: { reference_asset_ids: ["gal-asset-01", "gal-asset-02"], filter_character: true } });
+  expect(api.requests.find((request) => request.method === "PUT" && request.path === `${endpoint}/builtin-character`)?.body).toMatchObject({ options: { reference_asset_ids: ["gal-asset-01", "gal-asset-02"], filter_character: true } });
 
   await app.getByRole("button", { name: "从图库添加" }).click();
   await expect(picker.getByRole("list", { name: "待使用的参考图" })).toContainText("gal-asset-02");

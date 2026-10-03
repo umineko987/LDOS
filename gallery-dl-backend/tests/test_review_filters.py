@@ -39,7 +39,7 @@ class PresetPersistenceTests(unittest.TestCase):
             self.assertEqual(len(db.gallery_reviews.list_presets()), 2)
             db.close()
 
-    def test_sqlite_persistence_and_builtin_values_cannot_be_mutated(self):
+    def test_sqlite_persistence_and_editable_builtin_defaults(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "presets.db"
             db = Database(path)
@@ -56,18 +56,26 @@ class PresetPersistenceTests(unittest.TestCase):
             self.assertEqual(db.gallery_reviews.list_presets()[-1], saved)
             changed = db.gallery_reviews.save_preset("修改", options(similarity_groups=False), preset_id=saved["id"])
             self.assertEqual(changed["id"], saved["id"])
+            updates = []
             for builtin in ("builtin-style", "builtin-character"):
-                with self.assertRaisesRegex(RuntimeError, "review_preset_builtin"):
-                    db.gallery_reviews.save_preset("覆盖", options(), preset_id=builtin)
+                updated = db.gallery_reviews.save_preset("已修改 " + builtin, options(reference_asset_ids=["reference"]), preset_id=builtin)
+                self.assertTrue(updated["builtin"])
+                updated = db.gallery_reviews.save_preset(updated["name"], options(basic_dedup=False, reference_asset_ids=["reference"]), preset_id=builtin)
+                updates.append(updated)
                 with self.assertRaisesRegex(RuntimeError, "review_preset_builtin"):
                     db.gallery_reviews.delete_preset(builtin)
             db.gallery_reviews.delete_preset(saved["id"])
-            self.assertEqual(len(db.gallery_reviews.list_presets()), 2)
+            db.close()
+            db = Database(path)
+            self.assertEqual(db.gallery_reviews.list_presets(), updates)
             db.close()
 
 
 class FilterReviewsTests(unittest.TestCase):
-    setUp = fixtures.GalleryReviewsTests.setUp
+    def setUp(self):
+        fixtures.GalleryReviewsTests.setUp(self)
+        self.container.settings.dedup.model_dir = self.root / "models"
+
     tearDown = fixtures.GalleryReviewsTests.tearDown
 
     def client(self):
@@ -91,9 +99,13 @@ class FilterReviewsTests(unittest.TestCase):
             body["name"] = "更新"
             self.assertEqual(client.put(f"{route}/{preset['id']}", json=body).json()["name"], "更新")
             for builtin in ("builtin-style", "builtin-character"):
-                for response in (client.put(f"{route}/{builtin}", json=body), client.delete(f"{route}/{builtin}")):
-                    self.assertEqual(response.status_code, 409)
-                    self.assertEqual(response.json()["error"]["code"], "review_preset_builtin")
+                response = client.put(f"{route}/{builtin}", json=body)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json(), {"id": builtin, "builtin": True, **body})
+                self.assertIn(response.json(), client.get(route).json()["items"])
+                response = client.delete(f"{route}/{builtin}")
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.json()["error"]["code"], "review_preset_builtin")
             self.assertEqual(client.put(f"{route}/missing", json=body).status_code, 404)
             self.assertEqual(client.delete(f"{route}/missing").status_code, 404)
             for bad in ({"name": " ", "options": options()},
@@ -108,7 +120,7 @@ class FilterReviewsTests(unittest.TestCase):
 
     def test_config_freeze_reference_selection_and_worker_input(self):
         ids = self.asset_ids()
-        preset = self.container.db.gallery_reviews.save_preset("冻结", options(reference_asset_ids=[ids[-1]]))
+        preset = self.container.db.gallery_reviews.save_preset("冻结", options(reference_asset_ids=[ids[-1]]), preset_id="builtin-character")
         config = {"preset_name": preset["name"], "options": preset["options"]}
         expected = copy.deepcopy(config)
         review = self.manager.create([], [ids[0]], config)

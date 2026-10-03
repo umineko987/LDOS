@@ -32,6 +32,14 @@ describe("filter preset service", () => {
     expect(remove).toHaveBeenCalledWith("/api/v1/gallery/review-presets/custom%2F1");
   });
 
+  it("updates built-in presets without requiring a custom copy", async () => {
+    const { service, request } = fixture();
+    const updated = { ...preset, id: "builtin-style", builtin: true, name: "My style" };
+    request.mockResolvedValueOnce(updated);
+    expect(await service.update(updated.id, updated.name, updated.options)).toEqual(updated);
+    expect(request).toHaveBeenCalledWith("/api/v1/gallery/review-presets/builtin-style", "PUT", { body: { name: updated.name, options: updated.options } });
+  });
+
   it("validates writes before issuing requests", async () => {
     const { service, post, request } = fixture();
     await expect(service.create(" ", EMPTY_FILTER_OPTIONS)).rejects.toThrow();

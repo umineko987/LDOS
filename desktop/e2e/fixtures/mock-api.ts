@@ -747,7 +747,7 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
     if (presetMatch) {
       const id = decodeURIComponent(presetMatch[1]);
       const current = presets.get(id);
-      if (!current || current.builtin) { await respond(route, { error: { code: "preset_not_editable", message: "Preset is not editable" } }, 409); return; }
+      if (!current || current.builtin && request.method() === "DELETE") { await respond(route, { error: { code: "preset_not_editable", message: "Preset is not editable" } }, 409); return; }
       if (request.method() === "PUT") {
         const body = requestBody(request) as { name: string; options: typeof emptyFilterOptions };
         const saved = { ...current, ...body };
