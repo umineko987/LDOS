@@ -58,7 +58,8 @@
 .review-operation-live[data-review-dirty="true"]::before { content: "△ 未采纳 · "; color: var(--ldos-state-warning); }
 html[lang="en"] .review-operation-live[data-review-dirty="true"]::before { content: "△ Unsaved · "; }
 
-.review-engine-host { flex: 1; display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 320px; padding: 0 18px 18px; overflow: hidden; }
+.review-engine-host { flex: 1; display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-width: 0; min-height: 320px; padding: 0 18px 18px; overflow: hidden; }
+.review-classification-help { padding-bottom: 8px; color: var(--ldos-text-secondary); font-size: 0.75rem; line-height: 1.5; overflow-wrap: anywhere; }
 .review-toolbar { flex-wrap: wrap; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
 .review-toolbar-actions { gap: 6px; }
 .review-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -72,7 +73,7 @@ html[lang="en"] .review-operation-live[data-review-dirty="true"]::before { conte
 .review-panel { min-height: 0; padding: 18px; overflow-y: auto; background: var(--ldos-glass-surface-input); }
 .review-panel:only-child { grid-row: 1 / -1; }
 .review-panel p { margin-top: 10px; color: var(--ldos-text-secondary); }
-.review-panel dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+.review-panel dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
 .review-panel dl > div { padding: 12px; border: var(--ldos-border-width) solid var(--ldos-border-weak); border-radius: var(--ldos-radius-control); }
 .review-panel dt { color: var(--ldos-text-secondary); }
 .review-panel dd { margin-top: 4px; color: var(--ldos-text-code); font-family: var(--ldos-font-mono); font-size: 1.2rem; }

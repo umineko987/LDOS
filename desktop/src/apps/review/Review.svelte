@@ -463,14 +463,14 @@
           <button type="button" class="review-button review-button--primary review-finish" data-review-finish disabled={Boolean(snapshot.busy)} onclick={() => void controller.finish()}>完成</button>
         </div>
       </section>
-      <p class="filter-help">线稿/草图、单色仅辅助分类，不自动排除；命中任一图片时显示完整原组，各分类共用同一份采纳决定。</p>
+      <p class="review-classification-help">线稿/草图、单色仅辅助分类，不自动排除；命中任一图片时显示完整原组，各分类共用同一份采纳决定。</p>
 
       {#if listable && focusedGroup}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-operated review deck) -->
         <section class="review-deck" data-review-deck bind:this={reviewDeck} tabindex="0" aria-label="去重审核全高分拣台；左右键移动图片，空格切换保留，Enter 采纳并前进，Escape 返回上一组">
           <header class="review-deck-header">
-            <h2>组 {focusedGroup.ordinal} · {focusedGroup.kind === "duplicate" ? "重复组" : focusedGroup.kind === "single" ? "独立图片" : "读取受限"}</h2>
-            <div class="review-group-controls"><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === 0} onclick={() => moveGroupAndFocus(-1)}>上一组</button><label><span class="visually-hidden">当前筛选全量组选择器</span><select data-review-group-select aria-label="当前筛选全量组选择器" value={focusedGroup.id} disabled={Boolean(snapshot.busy)} onchange={(event) => { if (controller.setFocusedGroup(selectValue(event))) focusActiveImage(); }}>{#each groups as group (group.id)}<option value={group.id}>{group.ordinal}. {group.kind === "duplicate" ? "重复组" : group.kind === "single" ? "独立图片" : "读取受限"} · {group.selectedImageCount}/{group.imageCount} 保留{group.decided ? " · 已采纳" : ""}</option>{/each}</select></label><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === snapshot.snapshot.groupOrder.length - 1} onclick={() => moveGroupAndFocus(1)}>下一组</button></div>
+            <h2>组 {focusedGroup.ordinal} · {focusedGroup.imageCount} 张图片</h2>
+            <div class="review-group-controls"><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === 0} onclick={() => moveGroupAndFocus(-1)}>上一组</button><label><span class="visually-hidden">当前筛选全量组选择器</span><select data-review-group-select aria-label="当前筛选全量组选择器" value={focusedGroup.id} disabled={Boolean(snapshot.busy)} onchange={(event) => { if (controller.setFocusedGroup(selectValue(event))) focusActiveImage(); }}>{#each groups as group (group.id)}<option value={group.id}>组 {group.ordinal} · {group.selectedImageCount}/{group.imageCount} 保留{group.decided ? " · 已采纳" : ""}</option>{/each}</select></label><button type="button" disabled={Boolean(snapshot.busy) || snapshot.snapshot.groupOrder.indexOf(focusedGroup.id) === snapshot.snapshot.groupOrder.length - 1} onclick={() => moveGroupAndFocus(1)}>下一组</button></div>
           </header>
 
           <section class="review-deck-stage" aria-label={`组 ${focusedGroup.ordinal} 图片比较舞台`} bind:this={reviewDeckStage} data-review-panning={panning} data-review-zoomed={zoom.scale !== 1 || zoom.offsetX !== 0 || zoom.offsetY !== 0} onwheel={onStageWheel} onpointerdown={onStagePointerDown} onpointermove={onStagePointerMove} onpointerup={onStagePointerUp} onpointercancel={onStagePointerCancel} ondblclick={resetZoom}>
@@ -492,7 +492,7 @@
           </footer>
         </section>
       {:else}
-        <section class="review-panel" aria-labelledby="review-state-heading"><h2 id="review-state-heading">{snapshot.snapshot.summary.statusLabel}</h2><p>{displayMessage(snapshot.presentation.message)}</p><dl><div><dt>图片</dt><dd>{snapshot.snapshot.summary.totalImageCount}</dd></div><div><dt>审核组</dt><dd>{snapshot.snapshot.summary.totalGroupCount}</dd></div><div><dt>重复组</dt><dd>{snapshot.snapshot.summary.duplicateGroupCount}</dd></div><div><dt>读取失败</dt><dd>{snapshot.snapshot.summary.unreadableImageCount}</dd></div></dl></section>
+        <section class="review-panel" aria-labelledby="review-state-heading"><h2 id="review-state-heading">{snapshot.snapshot.summary.statusLabel}</h2><p>{displayMessage(snapshot.presentation.message)}</p><dl><div><dt>图片</dt><dd>{snapshot.snapshot.summary.totalImageCount}</dd></div><div><dt>审核组</dt><dd>{snapshot.snapshot.summary.totalGroupCount}</dd></div><div><dt>图片不可读</dt><dd>{snapshot.snapshot.summary.unreadableImageCount}</dd></div></dl></section>
       {/if}
     {:else}
       <section class="review-panel review-empty" aria-labelledby="review-empty-heading"><h2 id="review-empty-heading">尚无去重任务</h2><p>请在图库勾选图片或目录发起去重。</p><button type="button" onclick={() => onNavigate("gallery")}>打开图库</button></section>
