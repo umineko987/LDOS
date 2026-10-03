@@ -7,11 +7,12 @@ from typing import Any
 
 from .gallery_review_selection import select_review_assets, validate_snapshot
 from .gallery_safe_paths import SafeSourceRoot
-from .review import DedupReviewManager
+from .review import DedupReviewManager, ensure_private_directory
 
 
-def review_trash_operation_id(review_id: str, image_id: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"ldos:review:{review_id}:{image_id}"))
+def review_trash_operation_id(review_id: str, image_id: str, attempt: int = 0) -> str:
+    suffix = "" if attempt <= 0 else f":{attempt}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"ldos:review:{review_id}:{image_id}{suffix}"))
 
 
 class GalleryDedupReviewManager(DedupReviewManager):
@@ -19,13 +20,27 @@ class GalleryDedupReviewManager(DedupReviewManager):
         super().__init__(*args, **kwargs)
         self.repository = self.db.gallery_reviews
 
-    def create(self, directory_ids: list[str]) -> dict[str, Any]:
+    def create(self, directory_ids: list[str], asset_ids: list[str] | None = None) -> dict[str, Any]:
         if not self.settings.enabled:
             raise RuntimeError("去重功能未启用")
-        selection, snapshot = select_review_assets(self.catalog, directory_ids)
+        if not directory_ids and not asset_ids:
+            raise ValueError("review_selection_empty")
+        selection, snapshot = select_review_assets(self.catalog, directory_ids, asset_ids or ())
         result = self.repository.create(selection, snapshot)
         self.notify()
         return result
+
+    async def start(self) -> None:
+        """一次性任务：启动时先恢复中断的物理文件操作，再清空上次会话遗留的任务记录。"""
+        if self._loop_task is not None:
+            return
+        if self.file_operations is not None:
+            await asyncio.to_thread(self.file_operations.recover_unfinished)
+        await asyncio.to_thread(self.repository.delete_all_reviews)
+        if not self.settings.enabled:
+            return
+        ensure_private_directory(self.runtime_dir)
+        self._loop_task = asyncio.create_task(self._loop(), name="dedup-review-manager")
 
     def retry_analysis(self, review_id: str) -> bool:
         retried = super().retry_analysis(review_id)
@@ -97,13 +112,76 @@ class GalleryDedupReviewManager(DedupReviewManager):
         self.repository.bump_version(review_id)
         return self.repository.get_crawl_review(review_id)
 
-    def apply(self, review_id: str, *, version: int) -> dict[str, Any]:
-        if not self.repository.begin_crawl_review_apply(review_id, version=version):
-            return self.repository.get_crawl_review(review_id)
-        self._process_images(review_id, self.repository.crawl_review_apply_images(review_id))
-        self.repository.finish_crawl_review_apply(review_id)
+    def adopt_group(self, review_id: str, group_id: str, selected_image_ids: list[str], *, version: int) -> dict[str, Any]:
+        """采纳单组：先写决策（版本与归属校验，fail-closed），再逐图实时对账物理状态。"""
+        self.repository.update_crawl_review_decisions(
+            review_id, [{"group_id": group_id, "selected_image_ids": selected_image_ids}], version=version,
+        )
+        images = self.repository.crawl_review_group_images(review_id, group_id)
+        snapshots = {snapshot["asset_id"]: snapshot for snapshot in self.repository.snapshot(review_id)}
+        with self.catalog._filesystem_locks.hold(*(f"source:{snapshots[image['id']]['source_id']}" for image in images)):
+            for image in images:
+                try:
+                    disposition, final_path = self._settle_image(review_id, image, snapshots[image["id"]])
+                except Exception as exc:
+                    self.repository.finish_crawl_review_image(review_id, image["id"], "failed",
+                                                             final_relative_path=image["final_relative_path"], error=str(exc))
+                else:
+                    self.repository.finish_crawl_review_image(review_id, image["id"], disposition,
+                                                              final_relative_path=final_path)
+        self.repository.refresh_crawl_review_counts(review_id)
         self.repository.bump_version(review_id)
         return self.repository.get_crawl_review(review_id)
+
+    def finish(self, review_id: str) -> None:
+        """完成一次性任务：已落地的文件操作保持不变，任务记录即刻删除。"""
+        self.repository.delete_crawl_review(review_id)
+        self.notify()
+
+    def _settle_image(self, review_id: str, image: dict[str, Any], snapshot: dict[str, Any]) -> tuple[str, str]:
+        asset = self.db.gallery.get_asset(snapshot["asset_id"])
+        if asset is None:
+            raise RuntimeError("review_asset_missing")
+        operation_id = self._current_trash_operation(review_id, image, asset)
+        if image["selected"]:
+            if operation_id is None:
+                return "kept", snapshot["relative_path"]
+            self.file_operations.restore_trash(operation_id)
+            current = self.db.gallery.get_asset(snapshot["asset_id"])
+            self.repository.refresh_snapshot_asset(review_id, snapshot["asset_id"],
+                                                  int(current["content_version"]), int(current["txt_version"]))
+            return "kept", snapshot["relative_path"]
+        if operation_id is not None:
+            return "rejected", f".ldos/trash/{operation_id}/files/{snapshot['relative_path']}"
+        with SafeSourceRoot(snapshot["root_path"]) as safe:
+            validate_snapshot(self.db.gallery, snapshot, safe)
+        for attempt in range(64):
+            candidate = review_trash_operation_id(review_id, image["id"], attempt)
+            with self.db._read() as conn:
+                row = conn.execute("SELECT status FROM gallery_file_operations WHERE id=?", (candidate,)).fetchone()
+            if row is None or row["status"] == "rolled_back":
+                self.file_operations.trash_assets([snapshot["asset_id"]], review_snapshot=snapshot, operation_id=candidate)
+                return "rejected", f".ldos/trash/{candidate}/files/{snapshot['relative_path']}"
+            if row["status"] == "committed" and asset["lifecycle_state"] != "trashed":
+                continue  # 该槽位的回收已被后续采纳撤销，换下一个槽位
+            raise RuntimeError("review_operation_conflict")
+
+    def _current_trash_operation(self, review_id: str, image: dict[str, Any], asset: dict[str, Any]) -> str | None:
+        if asset["lifecycle_state"] != "trashed":
+            return None
+        with self.db._read() as conn:
+            row = conn.execute(
+                """
+                SELECT o.id FROM gallery_file_operations o
+                JOIN gallery_file_operation_items i ON i.operation_id=o.id
+                WHERE o.kind='trash' AND o.status='committed' AND i.asset_id=?
+                ORDER BY o.created_at DESC LIMIT 1
+                """,
+                (asset["asset_id"],),
+            ).fetchone()
+        if row is not None and row["id"] in {review_trash_operation_id(review_id, image["id"], attempt) for attempt in range(64)}:
+            return str(row["id"])
+        raise RuntimeError("review_operation_conflict")
 
     def image_content(self, review_id: str, image_id: str) -> tuple[Any, str]:
         image = self.repository.get_crawl_review_image(review_id, image_id)
@@ -114,10 +192,10 @@ class GalleryDedupReviewManager(DedupReviewManager):
             raise KeyError(image_id)
         with self.catalog._filesystem_locks.hold(f"source:{snapshot['source_id']}"):
             with SafeSourceRoot(snapshot["root_path"]) as safe:
-                operation_id = review_trash_operation_id(review_id, image_id)
                 asset = self.db.gallery.get_asset(image_id)
-                trashed = bool(asset and asset["lifecycle_state"] == "trashed" and
-                               image["final_relative_path"].startswith(f".ldos/trash/{operation_id}/"))
-                validate_snapshot(self.db.gallery, snapshot, safe, trash_operation_id=operation_id if trashed else "")
+                final_path = str(image["final_relative_path"] or "")
+                trashed_operation = final_path[len(".ldos/trash/"):].split("/", 1)[0] if final_path.startswith(".ldos/trash/") else ""
+                trashed = bool(asset and asset["lifecycle_state"] == "trashed" and trashed_operation)
+                validate_snapshot(self.db.gallery, snapshot, safe, trash_operation_id=trashed_operation if trashed else "")
                 relative = image["final_relative_path"] if trashed else snapshot["relative_path"]
                 return safe.open_binary(relative), Path(snapshot["relative_path"]).name

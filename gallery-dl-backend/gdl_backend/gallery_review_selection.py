@@ -66,8 +66,15 @@ def validate_snapshot(repo: Any, snapshot: dict[str, Any], safe: SafeSourceRoot,
     return asset
 
 
-def select_review_assets(catalog: Any, directory_ids: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def select_review_assets(catalog: Any, directory_ids: list[str],
+                         asset_ids: list[str] | tuple[str, ...] = ()) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     repo = catalog._repo
+    explicit_assets = []
+    for asset_id in dict.fromkeys(asset_ids):
+        asset = repo.get_asset(asset_id)
+        if asset is None:
+            raise KeyError(asset_id)
+        explicit_assets.append(asset)
     directories = []
     for directory_id in dict.fromkeys(directory_ids):
         directory = repo.get_directory(directory_id)
@@ -76,7 +83,7 @@ def select_review_assets(catalog: Any, directory_ids: list[str]) -> tuple[list[d
         if directory["relative_path"] and excluded_review_path(directory["relative_path"]):
             raise RuntimeError("review_directory_excluded")
         directories.append(directory)
-    source_ids = sorted({row["source_id"] for row in directories})
+    source_ids = sorted({row["source_id"] for row in directories} | {row["source_id"] for row in explicit_assets})
     # Shared with scans, relinks, unregister, annotations and file operations.
     with catalog._filesystem_locks.hold(*(f"source:{sid}" for sid in source_ids)):
         for sid in source_ids:
@@ -107,6 +114,16 @@ def select_review_assets(catalog: Any, directory_ids: list[str]) -> tuple[list[d
                     if excluded_review_path(relative) or not any(not d["relative_path"] or relative.startswith(d["relative_path"] + "/") for d in selected):
                         continue
                     physical = str(Path(source["root_path"]) / relative)
+                    if physical in seen_paths:
+                        continue
+                    seen_paths.add(physical)
+                    snapshots.append(snapshot_asset(repo, asset, safe))
+                for row in (item for item in explicit_assets if item["source_id"] == sid):
+                    # Re-read under the lock so trashed/renamed assets fail closed, like directory rows.
+                    asset = repo.get_asset(row["asset_id"])
+                    if asset is None or asset["source_id"] != sid:
+                        raise RuntimeError("review_asset_changed")
+                    physical = str(Path(source["root_path"]) / asset["relative_path"])
                     if physical in seen_paths:
                         continue
                     seen_paths.add(physical)

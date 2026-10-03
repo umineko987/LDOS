@@ -5,10 +5,9 @@ import mimetypes
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..schemas import ReviewDecisions
 from .dependencies import get_service
 from .errors import ApiError
 from .review import _desktop_review_operation, _desktop_review_response
@@ -16,15 +15,13 @@ from .review import _desktop_review_operation, _desktop_review_response
 
 class GalleryReviewCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    directory_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(min_length=1, max_length=200)
+    directory_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(default_factory=list, max_length=200)
+    asset_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(default_factory=list, max_length=200)
 
 
-class GalleryReviewDecisions(ReviewDecisions):
-    version: int = Field(ge=1)
-
-
-class GalleryReviewApply(BaseModel):
+class GalleryReviewAdopt(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    selected_image_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(default_factory=list, max_length=200)
     version: int = Field(ge=1)
 
 
@@ -66,17 +63,10 @@ def create_gallery_review_router() -> APIRouter:
         if not container.settings.dedup.enabled:
             raise ApiError(409, "dedup_disabled", "去重功能未启用")
         try:
-            result = await asyncio.to_thread(container.gallery_reviews.create, body.directory_ids)
+            result = await asyncio.to_thread(container.gallery_reviews.create, body.directory_ids, body.asset_ids)
         except (KeyError, ValueError, RuntimeError, OSError) as exc:
             raise review_error(exc) from None
         return gallery_review_response(result)
-
-    @router.get("")
-    async def list_reviews(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
-                           view: Literal["desktop"] = Query("desktop"), container: Any = Depends(get_service)):
-        page = await asyncio.to_thread(container.db.gallery_reviews.list, limit=limit, offset=offset)
-        return {**page, "response_profile": "desktop-gallery-review-list-v1",
-                "items": [gallery_review_response(review) for review in page["items"]]}
 
     @router.get("/{review_id}")
     async def get_review(review_id: str, limit: int = Query(12, ge=1, le=50), offset: int = Query(0, ge=0),
@@ -97,15 +87,14 @@ def create_gallery_review_router() -> APIRouter:
         except KeyError as exc:
             raise review_error(exc) from None
 
-    @router.put("/{review_id}/decisions")
-    async def decisions(review_id: str, body: GalleryReviewDecisions, container: Any = Depends(get_service)):
-        def update():
-            repo = container.db.gallery_reviews
-            repo.update_crawl_review_decisions(review_id, [group.model_dump() for group in body.groups], version=body.version)
-            return gallery_review_response(repo.get_crawl_review(review_id))
+    @router.post("/{review_id}/groups/{group_id}/adopt")
+    async def adopt(review_id: str, group_id: str, body: GalleryReviewAdopt, container: Any = Depends(get_service)):
         try:
-            return await asyncio.to_thread(update)
-        except (KeyError, ValueError, RuntimeError) as exc:
+            result = await asyncio.to_thread(
+                container.gallery_reviews.adopt_group, review_id, group_id, body.selected_image_ids, version=body.version,
+            )
+            return gallery_review_response(result)
+        except (KeyError, ValueError, RuntimeError, OSError) as exc:
             raise review_error(exc) from None
 
     @router.post("/{review_id}/retry", status_code=202)
@@ -117,13 +106,13 @@ def create_gallery_review_router() -> APIRouter:
         except (KeyError, RuntimeError) as exc:
             raise review_error(exc) from None
 
-    @router.post("/{review_id}/apply")
-    async def apply(review_id: str, body: GalleryReviewApply, container: Any = Depends(get_service)):
+    @router.post("/{review_id}/finish", status_code=204)
+    async def finish(review_id: str, container: Any = Depends(get_service)):
         try:
-            result = await asyncio.to_thread(container.gallery_reviews.apply, review_id, version=body.version)
-            return gallery_review_response(result)
-        except (KeyError, RuntimeError) as exc:
+            await asyncio.to_thread(container.gallery_reviews.finish, review_id)
+        except KeyError as exc:
             raise review_error(exc) from None
+        return Response(status_code=204)
 
     @router.get("/{review_id}/images/{image_id}")
     async def image_content(review_id: str, image_id: str, container: Any = Depends(get_service)):

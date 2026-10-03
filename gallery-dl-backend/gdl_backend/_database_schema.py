@@ -5,7 +5,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 
-CURRENT_SCHEMA_VERSION = 12
+CURRENT_SCHEMA_VERSION = 13
 SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION = 8
 GALLERY_EXPORT_SCHEMA_VERSION = 9
 GALLERY_RECONCILIATION_SCHEMA_VERSION = 10
@@ -710,3 +710,10 @@ def initialize_schema(
             if "review_snapshot_json" not in columns:
                 conn.execute("ALTER TABLE gallery_file_operation_items ADD COLUMN review_snapshot_json TEXT NOT NULL DEFAULT '{}'")
             conn.execute("UPDATE meta SET value='12' WHERE key='schema_version'")
+
+    if schema_version < 13:
+        # 一次性去重改造：旧审核记录的快照无法与新来源结构对齐，直接全部清空，不做兼容迁移。
+        with transaction() as conn:
+            for table in ("gallery_review_images", "gallery_review_groups", "gallery_reviews"):
+                conn.execute(f"DELETE FROM {table}")
+            conn.execute("UPDATE meta SET value='13' WHERE key='schema_version'")
