@@ -43,7 +43,8 @@
 .personalization-preview-sidebar { display: flex; flex-direction: column; gap: 8px; padding: 10px 6px; border-right: 1px solid var(--ldos-border-weak); background: var(--ldos-glass-surface-secondary); }
 .personalization-preview-sidebar > strong { margin-bottom: 6px; }
 .personalization-preview-sidebar > span { padding: 4px; }
-.personalization-preview-sidebar > .active { color: var(--ldos-accent-highlight); background: var(--ldos-glass-surface-environment); }
+.personalization-preview-sidebar > .active { color: var(--ldos-accent-highlight); }
+.personalization-preview-sidebar > .active::after { content: ""; display: inline-block; width: 0.6em; height: 0.6em; margin-left: 3px; border-radius: 50%; background: currentColor; }
 .personalization-preview-content { display: grid; grid-template-rows: auto 16px minmax(0, 1fr); gap: 10px; padding: 12px; background: var(--ldos-glass-surface-weak); }
 .personalization-preview-toolbar { width: 80%; border: 1px solid var(--ldos-border-weak); background: var(--ldos-glass-surface-secondary); }
 .personalization-preview-images { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 6px; }

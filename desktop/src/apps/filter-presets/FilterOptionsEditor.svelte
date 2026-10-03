@@ -152,7 +152,7 @@
       <div class="filter-toolbar"><button type="button" disabled={disabled} onclick={() => void openPicker()}>选择参考图…</button><button type="button" disabled={disabled || !references.length} onclick={() => onChange({ ...options, reference_asset_ids: [] })}>清空参考图</button></div>
       <ul class="filter-reference-grid" aria-label="已保存到配置的参考图">
         {#each references as id, index (id)}
-          <li class="filter-reference"><img src={gallery.thumbnailUrl(id, 256)} alt="" loading="lazy" /><span id={`${uid}-reference-${index}`}>{id}</span><button type="button" disabled={disabled} aria-describedby={`${uid}-reference-${index}`} onclick={() => remove(id)}>移除参考图</button></li>
+          <li class="filter-reference"><img src={gallery.thumbnailUrl(id, 256)} alt="" crossorigin="anonymous" loading="lazy" decoding="async" /><span id={`${uid}-reference-${index}`}>{id}</span><button type="button" disabled={disabled} aria-describedby={`${uid}-reference-${index}`} onclick={() => remove(id)}>移除参考图</button></li>
         {:else}<li class="filter-help">尚未添加参考图</li>{/each}
       </ul>
     </section>

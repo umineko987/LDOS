@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { clampReviewPan } from "../review/engine";
   import { parseGalleryTxtTagView, type GalleryAssetEntry } from "./model";
   import type {
     GalleryBrowseState,
@@ -196,6 +197,18 @@
     }
   }
 
+  /** 与去重审核一致的视窗查看器手感：缩放下限为适配，平移被图片边缘约束。 */
+  function clampZoomToImage(state: { scale: number; offsetX: number; offsetY: number }): { scale: number; offsetX: number; offsetY: number } {
+    const img = viewerRoot?.querySelector<HTMLImageElement>(".gallery-viewer__stage img");
+    const stage = img?.parentElement;
+    if (!img || !stage || !img.naturalWidth || !img.naturalHeight) return state;
+    return clampReviewPan(state, img.naturalWidth, img.naturalHeight, { width: stage.clientWidth, height: stage.clientHeight });
+  }
+  function resetZoom(): void {
+    scale = 1;
+    offsetX = 0;
+    offsetY = 0;
+  }
   function onWheel(event: WheelEvent): void {
     event.preventDefault();
     const element = event.currentTarget as HTMLElement;
@@ -203,11 +216,16 @@
     const pointerX = event.clientX - rect.left - rect.width / 2;
     const pointerY = event.clientY - rect.top - rect.height / 2;
     const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
-    const nextScale = Math.min(8, Math.max(0.25, scale * factor));
+    const nextScale = Math.min(8, Math.max(1, scale * factor));
     const ratio = nextScale / scale;
-    offsetX = pointerX - (pointerX - offsetX) * ratio;
-    offsetY = pointerY - (pointerY - offsetY) * ratio;
-    scale = nextScale;
+    const next = clampZoomToImage({
+      scale: nextScale,
+      offsetX: pointerX - (pointerX - offsetX) * ratio,
+      offsetY: pointerY - (pointerY - offsetY) * ratio,
+    });
+    scale = next.scale;
+    offsetX = next.offsetX;
+    offsetY = next.offsetY;
   }
 
   function onPointerDown(event: PointerEvent): void {
@@ -222,8 +240,18 @@
 
   function onPointerMove(event: PointerEvent): void {
     if (!dragging) return;
-    offsetX = startOffsetX + event.clientX - dragStartX;
-    offsetY = startOffsetY + event.clientY - dragStartY;
+    // 主键已松开（原生拖拽/系统手势吞掉 pointerup 的场景）：立即结束平移。
+    if ((event.buttons & 1) === 0) {
+      dragging = false;
+      return;
+    }
+    const next = clampZoomToImage({
+      scale,
+      offsetX: startOffsetX + event.clientX - dragStartX,
+      offsetY: startOffsetY + event.clientY - dragStartY,
+    });
+    offsetX = next.offsetX;
+    offsetY = next.offsetY;
   }
 
   function stopDragging(): void {
@@ -332,12 +360,13 @@
       class="gallery-viewer__stage"
       class:gallery-viewer__stage--dragging={dragging}
       role="group"
-      aria-label="图片画布；滚轮缩放，拖动平移"
+      aria-label="图片画布；滚轮缩放，拖动平移，双击复位"
       onwheel={onWheel}
       onpointerdown={onPointerDown}
       onpointermove={onPointerMove}
       onpointerup={stopDragging}
       onpointercancel={stopDragging}
+      ondblclick={resetZoom}
     >
       {#if currentAsset && currentAsset.read_state === "ok" && !imageFailed}
         <img

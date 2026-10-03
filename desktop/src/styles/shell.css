@@ -42,6 +42,7 @@
 }
 
 .workbench-sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -84,6 +85,36 @@
   border-color: rgb(228 184 99 / 0.25);
   color: var(--ldos-accent-highlight);
   background: rgb(228 184 99 / 0.10);
+}
+
+.workbench-sidebar button[aria-current] {
+  border-color: transparent;
+  color: var(--ldos-accent-highlight);
+  background: transparent;
+}
+
+.workbench-nav button:hover:not(:disabled),
+.workbench-settings:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+}
+
+.workbench-nav button:hover:not(:disabled):not([aria-current]),
+.workbench-settings:hover:not(:disabled):not([aria-current]) {
+  color: var(--ldos-accent);
+}
+
+.workbench-nav-dot {
+  top: 0;
+  left: 0;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  visibility: hidden;
+  background: var(--ldos-accent-highlight);
+  pointer-events: none;
+  position: absolute;
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .workbench-sidebar-bottom {
@@ -204,6 +235,7 @@
   .workbench-brand { padding: 0; text-align: center; font-size: 1rem; }
   .workbench-nav button,
   .workbench-settings { flex-direction: column; gap: 4px; padding: 8px 2px; font-size: 0.75rem; }
+  .workbench-nav-dot { width: 7px; height: 7px; }
   .workbench-utilities { flex-direction: column; }
   .workbench-settings-nav { gap: 2px; padding: 8px; }
   .workbench-settings-nav button { padding: 6px 10px; }
@@ -214,5 +246,7 @@
   .workbench-sidebar,
   .about-dialog { background: Canvas; color: CanvasText; }
   .workbench button[aria-current] { border-color: Highlight; color: Highlight; }
+  .workbench-sidebar button[aria-current] { color: Highlight; }
+  .workbench-nav-dot { background: Highlight; }
   .about-backdrop { background: Canvas; }
 }

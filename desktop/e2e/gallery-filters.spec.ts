@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import AxeBuilder from "@axe-core/playwright";
 import { appPage, configureExistingDedup } from "./fixtures/app-state";
 import { bootDesktop, expect, launchApp, test } from "./fixtures/test";
@@ -16,6 +18,46 @@ async function openPanel(page: Parameters<typeof bootDesktop>[0]) {
   await expect(panel).toBeVisible();
   return { gallery, panel, start: panel.getByRole("button", { name: "开始处理", exact: true }) };
 }
+
+test("已选参考图在图库面板和预设编辑器中都使用跨来源图片请求并成功解码", async ({ page }) => {
+  const api = await bootDesktop(page);
+  const origin = new URL(page.url()).origin;
+  // A separate loopback media server enforces the backend's configured-Origin requirement.
+  const media = createServer((request, response) => {
+    response.writeHead(request.headers.origin === origin ? 200 : 403, {
+      "Access-Control-Allow-Origin": origin,
+      "Cache-Control": "no-store",
+      "Content-Type": "image/svg+xml",
+    });
+    response.end('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="gold"/></svg>');
+  });
+  await new Promise<void>((resolve) => media.listen(0, "127.0.0.1", resolve));
+  try {
+    const mediaUrl = `http://127.0.0.1:${(media.address() as AddressInfo).port}/reference.svg`;
+    const { panel } = await openPanel(page);
+    await panel.getByLabel("选择预设", { exact: true }).selectOption("builtin-character");
+    await panel.locator("[data-gallery-review-options] > summary").click();
+    await addReference(panel);
+    const image = panel.getByRole("list", { name: "已保存到配置的参考图" }).locator("img");
+    // Desktop uses a different API origin; keep the component's image attributes unchanged.
+    await image.evaluate((element: HTMLImageElement, url) => { element.src = url; }, mediaUrl);
+    await image.scrollIntoViewIfNeeded();
+    await expect.poll(() => image.evaluate((element: HTMLImageElement, url) => element.currentSrc === url && element.complete && element.naturalWidth > 0, mediaUrl)).toBe(true);
+    await panel.getByRole("button", { name: "取消", exact: true }).click();
+
+    await launchApp(page, "filter-presets");
+    const settings = appPage(page, "filter-presets");
+    await settings.getByRole("button", { name: "角色 LoRA", exact: true }).click();
+    await addReference(settings);
+    const savedImage = settings.getByRole("list", { name: "已保存到配置的参考图" }).locator("img");
+    await savedImage.evaluate((element: HTMLImageElement, url) => { element.src = url; }, mediaUrl);
+    await savedImage.scrollIntoViewIfNeeded();
+    await expect.poll(() => savedImage.evaluate((element: HTMLImageElement, url) => element.currentSrc === url && element.complete && element.naturalWidth > 0, mediaUrl)).toBe(true);
+    expect(api.unhandled).toEqual([]);
+  } finally {
+    await new Promise<void>((resolve, reject) => media.close((error) => error ? reject(error) : resolve()));
+  }
+});
 
 test("图库调用同一选择器：独立勾选、原目录搜索滚动与同一个处理面板完整恢复", async ({ page }) => {
   const api = await bootDesktop(page);

@@ -947,7 +947,7 @@ const ENGLISH_TRANSLATIONS = new Map<string, string>([
   ["。原文件未从当前视图移除。", ". The original file was not removed from the current view."],
   ["无法继续加载结果：", "Unable to load more results:"],
   ["。可以再次使用下一张重试。", ". Use Next again to retry."],
-  ["图片画布；滚轮缩放，拖动平移", "Image canvas; scroll to zoom and drag to pan"],
+  ["图片画布；滚轮缩放，拖动平移，双击复位", "Image canvas; scroll to zoom, drag to pan, and double-click to reset"],
   ["无法显示", "Unable to display"],
   ["显示工具", "Show controls"],
   ["调整 TXT 面板宽度；当前", "Resize TXT panel; current width"],

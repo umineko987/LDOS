@@ -126,6 +126,40 @@
     if (changed) void focusPage(change.appId);
   }
 
+  let sidebarEl = $state<HTMLElement>();
+  let navDot = $state<HTMLElement>();
+  let navDotPlaced = false;
+  let lastNavDotLanguage: string | null = null;
+
+  function placeNavDot(animate: boolean): void {
+    const label = sidebarEl?.querySelector<HTMLElement>("button[aria-current] > span:last-child");
+    if (!sidebarEl || !navDot || !label) return;
+    const sidebarRect = sidebarEl.getBoundingClientRect();
+    const labelRect = label.getBoundingClientRect();
+    const size = navDot.offsetWidth;
+    const x = labelRect.right - sidebarRect.left + 10;
+    const y = labelRect.top - sidebarRect.top + labelRect.height / 2 - size / 2;
+    navDot.style.transition = animate ? "" : "none";
+    navDot.style.transform = `translate(${x}px, ${y}px)`;
+    if (!animate) {
+      void navDot.offsetHeight;
+      navDot.style.transition = "";
+    }
+    navDot.style.visibility = "visible";
+    navDotPlaced = true;
+  }
+
+  $effect(() => {
+    void snapshot.focusedAppId;
+    const languageChanged = lastNavDotLanguage !== null && $language !== lastNavDotLanguage;
+    lastNavDotLanguage = $language;
+    if (languageChanged) {
+      // localizeUi rewrites label text synchronously on store change; measure without sliding.
+      placeNavDot(false);
+      return;
+    }
+    placeNavDot(navDotPlaced);
+  });
   function navigate(appId: ApplicationId): void {
     if (!picker && !restoringPicker && appId !== snapshot.focusedAppId) router?.navigate(appId);
   }
@@ -144,12 +178,15 @@
   onMount(() => {
     const previousMotion = document.documentElement.dataset.motion;
     document.documentElement.dataset.motion = preferences.animations;
+    const repositionNavDot = () => placeNavDot(false);
+    window.addEventListener("resize", repositionNavDot);
     router = createHashRouter(handleRoute);
     router.start();
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => {
       destroyed = true;
       if (picker) finishPicker(picker, null);
+      window.removeEventListener("resize", repositionNavDot);
       router?.stop();
       router = null;
       window.removeEventListener("beforeunload", onBeforeUnload);
@@ -163,7 +200,7 @@
   <Wallpaper scene={preferences.wallpaperColor} />
   <button type="button" class="skip-link" data-skip-link inert={aboutOpen || !!picker} onclick={() => void focusPage(snapshot.focusedAppId)}>跳到当前应用</button>
 
-  <aside class="workbench-sidebar" inert={aboutOpen || !!picker}>
+  <aside class="workbench-sidebar" inert={aboutOpen || !!picker} bind:this={sidebarEl}>
     <strong class="workbench-brand">LDOS</strong>
     <nav class="workbench-nav" aria-label="主导航">
       {#each primaryPages as item}
@@ -172,6 +209,7 @@
         </button>
       {/each}
     </nav>
+    <span class="workbench-nav-dot" data-nav-dot aria-hidden="true" bind:this={navDot}></span>
     <div class="workbench-sidebar-bottom">
       <button type="button" class="workbench-settings" data-nav-settings aria-current={inSettings ? "true" : undefined} onclick={() => navigate(lastSettingsPage)}>
         <Icon name="sliders" size={20} /><span>设置</span>
