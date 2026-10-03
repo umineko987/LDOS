@@ -68,7 +68,7 @@ export function reviewPath(reviewId: string, suffix = ""): string {
 
 export function reviewWorkspacePath(reviewId: string, filter: ReviewFilter, offset = 0): string {
   if (!Number.isInteger(offset) || offset < 0 || offset > 10_000) throw new TypeError("invalid_review_offset");
-  return `${reviewPath(reviewId)}?limit=${REVIEW_PAGE_LIMIT}&offset=${offset}&view=desktop${filter ? `&kind=${encodeURIComponent(filter)}` : ""}`;
+  return `${reviewPath(reviewId)}?limit=${REVIEW_PAGE_LIMIT}&offset=${offset}&view=desktop${filter ? `&classification=${encodeURIComponent(filter)}` : ""}`;
 }
 
 export function createReviewService(api: ApiClient): ReviewService {
@@ -78,7 +78,7 @@ export function createReviewService(api: ApiClient): ReviewService {
     },
     async installModels(proxyUrl: string, signal: AbortSignal, models?: readonly ModelInstallKey[]) {
       const normalizedProxy = normalizeModelProxyUrl(proxyUrl);
-      if (models && (!models.length || models.length > 3 || models.some((key) => !["dedup", "monochrome", "ccip"].includes(key)))) {
+      if (models && (!models.length || models.length > 3 || models.some((key) => !["dedup", "completeness", "ccip"].includes(key)))) {
         throw new TypeError("invalid_model_selection");
       }
       return sanitizeModelSetup(await api.post(`${REVIEW_ENDPOINTS.models}/install`, {

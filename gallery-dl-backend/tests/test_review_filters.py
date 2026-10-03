@@ -186,8 +186,79 @@ class FilterReviewsTests(unittest.TestCase):
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM gallery_reviews").fetchone()[0], 0)
             self.assertEqual(self.container.gallery_file_operations.list_trash()["operations"], [])
 
+    def test_mixed_whole_groups_classification_paging_summary_and_shared_adoption(self):
+        from PIL import Image
+        source = self.sources[0]
+        for name in ("rough-1.png", "rough-2.png"):
+            Image.new("RGB", (8, 8), "blue").save(Path(source["root_path"]) / name)
+        (Path(source["root_path"]) / "unreadable.png").write_bytes(b"not an image")
+        self.container.gallery_catalog.scan_source(source["source_id"])
+        config = {"preset_name": "分类", "options": options(basic_dedup=False, filter_sketch=True, filter_monochrome=True)}
+        with mock.patch("gdl_backend.gallery_review.require_filter_capabilities"):
+            review = self.manager.create(self.directory_ids, filter_config=config)
+        rid = review["review_id"]
+        self.container.db.gallery_reviews.save_preset("已修改", options(), preset_id="builtin-style")
+        async def runner(claimed):
+            result = fixtures.selected_manifest(claimed)
+            self.assertEqual(claimed["filter_config"], config)
+            images = result["groups"][0]["items"]
+            rough = [i for i in images if i["relative_path"].endswith(("rough-1.png", "rough-2.png"))]
+            unreadable = [i for i in images if i["relative_path"].endswith("unreadable.png")]
+            mixed = [i for i in images if i not in rough + unreadable]
+            mixed[1]["metadata"]["classification"] = "rough"
+            mixed[2]["metadata"]["classification"] = "monochrome"
+            for i in rough: i["metadata"]["classification"] = "rough"
+            unreadable[0]["readable"] = False
+            result.update(filter_config=claimed["filter_config"], groups=[
+                {"id": "mixed", "kind": "duplicate", "items": mixed},
+                {"id": "rough-pair", "kind": "duplicate", "items": rough},
+                {"id": "unreadable", "kind": "unreadable", "items": unreadable},
+            ])
+            return result, ""
+        self.manager.runner = runner
+        self.assertTrue(asyncio.run(self.manager.run_once()))
+        self.assertEqual(self.container.gallery_file_operations.list_trash()["operations"], [])
+        repo = self.container.db.gallery_reviews
+        with self.client() as client:
+            route = f"/api/v1/gallery/reviews/{rid}"
+            all_page = client.get(route).json()
+            rough_page = client.get(route, params={"classification": "rough", "limit": 1}).json()
+            next_page = client.get(route, params={"classification": "rough", "limit": 1, "offset": 1}).json()
+            mono_page = client.get(route, params={"classification": "monochrome"}).json()
+            self.assertEqual((all_page["groups"]["total"], rough_page["groups"]["total"], mono_page["groups"]["total"]), (3, 2, 1))
+            mixed = all_page["groups"]["items"][0]
+            self.assertEqual(mixed, rough_page["groups"]["items"][0])
+            self.assertEqual(mixed, mono_page["groups"]["items"][0])
+            self.assertEqual(len(mixed["images"]), 3)
+            self.assertEqual(len(next_page["groups"]["items"][0]["images"]), 2)
+            self.assertEqual(all_page["groups"]["items"][2]["kind"], "unreadable")
+            for page in (all_page, rough_page, next_page, mono_page):
+                self.assertEqual((page["totalImageCount"], page["totalGroupCount"], page["automaticRejectedImageCount"], page["filteredImageCount"]), (6, 3, 0, 0))
+                self.assertEqual(page["filter_config"], config)
+            keep = [i["id"] for i in mixed["images"][:2]]
+            response = client.post(route + "/groups/mixed/adopt", json={"version": all_page["version"], "selected_image_ids": keep})
+            self.assertEqual(response.status_code, 200, response.text)
+            for classification in (None, "rough", "monochrome"):
+                page = client.get(route, params={"classification": classification} if classification else {}).json()
+                group = page["groups"]["items"][0]
+                self.assertEqual(group["id"], "mixed")
+                self.assertTrue(group["decided"])
+                self.assertEqual([i["id"] for i in group["images"] if i["selected"]], keep)
+                self.assertEqual((page["decidedGroupCount"], page["rejectedImageCount"], page["automaticRejectedImageCount"]), (1, 1, 0))
+
+    def test_old_manifest_without_classification_is_retained_in_all(self):
+        review = self.manager.create(self.directory_ids)
+        async def runner(claimed):
+            return fixtures.selected_manifest(claimed), ""
+        self.manager.runner = runner
+        self.assertTrue(asyncio.run(self.manager.run_once()))
+        repo = self.container.db.gallery_reviews
+        self.assertEqual(repo.list_crawl_review_groups(review["review_id"])["total"], 1)
+        self.assertEqual(repo.list_crawl_review_groups(review["review_id"], classification="rough")["total"], 0)
+        self.assertEqual(repo.get_crawl_review(review["review_id"])["total_image_count"], 3)
+        self.assertEqual(self.container.gallery_file_operations.list_trash()["operations"], [])
     def test_filtered_winner_and_all_filtered_recycle_once_with_txt_and_restore(self):
-        config = {"preset_name": "stub", "options": options(filter_monochrome=True, similarity_groups=False)}
+        config = {"preset_name": "stub", "options": options(filter_character=True, similarity_groups=False, reference_asset_ids=[self.asset_ids()[-1]])}
         with mock.patch("gdl_backend.gallery_review.require_filter_capabilities"):
             review = self.manager.create(self.directory_ids, filter_config=config)
         rid = review["review_id"]
@@ -196,7 +267,7 @@ class FilterReviewsTests(unittest.TestCase):
             images = result["groups"][0]["items"]
             result.update(filter_config=claimed["filter_config"], groups=[],
                           auto_groups=[{"id": "dedup", "kind": "exact", "winner": images[0], "rejected_items": [images[1]]}],
-                          filtered_items=[{**images[n], "reason": "filter_monochrome"} for n in (0, 2)])
+                          filtered_items=[{**images[n], "reason": "filter_character"} for n in (0, 2)])
             return result, ""
         self.manager.runner = runner
         with mock.patch.object(self.container.gallery_file_operations, "purge_trash", side_effect=AssertionError("no purge")):
@@ -224,21 +295,47 @@ class FilterReviewsTests(unittest.TestCase):
             self.assertTrue((Path(snapshot["root_path"]) / snapshot["relative_path"]).is_file())
         self.assertEqual(self.container.gallery_file_operations.list_trash()["operations"], [])
 
+    def test_auxiliary_manifest_validation_never_accepts_auto_exclusion(self):
+        config = {"preset_name": "分类", "options": options(filter_monochrome=True, filter_sketch=True)}
+        claimed = {"review_id": "validation", "filter_config": config,
+                   "images": [{"asset_id": "image", "source_id": "source", "relative_path": "image.png"}]}
+        manifest = fixtures.selected_manifest(claimed)
+        manifest["groups"][0]["kind"] = "single"
+        manifest["filter_config"] = copy.deepcopy(config)
+        image = manifest["groups"][0]["items"][0]
+        for classification in ("rough", "monochrome"):
+            image["metadata"]["classification"] = classification
+            DedupReviewManager._validate_manifest(claimed, manifest)
+            disabled = copy.deepcopy(claimed)
+            disabled["filter_config"]["options"]["filter_sketch" if classification == "rough" else "filter_monochrome"] = False
+            bad = copy.deepcopy(manifest)
+            bad["filter_config"] = disabled["filter_config"]
+            with self.assertRaisesRegex(ValueError, "未启用"):
+                DedupReviewManager._validate_manifest(disabled, bad)
+        image["metadata"]["classification"] = "polished"
+        with self.assertRaisesRegex(ValueError, "分类无效"):
+            DedupReviewManager._validate_manifest(claimed, manifest)
+        image["metadata"].pop("classification")
+        for reason in ("filter_monochrome", "filter_sketch"):
+            bad = {**manifest, "groups": [], "filtered_items": [{**image, "reason": reason}]}
+            with self.assertRaisesRegex(ValueError, "自动过滤原因无效"):
+                DedupReviewManager._validate_manifest(claimed, bad)
+
     def test_manifest_coverage_duplicates_configuration_and_winner_validation(self):
-        claimed = {"review_id": "test", "filter_config": {"preset_name": "stub", "options": options(filter_monochrome=True)},
+        claimed = {"review_id": "test", "filter_config": {"preset_name": "stub", "options": options(filter_character=True)},
                    "images": [{"asset_id": str(n), "source_id": "source", "relative_path": f"{n}.png"} for n in range(3)]}
         manifest = fixtures.selected_manifest(claimed)
         images = manifest["groups"][0]["items"]
         manifest.update(filter_config=copy.deepcopy(claimed["filter_config"]),
                         groups=[{"id": "single", "kind": "single", "items": [images[2]]}],
                         auto_groups=[{"id": "dedup", "kind": "exact", "winner": images[0], "rejected_items": [images[1]]}],
-                        filtered_items=[{**images[0], "reason": "filter_monochrome"}])
+                        filtered_items=[{**images[0], "reason": "filter_character"}])
         DedupReviewManager._validate_manifest(claimed, manifest)
         for change in ("missing", "double", "unknown", "fake_manual", "outside", "winner", "unenabled", "config", "basic", "similarity"):
             bad = copy.deepcopy(manifest)
             request = copy.deepcopy(claimed)
             if change == "missing": bad["groups"] = []
-            elif change == "double": bad["filtered_items"].append({**images[1], "reason": "filter_monochrome"})
+            elif change == "double": bad["filtered_items"].append({**images[1], "reason": "filter_character"})
             elif change == "unknown": bad["auto_groups"][0]["kind"] = "filter_monochrome"
             elif change == "fake_manual": bad["groups"][0]["kind"] = "auto_filtered"
             elif change == "outside": bad["filtered_items"][0]["relative_path"] = "/etc/passwd"

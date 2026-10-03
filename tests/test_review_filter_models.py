@@ -30,15 +30,19 @@ class FilterInferenceTests(unittest.TestCase):
             infos.append({"path": str(path), "frames": 1})
         return infos
 
-    def test_trained_monochrome_score_threshold_retains_boundary_and_color(self):
-        with tempfile.TemporaryDirectory() as directory:
-            infos = self.image_infos(Path(directory), ["red", "blue", "gray", "black"])
-            runtime = mock.Mock()
-            runtime.monochrome_score.side_effect = [0.02, 0.7999, 0.8, 0.99]
-            result = filters.filter_images(infos, options(filter_monochrome=True), [object()], models=runtime)
-            self.assertEqual(result, [{"image": info, "reason": "filter_monochrome"} for info in infos[2:]])
-            runtime.feature.assert_not_called()
-            runtime.distances.assert_not_called()
+    def test_auxiliary_classes_independent_switches_and_one_inference_per_image(self):
+        for mono, sketch in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(mono=mono, sketch=sketch), tempfile.TemporaryDirectory() as directory:
+                infos = self.image_infos(Path(directory), ["red", "blue", "gray"])
+                runtime = mock.Mock()
+                runtime.completeness.side_effect = ["polished", "rough", "monochrome"]
+                result = filters.filter_images(infos, options(filter_monochrome=mono, filter_sketch=sketch), [], models=runtime)
+                self.assertEqual(result, [])
+                self.assertEqual([info.get("classification") for info in infos],
+                                 [None, "rough" if sketch else None, "monochrome" if mono else None])
+                self.assertEqual(runtime.completeness.call_count, 3 if mono or sketch else 0)
+                runtime.feature.assert_not_called()
+                runtime.distances.assert_not_called()
 
     def test_ccip_any_reference_and_conservative_band_keep_only_strong_nonmatch_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -66,15 +70,15 @@ class FilterInferenceTests(unittest.TestCase):
                 calls.append(path)
                 return Image.open(io.BytesIO(held.getvalue())) if path == infos[0]["path"] else Image.open(path)
             runtime = mock.Mock()
-            runtime.monochrome_score.side_effect = [0.95, 0.1, 0.1]
+            runtime.completeness.side_effect = ["monochrome", "rough", "polished"]
             runtime.feature.return_value = np.ones(768, dtype=np.float32)
-            runtime.distances.side_effect = [np.array([0.8]), np.array([0.2])]
-            result = filters.filter_images(infos, options(filter_monochrome=True, filter_character=True),
+            runtime.distances.side_effect = [np.array([0.8]), np.array([0.8]), np.array([0.2])]
+            result = filters.filter_images(infos, options(filter_monochrome=True, filter_sketch=True, filter_character=True),
                 [Image.new("RGB", (12, 12), "purple")], models=runtime, open_image=open_held)
-            self.assertEqual([entry["reason"] for entry in result], ["filter_monochrome", "filter_character"])
+            self.assertEqual([entry["reason"] for entry in result], ["filter_character", "filter_character"])
             self.assertEqual([entry["image"] for entry in result], infos[:2])
             self.assertNotIn("multi", calls)
-            self.assertEqual(runtime.feature.call_count, 3)  # Reference + two color survivors only.
+            self.assertEqual(runtime.feature.call_count, 4)  # Reference + all three classified inputs still run CCIP.
 
     def test_only_enabled_models_load_once_and_disabled_filters_never_touch_references(self):
         with mock.patch.object(filters, "FilterModels", return_value=mock.sentinel.runtime) as load:
@@ -83,6 +87,12 @@ class FilterInferenceTests(unittest.TestCase):
             load.assert_not_called()
             self.assertIs(filters.require_filter_capabilities(options(filter_character=True), Path("models")), mock.sentinel.runtime)
             load.assert_called_once_with(Path("models"), ["ccip"])
+            load.reset_mock()
+            filters.require_filter_capabilities(options(filter_monochrome=True, filter_sketch=True), Path("models"))
+            load.assert_called_once_with(Path("models"), ["completeness"])
+            load.reset_mock()
+            filters.require_filter_capabilities(options(filter_sketch=True), Path("models"))
+            load.assert_called_once_with(Path("models"), ["completeness"])
         for error in (ImportError("dependency missing"), RuntimeError("corrupt model")):
             with mock.patch.object(filters, "FilterModels", side_effect=error), self.assertRaises(filters.FilterConfigurationError):
                 filters.require_filter_capabilities(options(filter_monochrome=True), Path("models"))
@@ -101,36 +111,45 @@ class FilterInferenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             data = b"model fixture"
-            files = {"monochrome": (("monochrome.onnx", len(data), hashlib.sha256(data).hexdigest(), "https://fixed"),)}
+            filename = models.MODEL_FILES["completeness"][0][0]
+            files = {"completeness": ((filename, len(data), hashlib.sha256(data).hexdigest(), "https://fixed"),)}
             with mock.patch.object(models, "MODEL_FILES", files):
+                old = root / "review_filters" / "monochrome.onnx"
+                old.parent.mkdir()
+                old.write_bytes(data)
                 with self.assertRaisesRegex(RuntimeError, "缺少"):
-                    models.verify_weights(root, "monochrome")
-                path = models.model_paths(root, "monochrome")[0]
-                path.parent.mkdir()
+                    models.verify_weights(root, "completeness")
+                path = models.model_paths(root, "completeness")[0]
+                path.write_bytes(b"x")
+                with self.assertRaisesRegex(RuntimeError, "大小"):
+                    models.verify_weights(root, "completeness")
                 path.write_bytes(b"x" * len(data))
                 with self.assertRaisesRegex(RuntimeError, "SHA-256"):
-                    models.verify_weights(root, "monochrome")
+                    models.verify_weights(root, "completeness")
                 path.write_bytes(data)
-                models.verify_weights(root, "monochrome")
+                models.verify_weights(root, "completeness")
                 path.unlink()
-                other = root / "other"
-                other.write_bytes(data)
-                path.symlink_to(other)
+                path.symlink_to(old)
                 with self.assertRaisesRegex(RuntimeError, "链接"):
-                    models.verify_weights(root, "monochrome")
+                    models.verify_weights(root, "completeness")
+                self.assertTrue(old.is_file())
 
     def test_runtime_uses_official_metric_and_rejects_invalid_model_outputs(self):
         runtime = models.FilterModels.__new__(models.FilterModels)
         runtime.np = np
         mono, feat, metric = mock.Mock(), mock.Mock(), mock.Mock()
-        runtime.sessions = {"monochrome": mono, "ccip_feat": feat, "ccip_metric": metric}
+        runtime.sessions = {"completeness_mobilenetv3_v2.2_dist": mono, "ccip_feat": feat, "ccip_metric": metric}
         image = Image.new("RGB", (4, 4), "red")
-        mono.run.return_value = [np.array([[0.9, 0.1]], dtype=np.float32)]
-        self.assertAlmostEqual(runtime.monochrome_score(image), 0.9)
-        for bad in (np.array([[np.nan, 0.1]]), np.array([[1.2, 0.1]]), np.zeros((1, 3))):
+        self.assertEqual(models.COMPLETENESS_LABELS, ("polished", "rough", "monochrome"))
+        for scores, label in (([0.4, 0.3, 0.3], "polished"), ([0.1, 0.46, 0.44], "rough"), ([0.3, 0.3, 0.4], "monochrome")):
+            mono.run.return_value = [np.array([scores], dtype=np.float32)]
+            self.assertEqual(runtime.completeness(image), label)
+        self.assertEqual(mono.run.call_args.args[0], ["output"])
+        self.assertEqual(mono.run.call_args.args[1]["input"].shape, (1, 3, 384, 384))
+        for bad in (np.array([[np.nan, 0.1, 0.2]]), np.zeros((1, 2)), np.zeros((2, 3))):
             mono.run.return_value = [bad]
             with self.assertRaises(RuntimeError):
-                runtime.monochrome_score(image)
+                runtime.completeness(image)
         feat.run.return_value = [np.ones((1, 768), dtype=np.float32)]
         feature = runtime.feature(image)
         metric.run.return_value = [np.array([[0, 0.42], [0.42, 0]], dtype=np.float32)]
@@ -150,16 +169,16 @@ class FilterInferenceTests(unittest.TestCase):
             # The same downloader used by SSCD/DINO, but no deep extractor is loaded.
             sys.path.insert(0, str(ROOT / "dedup"))
             import dedup_models
-            checks = {"monochrome": {"available": True, "reason": ""}}
-            command = ["check", "--model-dir", str(root), "--models", "monochrome"]
+            checks = {"completeness": {"available": True, "reason": ""}}
+            command = ["check", "--model-dir", str(root), "--models", "completeness"]
             with mock.patch.object(sys, "argv", command), mock.patch.object(models, "check_models", return_value=checks), \
                  mock.patch.object(dedup_models, "download_file") as download:
                 self.assertEqual(models.main(), 0)
                 download.assert_not_called()
                 with mock.patch.object(sys, "argv", command + ["--prepare", "--dedup-dir", str(ROOT / "dedup")]):
                     self.assertEqual(models.main(), 0)
-                entry = models.MODEL_FILES["monochrome"][0]
-                download.assert_called_once_with(entry[3], models.model_paths(root, "monochrome")[0], entry[2])
+                entry = models.MODEL_FILES["completeness"][0]
+                download.assert_called_once_with(entry[3], models.model_paths(root, "completeness")[0], entry[2])
 
 
 if __name__ == "__main__":

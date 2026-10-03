@@ -27,11 +27,11 @@ async function reference(panel: ReturnType<typeof appPage>) {
   await expect(panel).toBeVisible();
 }
 async function confirm(panel: ReturnType<typeof appPage>) {
-  await panel.getByRole("button", { name: /^(准备已选过滤模型|重试准备模型)$/ }).click();
+  await panel.getByRole("button", { name: /^(准备已选模型|重试准备模型)$/ }).click();
   return panel.locator("[data-filter-model-confirmation]");
 }
 
-test("Gallery explicitly prepares only missing checked filters; sketch still requires cancellation", async ({ page }) => {
+test("Gallery prepares shared completeness once for both categories and CCIP independently", async ({ page }) => {
   const api = await bootDesktop(page);
   const { panel, start } = await galleryPanel(page);
   await panel.getByRole("checkbox", { name: "非目标角色", exact: true }).check();
@@ -53,12 +53,11 @@ test("Gallery explicitly prepares only missing checked filters; sketch still req
   await confirmation.getByRole("button", { name: "确认准备", exact: true }).click();
   await expect(panel.getByRole("progressbar")).toBeVisible();
   await expect(start).toBeDisabled();
-  expect(api.requests.find(({ method, path }) => method === "POST" && path === install)?.body).toEqual({ proxy_url: "http://127.0.0.1:7890", models: ["monochrome", "ccip"] });
-  await expect(panel.locator('[data-filter-capability="filter_monochrome"]')).toContainText("过滤能力已就绪");
-  await expect(panel.locator('[data-filter-capability="filter_character"]')).toContainText("过滤能力已就绪");
-  await expect(start).toBeDisabled();
-  await expect(panel.getByRole("checkbox", { name: "素描", exact: true })).toBeChecked();
-  await panel.getByRole("checkbox", { name: "素描", exact: true }).uncheck();
+  expect(api.requests.find(({ method, path }) => method === "POST" && path === install)?.body).toEqual({ proxy_url: "http://127.0.0.1:7890", models: ["completeness", "ccip"] });
+  await expect(panel.locator('[data-filter-capability="filter_monochrome"]')).toContainText("能力已就绪");
+  await expect(panel.locator('[data-filter-capability="filter_character"]')).toContainText("能力已就绪");
+  await expect(panel.getByRole("checkbox", { name: "线稿/草图", exact: true })).toBeChecked();
+  await expect(panel.locator('[data-filter-capability="filter_sketch"]')).toContainText("能力已就绪");
   await expect(start).toBeEnabled();
   await expect(panel.getByRole("list", { name: "已保存到配置的参考图" })).toContainText("gal-asset-02");
   expect(api.count("PUT", "/api/v1/gallery/review-presets")).toBe(0);
@@ -75,14 +74,14 @@ test("Settings prepares CCIP without editing builtin presets; Gallery refreshes 
   await expect(settings.getByRole("checkbox", { name: "非目标角色", exact: true })).toBeEnabled();
   const confirmation = await confirm(settings);
   await expect(confirmation.getByRole("list")).toContainText("150.3 MB");
-  await expect(confirmation.getByRole("list")).not.toContainText("单色模型");
+  await expect(confirmation.getByRole("list")).not.toContainText("完成度分类模型");
   await page.locator("[data-language-toggle]").evaluate((element: HTMLElement) => element.click());
   await expect(confirmation.getByRole("button", { name: "Confirm preparation", exact: true })).toBeVisible();
   await expect(confirmation.getByLabel("Download proxy (optional)")).toBeVisible();
   await page.locator("[data-language-toggle]").evaluate((element: HTMLElement) => element.click());
   await confirmation.getByRole("button", { name: "确认准备", exact: true }).click();
   await expect(settings.getByRole("progressbar")).toBeVisible();
-  await expect(settings.locator('[data-filter-capability="filter_character"]')).toContainText("过滤能力已就绪");
+  await expect(settings.locator('[data-filter-capability="filter_character"]')).toContainText("能力已就绪");
   expect(api.requests.find(({ method, path }) => method === "POST" && path === install)?.body).toEqual({ proxy_url: "", models: ["ccip"] });
   const { panel, start } = await galleryPanel(page, "builtin-character");
   await reference(panel);
@@ -95,7 +94,7 @@ test("Settings prepares CCIP without editing builtin presets; Gallery refreshes 
 test("Real install errors and failed capability refresh stay blocked and can be retried", async ({ page }) => {
   const api = await bootDesktop(page);
   const { panel, start } = await galleryPanel(page);
-  await panel.getByRole("checkbox", { name: "素描", exact: true }).uncheck();
+  await panel.getByRole("checkbox", { name: "线稿/草图", exact: true }).uncheck();
   let fail = true;
   await page.route(`**${install}`, async (route) => {
     if (fail) { fail = false; await route.fulfill({ status: 503, json: { error: { code: "model_download_failed", message: "Actual download failure" } } }); }
@@ -109,20 +108,20 @@ test("Real install errors and failed capability refresh stay blocked and can be 
   await panel.getByRole("button", { name: "确认准备", exact: true }).click();
   await expect(panel.getByRole("alert").filter({ hasText: "Offline probe failed" })).toBeVisible();
   await expect(start).toBeDisabled();
-  await expect(panel.getByRole("checkbox", { name: "单色 / 灰度", exact: true })).toBeChecked();
+  await expect(panel.getByRole("checkbox", { name: "单色", exact: true })).toBeChecked();
   await page.unroute(`**${models}`);
-  await panel.getByRole("button", { name: "刷新过滤能力", exact: true }).click();
+  await panel.getByRole("button", { name: "刷新模型能力", exact: true }).click();
   await expect(start).toBeEnabled();
-  expect(api.requests.filter(({ method, path }) => method === "POST" && path === install).every(({ body }) => JSON.stringify(body).includes('"models":["monochrome"]'))).toBe(true);
+  expect(api.requests.filter(({ method, path }) => method === "POST" && path === install).every(({ body }) => JSON.stringify(body).includes('"models":["completeness"]'))).toBe(true);
   expect(api.unhandled).toEqual([]);
 });
 
 test("Filtering-only ready does not claim SSCD/DINO are enabled or bypass the backend entry gate", async ({ page }) => {
   const api = await bootDesktop(page, { baseModelsReady: false });
   const { panel, start } = await galleryPanel(page);
-  for (const name of ["素描", "基础去重", "相似图片分组"]) await panel.getByRole("checkbox", { name, exact: true }).uncheck();
+  for (const name of ["线稿/草图", "基础去重", "相似图片分组"]) await panel.getByRole("checkbox", { name, exact: true }).uncheck();
   await (await confirm(panel)).getByRole("button", { name: "确认准备", exact: true }).click();
-  await expect(panel.locator('[data-filter-capability="filter_monochrome"]')).toContainText("过滤能力已就绪");
+  await expect(panel.locator('[data-filter-capability="filter_monochrome"]')).toContainText("能力已就绪");
   await expect(start).toBeDisabled();
   await expect(panel.locator("[data-gallery-review-base-blocker]")).toContainText("即使本次仅过滤");
   await panel.getByRole("button", { name: "取消", exact: true }).click();
@@ -136,7 +135,7 @@ test("Filtering-only ready does not claim SSCD/DINO are enabled or bypass the ba
   await review.getByRole("button", { name: "开始下载", exact: true }).click();
   await expect(setup.locator("summary")).toContainText("已启用");
   expect(api.requests.filter(({ method, path }) => method === "POST" && path === install).map(({ body }) => body)).toEqual([
-    { proxy_url: "", models: ["monochrome"] }, { proxy_url: "" },
+    { proxy_url: "", models: ["completeness"] }, { proxy_url: "" },
   ]);
   expect(api.unhandled).toEqual([]);
 });
@@ -144,7 +143,7 @@ test("Filtering-only ready does not claim SSCD/DINO are enabled or bypass the ba
 test("Polling pauses when inactive and preset switches cannot overwrite the current draft", async ({ page }) => {
   const api = await bootDesktop(page);
   const { panel } = await galleryPanel(page);
-  await panel.getByRole("checkbox", { name: "素描", exact: true }).uncheck();
+  await panel.getByRole("checkbox", { name: "线稿/草图", exact: true }).uncheck();
   await (await confirm(panel)).getByRole("button", { name: "确认准备", exact: true }).click();
   await expect(panel.getByRole("progressbar")).toBeVisible();
   await panel.getByRole("button", { name: "选择参考图…", exact: true }).click();
@@ -157,7 +156,7 @@ test("Polling pauses when inactive and preset switches cannot overwrite the curr
   await picker.getByRole("button", { name: "取消选图", exact: true }).click();
   await expect(panel).toBeVisible();
   await panel.getByLabel("选择预设", { exact: true }).selectOption("builtin-character");
-  await expect(panel.getByRole("checkbox", { name: "单色 / 灰度", exact: true })).not.toBeChecked();
+  await expect(panel.getByRole("checkbox", { name: "单色", exact: true })).not.toBeChecked();
   await reference(panel);
   await panel.getByRole("button", { name: "另存为预设", exact: true }).click();
   await panel.getByLabel("新预设名称").fill("Temporary draft");

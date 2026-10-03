@@ -24,8 +24,8 @@ export type FilterCapabilities = Readonly<Record<FilterCapabilityKey, Readonly<{
 
 export const FILTER_LABELS = Object.freeze({
   basic_dedup: "基础去重",
-  filter_monochrome: "单色 / 灰度",
-  filter_sketch: "素描",
+  filter_monochrome: "单色",
+  filter_sketch: "线稿/草图",
   filter_character: "非目标角色",
   similarity_groups: "相似图片分组",
 });
@@ -115,16 +115,17 @@ export function sanitizeFilterCapabilities(raw: unknown): FilterCapabilities {
   return Object.freeze(result);
 }
 
-export type FilterModelKey = "monochrome" | "ccip";
+export type FilterModelKey = "completeness" | "ccip";
 export const FILTER_MODELS = Object.freeze({
-  monochrome: { label: "单色模型", megabytes: 16.8 },
+  completeness: { label: "完成度模型（线稿/草图、单色共用）", megabytes: 16.8 },
   ccip: { label: "角色模型（CCIP feat + metric）", megabytes: 150.3 },
 });
 
-/** Only explicitly selected, unready filters; sketch never has a downloadable model. */
+/** Only explicitly selected, unready options; both auxiliary classes share one model. */
 export function requiredFilterModels(options: FilterOptions, capabilities: FilterCapabilities | null): readonly FilterModelKey[] {
   const models: FilterModelKey[] = [];
-  if (options.filter_monochrome && capabilities?.filter_monochrome.available !== true) models.push("monochrome");
+  if ((options.filter_monochrome && capabilities?.filter_monochrome.available !== true)
+    || (options.filter_sketch && capabilities?.filter_sketch.available !== true)) models.push("completeness");
   if (options.filter_character && capabilities?.filter_character.available !== true) models.push("ccip");
   return models;
 }

@@ -18,7 +18,7 @@ from tests.test_model_setup import _FakeProcess
 
 
 def capabilities(available):
-    return {name: {"available": available and name != "filter_sketch", "reason": "" if available and name != "filter_sketch" else "not ready"}
+    return {name: {"available": available, "reason": "" if available else "not ready"}
             for name in review_filters.FILTER_BLOCKERS}
 
 
@@ -39,13 +39,13 @@ class FilterCapabilityTests(unittest.TestCase):
                 status = review_filters.filter_capabilities(root, python, refresh=True)
                 self.assertTrue(status["filter_monochrome"]["available"])
                 self.assertTrue(status["filter_character"]["available"])
-                self.assertFalse(status["filter_sketch"]["available"])
+                self.assertTrue(status["filter_sketch"]["available"])
                 self.assertEqual(probe.call_args.args[0][0], str(python))
                 self.assertEqual(set(status), set(review_filters.FILTER_BLOCKERS))
                 self.assertTrue(all(set(item) == {"available", "reason"} for item in status.values()))
                 review_filters.filter_capabilities(root, python)
                 self.assertEqual(probe.call_count, 1)
-                for bad in ({}, {"monochrome": {"available": True, "reason": ""}},
+                for bad in ({}, {"completeness": {"available": True, "reason": ""}},
                             {**valid, "ccip": {"available": "yes", "reason": ""}},
                             {**valid, "ccip": {"available": False, "reason": ""}}):
                     probe.return_value = SimpleNamespace(returncode=0, stdout=json.dumps(bad))
@@ -53,16 +53,16 @@ class FilterCapabilityTests(unittest.TestCase):
                     self.assertFalse(status["filter_character"]["available"])
                 probe.side_effect = subprocess.TimeoutExpired("model check", 60)
                 self.assertFalse(review_filters.filter_capabilities(root, python, refresh=True)["filter_monochrome"]["available"])
-            model_paths(root, "monochrome")[0].write_bytes(b"corrupt")
+            model_paths(root, "completeness")[0].write_bytes(b"corrupt")
             with mock.patch.object(review_filters.subprocess, "run") as probe:
-                status = review_filters.filter_capabilities(root, python, selected=["monochrome"], refresh=True)
+                status = review_filters.filter_capabilities(root, python, selected=["completeness"], refresh=True)
                 self.assertFalse(status["filter_monochrome"]["available"])
                 probe.assert_not_called()
 
     def test_setup_request_old_call_and_only_known_model_selection(self):
         self.assertEqual(ModelInstallRequest.model_validate({"proxy_url": ""}).models, ["dedup"])
         self.assertEqual(ModelInstallRequest.model_validate({"models": ["ccip"]}).models, ["ccip"])
-        for bad in ([], ["sketch"], ["/tmp/model"], ["monochrome", "ccip", "dedup", "ccip"]):
+        for bad in ([], ["sketch"], ["/tmp/model"], ["completeness", "ccip", "dedup", "ccip"], ["monochrome"]):
             with self.assertRaises(ValueError):
                 ModelInstallRequest.model_validate({"models": bad})
         with self.assertRaises(ValueError):
@@ -90,18 +90,18 @@ class SelectiveModelInstallTests(unittest.IsolatedAsyncioTestCase):
         launch = mock.AsyncMock(return_value=_FakeProcess(run))
         with mock.patch("gdl_backend.model_setup.asyncio.create_subprocess_exec", launch), \
              mock.patch("gdl_backend.model_setup.filter_capabilities", return_value=capabilities(True)):
-            await self.manager.install("http://proxy.example:8080", ["ccip", "monochrome"])
+            await self.manager.install("http://proxy.example:8080", ["ccip", "completeness"])
             await self.manager._task
             status = self.manager.status()
         command = launch.call_args.args
         self.assertEqual(command[0], str(self.settings.dedup.python_executable))
         self.assertTrue(command[1].endswith("review_filter_models.py"))
         self.assertNotIn("--prepare-models", command)
-        self.assertEqual(command[-2:], ("ccip", "monochrome"))
+        self.assertEqual(command[-2:], ("ccip", "completeness"))
         self.assertEqual(status["phase"], "ready")
         self.assertFalse(status["enabled"])
-        self.assertEqual(status["requested_models"], ["ccip", "monochrome"])
-        self.assertEqual(status["expected_bytes"], 167_072_328)
+        self.assertEqual(status["requested_models"], ["ccip", "completeness"])
+        self.assertEqual(status["expected_bytes"], 167_077_452)
         self.callback.assert_not_awaited()
         self.assertFalse(self.settings.config_path.exists())
 
@@ -111,11 +111,11 @@ class SelectiveModelInstallTests(unittest.IsolatedAsyncioTestCase):
                 return b"", b"secret proxy error", returncode
             with mock.patch("gdl_backend.model_setup.asyncio.create_subprocess_exec", mock.AsyncMock(return_value=_FakeProcess(run))), \
                  mock.patch("gdl_backend.model_setup.filter_capabilities", return_value=capabilities(False)):
-                await self.manager.install(models=["monochrome"])
+                await self.manager.install(models=["completeness"])
                 await self.manager._task
                 status = self.manager.status()
             self.assertEqual(status["phase"], "failed")
-            self.assertFalse(status["models"]["monochrome"]["installed"])
+            self.assertFalse(status["models"]["completeness"]["installed"])
             self.assertFalse(status["review_filters"]["filter_monochrome"]["available"])
             self.assertNotIn("secret", status["message"])
             self.assertFalse(self.settings.dedup.enabled)

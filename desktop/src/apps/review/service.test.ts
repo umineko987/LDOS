@@ -36,7 +36,7 @@ const rawPage = {
   failedImageCount: 0,
   hasError: false,
   groups: {
-    items: [{ id: "group-1", ordinal: 1, kind: "duplicate", decided: false, images: [{ id: "image-1", asset_id: "image-1", source_display_name: "Source", relative_path: "album/1.jpg", ordinal: 1, readable: true, recommended: true, selected: true, metadata: { w: 800, h: 1200 } }] }],
+    items: [{ id: "group-1", ordinal: 1, kind: "duplicate", decided: false, images: [{ id: "image-1", asset_id: "image-1", source_display_name: "Source", relative_path: "album/1.jpg", ordinal: 1, readable: true, recommended: true, selected: true, metadata: { w: 800, h: 1200, classification: "rough" } }] }],
     offset: 0,
     limit: 1,
     total: 1,
@@ -49,9 +49,9 @@ describe("review service", () => {
     const service = createReviewService(calls.client);
     const signal = new AbortController().signal;
     calls.get.mockResolvedValueOnce(rawPage);
-    const page = await service.readPage("review-one", "duplicate", signal);
+    const page = await service.readPage("review-one", "rough", signal);
     expect(page.reviewId).toBe("review-one");
-    expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.reviews}/review-one?limit=50&offset=0&view=desktop&kind=duplicate`, { signal });
+    expect(calls.get).toHaveBeenLastCalledWith(`${REVIEW_ENDPOINTS.reviews}/review-one?limit=50&offset=0&view=desktop&classification=rough`, { signal });
 
     const operation = { ...rawPage, response_profile: "desktop-gallery-review-operation-v1" };
     calls.post.mockResolvedValueOnce({ ...operation, version: 2 });

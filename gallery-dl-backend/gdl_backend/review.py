@@ -318,6 +318,13 @@ class DedupReviewManager:
                     raise ValueError("图库审核清单包含快照范围外图片")
             else:
                 resolve_review_file(root, relative_path)
+            classification = (image.get("metadata") or {}).get("classification")
+            if classification is not None:
+                if classification not in {"rough", "monochrome"}:
+                    raise ValueError("辅助分类无效")
+                option = "filter_sketch" if classification == "rough" else "filter_monochrome"
+                if options is None or not options[option]:
+                    raise ValueError("清单包含未启用的辅助分类")
             if count:
                 if image_id in seen_images:
                     raise ValueError("去重审核图片 ID 重复")
@@ -351,7 +358,7 @@ class DedupReviewManager:
             raise ValueError("自动过滤图片格式无效")
         filtered_paths: set[str] = set()
         for image in filtered_items:
-            if not isinstance(image, dict) or image.get("reason") not in {"filter_monochrome", "filter_sketch", "filter_character"}:
+            if not isinstance(image, dict) or image.get("reason") not in {"filter_character"}:
                 raise ValueError("自动过滤原因无效")
             if options is None or not options[image["reason"]]:
                 raise ValueError("清单包含未启用的自动过滤")

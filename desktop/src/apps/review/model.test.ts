@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { EMPTY_FILTER_OPTIONS, type FilterConfig } from "../filter-presets/model";
 import {
+  REVIEW_FILTERS,
   REVIEW_GROUP_LIMIT,
   REVIEW_POLL_INTERVAL_MS,
   mergeReviewPageChunks,
@@ -66,6 +67,21 @@ function sanitize(groups = [rawGroup(1)]): ReviewSnapshot {
 }
 
 describe("review model", () => {
+  it("uses exactly three views and keeps mixed original groups in either classification", () => {
+    const mixed = rawGroup(1, [rawImage(1), rawImage(2, { metadata: { classification: "rough" } }), rawImage(3, { metadata: { classification: "monochrome" } })]);
+    for (const filter of ["", "rough", "monochrome"] as const) {
+      const snapshot = sanitizeReviewPage(rawPage([mixed]), { reviewId: "review-one", filter });
+      expect(snapshot.groupOrder).toEqual(["group-1"]);
+      expect(snapshot.groups["group-1"].kind).toBe("duplicate");
+      expect(snapshot.groups["group-1"].imageOrder).toEqual(["image-1", "image-2", "image-3"]);
+      expect(snapshot.summary.totalImageCount).toBe(3);
+      expect(snapshot.summary.automaticRejectedImageCount).toBe(0);
+    }
+    expect(REVIEW_FILTERS.map(({ id }) => id)).toEqual(["", "rough", "monochrome"]);
+    expect(sanitize().groups["group-1"].images["image-1"].classification).toBe("");
+    expect(() => sanitizeReviewPage(rawPage(), { reviewId: "review-one", filter: "rough" })).toThrow();
+    expect(() => sanitize([rawGroup(1, [rawImage(1, { metadata: { classification: "unsafe" } })])])).toThrow();
+  });
   it("freezes task configuration and reads filtered counts without counting them twice", () => {
     const config = { preset_name: "Frozen", options: { ...EMPTY_FILTER_OPTIONS, basic_dedup: true, reference_asset_ids: ["reference-one"] } };
     const snapshot = sanitizeReviewPage(rawPage([], { filter_config: config, automaticRejectedImageCount: 3, filteredImageCount: 2, totalImageCount: 3 }), { reviewId: "review-one" });
@@ -153,7 +169,7 @@ describe("review model", () => {
     const recent = gate.beginRead("recent", "", "", 0);
     expect(gate.isReadCurrent(page)).toBe(true);
     expect(gate.isReadCurrent(recent)).toBe(true);
-    gate.beginRead("page", "review-one", "duplicate", 0);
+    gate.beginRead("page", "review-one", "rough", 0);
     expect(gate.isReadCurrent(page)).toBe(false);
     expect(gate.isReadCurrent(recent)).toBe(true);
     const write = gate.beginWrite();

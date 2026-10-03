@@ -151,7 +151,7 @@ class ModelSetupManager:
                     "installed": capabilities[option]["available"],
                     "downloaded_bytes": self._filter_downloaded_bytes(name),
                     "expected_bytes": sum(entry[1] for entry in MODEL_FILES[name]),
-                } for option, name in (("filter_monochrome", "monochrome"), ("filter_character", "ccip"))},
+                } for option, name in (("filter_monochrome", "completeness"), ("filter_character", "ccip"))},
             },
         }
 
@@ -223,7 +223,7 @@ class ModelSetupManager:
                     selected=filters, refresh=True,
                 )
                 if any(not capabilities[option]["available"] for option, name in
-                       (("filter_monochrome", "monochrome"), ("filter_character", "ccip")) if name in filters):
+                       (("filter_monochrome", "completeness"), ("filter_character", "ccip")) if name in filters):
                     raise RuntimeError("过滤模型离线推理校验失败")
             updates: dict[str, Any] = {}
             if "dedup" in self._selected_models:

@@ -194,7 +194,7 @@ def normalize_crawl_review_manifest(
         raise ValueError("自动过滤图片格式无效")
     filtered_ordinal = max((group["ordinal"] for group in normalized_groups), default=0)
     for ordinal, image in enumerate(filtered_items, 1):
-        if not isinstance(image, dict) or image.get("reason") not in {"filter_monochrome", "filter_sketch", "filter_character"}:
+        if not isinstance(image, dict) or image.get("reason") not in {"filter_character"}:
             raise ValueError("自动过滤原因无效")
         group_id = "filtered:" + str(image.get("id") or "")
         group = normalize_group(group_id, filtered_ordinal + ordinal, "auto_filtered", [], image["reason"], decided=True)
@@ -570,6 +570,7 @@ class ReviewRepository:
         batch_id: str,
         *,
         kind: str | None = None,
+        classification: str | None = None,
         limit: int = 12,
         offset: int = 0,
         all_groups: bool = False,
@@ -579,6 +580,17 @@ class ReviewRepository:
         if kind:
             where += " AND kind=?"
             params.append(kind)
+        if classification:
+            if classification not in {"rough", "monochrome"}:
+                raise ValueError("辅助分类无效")
+            # Match any member, but page/count original groups and return all their images.
+            where += f""" AND EXISTS (
+                SELECT 1 FROM {self.images_table} i
+                WHERE i.{self.identity_column}={self.groups_table}.{self.identity_column}
+                  AND i.group_id={self.groups_table}.id
+                  AND json_extract(i.metadata_json, '$.classification')=?
+            )"""
+            params.append(classification)
         page_limit = (
             self._max_groups()
             if all_groups

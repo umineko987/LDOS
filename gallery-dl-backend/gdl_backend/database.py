@@ -505,6 +505,7 @@ class Database:
         batch_id: str,
         *,
         kind: str | None = None,
+        classification: str | None = None,
         limit: int = 12,
         offset: int = 0,
         all_groups: bool = False,
@@ -512,6 +513,7 @@ class Database:
         return self._review_repository.list_crawl_review_groups(
             batch_id,
             kind=kind,
+            classification=classification,
             limit=limit,
             offset=offset,
             all_groups=all_groups,

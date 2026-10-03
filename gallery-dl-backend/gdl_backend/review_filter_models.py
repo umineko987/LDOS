@@ -14,13 +14,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-MONO_REVISION = "15df450f9d1c74e192bc15514e90c8a864b56b86"
+COMPLETENESS_REVISION = "315b0207c474c7dd0e9f6e282a51ffe00f3f11bd"
+COMPLETENESS_LABELS = ("polished", "rough", "monochrome")
 CCIP_REVISION = "eb2acdd29af1703388d3d0c04221add322bc9110"
 MODEL_FILES = {
-    "monochrome": (
-        ("monochrome.onnx", 16_822_434,
-         "35804ca819e3eb988d30afdf425143eca71e725e2ddbf708d58529b066b62db5",
-         f"https://huggingface.co/deepghs/monochrome_detect/resolve/{MONO_REVISION}/mobilenetv3_large_100_dist_safe2/model.onnx"),
+    "completeness": (
+        ("completeness_mobilenetv3_v2.2_dist.onnx", 16_827_558,
+         "41908bb124475dd853707452743ce4599fb03c4adacbd4188d8e35fd8705256f",
+         f"https://huggingface.co/deepghs/anime_completeness/resolve/{COMPLETENESS_REVISION}/mobilenetv3_v2.2_dist/model.onnx"),
     ),
     "ccip": (
         ("ccip_feat.onnx", 150_248_245,
@@ -31,8 +32,6 @@ MODEL_FILES = {
          f"https://huggingface.co/deepghs/ccip_onnx/resolve/{CCIP_REVISION}/ccip-caformer-24-randaug-pruned/model_metrics.onnx"),
     ),
 }
-# Class scores are not calibrated probabilities. Retain uncertain monochrome cases.
-MONO_REJECT_SCORE = 0.8
 # Published max-F1 distance threshold; the larger rejection cutoff is an LDOS
 # engineering conservative band, NOT a calibrated probability or multi-person guarantee.
 CCIP_MATCH_DISTANCE = 0.17847511429108218
@@ -98,19 +97,20 @@ class FilterModels:
         # Check execution, shapes and numerical validity, not merely imports/files.
         from PIL import Image
         test_image = Image.new("RGB", (384, 384), "white")
-        if "monochrome" in names:
-            self.monochrome_score(test_image)
+        if "completeness" in names:
+            self.completeness(test_image)
         if "ccip" in names:
             feature = self.feature(test_image)
             self.distances(feature, [feature])
 
-    def monochrome_score(self, image: Any) -> float:
-        output = self.sessions["monochrome"].run(["output"], {"input": encode_image(image)[None]})[0]
-        if (output.shape != (1, 2) or not self.np.isfinite(output).all() or
-                not ((output >= 0) & (output <= 1)).all()):
-            raise RuntimeError("单色模型输出无效")
-        # Pinned meta.json labels: [monochrome, normal]. ONNX already emits scores.
-        return float(output[0, 0])
+    def completeness(self, image: Any) -> str:
+        output = self.sessions["completeness_mobilenetv3_v2.2_dist"].run(
+            ["output"], {"input": encode_image(image)[None]},
+        )[0]
+        if output.shape != (1, 3) or not self.np.isfinite(output).all():
+            raise RuntimeError("完成度模型输出无效")
+        # Pinned meta.json order; ONNX emits scores. Official default: argmax, no softmax/threshold.
+        return COMPLETENESS_LABELS[int(self.np.argmax(output[0]))]
 
     def feature(self, image: Any) -> Any:
         output = self.sessions["ccip_feat"].run(["output"], {"input": encode_image(image, ccip=True)[None]})[0]

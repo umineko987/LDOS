@@ -139,6 +139,8 @@ def public_image_info(info: dict[str, Any], root: Path, inputs: dict[str, dict[s
         "jpeg_quant_mean",
     )
     metadata = {field: json_value(info.get(field)) for field in fields}
+    if info.get("classification") in {"rough", "monochrome"}:
+        metadata["classification"] = info["classification"]
     return {
         "id": selected["asset_id"] if selected else stable_id(relative_path, str(info.get("file_hash") or "")),
         "relative_path": relative_path,
@@ -238,7 +240,7 @@ def build_manifest(
         key = normalized_path(exclusion["image"]["path"])
         if key not in all_info_by_path or key in automatic_rejected_paths or key in filtered_paths:
             raise ValueError("自动过滤图片不在幸存选区或重复处理")
-        if exclusion.get("reason") not in {"filter_monochrome", "filter_sketch", "filter_character"}:
+        if exclusion.get("reason") not in {"filter_character"}:
             raise ValueError("自动过滤原因无效")
         filtered_paths.add(key)
         item = public_image_info(all_info_by_path[key], root, inputs)

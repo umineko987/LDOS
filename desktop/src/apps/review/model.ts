@@ -4,7 +4,7 @@ const REVIEW_STATUS_VALUES = [
   "applying", "apply_failed", "applied",
 ] as const;
 const REVIEW_STATUS_SET = new Set<string>(REVIEW_STATUS_VALUES);
-const REVIEW_FILTER_SET = new Set<string>(["", "duplicate", "single", "unreadable"]);
+const REVIEW_FILTER_SET = new Set<string>(["", "rough", "monochrome"]);
 const REVIEW_GROUP_KIND_SET = new Set<string>(["duplicate", "single", "unreadable"]);
 const ACTIVE_STATUS_SET = new Set<string>(["pending", "analyzing", "auto_applying", "applying"]);
 const LISTABLE_STATUS_SET = new Set<string>(["ready", "applying", "applied", "apply_failed"]);
@@ -17,9 +17,8 @@ export const REVIEW_GROUP_LIMIT = 10_000;
 export const REVIEW_POLL_INTERVAL_MS = 1_500;
 export const REVIEW_FILTERS = Object.freeze([
   Object.freeze({ id: "", label: "全部" }),
-  Object.freeze({ id: "duplicate", label: "重复组" }),
-  Object.freeze({ id: "single", label: "独立图片" }),
-  Object.freeze({ id: "unreadable", label: "读取失败" }),
+  Object.freeze({ id: "rough", label: "线稿/草图" }),
+  Object.freeze({ id: "monochrome", label: "单色" }),
 ] as const);
 
 export type ReviewStatus = typeof REVIEW_STATUS_VALUES[number];
@@ -40,6 +39,7 @@ export interface ReviewImage {
   readonly sourceLabel: string;
   readonly relativePath: string;
   readonly failed: boolean;
+  readonly classification: "" | "rough" | "monochrome";
 }
 
 export interface ReviewGroup {
@@ -117,7 +117,7 @@ export interface ReviewOperationResult {
 
 export type ModelSetupPhase = "idle" | "installing" | "ready" | "failed";
 
-export type ModelInstallKey = "dedup" | "monochrome" | "ccip";
+export type ModelInstallKey = "dedup" | "completeness" | "ccip";
 export interface ModelSetupSnapshot {
   readonly phase: ModelSetupPhase;
   readonly enabled: boolean;
@@ -296,7 +296,7 @@ export function sanitizeModelSetup(value: unknown): ModelSetupSnapshot {
     : "";
   const rawRequested = own(record, "requested_models");
   if (rawRequested !== undefined && (!Array.isArray(rawRequested) || !rawRequested.length
-    || rawRequested.some((key) => !["dedup", "monochrome", "ccip"].includes(key)))) {
+    || rawRequested.some((key) => !["dedup", "completeness", "ccip"].includes(key)))) {
     throw new TypeError("invalid_model_setup_requested_models");
   }
   const requestedModels = Object.freeze([...(Array.isArray(rawRequested) ? rawRequested : ["dedup"])]) as readonly ModelInstallKey[];
@@ -349,6 +349,8 @@ function sanitizeImage(value: unknown, index: number): ReviewImage {
   const ordinal = strictCount(own(record, "ordinal"), "invalid_review_image_ordinal", 100_000);
   const galleryValue = own(record, "gallery");
   const gallery = galleryValue === undefined ? null : requireRecord(galleryValue, "invalid_review_image_gallery");
+  const classification = own(metadata, "classification") ?? "";
+  if (classification !== "" && classification !== "rough" && classification !== "monochrome") throw new TypeError("invalid_review_classification");
   return Object.freeze({
     id,
     ordinal: ordinal || index + 1,
@@ -359,6 +361,7 @@ function sanitizeImage(value: unknown, index: number): ReviewImage {
     height: strictCount(own(metadata, "h") ?? 0, "invalid_review_image_height", 1_000_000),
     sourceLabel: displayText(own(record, "source_display_name")),
     relativePath,
+    classification,
     failed: gallery !== null && strictBoolean(own(gallery, "hasError"), "invalid_review_image_error"),
   });
 }
@@ -495,7 +498,7 @@ export function sanitizeReviewPageChunk(value: unknown, {
   const imageIds = new Set<string>();
   for (const rawGroup of items) {
     const group = sanitizeGroup(rawGroup, groupOrder.length);
-    if (groups[group.id] || (filter && group.kind !== filter)) throw new TypeError("invalid_review_page_group");
+    if (groups[group.id] || (filter && !group.imageOrder.some((id) => group.images[id].classification === filter))) throw new TypeError("invalid_review_page_group");
     for (const imageId of group.imageOrder) {
       if (imageIds.has(imageId)) throw new TypeError("duplicate_review_image");
       imageIds.add(imageId);

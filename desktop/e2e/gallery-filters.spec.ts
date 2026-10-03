@@ -137,8 +137,8 @@ test("图库配置：折叠摘要、三个真实过滤的阻止原因、取消�
   await expect(panel.locator("[data-gallery-review-options]")).not.toHaveAttribute("open");
   await expect(panel.locator("[data-gallery-review-enabled]")).toContainText("基础去重");
   const blockers = panel.locator("[data-gallery-review-blockers]");
-  await expect(blockers).toContainText("monochrome");
-  await expect(blockers).toContainText("素描检测暂缓");
+  await expect(blockers).toContainText("completeness");
+  await expect(blockers).toContainText("completeness");
   await expect(start).toBeDisabled();
   await panel.locator("[data-gallery-review-options] > summary").click();
   await panel.getByRole("checkbox", { name: "非目标角色", exact: true }).check();
@@ -148,7 +148,7 @@ test("图库配置：折叠摘要、三个真实过滤的阻止原因、取消�
   expect(api.count("POST", reviews)).toBe(0);
   await addReference(panel);
   await expect(blockers.locator("li")).toHaveCount(3);
-  for (const name of ["单色 / 灰度", "素描", "非目标角色"]) await panel.getByRole("checkbox", { name, exact: true }).uncheck();
+  for (const name of ["单色", "线稿/草图", "非目标角色"]) await panel.getByRole("checkbox", { name, exact: true }).uncheck();
   await expect(start).toBeEnabled();
   await panel.getByText("查看选区详情", { exact: true }).click();
   await expect(panel).toContainText("E2E 导入目录 / subdir");
@@ -254,7 +254,7 @@ test("能力加载失败不能当作可用；后端 409 原因和 422 参考图�
     models: { sscd: { installed: true }, dino: { installed: true } },
     review_filters: { filter_monochrome: { available: false, reason: "missing" }, filter_character: { available: false, reason: "missing" }, filter_sketch: { available: false, reason: "deferred" } },
   } }));
-  await panel.getByRole("button", { name: "刷新过滤能力", exact: true }).click();
+  await panel.getByRole("button", { name: "刷新模型能力", exact: true }).click();
   await expect(start).toBeEnabled();
   await page.route(`**${reviews}`, (route) => route.fulfill({ status: 409, json: { error: { code: "review_filter_unavailable", message: "Unavailable", details: { filters: [{ option: "filter_character", reason: "Capability changed before submission" }] } } } }));
   await start.click();

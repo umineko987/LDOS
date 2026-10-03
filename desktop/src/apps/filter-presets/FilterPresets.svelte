@@ -133,7 +133,7 @@
 
 <section class="filter-presets-app" data-filter-presets-app aria-labelledby="filter-presets-heading" aria-busy={busy || loading}>
   <header class="filter-presets-header"><h1 id="filter-presets-heading">筛选预设</h1><span role="status">{busy ? "正在保存…" : dirty ? "有未保存的更改" : ""}</span></header>
-  <p class="filter-help">各功能可自由组合；未就绪的自动过滤可保存配置，但不能执行。</p>
+  <p class="filter-help">各功能可自由组合；线稿/草图、单色仅辅助分类，不自动排除。未就绪的模型可保存配置，但不能执行。</p>
   {#if loadError}<p role="alert">{loadError}</p><button type="button" disabled={loading || !active} onclick={() => void load()}>重试</button>{/if}
   {#if loading}<p role="status">正在加载筛选预设…</p>{/if}
   <div class="filter-presets-layout">

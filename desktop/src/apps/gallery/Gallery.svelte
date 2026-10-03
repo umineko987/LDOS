@@ -753,7 +753,7 @@
     reviewModelSetup = next; reviewCapabilities = next?.reviewFilters ?? null; reviewCapabilitiesError = "";
   }
   const reviewBaseBlocker = $derived(!reviewModelSetup
-    ? "模型状态未确认，暂不可执行。请刷新过滤能力。"
+    ? "模型状态未确认，暂不可执行。请刷新模型能力。"
     : reviewModelSetup.enabled !== true
     ? "当前后端要求先启用基础去重服务，即使本次仅过滤；请到去重页明确准备 SSCD/DINO。"
     : reviewConfig && (reviewConfig.options.basic_dedup || reviewConfig.options.similarity_groups) && !baseModelsReady(reviewModelSetup)

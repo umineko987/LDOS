@@ -119,12 +119,12 @@ class FilterPipelineTests(unittest.TestCase):
                 with self.subTest(similarity=similarity, exclude_all=exclude_all):
                     infos = [CORE.get_image_info(str(path)) for path in paths]
                     def exclude(selected, options, references, **kwargs):
-                        return [{"image": info, "reason": "filter_monochrome"}
+                        return [{"image": info, "reason": "filter_character"}
                                 for info in (selected if exclude_all else selected[:1])]
                     with mock.patch.object(review_filters, "require_filter_capabilities"), \
                          mock.patch.object(review_filters, "filter_images", side_effect=exclude):
                         automatic, candidates, filtered = worker.analyze_with_filters(
-                            CORE, infos, args(root), config(filter_monochrome=True, similarity_groups=similarity), [])
+                            CORE, infos, args(root), config(filter_character=True, similarity_groups=similarity), [object()])
                     self.assertTrue(all(ARRAY_KEYS.isdisjoint(info) for info in infos))
                     manifest = worker.build_manifest(root, [str(p) for p in paths], infos, automatic, candidates, CORE,
                                                      filtered_items=filtered)
@@ -144,22 +144,27 @@ class FilterPipelineTests(unittest.TestCase):
                     self.assertTrue(core_args.no_auto_compression)  # SSCD off never widens strict auto gate.
                     return [{"kind": "exact", "winner": infos[1], "members": infos[:2]}], []
                 self.assertFalse(flags["basic_dedup"])
-                self.assertEqual(selected, infos[2:])
+                self.assertEqual(selected, infos[1:])
                 return [], [selected]
             core = SimpleNamespace(analyze_images=analyze, release_image_arrays=CORE.release_image_arrays)
             reference = object()
             def exclude(selected, options, references, **kwargs):
                 self.assertEqual(selected, infos[1:])
                 self.assertEqual(references, [])  # References cannot affect non-character filtering.
-                return [{"image": infos[1], "reason": "filter_monochrome"}]
+                infos[1]["classification"] = "rough"
+                infos[2]["classification"] = "monochrome"
+                return []
             with mock.patch.object(review_filters, "require_filter_capabilities"), mock.patch.object(review_filters, "filter_images", side_effect=exclude):
                 automatic, candidates, filtered = worker.analyze_with_filters(
-                    core, infos, args(root), config(filter_monochrome=True), [reference])
+                    core, infos, args(root), config(filter_monochrome=True, filter_sketch=True), [reference])
             self.assertEqual(len(calls), 2)
             manifest = worker.build_manifest(root, [str(p) for p in paths], infos, automatic, candidates, CORE,
                                              filtered_items=filtered)
-            self.assertEqual(manifest["counts"]["automatic_rejected_images"], 2)
-            self.assertEqual(manifest["counts"]["filtered_images"], 1)
+            self.assertEqual(manifest["counts"]["automatic_rejected_images"], 1)
+            self.assertEqual(manifest["counts"]["filtered_images"], 0)
+            self.assertEqual(len(manifest["groups"]), 1)
+            self.assertEqual([item["metadata"].get("classification") for item in sorted(manifest["groups"][0]["items"], key=lambda item: item["relative_path"])],
+                             ["rough", "monochrome", None])
             emitted = [i["id"] for g in manifest["groups"] for i in g["items"]]
             emitted += [i["id"] for g in manifest["auto_groups"] for i in g["rejected_items"]]
             emitted += [i["id"] for i in manifest["filtered_items"]]

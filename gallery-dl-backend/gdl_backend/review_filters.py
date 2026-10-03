@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .review_filter_models import (
-    CCIP_REJECT_DISTANCE, MODEL_FILES, MONO_REJECT_SCORE, FilterModels, model_paths, rgb_image,
+    CCIP_REJECT_DISTANCE, MODEL_FILES, FilterModels, model_paths, rgb_image,
 )
 
 BUILTIN_PRESETS = (
@@ -23,11 +23,10 @@ BUILTIN_PRESETS = (
         "filter_character": True, "similarity_groups": True, "reference_asset_ids": [],
     }},
 )
-FILTER_MODELS = {"filter_monochrome": "monochrome", "filter_character": "ccip"}
-SKETCH_BLOCKER = "素描检测暂缓，尚无已接入的可靠模型；单色分类器不能代替素描检测"
+FILTER_MODELS = {"filter_monochrome": "completeness", "filter_sketch": "completeness", "filter_character": "ccip"}
 FILTER_BLOCKERS = {
-    "filter_monochrome": "单色过滤模型及去重 ONNX 环境尚未验证，请先准备模型",
-    "filter_sketch": SKETCH_BLOCKER,
+    "filter_monochrome": "完成度分类模型及去重 ONNX 环境尚未验证，请先准备模型",
+    "filter_sketch": "完成度分类模型及去重 ONNX 环境尚未验证，请先准备模型",
     "filter_character": "CCIP 模型及去重 ONNX 环境尚未验证，请先准备模型",
 }
 _probe_cache: dict[tuple, tuple[float, dict]] = {}
@@ -57,8 +56,9 @@ def filter_capabilities(model_dir: Path | None = None, python_executable: Path |
         except OSError:
             complete = False
         if not complete:
-            option = next(option for option, model in FILTER_MODELS.items() if model == name)
-            result[option] = {"available": False, "reason": f"缺少或损坏的 {name} 模型，请先准备模型"}
+            for option, model in FILTER_MODELS.items():
+                if model == name:
+                    result[option] = {"available": False, "reason": f"缺少或损坏的 {name} 模型，请先准备模型"}
         if complete:
             candidates.append(name)
             fingerprints.extend((str(path), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns) for path, stat in zip(paths, stats))
@@ -107,10 +107,7 @@ def filter_capabilities(model_dir: Path | None = None, python_executable: Path |
 
 def require_filter_capabilities(options: dict[str, Any], model_dir: Path | None = None,
                                 python_executable: Path | None = None) -> FilterModels | None:
-    selected = [name for option, name in FILTER_MODELS.items() if options[option]]
-    if options["filter_sketch"]:
-        raise FilterConfigurationError("review_filter_unavailable", SKETCH_BLOCKER,
-                                       details={"filters": [{"option": "filter_sketch", "reason": SKETCH_BLOCKER}]})
+    selected = list(dict.fromkeys(name for option, name in FILTER_MODELS.items() if options[option]))
     if not selected:
         return None
     capabilities = filter_capabilities()
@@ -138,7 +135,7 @@ def require_filter_capabilities(options: dict[str, Any], model_dir: Path | None 
 def filter_images(image_infos: list[dict[str, Any]], options: dict[str, Any], references: list[Any],
                   *, models: FilterModels | None = None, model_dir: Path | None = None,
                   open_image: Callable | None = None) -> list[dict[str, Any]]:
-    """Exclude once per surviving image; decode held inputs, never client paths.
+    """Classify for human review; only character mismatches exclude. Decode held inputs.
 
     Multi-frame/undecodable selected inputs are retained for human review. Invalid
     references abort rather than silently shrinking the user's explicit reference set.
@@ -177,9 +174,12 @@ def filter_images(image_infos: list[dict[str, Any]], options: dict[str, Any], re
         except (OSError, ValueError, Image.DecompressionBombError):
             continue
         reason = None
-        if options["filter_monochrome"] and models.monochrome_score(image) >= MONO_REJECT_SCORE:
-            reason = "filter_monochrome"
-        elif options["filter_character"]:
+        if options["filter_monochrome"] or options["filter_sketch"]:
+            classification = models.completeness(image)
+            if ((classification == "rough" and options["filter_sketch"]) or
+                    (classification == "monochrome" and options["filter_monochrome"])):
+                info["classification"] = classification
+        if options["filter_character"]:
             distances = models.distances(feature(image), reference_features)
             # OR references: any match OR any conservative-band case retains it.
             if len(distances) and bool((distances > CCIP_REJECT_DISTANCE).all()):

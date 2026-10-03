@@ -463,6 +463,7 @@
           <button type="button" class="review-button review-button--primary review-finish" data-review-finish disabled={Boolean(snapshot.busy)} onclick={() => void controller.finish()}>完成</button>
         </div>
       </section>
+      <p class="filter-help">线稿/草图、单色仅辅助分类，不自动排除；命中任一图片时显示完整原组，各分类共用同一份采纳决定。</p>
 
       {#if listable && focusedGroup}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-operated review deck) -->
@@ -477,7 +478,7 @@
               {#each images as image (image.id)}
                 <button type="button" class="review-image-card" data-review-engine-card={image.id} data-selected={image.selected} data-active={snapshot.activeImageId === image.id} data-failed={image.failed || undefined} aria-checked={image.selected} aria-current={snapshot.activeImageId === image.id} aria-disabled={snapshot.snapshot.summary.status !== "ready" || Boolean(snapshot.busy)} role="checkbox" onclick={() => onImageClick(focusedGroup.id, image.id)} onfocus={() => controller.setActiveImage(image.id)}>
                   <span class="review-image-media"><img data-review-engine-image draggable="false" data-review-engine-decoded="false" alt={`组 ${focusedGroup.ordinal} 图 ${image.ordinal}`} crossorigin="anonymous" decoding="async" style:transform={`translate(${zoom.offsetX}px, ${zoom.offsetY}px) scale(${zoom.scale})`} /><span class="review-image-fallback">{image.readable ? "预览加载失败" : "图片不可读"}</span></span>
-                  <span class="review-image-card-copy"><strong>图 {image.ordinal}{image.recommended ? " · 推荐项" : ""}</strong><span title={`${image.sourceLabel} / ${image.relativePath}`}>{image.sourceLabel} / {image.relativePath}</span><span>{image.width} × {image.height}</span><span class="review-image-stamp" data-state={image.selected ? "keep" : "drop"}>{image.selected ? "✓ 保留" : "✗ 回收"}</span>{#if image.failed}<span class="review-image-error-marker" role="status">落地失败</span>{/if}<span class="review-image-active-marker">当前检查</span></span>
+                  <span class="review-image-card-copy"><strong>图 {image.ordinal}{image.recommended ? " · 推荐项" : ""}</strong><span title={`${image.sourceLabel} / ${image.relativePath}`}>{image.sourceLabel} / {image.relativePath}</span><span>{image.width} × {image.height}</span>{#if image.classification}<span data-review-classification>{image.classification === "rough" ? "线稿/草图" : "单色"}<span> · </span><span>辅助分类</span></span>{/if}<span class="review-image-stamp" data-state={image.selected ? "keep" : "drop"}>{image.selected ? "✓ 保留" : "✗ 回收"}</span>{#if image.failed}<span class="review-image-error-marker" role="status">落地失败</span>{/if}<span class="review-image-active-marker">当前检查</span></span>
                 </button>
               {/each}
             </div>

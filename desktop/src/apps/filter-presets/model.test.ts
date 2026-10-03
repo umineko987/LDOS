@@ -4,16 +4,19 @@ import {
   sanitizeFilterCapabilities, sanitizeFilterConfig, sanitizeFilterOptions, validateFilterName, requiredFilterModels,
 } from "./model";
 
-it("prepares only selected, unready filters, never sketch or base models", () => {
+it("prepares only selected, unready filters, sharing completeness for monochrome and sketches, never base models", () => {
   const options = { ...EMPTY_FILTER_OPTIONS, basic_dedup: true, similarity_groups: true, filter_monochrome: true, filter_character: true, filter_sketch: true };
-  expect(requiredFilterModels(options, null)).toEqual(["monochrome", "ccip"]);
+  expect(requiredFilterModels(options, null)).toEqual(["completeness", "ccip"]);
   const capabilities = sanitizeFilterCapabilities({
     filter_monochrome: { available: true, reason: "" },
     filter_character: { available: false, reason: "missing" },
-    filter_sketch: { available: false, reason: "deferred" },
+    filter_sketch: { available: true, reason: "" },
   });
   expect(requiredFilterModels(options, capabilities)).toEqual(["ccip"]);
   expect(requiredFilterModels({ ...options, filter_character: false }, capabilities)).toEqual([]);
+  expect(requiredFilterModels({ ...EMPTY_FILTER_OPTIONS, filter_sketch: true }, null)).toEqual(["completeness"]);
+  expect(requiredFilterModels({ ...EMPTY_FILTER_OPTIONS, filter_monochrome: true }, null)).toEqual(["completeness"]);
+  expect(requiredFilterModels(EMPTY_FILTER_OPTIONS, null)).toEqual([]);
 });
 const unavailable = {
   filter_monochrome: { available: false, reason: "monochrome not integrated" },

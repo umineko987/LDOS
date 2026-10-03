@@ -77,11 +77,11 @@ function vaultSnapshot(): Record<string, unknown> {
 }
 
 function modelSetupSnapshot(baseReady: boolean, requested: readonly string[], phase: string, readyFilters: ReadonlySet<string>, usingProxy: boolean): Record<string, unknown> {
-  const sizes: Record<string, number> = { dedup: 190_000_000, monochrome: 16_800_000, ccip: 150_300_000 };
+  const sizes: Record<string, number> = { dedup: 190_000_000, completeness: 16_827_558, ccip: 150_300_000 };
   const expected = requested.reduce((sum, key) => sum + sizes[key], 0);
   const filters = {
-    filter_monochrome: { available: readyFilters.has("monochrome"), reason: readyFilters.has("monochrome") ? "" : "缺少或损坏的 monochrome 模型，请先准备模型" },
-    filter_sketch: { available: false, reason: "素描检测暂缓，尚无已接入的可靠模型；单色分类器不能代替素描检测" },
+    filter_monochrome: { available: readyFilters.has("completeness"), reason: readyFilters.has("completeness") ? "" : "缺少或损坏的 completeness 模型，请先准备模型" },
+    filter_sketch: { available: readyFilters.has("completeness"), reason: readyFilters.has("completeness") ? "" : "缺少或损坏的 completeness 模型，请先准备模型" },
     filter_character: { available: readyFilters.has("ccip"), reason: readyFilters.has("ccip") ? "" : "缺少或损坏的 ccip 模型，请先准备模型" },
   };
   return {
@@ -90,7 +90,7 @@ function modelSetupSnapshot(baseReady: boolean, requested: readonly string[], ph
     expected_bytes: expected, message: phase === "installing" ? "正在下载并检查模型" : "",
     requested_models: [...requested], review_filters: filters,
     models: { sscd: { installed: baseReady }, dino: { installed: baseReady },
-      monochrome: { installed: filters.filter_monochrome.available, downloaded_bytes: filters.filter_monochrome.available ? sizes.monochrome : 0, expected_bytes: sizes.monochrome },
+      completeness: { installed: filters.filter_monochrome.available, downloaded_bytes: filters.filter_monochrome.available ? sizes.completeness : 0, expected_bytes: sizes.completeness },
       ccip: { installed: filters.filter_character.available, downloaded_bytes: filters.filter_character.available ? sizes.ccip : 0, expected_bytes: sizes.ccip } },
   };
 }
@@ -820,7 +820,15 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       if (action === "images") {
         await route.fulfill({ status: 200, contentType: "image/svg+xml", body: svgImage(decodeURIComponent(imageId)) });
       } else if (!action) {
-        await respond(route, reviewResponse(id));
+        const response = reviewResponse(id);
+        const groups = response.groups as { items: { images: { metadata: { classification?: string } }[] }[]; total: number; offset: number; limit: number };
+        const classification = url.searchParams.get("classification");
+        const matching = groups.items.filter((group) => !classification || group.images.some((image) => image.metadata.classification === classification));
+        groups.total = matching.length;
+        groups.offset = Number(url.searchParams.get("offset") ?? 0);
+        groups.limit = Number(url.searchParams.get("limit") ?? 50);
+        groups.items = matching.slice(groups.offset, groups.offset + groups.limit);
+        await respond(route, response);
       } else if (action === "finish") {
         reviews.delete(id);
         await route.fulfill({ status: 204, body: "" });
@@ -877,7 +885,7 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
     if (url.pathname === "/api/v1/setup/models/install" && request.method() === "POST") {
       const body = requestBody(request) as { proxy_url?: string; models?: string[] };
       const models = body?.models ?? ["dedup"];
-      if (!Array.isArray(models) || !models.length || models.length > 3 || models.some((key) => !["dedup", "monochrome", "ccip"].includes(key))
+      if (!Array.isArray(models) || !models.length || models.length > 3 || models.some((key) => !["dedup", "completeness", "ccip"].includes(key))
         || Object.keys(body ?? {}).some((key) => !["proxy_url", "models"].includes(key))) {
         await respond(route, { error: { code: "validation_error", message: "模型选择无效" } }, 422); return;
       }

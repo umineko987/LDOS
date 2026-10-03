@@ -112,7 +112,7 @@ def create_gallery_review_router() -> APIRouter:
     @router.get("/{review_id}")
     async def get_review(review_id: str, limit: int = Query(12, ge=1, le=50), offset: int = Query(0, ge=0),
                          view: Literal["desktop"] = Query("desktop"),
-                         kind: Literal["duplicate", "single", "unreadable"] | None = Query(None),
+                         classification: Literal["rough", "monochrome"] | None = Query(None),
                          container: Any = Depends(get_service)):
         def read():
             repo = container.db.gallery_reviews
@@ -121,7 +121,7 @@ def create_gallery_review_router() -> APIRouter:
                 review = repo.get_crawl_review(review_id)
                 if review is None:
                     raise KeyError(review_id)
-                page = repo.list_crawl_review_groups(review_id, limit=limit, offset=offset, kind=kind)
+                page = repo.list_crawl_review_groups(review_id, limit=limit, offset=offset, classification=classification)
                 return gallery_review_response(review, page, repo.snapshot(review_id))
         try:
             return await asyncio.to_thread(read)

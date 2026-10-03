@@ -21,8 +21,8 @@ export function appPage(page: Page, appId: string): Locator {
 export async function configureExistingDedup(panel: Locator): Promise<void> {
   await panel.getByLabel("选择预设", { exact: true }).selectOption("builtin-style");
   await panel.locator("[data-gallery-review-options] > summary").click();
-  await panel.getByRole("checkbox", { name: "单色 / 灰度", exact: true }).uncheck();
-  await panel.getByRole("checkbox", { name: "素描", exact: true }).uncheck();
+  await panel.getByRole("checkbox", { name: "单色", exact: true }).uncheck();
+  await panel.getByRole("checkbox", { name: "线稿/草图", exact: true }).uncheck();
   await expect(panel.getByRole("button", { name: "开始处理", exact: true })).toBeEnabled();
 }
 export async function prepareRichState(page: Page, appId: AppId): Promise<void> {

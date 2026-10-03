@@ -48,6 +48,8 @@ def _desktop_review_image(image: dict[str, Any]) -> dict[str, Any]:
         "metadata": {
             "w": _count(metadata.get("w", metadata.get("width")), maximum=1_000_000),
             "h": _count(metadata.get("h", metadata.get("height")), maximum=1_000_000),
+            **({"classification": metadata["classification"]}
+               if metadata.get("classification") in {"rough", "monochrome"} else {}),
         },
     }
 
@@ -172,6 +174,7 @@ def create_review_router() -> APIRouter:
             default=None,
             pattern="^(duplicate|single|unreadable)$",
         ),
+        classification: Literal["rough", "monochrome"] | None = Query(None),
         limit: int = Query(default=12, ge=1, le=50),
         offset: int = Query(default=0, ge=0),
         all_groups: bool = Query(default=False, alias="all"),
@@ -215,6 +218,7 @@ def create_review_router() -> APIRouter:
                 page = container.db.list_crawl_review_groups(
                     batch_id,
                     kind=kind,
+                    classification=classification,
                     limit=limit,
                     offset=offset,
                     all_groups=all_groups,
