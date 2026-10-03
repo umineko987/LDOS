@@ -20,7 +20,7 @@ describe("workbench navigation lifecycle contract", () => {
     expect(desktopSource).toContain("shell.getState().focusedAppId !== appId || aboutOpen");
     expect(desktopSource).toContain('`[data-app-page][data-app-id="${appId}"]`');
     expect(desktopSource).toContain("focus({ preventScroll: true })");
-    expect(desktopSource).toContain('data-skip-link inert={aboutOpen}');
+    expect(desktopSource).toContain('data-skip-link inert={aboutOpen || !!picker}');
     expect(desktopSource).toContain('tabindex="-1" aria-label={getApplicationDefinition(appId).title}');
   });
 

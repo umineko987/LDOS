@@ -87,9 +87,10 @@ export interface GalleryController {
   destroy(): void;
 }
 
-export function createGalleryController({ store, service }: {
+export function createGalleryController({ store, service, readOnly = false }: {
   readonly store: GalleryStore;
   readonly service: GalleryService;
+  readonly readOnly?: boolean;
 }): GalleryController {
   let active = false;
   let destroyed = false;
@@ -190,7 +191,7 @@ export function createGalleryController({ store, service }: {
   }
 
   async function startSourceScan(sourceId: string): Promise<boolean> {
-    if (!active || destroyed || store.getState().activeSourceId !== sourceId) return false;
+    if (readOnly || !active || destroyed || store.getState().activeSourceId !== sourceId) return false;
     clearScanPolling();
     const version = ++scanVersion;
     store.patch({ scanRequestErrorCode: null });
@@ -319,10 +320,11 @@ export function createGalleryController({ store, service }: {
 
   const controller: GalleryController = {
     activate() {
-      if (destroyed) return;
+      if (destroyed || active) return;
       active = true;
-      const phase = store.getState().sourcesPhase;
-      if (phase === "loading" || phase === "idle") void loadSources();
+      const state = store.getState();
+      if (state.sourcesPhase === "loading" || state.sourcesPhase === "idle") void loadSources();
+      if (state.viewerPhase === "loading") void loadViewerAnnotation();
     },
     deactivate() {
       active = false;
@@ -335,6 +337,8 @@ export function createGalleryController({ store, service }: {
       viewerPageController?.abort();
       viewerPageController = null;
       viewerPageVersion += 1;
+      // An aborted pagination request must not leave the retained viewer permanently busy.
+      if (store.getState().viewerPagePhase === "loading") store.patch({ viewerPagePhase: "idle" });
       clearScanPolling();
       scanVersion += 1;
     },

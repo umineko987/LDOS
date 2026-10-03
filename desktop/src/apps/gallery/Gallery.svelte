@@ -9,6 +9,7 @@
     type PlatformDirectoryPurpose,
   } from "../../core/platform/adapter";
   import FilterOptionsEditor from "../filter-presets/FilterOptionsEditor.svelte";
+  import type { PickGalleryAssets } from "./picker";
   import { createFilterPresetService } from "../filter-presets/service";
   import {
     cloneFilterOptions, FILTER_LABELS, filterOptionsSummary, filterConfigBlockers,
@@ -35,12 +36,39 @@
   import Viewer from "./Viewer.svelte";
   import "./gallery.css";
 
-  let { api, active = true, onReviewCreated, onManagePresets }: { api: ApiClient; active?: boolean; onReviewCreated?: (reviewId: string) => void; onManagePresets?: () => void } = $props();
+  let { api, active = true, suspended = false, picker, onPickAssets, onReviewCreated, onManagePresets }: {
+    api: ApiClient;
+    active?: boolean;
+    suspended?: boolean;
+    picker?: { origin: string; assetIds: readonly string[]; onFinish: (ids: string[] | null) => void };
+    onPickAssets?: PickGalleryAssets;
+    onReviewCreated?: (reviewId: string) => void;
+    onManagePresets?: () => void;
+  } = $props();
+  const uid = $props.id();
+  let pickedIds = $state<string[]>(untrack(() => [...new Set(picker?.assetIds ?? [])].slice(0, 200)));
+  let pickerLimit = $state(false);
+  function togglePicked(id: string): void {
+    pickerLimit = false;
+    if (pickedIds.includes(id)) pickedIds = pickedIds.filter((value) => value !== id);
+    else if (pickedIds.length < 200) pickedIds = [...pickedIds, id];
+    else pickerLimit = true;
+  }
+  function selectPickerPage(checked: boolean): void {
+    const pageIds = snapshot.assets.map((asset) => asset.asset_id);
+    pickerLimit = false;
+    if (!checked) pickedIds = pickedIds.filter((id) => !pageIds.includes(id));
+    else {
+      const ids = [...new Set([...pickedIds, ...pageIds])];
+      pickerLimit = ids.length > 200;
+      pickedIds = ids.slice(0, 200);
+    }
+  }
 
   const runtime = untrack(() => {
     const store = createGalleryStore();
     const service = createGalleryService(api);
-    return { store, service, controller: createGalleryController({ store, service }) };
+    return { store, service, controller: createGalleryController({ store, service, readOnly: !!picker }) };
   });
   const { store, service, controller } = runtime;
   const snapshot: GalleryBrowseState = $derived($store);
@@ -119,14 +147,15 @@
   }
 
   // ---- 选择与查看器（G2-3） ----
-  const selectedIds = $derived(new Set(snapshot.selectedAssetIds));
+  const selectedIds = $derived(new Set(picker ? pickedIds : snapshot.selectedAssetIds));
   const allVisibleItemsSelected = $derived(
-    (snapshot.directories.length > 0 || snapshot.assets.length > 0)
-      && snapshot.directories.every((directory) => selectedDirectoryIds.has(directory.directory_id))
+    ((!picker && snapshot.directories.length > 0) || snapshot.assets.length > 0)
+      && (picker || snapshot.directories.every((directory) => selectedDirectoryIds.has(directory.directory_id)))
       && snapshot.assets.every((asset) => selectedIds.has(asset.asset_id)),
   );
   function toggleSelectAll(event: Event): void {
     const checked = (event.currentTarget as HTMLInputElement).checked;
+    if (picker) { selectPickerPage(checked); return; }
     if (!checked) {
       clearVisibleSelection();
       return;
@@ -150,9 +179,10 @@
     const returnAssetId = viewerReturnAssetId;
     const scrollTop = snapshot.pendingGridScrollTop;
     void tick().then(() => {
+      if (!active) return;
       if (contentViewport !== null) contentViewport.scrollTop = scrollTop;
       const preferred = returnAssetId.length > 0
-        ? document.querySelector<HTMLElement>(`[data-gallery-asset="${CSS.escape(returnAssetId)}"]`)
+        ? galleryRoot?.querySelector<HTMLElement>(`[data-gallery-asset="${CSS.escape(returnAssetId)}"]`)
         : null;
       const fallback = contentViewport?.querySelector<HTMLElement>("[data-gallery-asset]") ?? contentViewport;
       restoreFocus(preferred ?? fallback);
@@ -165,6 +195,8 @@
   }
 
   function onAssetClick(event: MouseEvent, asset: GalleryAssetEntry): void {
+    if (!active) return;
+    if (picker) { togglePicked(asset.asset_id); return; }
     controller.clickAsset(asset.asset_id, {
       additive: event.ctrlKey || event.metaKey,
       range: event.shiftKey,
@@ -279,6 +311,11 @@
 
   function onGridKeydown(event: KeyboardEvent): void {
     if (event.target instanceof HTMLElement && (event.target.isContentEditable || event.target.closest("input, textarea, select"))) return;
+    if (picker) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") { event.preventDefault(); selectPickerPage(true); }
+      else if (event.key === "Delete" || event.key === "F2") event.preventDefault();
+      return;
+    }
     if (event.key === "Delete") {
       event.preventDefault();
       requestDeleteSelection();
@@ -650,6 +687,7 @@
 
   function toggleAssetCheckbox(event: Event, asset: GalleryAssetEntry): void {
     event.stopPropagation();
+    if (picker) { togglePicked(asset.asset_id); return; }
     const shift = "shiftKey" in event && Boolean(event.shiftKey);
     controller.clickAsset(asset.asset_id, { additive: !shift, range: shift });
   }
@@ -1266,7 +1304,7 @@
   }
 
   onMount(() => {
-    controller.activate();
+    if (active) controller.activate();
     galleryMounted = true;
     return () => {
       reviewDestroyed = true;
@@ -1300,12 +1338,15 @@
   let galleryMounted = $state(false);
   let galleryActivationSeen = false;
   let galleryWasActive = false;
+  let galleryWasSuspended = false;
   let galleryRefreshNotice = $state("");
   $effect(() => {
     if (!galleryMounted) return;
     const nowActive = active;
     untrack(() => {
-      if (nowActive && galleryActivationSeen && !galleryWasActive && !reviewConfirmOpen) {
+      if (nowActive) controller.activate();
+      else { controller.deactivate(); clearSearchDebounce(); }
+      if (nowActive && galleryActivationSeen && !galleryWasActive && !galleryWasSuspended && !reviewConfirmOpen) {
         galleryRefreshNotice = snapshot.txtDraft !== null && snapshot.txtDraft !== (snapshot.viewerAnnotation?.content ?? "")
           ? "正在刷新图库；打开的 TXT 草稿保持不变。若文件已移动，请先保存草稿或关闭查看器后再打开。" : "";
         void controller.reconcileOnFocus();
@@ -1314,6 +1355,7 @@
       if (nowActive && !galleryWasActive && reviewConfirmOpen) { void loadReviewPresets(); void loadReviewCapabilities(); }
       if (!nowActive) { reviewPresetsRequest?.abort(); reviewCapabilitiesRequest?.abort(); }
       galleryWasActive = nowActive;
+      galleryWasSuspended = suspended;
       galleryActivationSeen = true;
     });
   });
@@ -1335,6 +1377,7 @@
   function onAppKeydown(event: KeyboardEvent): void {
     if (!active || reviewConfirmOpen || event.defaultPrevented || galleryRoot?.closest("[hidden], [inert]")) return;
     if (snapshot.viewerIndex >= 0) return;
+    if (picker && event.key === "Escape") { event.preventDefault(); picker.onFinish(null); return; }
     if (importWarningOpen) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -1397,7 +1440,7 @@
           <div data-gallery-review-enabled><p><span>预设：</span>{reviewConfig.preset_name}</p><h3>已启用功能</h3><ul>{#each reviewEnabledLabels as label}<li>{label}</li>{:else}<li>未启用任何功能</li>{/each}</ul></div>
           <p class="gallery-export-sheet__hint">临时调整仅用于本次任务，不会覆盖已有预设。</p>
           <details bind:open={reviewOptionsExpanded} data-gallery-review-options><summary>展开并调整本次选项</summary>
-            {#key reviewEditorRevision}<FilterOptionsEditor {api} options={reviewConfig.options} onChange={changeReviewOptions} capabilities={reviewCapabilities} setup={reviewModelSetup} onModelSetup={updateReviewModelSetup} active={active && reviewConfirmOpen} prepareDisabled={reviewBusy} disabled={reviewBusy || !active} />{/key}
+            {#key reviewEditorRevision}<FilterOptionsEditor {api} onPickAssets={onPickAssets ?? (() => Promise.resolve(null))} referenceOrigin="图库 / 本次去重与筛选" options={reviewConfig.options} onChange={changeReviewOptions} capabilities={reviewCapabilities} setup={reviewModelSetup} onModelSetup={updateReviewModelSetup} active={active && reviewConfirmOpen} prepareDisabled={reviewBusy} disabled={reviewBusy || !active} />{/key}
           </details>
           {#if reviewSaveOpen}
             <form class="filter-toolbar gallery-review-save" onsubmit={(event) => { event.preventDefault(); void saveReviewPreset(); }}>
@@ -1427,15 +1470,16 @@
   onfocus={onWindowFocus}
 />
 
-<section class="gallery-app" data-gallery-app data-domain-owner="gallery" data-preview-availability="live" aria-labelledby="gallery-heading" bind:this={galleryRoot}>
+<section class="gallery-app" data-gallery-app data-domain-owner="gallery" data-preview-availability="live" aria-labelledby={`${uid}-heading`} bind:this={galleryRoot}>
   <header class="gallery-header" inert={snapshot.viewerIndex >= 0 ? true : undefined} aria-hidden={snapshot.viewerIndex >= 0 ? "true" : undefined}>
-    <h1 id="gallery-heading">图库</h1>
+    <h1 id={`${uid}-heading`} data-gallery-picker-heading={picker ? true : undefined} tabindex="-1">{picker ? "选择角色参考图" : "图库"}</h1>
+    {#if picker}<span class="gallery-picker-origin">来自『{picker.origin}』</span>{/if}
     <span class="gallery-status" data-kind={snapshot.sourcesPhase}>{snapshot.sourcesPhase === "ready" ? `${formatCount(snapshot.sources.length)} 个来源` : snapshot.sourcesPhase === "error" ? "来源加载失败" : "正在加载来源"}</span>
   </header>
 
   <div class="gallery-body" inert={snapshot.viewerIndex >= 0 ? true : undefined} aria-hidden={snapshot.viewerIndex >= 0 ? "true" : undefined}>
-    <aside class="gallery-tree" aria-labelledby="gallery-tree-heading">
-      <h2 id="gallery-tree-heading">来源与目录</h2>
+    <aside class="gallery-tree" aria-labelledby={`${uid}-tree-heading`}>
+      <h2 id={`${uid}-tree-heading`}>来源与目录</h2>
       {#if snapshot.sourcesPhase === "loading" || snapshot.sourcesPhase === "idle"}
         <p class="gallery-hint" role="status">正在加载来源…</p>
       {:else if snapshot.sourcesPhase === "error"}
@@ -1453,6 +1497,7 @@
                   class="gallery-source"
                   aria-current={snapshot.activeSourceId === source.source_id ? "true" : undefined}
                   onclick={() => void controller.openSource(source.source_id)}
+                  disabled={!!picker && (source.availability !== "available" || !source.root_directory_id)}
                 >
                   <span class="gallery-source__name">{source.display_name}</span>
                   <span class="gallery-source__meta">{sourceSubtitle(source)}</span>
@@ -1465,7 +1510,7 @@
                     {source.root_directory_id === null ? " · 待扫描" : ""}
                   </span>
                 </button>
-                {#if source.kind === "crawl_batch" || source.kind === "imported"}
+                {#if !picker && (source.kind === "crawl_batch" || source.kind === "imported")}
                   <button
                     type="button"
                     class="gallery-source__delete"
@@ -1492,6 +1537,7 @@
           <p class="gallery-hint gallery-hint--error" role="alert">来源操作失败（{batchDeleteError}）</p>
         {/if}
       {/if}
+      {#if !picker}
       <div class="gallery-import">
         <button data-gallery-import type="button" onclick={requestImportDirectory} disabled={!canImportDirectories || importPhase !== "idle"}>
           {importPhase === "importing" ? "正在导入目录…" : "导入目录…"}
@@ -1503,10 +1549,11 @@
           <p class="gallery-hint gallery-hint--error" role="alert">导入失败（{importError}）</p>
         {/if}
       </div>
+      {/if}
     </aside>
 
-    <section class="gallery-content" aria-labelledby="gallery-content-heading">
-      <h2 id="gallery-content-heading" class="gallery-visually-hidden">目录内容</h2>
+    <section class="gallery-content" aria-labelledby={`${uid}-content-heading`}>
+      <h2 id={`${uid}-content-heading`} class="gallery-visually-hidden">目录内容</h2>
       {#if snapshot.activeSourceId === null}
         <div class="gallery-empty" role="status">
           <strong>选择一个来源开始浏览</strong>
@@ -1519,6 +1566,7 @@
               <div>
                 <span>{sourceSubtitle(activeSource)}</span>
               </div>
+              {#if !picker}
               <div class="gallery-source-status__actions">
                 <button
                   type="button"
@@ -1527,8 +1575,9 @@
                 >{activeScan?.state === "running" ? "正在扫描…" : "重新扫描"}</button>
                 <button type="button" onclick={openSourceManager}>来源设置…</button>
               </div>
+              {/if}
             </div>
-            {#if activeSource.kind === "imported"}
+            {#if !picker && activeSource.kind === "imported"}
               <p class="gallery-source-warning">
                 此来源直接管理原目录。重命名、保存 TXT 和移入回收区都会修改磁盘上的原文件。
               </p>
@@ -1553,7 +1602,7 @@
                 </p>
               {/if}
             {/if}
-            {#if activeSource.reconciliation_state === "failed"}
+            {#if !picker && activeSource.reconciliation_state === "failed"}
               <div class="gallery-source-reconciliation" role="alert">
                 <span>审核结果已保存，但图库去重对账失败；被排除文件会继续保持隐藏。</span>
                 <button
@@ -1581,9 +1630,9 @@
             {/each}
           </ol>
           <form class="gallery-search" onsubmit={submitSearch} role="search">
-            <label class="gallery-visually-hidden" for="gallery-search-input">搜索当前范围</label>
+            <label class="gallery-visually-hidden" for={`${uid}-search`}>搜索当前范围</label>
             <input
-              id="gallery-search-input"
+              id={`${uid}-search`}
               type="search"
               placeholder="搜索文件名、相对路径或 TXT 原文"
               maxlength="256"
@@ -1638,6 +1687,7 @@
               <button type="button" aria-pressed={snapshot.viewMode === "grid"} onclick={() => controller.setViewMode("grid")}>网格</button>
               <button type="button" aria-pressed={snapshot.viewMode === "list"} onclick={() => controller.setViewMode("list")}>列表</button>
             </div>
+            {#if !picker}
             {#if selectedItemCount > 0}
               <span class="gallery-toolbar-selection" data-gallery-selection-summary>
                 {#if selectedDirectorySelections.length > 0}{formatCount(selectedDirectorySelections.length)} 个目录{/if}
@@ -1662,6 +1712,7 @@
               onclick={openDirectoryExport}
               disabled={snapshot.currentDirectory === null && selectedDirectorySelections.length === 0}
             >导出目录…</button>
+            {/if}
           </div>
         </nav>
         {#if galleryRefreshNotice}<p class="gallery-hint" role="status" data-gallery-refresh-notice>{galleryRefreshNotice}</p>{/if}
@@ -1687,6 +1738,7 @@
               {#each snapshot.directories as directory (directory.directory_id)}
                 <li class:selected={selectedDirectoryIds.has(directory.directory_id)}>
                   <div class="gallery-folder-shell">
+                    {#if !picker}
                     <label class="gallery-selection-control gallery-folder__select">
                       <input
                         type="checkbox"
@@ -1697,6 +1749,7 @@
                       />
                       <span>选择目录</span>
                     </label>
+                    {/if}
                     <button type="button" class="gallery-folder" onclick={() => void controller.openDirectory(directory.directory_id)}>
                       <span class="gallery-folder__cover" data-count={Math.min(directory.recursive_asset_count, 4)} aria-hidden="true">
                         {#each directory.cover_asset_ids.slice(0, 4) as coverId (coverId)}
@@ -1732,6 +1785,7 @@
                           <input
                             type="checkbox"
                             checked={selectedIds.has(asset.asset_id)}
+                            disabled={!!picker && !selectedIds.has(asset.asset_id) && pickedIds.length >= 200}
                             aria-label={`选择图片 ${asset.name}`}
                             onclick={(event) => event.stopPropagation()}
                             onkeydown={(event) => event.stopPropagation()}
@@ -1809,6 +1863,7 @@
                               <input
                                 type="checkbox"
                                 checked={selectedIds.has(asset.asset_id)}
+                                disabled={!!picker && !selectedIds.has(asset.asset_id) && pickedIds.length >= 200}
                                 aria-label={`选择图片 ${asset.name}`}
                                 onclick={(event) => event.stopPropagation()}
                                 onkeydown={(event) => event.stopPropagation()}
@@ -1841,6 +1896,24 @@
       {/if}
     </section>
   </div>
+  {#if picker}
+    <footer class="gallery-picker-footer" inert={snapshot.viewerIndex >= 0} data-gallery-picker-footer>
+      <details>
+        <summary>已选 {pickedIds.length} 张 / 200 · 查看与移除</summary>
+        <ul class="gallery-picker-selection" aria-label="待使用的参考图">
+          {#each pickedIds as id (id)}
+            <li><img src={service.thumbnailUrl(id, 256)} alt="" crossorigin="anonymous" loading="lazy" onerror={() => markThumbnailFailed(id)} />{#if failedThumbnailIds.has(id)}<span role="status">缩略图不可读</span>{/if}<span>{id}</span><button type="button" aria-label={`移除参考图 ${id}`} onclick={() => togglePicked(id)}>移除参考图</button></li>
+          {/each}
+        </ul>
+      </details>
+      <div class="gallery-picker-actions">
+        <div class="gallery-picker-thumbnails" aria-hidden="true">{#each pickedIds.slice(0, 5) as id (id)}<img src={service.thumbnailUrl(id, 256)} alt="" crossorigin="anonymous" />{/each}</div>
+        {#if pickerLimit || pickedIds.length >= 200}<span role="status">最多选择 200 张参考图</span>{/if}
+        <button type="button" onclick={() => picker?.onFinish(null)}>取消选图</button>
+        <button type="button" onclick={() => picker?.onFinish([...pickedIds])}>使用这 {pickedIds.length} 张</button>
+      </div>
+    </footer>
+  {/if}
 </section>
 
 {#if importWarningOpen}
@@ -2188,6 +2261,7 @@
 
 {#if snapshot.viewerIndex >= 0 && snapshot.viewerAssets.length > 0}
   <Viewer
+    readOnly={!!picker}
     {snapshot}
     {currentAsset}
     contentUrl={service.assetContentUrl}
@@ -2196,10 +2270,10 @@
     onJump={(index) => void controller.viewerJump(index)}
     onClose={closeViewer}
     onSetTxtViewMode={(mode) => controller.setTxtViewMode(mode)}
-    onSetTxtDraft={(draft) => controller.setTxtDraft(draft)}
-    onSave={(advance) => void controller.saveTxtAnnotation({ advance })}
+    onSetTxtDraft={(draft) => !picker && controller.setTxtDraft(draft)}
+    onSave={(advance) => !picker && void controller.saveTxtAnnotation({ advance })}
     onDiscard={() => controller.discardTxtDraft()}
-    onTrash={() => void controller.trashViewerAsset()}
+    onTrash={() => !picker && void controller.trashViewerAsset()}
     onResolvePending={(decision) => void controller.resolveViewerPendingAction(decision)}
   />
 {/if}

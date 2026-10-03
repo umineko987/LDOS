@@ -29,7 +29,7 @@ describe("Svelte Gallery live integration", () => {
       "data-gallery-app",
       'data-domain-owner="gallery"',
       'data-preview-availability="live"',
-      '<h1 id="gallery-heading">图库</h1>',
+      'tabindex="-1">图库</h1>',
       "来源与目录",
       "选择一个来源开始浏览",
       "左侧选择下载批次或导入目录",

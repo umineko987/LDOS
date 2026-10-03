@@ -385,7 +385,7 @@ test.describe("可用应用关键旅程", () => {
     await expect(gallery.locator("[data-gallery-asset=\"gal-asset-05\"]")).toBeVisible();
     await expect(gallery.locator("[data-gallery-asset]")).toHaveCount(2);
     // 搜索限定当前目录（§2.5）。
-    await gallery.locator("#gallery-search-input").fill("image-05");
+    await gallery.getByRole("searchbox", { name: "搜索当前范围" }).fill("image-05");
     await gallery.getByRole("button", { name: "搜索", exact: true }).click();
     await expect(gallery.locator("[data-gallery-asset]")).toHaveCount(1);
     await gallery.getByRole("button", { name: "清除", exact: true }).click();

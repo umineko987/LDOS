@@ -4,6 +4,7 @@
   import Crawl from "../apps/crawl/Crawl.svelte";
   import Tasks from "../apps/tasks/Tasks.svelte";
   import Gallery from "../apps/gallery/Gallery.svelte";
+  import type { PickGalleryAssets } from "../apps/gallery/picker";
   import Review from "../apps/review/Review.svelte";
   import Proxy from "../apps/proxy/Proxy.svelte";
   import Vault from "../apps/vault/Vault.svelte";
@@ -52,6 +53,49 @@
   const snapshot = $derived($shell);
   const inSettings = $derived(settingsPages.some(({ id }) => id === snapshot.focusedAppId));
 
+
+  type PickerSession = {
+    origin: string;
+    assetIds: readonly string[];
+    appId: ApplicationId;
+    focus: HTMLElement | null;
+    dialogs: HTMLDialogElement[];
+    resolve: (ids: string[] | null) => void;
+    unsubscribe: () => void;
+  };
+  let picker = $state.raw<PickerSession | null>(null);
+  let restoringPicker = false;
+  let destroyed = false;
+
+  const pickAssets: PickGalleryAssets = ({ origin, assetIds, signal }) => {
+    const appId = shell.getState().focusedAppId;
+    if (picker || restoringPicker || destroyed || signal.aborted || !appId) return Promise.resolve(null);
+    const focus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialogs = [...desktop?.querySelectorAll<HTMLDialogElement>('[data-app-page] dialog[open]') ?? []];
+    // Suspend presentation only: native cancel would discard Gallery's processing draft.
+    for (const dialog of dialogs) dialog.close();
+    return new Promise((resolve) => {
+      const cancel = () => finishPicker(session, null);
+      const session: PickerSession = { origin, assetIds: [...assetIds], appId, focus, dialogs, resolve,
+        unsubscribe: () => signal.removeEventListener("abort", cancel) };
+      picker = session;
+      signal.addEventListener("abort", cancel, { once: true });
+      void tick().then(() => {
+        if (picker === session) desktop?.querySelector<HTMLElement>('[data-gallery-picker-heading]')?.focus({ preventScroll: true });
+      });
+    });
+  };
+
+  function finishPicker(session: PickerSession, ids: string[] | null): void {
+    if (picker !== session) return;
+    session.unsubscribe(); picker = null; restoringPicker = true;
+    session.resolve(ids);
+    void tick().then(() => {
+      if (destroyed || picker || shell.getState().focusedAppId !== session.appId) return;
+      for (const dialog of session.dialogs) if (dialog.isConnected && !dialog.open) dialog.showModal();
+      if (session.focus?.isConnected) session.focus.focus({ preventScroll: true });
+    }).finally(() => { restoringPicker = false; });
+  }
   async function focusPage(appId: ApplicationId | null): Promise<void> {
     await tick();
     if (!appId || shell.getState().focusedAppId !== appId || aboutOpen) return;
@@ -59,6 +103,12 @@
   }
 
   function handleRoute(change: RouteChange): void {
+    if (picker) {
+      const session = picker;
+      finishPicker(session, null);
+      router?.restore(session.appId);
+      return;
+    }
     if (change.appId === null) {
       router?.navigate("crawl", { replace: true });
       return;
@@ -77,7 +127,7 @@
   }
 
   function navigate(appId: ApplicationId): void {
-    if (appId !== snapshot.focusedAppId) router?.navigate(appId);
+    if (!picker && !restoringPicker && appId !== snapshot.focusedAppId) router?.navigate(appId);
   }
 
   let requestedReviewId = $state("");
@@ -98,6 +148,8 @@
     router.start();
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => {
+      destroyed = true;
+      if (picker) finishPicker(picker, null);
       router?.stop();
       router = null;
       window.removeEventListener("beforeunload", onBeforeUnload);
@@ -109,9 +161,9 @@
 
 <div use:localizeUi class="workbench" data-desktop data-workbench data-scene={preferences.wallpaperColor} bind:this={desktop}>
   <Wallpaper scene={preferences.wallpaperColor} />
-  <button type="button" class="skip-link" data-skip-link inert={aboutOpen} onclick={() => void focusPage(snapshot.focusedAppId)}>跳到当前应用</button>
+  <button type="button" class="skip-link" data-skip-link inert={aboutOpen || !!picker} onclick={() => void focusPage(snapshot.focusedAppId)}>跳到当前应用</button>
 
-  <aside class="workbench-sidebar" inert={aboutOpen}>
+  <aside class="workbench-sidebar" inert={aboutOpen || !!picker}>
     <strong class="workbench-brand">LDOS</strong>
     <nav class="workbench-nav" aria-label="主导航">
       {#each primaryPages as item}
@@ -132,7 +184,7 @@
   </aside>
 
   <main class="workbench-main" inert={aboutOpen}>
-    {#if inSettings}
+    {#if inSettings && !picker}
       <nav class="workbench-settings-nav" aria-label="设置导航">
         {#each settingsPages as item}
           <button type="button" data-nav-app={item.id} aria-current={snapshot.focusedAppId === item.id ? "page" : undefined} onclick={() => navigate(item.id)}>{item.label}</button>
@@ -141,15 +193,15 @@
     {/if}
     <div class="workbench-workspace" data-workspace>
       {#each snapshot.openedAppIds as appId (appId)}
-        <section class="workbench-page" data-app-page data-app-id={appId} hidden={snapshot.focusedAppId !== appId} inert={snapshot.focusedAppId !== appId} tabindex="-1" aria-label={getApplicationDefinition(appId).title}>
+        <section class="workbench-page" data-app-page data-app-id={appId} hidden={!!picker || snapshot.focusedAppId !== appId} inert={!!picker || snapshot.focusedAppId !== appId} tabindex="-1" aria-label={getApplicationDefinition(appId).title}>
           {#if appId === "crawl"}
             <Crawl {api} {persistence} onNavigate={navigate} />
           {:else if appId === "tasks"}
             <Tasks {api} {polling} {persistence} onNavigate={navigate} />
           {:else if appId === "gallery"}
-            <Gallery {api} active={snapshot.focusedAppId === "gallery"} onReviewCreated={openCreatedReview} onManagePresets={() => navigate("filter-presets")} />
+            <Gallery {api} onPickAssets={pickAssets} suspended={!!picker} active={!picker && snapshot.focusedAppId === "gallery"} onReviewCreated={openCreatedReview} onManagePresets={() => navigate("filter-presets")} />
           {:else if appId === "review"}
-            <Review {api} {polling} active={snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate} registerUnsavedChanges={(reader, discard, prepare) => shell.registerUnsavedChanges("review", reader, discard, prepare)} />
+            <Review {api} {polling} active={!picker && snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate} registerUnsavedChanges={(reader, discard, prepare) => shell.registerUnsavedChanges("review", reader, discard, prepare)} />
           {:else if appId === "proxy"}
             <Proxy {api} {polling} />
           {:else if appId === "vault"}
@@ -161,10 +213,16 @@
           {:else if appId === "personalization"}
             <Personalization {persistence} registerUnsavedChanges={(reader, discard) => shell.registerUnsavedChanges("personalization", reader, discard)} />
           {:else if appId === "filter-presets"}
-            <FilterPresets {api} active={snapshot.focusedAppId === "filter-presets"} registerUnsavedChanges={(reader, discard) => shell.registerUnsavedChanges("filter-presets", reader, discard)} />
+            <FilterPresets {api} onPickAssets={pickAssets} active={!picker && snapshot.focusedAppId === "filter-presets"} registerUnsavedChanges={(reader, discard) => shell.registerUnsavedChanges("filter-presets", reader, discard)} />
           {/if}
         </section>
       {/each}
+      {#if picker}
+        {@const session = picker}
+        <section class="workbench-page" data-gallery-picker aria-label="角色参考图选取">
+          <Gallery {api} picker={{ origin: session.origin, assetIds: session.assetIds, onFinish: (ids) => finishPicker(session, ids) }} />
+        </section>
+      {/if}
     </div>
   </main>
   <About open={aboutOpen} onClose={() => { aboutOpen = false; }} />

@@ -1000,6 +1000,11 @@ const ENGLISH_TRANSLATIONS = new Map<string, string>([
 type DynamicUiTranslation = readonly [RegExp, (match: string, ...groups: string[]) => string];
 
 const DYNAMIC_UI_TRANSLATIONS: readonly DynamicUiTranslation[] = [
+  [/^使用这 (\d+) 张$/u, (_, count) => `Use these ${count} images`],
+  [/^已选 (\d+) 张 \/ 200 · 查看与移除$/u, (_, count) => `${count} / 200 selected · View and remove`],
+  [/^移除参考图 (.+)$/u, (_, id) => `Remove reference ${id}`],
+  [/^来自『(.+)』$/u, (_, origin) => `From “${translateCore(origin)}”`],
+  [/^筛选预设 \/ (.+)$/u, (_, name) => `Filter presets / ${translateCore(name)}`],
   [/^选择 (.+)$/u, (_, value) => `Select ${value}`],
   [/^(.+) 窗口标题栏$/u, (_, title) => `${translateCore(title)} window title bar`],
   [/^(.+) 封面$/u, (_, value) => `${value} cover`],

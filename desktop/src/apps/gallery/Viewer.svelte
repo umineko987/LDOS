@@ -9,6 +9,7 @@
   import { enqueueThumbnailPrefetch } from "./thumbnailPrefetch";
 
   interface Props {
+    readOnly?: boolean;
     snapshot: GalleryBrowseState;
     currentAsset: GalleryAssetEntry | null;
     contentUrl: (asset: { asset_id: string; source_id: string | null; relative_path: string }) => string;
@@ -25,6 +26,7 @@
   }
 
   let {
+    readOnly = false,
     snapshot,
     currentAsset,
     contentUrl,
@@ -187,7 +189,7 @@
       if (!interactionBusy) onMove(1);
     } else if (event.key === "Delete") {
       event.preventDefault();
-      if (!interactionBusy) onTrash();
+      if (!readOnly && !interactionBusy) onTrash();
     } else if (event.key.toLowerCase() === "f") {
       event.preventDefault();
       toggleChrome();
@@ -252,6 +254,7 @@
   }
 
   function onTextareaKeydown(event: KeyboardEvent): void {
+    if (readOnly) return;
     if (!(event.ctrlKey || event.metaKey)) return;
     if (event.key.toLowerCase() === "s") {
       event.preventDefault();
@@ -274,6 +277,7 @@
 
 <div
   class="gallery-viewer"
+  class:gallery-viewer--readonly={readOnly}
   class:gallery-viewer--focus={chromeHidden}
   role="dialog"
   aria-modal="true"
@@ -294,12 +298,14 @@
         <span>{snapshot.viewerIndex + 1} / {snapshot.viewerAssets.length}{snapshot.viewerAssetCursor ? "+" : ""}</span>
       </div>
       <div class="gallery-viewer__actions">
+        {#if !readOnly}
         <button
           type="button"
           class="gallery-viewer__button gallery-viewer__button--danger"
           disabled={!currentAsset || interactionBusy}
           onclick={onTrash}
         >{snapshot.viewerOperationPhase === "trashing" ? "正在移入…" : "移入回收区"}</button>
+        {/if}
         <button type="button" class="gallery-viewer__button" onclick={toggleChrome}>专注模式 <kbd>F</kbd></button>
         <button type="button" class="gallery-viewer__button" bind:this={closeButton} onclick={onClose}>关闭 <kbd>Esc</kbd></button>
       </div>
@@ -354,7 +360,7 @@
       {/if}
     </div>
 
-    {#if !chromeHidden}
+    {#if !chromeHidden && !readOnly}
       <button
         type="button"
         class="gallery-viewer__panel-resizer"

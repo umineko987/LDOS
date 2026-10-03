@@ -88,7 +88,7 @@ describe("single-content Svelte workbench", () => {
     }
     // SSR checks the emitted pages; the keyed each block pins client-side retention.
     expect(desktopSource).toContain("{#each snapshot.openedAppIds as appId (appId)}");
-    expect(desktopSource).toContain("hidden={snapshot.focusedAppId !== appId} inert={snapshot.focusedAppId !== appId}");
+    expect(desktopSource).toContain("hidden={!!picker || snapshot.focusedAppId !== appId} inert={!!picker || snapshot.focusedAppId !== appId}");
     expect(desktopSource).not.toContain("{#key snapshot.focusedAppId}");
   });
 
@@ -118,7 +118,7 @@ describe("single-content Svelte workbench", () => {
     expect(body).toContain("The operating workspace for LoRA datasets.");
     expect(render(About, { props: { open: false, onClose: () => {} } }).body).not.toContain("data-about-dialog");
     for (const marker of ["Escape", "onkeydown", "trappedTabIndex", "restoreFocus", "returnFocus"]) expect(aboutSource).toContain(marker);
-    expect(desktopSource).toContain('class="workbench-sidebar" inert={aboutOpen}');
+    expect(desktopSource).toContain('class="workbench-sidebar" inert={aboutOpen || !!picker}');
     expect(desktopSource).toContain('class="workbench-main" inert={aboutOpen}');
   });
 

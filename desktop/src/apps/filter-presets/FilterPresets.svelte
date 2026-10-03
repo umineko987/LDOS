@@ -2,14 +2,16 @@
   import { onMount, untrack } from "svelte";
   import type { ApiClient } from "../../core/api/client";
   import { translateCurrentUiText } from "../../core/i18n";
+  import type { PickGalleryAssets } from "../gallery/picker";
   import { createFilterPresetService } from "./service";
   import { cloneFilterOptions, EMPTY_FILTER_OPTIONS, validateFilterName, type FilterPreset, type FilterOptions, type FilterCapabilities } from "./model";
   import type { ModelSetupSnapshot } from "../review/model";
   import FilterOptionsEditor from "./FilterOptionsEditor.svelte";
   import "./filter-presets.css";
 
-  let { api, active = true, registerUnsavedChanges }: {
+  let { api, onPickAssets, active = true, registerUnsavedChanges }: {
     api: ApiClient;
+    onPickAssets: PickGalleryAssets;
     active?: boolean;
     registerUnsavedChanges?: (reader: () => boolean, discard?: () => void) => () => void;
   } = $props();
@@ -153,7 +155,7 @@
         <p id="filter-name-help" class="filter-help">名称需为 1–80 个字符，不能包含控制字符。</p>
         {#if capabilityError}<p role="alert">{capabilityError}</p><button type="button" disabled={busy || !active} onclick={() => void loadCapabilities()}>重试过滤能力</button>{/if}
         {#key editorRevision}
-          <FilterOptionsEditor {api} {options} {capabilities} {active} setup={modelSetup} onModelSetup={updateModelSetup} prepareDisabled={busy} disabled={busy || !active} onChange={(next) => { options = cloneFilterOptions(next); }} />
+          <FilterOptionsEditor {api} {options} {onPickAssets} referenceOrigin={`筛选预设 / ${name || "新预设"}`} {capabilities} {active} setup={modelSetup} onModelSetup={updateModelSetup} prepareDisabled={busy} disabled={busy || !active} onChange={(next) => { options = cloneFilterOptions(next); }} />
         {/key}
         <div class="filter-toolbar filter-preset-actions"><button type="button" disabled={busy || !dirty || !validName || !active} onclick={() => void save()}>保存预设</button><button type="button" disabled={busy || !dirty} onclick={discard}>取消修改</button></div>
       {:else if loaded}<p>新建预设或选择一个已有预设。</p>{/if}

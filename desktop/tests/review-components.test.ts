@@ -51,7 +51,7 @@ describe("Svelte Review integration", () => {
     expect(body).toContain('data-app-page="" data-app-id="review"');
     expect(body).toContain("data-review-app");
     expect(body).not.toContain('data-application-content="review"');
-    expect(desktopSource).toContain('<Review {api} {polling} active={snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate}');
+    expect(desktopSource).toContain('<Review {api} {polling} active={!picker && snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate}');
     expect(desktopSource).toContain('shell.registerUnsavedChanges("review", reader, discard, prepare)');
   });
 

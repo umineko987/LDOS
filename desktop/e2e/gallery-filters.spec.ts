@@ -17,12 +17,74 @@ async function openPanel(page: Parameters<typeof bootDesktop>[0]) {
   return { gallery, panel, start: panel.getByRole("button", { name: "开始处理", exact: true }) };
 }
 
+test("图库调用同一选择器：独立勾选、原目录搜索滚动与同一个处理面板完整恢复", async ({ page }) => {
+  const api = await bootDesktop(page);
+  await launchApp(page, "gallery");
+  const gallery = appPage(page, "gallery");
+  await gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+  await expect(gallery.getByRole("status").filter({ hasText: "扫描完成" })).toBeVisible();
+  await gallery.getByRole("checkbox", { name: "选择目录 subdir", exact: true }).check();
+  await gallery.getByRole("searchbox", { name: "搜索当前范围" }).fill("image-");
+  await gallery.getByRole("button", { name: "搜索", exact: true }).click();
+  await expect(gallery.getByRole("checkbox", { name: "选择目录 subdir", exact: true })).toHaveCount(0);
+  await gallery.getByRole("checkbox", { name: "选择图片 image-01.jpg", exact: true }).check();
+  const scroll = await gallery.getByLabel("图片网格", { exact: true }).evaluate((element) => { element.scrollTop = 77; return element.scrollTop; });
+  await gallery.locator("[data-gallery-dedup]").click();
+  const panel = gallery.locator("[data-gallery-review-confirmation]");
+  await panel.getByLabel("选择预设", { exact: true }).selectOption("builtin-character");
+  await panel.locator("[data-gallery-review-options] > summary").click();
+  await panel.getByRole("checkbox", { name: "基础去重", exact: true }).uncheck();
+  await panel.getByRole("button", { name: "另存为预设", exact: true }).click();
+  await panel.getByLabel("新预设名称").fill("Unsaved panel name");
+  const originalDialog = await panel.elementHandle();
+  await panel.getByRole("button", { name: "选择参考图…", exact: true }).click();
+  const picker = page.locator("[data-gallery-picker]");
+  await expect(panel).not.toBeVisible();
+  await expect(picker).toContainText("来自『图库 / 本次去重与筛选』");
+  await picker.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+  await expect(picker.getByRole("searchbox", { name: "搜索当前范围" })).toHaveValue("");
+  await expect(picker.getByRole("checkbox", { name: "选择图片 image-01.jpg", exact: true })).not.toBeChecked();
+  await panel.dispatchEvent("cancel", { cancelable: true });
+  await picker.getByRole("checkbox", { name: "选择图片 image-02.jpg", exact: true }).check();
+  await picker.getByRole("button", { name: "使用这 1 张", exact: true }).click();
+  await expect(panel).toBeVisible();
+  expect(await originalDialog?.evaluate((dialog) => dialog === document.querySelector('[data-app-id="gallery"] [data-gallery-review-confirmation]'))).toBe(true);
+  await expect(panel.getByRole("button", { name: "选择参考图…", exact: true })).toBeFocused();
+  await expect(panel.getByLabel("新预设名称")).toHaveValue("Unsaved panel name");
+  await expect(panel.getByRole("checkbox", { name: "基础去重", exact: true })).not.toBeChecked();
+  await expect(panel.locator("[data-gallery-review-options]")).toHaveAttribute("open");
+  await expect(panel.getByRole("list", { name: "已保存到配置的参考图" })).toContainText("gal-asset-02");
+  await expect(panel).toContainText("勾选目录 1 · 勾选图片 1");
+  await panel.getByRole("button", { name: "选择参考图…", exact: true }).click();
+  await picker.locator("[data-gallery-picker-footer] summary").click();
+  await picker.getByRole("button", { name: "移除参考图 gal-asset-02", exact: true }).click();
+  await page.evaluate(() => { location.hash = "#/tasks"; });
+  await expect(picker).toHaveCount(0);
+  await expect(panel).toBeVisible();
+  await expect(page).toHaveURL(/#\/gallery$/);
+  await expect(panel.getByRole("list", { name: "已保存到配置的参考图" })).toContainText("gal-asset-02");
+  await panel.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(gallery.getByRole("searchbox", { name: "搜索当前范围" })).toHaveValue("image-");
+  await expect(gallery.getByRole("checkbox", { name: "选择图片 image-01.jpg", exact: true })).toBeChecked();
+  expect(await gallery.getByLabel("图片网格", { exact: true }).evaluate((element) => element.scrollTop)).toBe(scroll);
+  await gallery.getByRole("searchbox", { name: "搜索当前范围" }).fill("");
+  await gallery.getByRole("button", { name: "搜索", exact: true }).click();
+  await expect(gallery.getByRole("checkbox", { name: "选择目录 subdir", exact: true })).toBeChecked();
+  expect(api.count("POST", reviews)).toBe(0);
+  expect(api.count("POST", presets)).toBe(0);
+  expect(api.count("PUT", `${presets}/builtin-character`)).toBe(0);
+  expect(api.unhandled).toEqual([]);
+});
+
 async function addReference(panel: ReturnType<typeof appPage>) {
-  await panel.getByRole("button", { name: "从图库添加" }).click();
-  const picker = panel.locator("[data-filter-reference-picker]");
-  await picker.getByRole("button", { name: "E2E 导入目录", exact: true }).click();
-  await picker.getByRole("checkbox", { name: "image-02.jpg", exact: true }).check();
-  await picker.getByRole("button", { name: "使用所选参考图" }).click();
+  await panel.getByRole("button", { name: "选择参考图…" }).click();
+  const picker = panel.page().locator("[data-gallery-picker]");
+  await expect(panel).not.toBeVisible();
+  await picker.locator(".gallery-source").filter({ hasText: "E2E 导入目录" }).click();
+  await picker.getByRole("checkbox", { name: "选择图片 image-02.jpg", exact: true }).check();
+  await picker.getByRole("button", { name: "使用这 1 张", exact: true }).click();
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole("button", { name: "选择参考图…" })).toBeFocused();
 }
 
 test("图库配置：折叠摘要、三个真实过滤的阻止原因、取消过滤后完整配置与参考图发送", async ({ page }) => {

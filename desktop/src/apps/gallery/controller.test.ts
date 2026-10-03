@@ -117,6 +117,23 @@ function makeService(
 }
 
 describe("gallery browse controller", () => {
+  it("read-only browsing uses the existing pages and search without starting scans", async () => {
+    const store = createGalleryStore();
+    const service = makeService();
+    const controller = createGalleryController({ store, service, readOnly: true });
+    controller.activate();
+    await controller.refreshSources();
+    await expect(controller.openSource("source-1")).resolves.toBe(true);
+    await expect(controller.openDirectory("dir-root")).resolves.toBe(true);
+    await controller.navigateToBreadcrumb(-1);
+    await controller.setSearchScope("library");
+    await controller.submitQuery("reference");
+    await controller.reconcileOnFocus();
+    expect(service.listDirectoryEntries).toHaveBeenCalled();
+    expect(service.searchAssets).toHaveBeenCalled();
+    expect(service.startSourceScan).not.toHaveBeenCalled();
+    controller.destroy();
+  });
   it("stays inert until activated and stops after destroy", async () => {
     const store = createGalleryStore();
     const service = makeService();
@@ -833,6 +850,47 @@ describe("gallery file operations controller (G3-3 TXT 编辑/重命名/回收)"
     await controller.openSource("source-1");
     return { store, controller, service: service as unknown as Record<string, ReturnType<typeof vi.fn>> };
   }
+
+  it("resumes an interrupted TXT read after the gallery is reactivated without overwriting drafts", async () => {
+    let finishOld!: (value: unknown) => void;
+    const annotation = { asset_id: "asset-1", txt_state: "normal", content: "resumed", txt_version: 1, disk_version: "v1" };
+    const getAnnotation = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }))
+      .mockResolvedValue(annotation);
+    const { store, controller } = await openReady({ getAnnotation });
+    controller.openViewer("asset-1");
+    controller.deactivate();
+    expect(getAnnotation.mock.calls[0][1].aborted).toBe(true);
+    controller.activate();
+    controller.activate();
+    await vi.waitFor(() => expect(store.getState().viewerPhase).toBe("ready"));
+    expect(getAnnotation).toHaveBeenCalledTimes(2);
+    expect(controller.setTxtDraft("keep this draft")).toBe(true);
+    finishOld({ ...annotation, content: "stale" });
+    await Promise.resolve();
+    controller.deactivate();
+    controller.activate();
+    expect(getAnnotation).toHaveBeenCalledTimes(2);
+    expect(store.getState().txtDraft).toBe("keep this draft");
+    controller.destroy();
+  });
+
+  it("allows retrying viewer pagination after suspension aborts the old request", async () => {
+    const { store, controller, service } = await openReady();
+    store.patch({ assets: [assetA], assetCursor: "next" });
+    controller.openViewer("asset-1");
+    let finishOld!: (value: unknown) => void;
+    const page = { directory: rootDirectory, directories: [], assets: [assetB], directory_cursor: null, asset_cursor: null };
+    service.listDirectoryEntries.mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; })).mockResolvedValue(page);
+    const oldMove = controller.viewerNext();
+    controller.deactivate();
+    controller.activate();
+    finishOld(page);
+    await expect(oldMove).resolves.toBe(false);
+    await expect(controller.viewerNext()).resolves.toBe(true);
+    expect(store.getState().viewerIndex).toBe(1);
+    controller.destroy();
+  });
 
   it("edits and saves TXT with the version contract, then advances on demand", async () => {
     const { store, controller, service } = await openReady();
