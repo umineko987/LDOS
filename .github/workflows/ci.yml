@@ -155,3 +155,7 @@ jobs:
       - name: Run frontend unit tests
         working-directory: desktop
         run: npm test
+
+      - name: Build frontend artifacts
+        working-directory: desktop
+        run: npm run build
