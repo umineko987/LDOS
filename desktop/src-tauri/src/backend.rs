@@ -236,6 +236,11 @@ impl LaunchSpec {
 
     fn command(&self) -> Command {
         let mut command = Command::new(&self.python);
+        // AppImage 的 AppRun 会导出 PYTHONHOME/PYTHONPATH 指向 $APPDIR/usr（deb→AppImage
+        // 转换布局），劫持受控 CPython 的 stdlib 搜索路径，后端启动即
+        // "Failed to import encodings"。剥离后由本进程与其子进程继承净化环境。
+        command.env_remove("PYTHONHOME");
+        command.env_remove("PYTHONPATH");
         command
             .current_dir(&self.backend_dir)
             .args(["-m", "gdl_backend", "--config"])
