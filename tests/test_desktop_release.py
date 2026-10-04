@@ -180,7 +180,7 @@ class DesktopReleaseTests(unittest.TestCase):
         self.assertTrue(release_config["bundle"]["active"])
         self.assertEqual(
             release_config["bundle"]["resources"],
-            {"../../dist/frontend-manifest.json": "frontend-manifest.json"},
+            {"../dist/frontend-manifest.json": "frontend-manifest.json"},
         )
         self.assertEqual(
             linux_config["bundle"]["linux"]["deb"]["files"],

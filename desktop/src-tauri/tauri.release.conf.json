@@ -9,7 +9,7 @@
   "bundle": {
     "active": true,
     "resources": {
-      "../../dist/frontend-manifest.json": "frontend-manifest.json"
+      "../dist/frontend-manifest.json": "frontend-manifest.json"
     }
   }
 }

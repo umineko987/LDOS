@@ -200,7 +200,7 @@ mod tests {
         assert_eq!(
             release["bundle"]["resources"],
             serde_json::json!({
-                "../../dist/frontend-manifest.json": "frontend-manifest.json"
+                "../dist/frontend-manifest.json": "frontend-manifest.json"
             })
         );
         assert_eq!(
