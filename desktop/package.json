@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/frontend-manifest.mjs",
     "check": "svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.json && tsc -p e2e/tsconfig.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
