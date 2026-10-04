@@ -508,6 +508,32 @@ class DesktopReleaseTests(unittest.TestCase):
                 "usr/lib/ldos/frontend-manifest.json",
             )
 
+    def test_appimage_tree_rejects_bundled_libwayland_client(self) -> None:
+        with temporary_path() as tmp_path:
+            canonical, frontend_payload = use_test_frontend_manifest(tmp_path)
+            backend = tmp_path / "backend"
+            backend.mkdir()
+            minimal_tree(backend)
+            (tmp_path / "frontend-manifest.json").write_bytes(frontend_payload)
+            (tmp_path / "AppRun").write_text("#!/bin/sh\n", encoding="utf-8")
+            bundled = tmp_path / "usr" / "lib" / "libwayland-client.so.0"
+            bundled.parent.mkdir(parents=True)
+            bundled.write_bytes(b"stale wayland client")
+
+            with (
+                mock.patch.object(release, "FRONTEND_MANIFEST", canonical),
+                mock.patch.object(release, "verify_release_identity"),
+                self.assertRaisesRegex(release.ReleaseError, "libwayland-client"),
+            ):
+                release.verify_bundle_tree(tmp_path)
+
+            bundled.unlink()
+            with (
+                mock.patch.object(release, "FRONTEND_MANIFEST", canonical),
+                mock.patch.object(release, "verify_release_identity"),
+            ):
+                release.verify_bundle_tree(tmp_path)
+
     def test_bundle_tree_rejects_a_second_frontend(self) -> None:
         with temporary_path() as tmp_path:
             canonical, frontend_payload = use_test_frontend_manifest(tmp_path)

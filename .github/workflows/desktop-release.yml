@@ -180,6 +180,16 @@ jobs:
         shell: bash
         run: test -f desktop/dist/index.html
 
+      - name: Seed pinned linuxdeploy into the tauri tool cache
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.cache/tauri"
+          curl -sfL -o "$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage" \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage"
+          echo "c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d  $HOME/.cache/tauri/linuxdeploy-x86_64.AppImage" | sha256sum -c -
+          chmod +x "$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage"
+
       - name: Build, run, and statically verify the bundle
         env:
           LDOS_PREBUILT_FRONTEND: "1"

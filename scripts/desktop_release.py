@@ -1106,6 +1106,14 @@ def verify_bundle_tree(extracted: Path) -> dict[str, Any]:
         raise ReleaseError("bundled frontend manifest differs from the canonical Svelte build")
     if any(path.name == "webui_dist" for path in extracted.rglob("webui_dist")):
         raise ReleaseError("bundle contains a second frontend tree")
+    if (extracted / "AppRun").is_file() and any(
+        extracted.glob("usr/lib/libwayland-client.so.0*")
+    ):
+        raise ReleaseError(
+            "AppImage bundles libwayland-client.so.0: the stale copy shadows the host "
+            "library and breaks EGL initialization on Mesa 25+ Wayland hosts "
+            "(linuxdeploy excludelist must keep it out)"
+        )
     runtime_roots = [path for path in extracted.rglob("runtime") if path.parent == backend]
     if runtime_roots != [backend / "runtime"]:
         raise ReleaseError("bundle does not contain exactly one controlled Python runtime")
