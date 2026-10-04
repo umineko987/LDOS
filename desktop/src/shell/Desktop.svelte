@@ -126,19 +126,23 @@
     if (changed) void focusPage(change.appId);
   }
 
+  let sidebarCollapsed = $state(false);
   let sidebarEl = $state<HTMLElement>();
   let navDot = $state<HTMLElement>();
   let navDotPlaced = false;
   let lastNavDotLanguage: string | null = null;
+  let lastNavDotSidebarCollapsed: boolean | null = null;
 
   function placeNavDot(animate: boolean): void {
-    const label = sidebarEl?.querySelector<HTMLElement>("button[aria-current] > span:last-child");
-    if (!sidebarEl || !navDot || !label) return;
+    const anchor = sidebarCollapsed
+      ? sidebarEl?.querySelector<HTMLElement>("button[aria-current] svg")
+      : sidebarEl?.querySelector<HTMLElement>("button[aria-current] > span:last-child");
+    if (!sidebarEl || !navDot || !anchor) return;
     const sidebarRect = sidebarEl.getBoundingClientRect();
-    const labelRect = label.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
     const size = navDot.offsetWidth;
-    const x = labelRect.right - sidebarRect.left + 10;
-    const y = labelRect.top - sidebarRect.top + labelRect.height / 2 - size / 2;
+    const x = anchorRect.right - sidebarRect.left + (sidebarCollapsed ? 4 : 10);
+    const y = anchorRect.top - sidebarRect.top + anchorRect.height / 2 - size / 2;
     navDot.style.transition = animate ? "" : "none";
     navDot.style.transform = `translate(${x}px, ${y}px)`;
     if (!animate) {
@@ -151,9 +155,11 @@
 
   $effect(() => {
     void snapshot.focusedAppId;
+    const sidebarChanged = lastNavDotSidebarCollapsed !== null && lastNavDotSidebarCollapsed !== sidebarCollapsed;
+    lastNavDotSidebarCollapsed = sidebarCollapsed;
     const languageChanged = lastNavDotLanguage !== null && $language !== lastNavDotLanguage;
     lastNavDotLanguage = $language;
-    if (languageChanged) {
+    if (languageChanged || sidebarChanged) {
       // localizeUi rewrites label text synchronously on store change; measure without sliding.
       placeNavDot(false);
       return;
@@ -196,22 +202,34 @@
   });
 </script>
 
-<div use:localizeUi class="workbench" data-desktop data-workbench data-scene={preferences.wallpaperColor} bind:this={desktop}>
+<div use:localizeUi class="workbench" data-desktop data-workbench data-scene={preferences.wallpaperColor} data-sidebar-collapsed={sidebarCollapsed ? "true" : undefined} bind:this={desktop}>
   <Wallpaper scene={preferences.wallpaperColor} />
   <button type="button" class="skip-link" data-skip-link inert={aboutOpen || !!picker} onclick={() => void focusPage(snapshot.focusedAppId)}>跳到当前应用</button>
 
   <aside class="workbench-sidebar" inert={aboutOpen || !!picker} bind:this={sidebarEl}>
-    <strong class="workbench-brand">LDOS</strong>
+    <div class="workbench-brand-row">
+      <strong class="workbench-brand">LDOS</strong>
+      <button
+        type="button"
+        class="workbench-sidebar-toggle"
+        aria-expanded={sidebarCollapsed ? "false" : "true"}
+        aria-label={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
+        title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
+        onclick={() => { sidebarCollapsed = !sidebarCollapsed; }}
+      >
+        <Icon name={sidebarCollapsed ? "chevron-right" : "chevron-left"} size={16} />
+      </button>
+    </div>
     <nav class="workbench-nav" aria-label="主导航">
       {#each primaryPages as item}
-        <button type="button" data-nav-app={item.id} aria-current={snapshot.focusedAppId === item.id ? "page" : undefined} onclick={() => navigate(item.id)}>
+        <button type="button" data-nav-app={item.id} title={sidebarCollapsed ? item.label : undefined} aria-current={snapshot.focusedAppId === item.id ? "page" : undefined} onclick={() => navigate(item.id)}>
           <Icon name={getApplicationDefinition(item.id).icon} size={20} /><span>{item.label}</span>
         </button>
       {/each}
     </nav>
     <span class="workbench-nav-dot" data-nav-dot aria-hidden="true" bind:this={navDot}></span>
     <div class="workbench-sidebar-bottom">
-      <button type="button" class="workbench-settings" data-nav-settings aria-current={inSettings ? "true" : undefined} onclick={() => navigate(lastSettingsPage)}>
+      <button type="button" class="workbench-settings" data-nav-settings title={sidebarCollapsed ? "设置" : undefined} aria-current={inSettings ? "true" : undefined} onclick={() => navigate(lastSettingsPage)}>
         <Icon name="sliders" size={20} /><span>设置</span>
       </button>
       <div class="workbench-utilities">

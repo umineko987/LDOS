@@ -4,6 +4,8 @@ export const ENGLISH_UI_MESSAGES: ReadonlyArray<readonly [string, string]> = [
   ["正在准备工作台", "Preparing the workbench"],
   ["去重", "Deduplication"],
   ["主导航", "Main navigation"],
+  ["收起侧栏", "Collapse sidebar"],
+  ["展开侧栏", "Expand sidebar"],
   ["设置导航", "Settings navigation"],
   // Crawl.
   ["有站内作品结果", "Has on-site work results"],

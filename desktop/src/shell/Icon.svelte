@@ -2,7 +2,7 @@
   import type { ApplicationIcon } from "../core/applications/definitions";
 
   interface Props {
-    name: ApplicationIcon | "grid" | "clock";
+    name: ApplicationIcon | "grid" | "clock" | "chevron-left" | "chevron-right";
     size?: number;
     strokeWidth?: number;
     label?: string | null;
@@ -43,6 +43,10 @@
     <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM7 16l3-3 2 2 3-4 3 5"/>
   {:else if name === "grid"}
     <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+  {:else if name === "chevron-left"}
+    <path d="m14 6-6 6 6 6"/>
+  {:else if name === "chevron-right"}
+    <path d="m10 6 6 6-6 6"/>
   {:else}
     <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
   {/if}
