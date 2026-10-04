@@ -26,7 +26,8 @@ pub const HEALTH_PATH: &str = "/healthz";
 const VERSION_PATH: &str = "/";
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 const MAX_HTTP_BYTES: u64 = 64 * 1024;
-const START_TIMEOUT: Duration = Duration::from_secs(30);
+/// AppImage 冷启动时 Python 需从 squashfs 懒解压整个 import 链，30 秒不够（首启可达分钟级）。
+const START_TIMEOUT: Duration = Duration::from_secs(180);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 const PROBE_INTERVAL: Duration = Duration::from_millis(100);
 const MONITOR_INTERVAL: Duration = Duration::from_millis(250);
