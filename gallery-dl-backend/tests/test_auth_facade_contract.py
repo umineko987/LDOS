@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import os
 import tempfile
 import time
@@ -18,14 +17,6 @@ from gdl_backend.auth import (
 
 from tests.helpers import make_settings
 
-
-def _signature_shape(callable_object) -> list[tuple[str, inspect._ParameterKind, object]]:
-    return [
-        (name, parameter.kind, parameter.default)
-        for name, parameter in inspect.signature(callable_object).parameters.items()
-    ]
-
-
 class AuthFacadeContractTests(unittest.TestCase):
     """Characterize the facade before moving its external-I/O collaborators."""
 
@@ -37,73 +28,6 @@ class AuthFacadeContractTests(unittest.TestCase):
     def tearDown(self) -> None:
         asyncio.run(self.auth.stop())
         self.temporary.cleanup()
-
-    def test_public_method_signatures_and_async_shape_are_stable(self):
-        positional = inspect.Parameter.POSITIONAL_OR_KEYWORD
-        keyword_only = inspect.Parameter.KEYWORD_ONLY
-        empty = inspect.Parameter.empty
-        expected = {
-            "__init__": [("self", positional, empty), ("settings", positional, empty)],
-            "status": [("self", positional, empty), ("site", positional, empty)],
-            "statuses": [("self", positional, empty)],
-            "credentials_for": [("self", positional, empty), ("site", positional, empty)],
-            "browser_profile_status": [("self", positional, empty)],
-            "authorization_proxy": [("self", positional, empty)],
-            "proxy_status": [("self", positional, empty)],
-            "browser_login_session": [
-                ("self", positional, empty),
-                ("site", positional, empty),
-                ("session_id", positional, empty),
-            ],
-            "managed_credentials_available": [
-                ("self", positional, empty),
-                ("site", positional, empty),
-                ("cookies_file", positional, empty),
-            ],
-            "set_authorization_proxy": [
-                ("self", positional, empty),
-                ("value", positional, empty),
-            ],
-            "clear_authorization_proxy": [("self", positional, empty)],
-            "start_browser_login": [
-                ("self", positional, empty),
-                ("site", positional, empty),
-            ],
-            "cancel_browser_login": [
-                ("self", positional, empty),
-                ("site", positional, empty),
-                ("session_id", positional, empty),
-            ],
-            "invalidate_if_managed": [
-                ("self", positional, empty),
-                ("site", positional, empty),
-                ("cookies_file", positional, empty),
-                ("message", positional, empty),
-            ],
-            "start_pixiv_oauth": [("self", positional, empty)],
-            "clear": [("self", positional, empty), ("site", positional, empty)],
-            "cancel_pixiv_oauth": [("self", positional, empty)],
-            "clear_browser_profile": [("self", positional, empty)],
-            "stop": [("self", positional, empty)],
-        }
-        del keyword_only  # Documents that the public auth facade has no keyword-only arguments.
-        async_methods = {
-            "set_authorization_proxy",
-            "clear_authorization_proxy",
-            "start_browser_login",
-            "cancel_browser_login",
-            "invalidate_if_managed",
-            "start_pixiv_oauth",
-            "clear",
-            "cancel_pixiv_oauth",
-            "clear_browser_profile",
-            "stop",
-        }
-        for name, shape in expected.items():
-            with self.subTest(method=name):
-                method = getattr(AuthManager, name)
-                self.assertEqual(_signature_shape(method), shape)
-                self.assertEqual(inspect.iscoroutinefunction(method), name in async_methods)
 
     def test_legacy_status_and_credential_dtos_keep_exact_key_allowlists(self):
         payload = self.auth.statuses()

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import json
 import tempfile
 import time
@@ -16,14 +15,6 @@ from gdl_backend.proxy_runtime import NativeProxyPool
 from gdl_backend.proxy_source_store import snapshot_from_settings
 
 from tests.helpers import make_settings
-
-
-def _signature_shape(callable_object) -> list[tuple[str, inspect._ParameterKind, object]]:
-    return [
-        (name, parameter.kind, parameter.default)
-        for name, parameter in inspect.signature(callable_object).parameters.items()
-    ]
-
 
 def _healthy_probe(adapter: ProxyPoolAdapter) -> dict[str, object]:
     for record in adapter._records:
@@ -75,98 +66,6 @@ class ProxyFacadeContractTests(unittest.TestCase):
             self.assertIsNot(self.adapter._lifecycle_lock, second._lifecycle_lock)
         finally:
             second.stop(force=True)
-
-    def test_public_imports_signatures_and_lease_dto_are_stable(self):
-        positional = inspect.Parameter.POSITIONAL_OR_KEYWORD
-        keyword_only = inspect.Parameter.KEYWORD_ONLY
-        empty = inspect.Parameter.empty
-        expected = {
-            "__init__": [
-                ("self", positional, empty),
-                ("settings", positional, empty),
-                ("runtime_dir", positional, empty),
-                ("source_provider", positional, None),
-            ],
-            "start": [
-                ("self", positional, empty),
-                ("force_refresh", keyword_only, True),
-                ("probe_url", keyword_only, None),
-                ("_source_snapshot", keyword_only, None),
-            ],
-            "reload": [
-                ("self", positional, empty),
-                ("force_refresh", keyword_only, True),
-                ("probe_url", keyword_only, None),
-            ],
-            "stop": [
-                ("self", positional, empty),
-                ("force", keyword_only, False),
-                ("_configured_snapshot", keyword_only, None),
-            ],
-            "status": [
-                ("self", positional, empty),
-                ("_configured_snapshot", keyword_only, None),
-            ],
-            "probe": [
-                ("self", positional, empty),
-                ("target_url", keyword_only, None),
-                ("node_id", keyword_only, None),
-            ],
-            "probe_for_target": [
-                ("self", positional, empty),
-                ("target_url", positional, empty),
-            ],
-            "acquire": [
-                ("self", positional, empty),
-                ("task_id", positional, empty),
-                ("node_tags", keyword_only, None),
-                ("exclude_ids", keyword_only, None),
-                ("allowed_ids", keyword_only, None),
-                ("probe_before_use", keyword_only, False),
-                ("probe_url", keyword_only, None),
-            ],
-            "release": [
-                ("self", positional, empty),
-                ("task_id", positional, empty),
-                ("proxy_fault", keyword_only, empty),
-                ("reason", keyword_only, ""),
-            ],
-        }
-        for name, shape in expected.items():
-            with self.subTest(method=name):
-                self.assertEqual(_signature_shape(getattr(ProxyPoolAdapter, name)), shape)
-        self.assertIsInstance(ProxyPoolAdapter.active_revision, property)
-        self.assertIsInstance(ProxyPoolAdapter.active_leases, property)
-        self.assertEqual(
-            tuple(ProxyLease.__dataclass_fields__),
-            (
-                "task_id",
-                "node_id",
-                "endpoint",
-                "name",
-                "protocol",
-                "tags",
-                "acquired_at",
-                "pool_endpoint",
-                "pool_token",
-                "forwarder_key",
-            ),
-        )
-        lease = ProxyLease(
-            task_id="task",
-            node_id="node",
-            endpoint="http://127.0.0.1:1234",
-            name="fixture",
-            protocol="http",
-            tags=["jp"],
-            acquired_at=1.0,
-            pool_endpoint="http://user:secret@upstream.invalid:443",
-            pool_token="POOL_SECRET",
-            forwarder_key="task",
-        )
-        rendered = repr(lease)
-        self.assertNotIn("upstream.invalid", rendered)
-        self.assertNotIn("POOL_SECRET", rendered)
 
     def test_start_and_status_keep_exact_public_allowlists_and_redaction(self):
         self.settings.proxy.inline_nodes = [

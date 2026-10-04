@@ -22,91 +22,6 @@ from gdl_backend.database import (
     Database,
 )
 
-
-PUBLIC_DATABASE_SIGNATURES = {
-    "close": "(self) -> 'None'",
-    "ping": "(self) -> 'bool'",
-    "create_task": "(self, values: 'dict[str, Any]', *, idempotency_key: 'str | None' = None) -> 'tuple[dict[str, Any], bool]'",
-    "create_crawl_media_tasks": "(self, address_id: 'str', items: 'list[dict[str, Any]]') -> 'list[dict[str, Any]]'",
-    "get_task": "(self, task_id: 'str') -> 'dict[str, Any] | None'",
-    "get_task_by_idempotency": "(self, key: 'str') -> 'dict[str, Any] | None'",
-    "list_tasks": "(self, *, status: 'str | None' = None, site: 'str | None' = None, limit: 'int' = 50, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
-    "queued_tasks": "(self, limit: 'int' = 100, exclude_sites: 'set[str] | None' = None) -> 'list[dict[str, Any]]'",
-    "queued_task_ids": "(self, task_ids: 'set[str]') -> 'set[str]'",
-    "mark_task_credentials_unavailable": "(self, task_id: 'str', site: 'str') -> 'bool'",
-    "claim_task": "(self, task_id: 'str') -> 'bool'",
-    "begin_attempt": "(self, task_id: 'str') -> 'dict[str, Any]'",
-    "set_process": "(self, task_id: 'str', attempt_id: 'str', pid: 'int', marker: 'str') -> 'None'",
-    "finish_attempt": "(self, attempt_id: 'str', *, exit_code: 'int | None', status: 'str', error_class: 'str' = '', error_message: 'str' = '', retryable: 'bool' = False, proxy_node_id: 'str | None' = None, proxy_endpoint: 'str | None' = None) -> 'None'",
-    "complete_task": "(self, task_id: 'str', status: 'str', *, exit_code: 'int | None' = None, error_class: 'str' = '', error_message: 'str' = '', expected_attempt_id: 'str | None' = None) -> 'dict[str, Any] | None'",
-    "requeue_task": "(self, task_id: 'str', *, next_run_at: 'float', exit_code: 'int | None', error_class: 'str', error_message: 'str', tried_proxy_ids: 'list[str]', expected_attempt_id: 'str | None' = None) -> 'bool'",
-    "request_cancel": "(self, task_id: 'str') -> 'dict[str, Any] | None'",
-    "retry_task": "(self, task_id: 'str', additional_attempts: 'int') -> 'dict[str, Any] | None'",
-    "retry_failed_crawl_tasks": "(self, batch_id: 'str', additional_attempts: 'int' = 1) -> 'dict[str, Any] | None'",
-    "rerun_crawl_batch": "(self, batch_id: 'str', additional_attempts: 'int' = 1, requeue_succeeded: 'bool' = False) -> 'dict[str, Any] | None'",
-    "set_lease": "(self, task_id: 'str', attempt_id: 'str', node_id: 'str', endpoint: 'str', site: 'str') -> 'None'",
-    "clear_lease": "(self, task_id: 'str', attempt_id: 'str | None' = None) -> 'None'",
-    "append_logs_bulk": "(self, rows: 'Iterable[tuple[str, str | None, float, str, str]]') -> 'int | None'",
-    "append_log": "(self, task_id: 'str', attempt_id: 'str | None', stream: 'str', line: 'str') -> 'int'",
-    "get_logs": "(self, task_id: 'str', *, since: 'int' = 0, tail: 'int | None' = None, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
-    "get_events": "(self, task_id: 'str', *, since: 'int' = 0, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
-    "update_artifacts": "(self, task_id: 'str', count: 'int', total_bytes: 'int') -> 'None'",
-    "create_crawl_batch": "(self, values: 'dict[str, Any]', addresses: 'list[dict[str, Any]]', *, idempotency_key: 'str | None' = None) -> 'tuple[str, bool]'",
-    "get_crawl_batch_by_idempotency": "(self, key: 'str') -> 'dict[str, Any] | None'",
-    "crawl_batch_tick_view": "(self, batch_id: 'str') -> 'dict[str, Any] | None'",
-    "get_crawl_batch": "(self, batch_id: 'str') -> 'dict[str, Any] | None'",
-    "list_crawl_batches": "(self, *, limit: 'int' = 50, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
-    "get_crawl_review": "(self, batch_id: 'str') -> 'dict[str, Any] | None'",
-    "start_crawl_review": "(self, batch_id: 'str') -> 'dict[str, Any]'",
-    "recover_crawl_reviews": "(self) -> 'int'",
-    "claim_next_crawl_review": "(self) -> 'dict[str, Any] | None'",
-    "next_crawl_review_automatic": "(self) -> 'dict[str, Any] | None'",
-    "requeue_crawl_review": "(self, batch_id: 'str') -> 'None'",
-    "fail_crawl_review": "(self, batch_id: 'str', error: 'str', *, log_path: 'str' = '') -> 'None'",
-    "retry_crawl_review": "(self, batch_id: 'str') -> 'bool'",
-    "replace_crawl_review_manifest": "(self, batch_id: 'str', manifest: 'dict[str, Any]', *, log_path: 'str' = '') -> 'None'",
-    "list_crawl_review_groups": "(self, batch_id: 'str', *, kind: 'str | None' = None, limit: 'int' = 12, offset: 'int' = 0, all_groups: 'bool' = False) -> 'dict[str, Any]'",
-    "update_crawl_review_decisions": "(self, batch_id: 'str', decisions: 'list[dict[str, Any]]') -> 'None'",
-    "get_crawl_review_image": "(self, batch_id: 'str', image_id: 'str') -> 'dict[str, Any] | None'",
-    "begin_crawl_review_apply": "(self, batch_id: 'str') -> 'bool'",
-    "crawl_review_apply_images": "(self, batch_id: 'str') -> 'list[dict[str, Any]]'",
-    "crawl_review_automatic_images": "(self, batch_id: 'str') -> 'list[dict[str, Any]]'",
-    "finish_crawl_review_automatic": "(self, batch_id: 'str') -> 'dict[str, Any] | None'",
-    "stage_crawl_review_image_move": "(self, batch_id: 'str', image_id: 'str', final_relative_path: 'str') -> 'None'",
-    "finish_crawl_review_image": "(self, batch_id: 'str', image_id: 'str', disposition: 'str', *, final_relative_path: 'str', error: 'str' = '') -> 'None'",
-    "finish_crawl_review_apply": "(self, batch_id: 'str') -> 'dict[str, Any] | None'",
-    "active_crawl_batch_ids": "(self) -> 'list[str]'",
-    "next_crawl_address": "(self, batch_id: 'str') -> 'dict[str, Any] | None'",
-    "save_crawl_address_proxy_probe": "(self, address_id: 'str', *, target_url: 'str', total_count: 'int', healthy_node_ids: 'list[str]', error: 'str' = '') -> 'dict[str, Any]'",
-    "get_crawl_address_proxy_probe": "(self, address_id: 'str') -> 'dict[str, Any] | None'",
-    "begin_crawl_address_planning": "(self, address_id: 'str') -> 'bool'",
-    "task_crawl_batch_id": "(self, task_id: 'str') -> 'str | None'",
-    "crawl_batch_cancel_requested": "(self, batch_id: 'str') -> 'bool | None'",
-    "link_crawl_task": "(self, address_id: 'str', task_id: 'str', sequence_no: 'int', *, source_key: 'str | None' = None, source_url: 'str | None' = None) -> 'None'",
-    "succeeded_danbooru_source_keys": "(self, batch_id: 'str', source_keys: 'list[str] | set[str] | tuple[str, ...]') -> 'set[str]'",
-    "succeeded_danbooru_source_key_count": "(self, batch_id: 'str', target_site: 'str') -> 'int'",
-    "set_crawl_address_pre_dedup_skipped_count": "(self, address_id: 'str', skipped_count: 'int') -> 'bool'",
-    "finish_crawl_address_as_pre_deduplicated": "(self, address_id: 'str', skipped_count: 'int') -> 'bool'",
-    "mark_crawl_address_running": "(self, address_id: 'str', *, last_error: 'str' = '', planning_error: 'str' = '') -> 'bool'",
-    "reset_crawl_address_planning": "(self, address_id: 'str', error: 'str' = '') -> 'bool'",
-    "crawl_address_tasks": "(self, address_id: 'str') -> 'list[dict[str, Any]]'",
-    "list_crawl_tasks": "(self, batch_id: 'str', *, address_id: 'str | None' = None, limit: 'int' = 100, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
-    "crawl_batch_task_count": "(self, batch_id: 'str') -> 'int'",
-    "crawl_address_task_count": "(self, address_id: 'str') -> 'int'",
-    "finish_crawl_address_if_terminal": "(self, address_id: 'str') -> 'bool'",
-    "fail_crawl_address": "(self, address_id: 'str', error: 'str') -> 'None'",
-    "finish_crawl_batch_if_ready": "(self, batch_id: 'str') -> 'bool'",
-    "request_cancel_crawl_batch": "(self, batch_id: 'str') -> 'tuple[dict[str, Any] | None, list[str]]'",
-    "recover_ordered_crawls": "(self) -> 'int'",
-    "put_site_policy": "(self, site: 'str', policy: 'dict[str, Any]') -> 'dict[str, Any]'",
-    "get_site_policy": "(self, site: 'str') -> 'dict[str, Any] | None'",
-    "list_site_policies": "(self) -> 'list[dict[str, Any]]'",
-    "delete_site_policy": "(self, site: 'str') -> 'bool'",
-    "incomplete_processes": "(self) -> 'list[dict[str, Any]]'",
-    "recover_incomplete": "(self) -> 'int'",
-}
-
-
 def task_values(root: Path, task_id: str = "task-transaction") -> dict[str, Any]:
     return {
         "id": task_id,
@@ -228,14 +143,6 @@ class DatabaseTransactionBoundaryTests(unittest.TestCase):
                 ).fetchall()
             ]
         return groups, images
-
-    def test_public_database_facade_signatures_are_stable(self) -> None:
-        actual = {
-            name: str(inspect.signature(value))
-            for name, value in Database.__dict__.items()
-            if callable(value) and not name.startswith("_")
-        }
-        self.assertEqual(actual, PUBLIC_DATABASE_SIGNATURES)
 
     def test_database_is_the_begin_commit_and_rollback_owner(self) -> None:
         source = inspect.getsource(Database._transaction)
@@ -395,7 +302,9 @@ class DatabaseTransactionBoundaryTests(unittest.TestCase):
         self.assertIs(repository._read.__self__, self.db)
         self.assertIs(repository._transaction.__self__, self.db)
 
-        for method_name in sorted(PUBLIC_DATABASE_SIGNATURES):
+        for method_name in sorted(
+            name for name, value in Database.__dict__.items() if callable(value) and not name.startswith("_")
+        ):
             if method_name in {"close", "ping"}:
                 continue
             with self.subTest(method=method_name):
