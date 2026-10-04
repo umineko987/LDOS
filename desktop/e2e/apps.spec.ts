@@ -642,7 +642,8 @@ test.describe("可用应用关键旅程", () => {
     await gallery.getByLabel("搜索当前范围").fill("image");
     await gallery.getByRole("button", { name: "搜索", exact: true }).click();
     await expect(gallery.locator("[data-gallery-asset]")).toHaveCount(2);
-    await expect(gallery.getByText(/整个图库 · 已载入 2 项/)).toBeVisible();
+    await expect(gallery.getByText(/“image” · 整个图库/)).toBeVisible();
+    await expect(gallery.locator("[data-gallery-loaded-stats]")).toContainText("已加载 2 张");
 
     const opener = gallery.locator('[data-gallery-asset="gal-asset-02"]');
     await opener.dblclick();

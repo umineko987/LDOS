@@ -863,25 +863,6 @@ export interface GalleryPathSegment {
   readonly name: string;
 }
 
-export interface GalleryBreadcrumbSegment {
-  readonly directory_id: string;
-  readonly label: string;
-}
-
-export function galleryBreadcrumb(
-  sourceName: string,
-  path: readonly GalleryPathSegment[],
-): readonly GalleryBreadcrumbSegment[] {
-  if (sourceName.length === 0) throw new TypeError("invalid_gallery_source_name");
-  const segments: GalleryBreadcrumbSegment[] = [{ directory_id: "", label: sourceName }];
-  for (const segment of path) {
-    segments.push({
-      directory_id: idText(segment.directory_id, "gallery_directory_id"),
-      label: boundedText(segment.name, "gallery_directory_name", 255),
-    });
-  }
-  return Object.freeze(segments);
-}
 
 export function validateGalleryQuery(query: string): string {
   if (typeof query !== "string") throw new TypeError("invalid_gallery_query");

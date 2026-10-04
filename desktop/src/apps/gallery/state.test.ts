@@ -170,6 +170,44 @@ describe("gallery browse store", () => {
     expect(appended.assetCursor).toBeNull();
     store.destroy();
   });
+  it("keeps selection with a re-anchored index when appending pages", () => {
+    const store = createGalleryStore();
+    store.setSources([source]);
+    store.openSource("source-1", "dir-root");
+    store.applyDirectoryPage(page());
+    store.applySelection({ anchorIndex: 1, selectedIds: ["asset-2"] });
+
+    expect(
+      store.appendDirectoryPage({
+        directory_id: "dir-root",
+        directories: [],
+        assets: [asset("asset-0", "0.jpg")],
+        directory_cursor: null,
+        asset_cursor: null,
+      }),
+    ).toBe(true);
+
+    let state = store.getState();
+    expect(state.assets.map((entry) => entry.name)).toEqual(["0.jpg", "1.jpg", "2.jpg"]);
+    expect(state.selectedAssetIds).toEqual(["asset-2"]);
+    expect(state.selectionAnchorIndex).toBe(2);
+
+    expect(
+      store.applySearchPage({ assets: [asset("asset-5", "5.jpg")], asset_cursor: null }, true),
+    ).toBe(true);
+    state = store.getState();
+    expect(state.assets.map((entry) => entry.name)).toEqual(["0.jpg", "1.jpg", "2.jpg", "5.jpg"]);
+    expect(state.selectedAssetIds).toEqual(["asset-2"]);
+    expect(state.selectionAnchorIndex).toBe(2);
+
+    expect(
+      store.applySearchPage({ assets: [asset("asset-9", "9.jpg")], asset_cursor: null }, false),
+    ).toBe(true);
+    state = store.getState();
+    expect(state.selectedAssetIds).toEqual([]);
+    expect(state.selectionAnchorIndex).toBeNull();
+    store.destroy();
+  });
 
   it("keeps active source when reloading sources and resets when it disappears", () => {
     const store = createGalleryStore();

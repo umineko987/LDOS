@@ -23,7 +23,6 @@
     GALLERY_DEDUP_STATE_LABELS,
     GALLERY_SOURCE_KIND_LABELS,
     GALLERY_TXT_STATE_LABELS,
-    galleryBreadcrumb,
     galleryVisibleRange,
     type GalleryAssetEntry,
     type GalleryDirectoryEntry,
@@ -77,16 +76,30 @@
   // ---- 虚拟化窗口状态（滚动驱动，非 store 事务） ----
   let contentScroll = $state(0);
   let contentHeight = $state(0);
-  let gridColumns = $state(4);
+  let contentWidth = $state(0);
   let contentViewport: HTMLElement | null = $state(null);
   let viewerWasOpen = $state(false);
   let viewerReturnAssetId = $state("");
-  const GRID_CELL = 208;
-  const GRID_ROW = 268;
+  // 网格密度档位（离散步进）：cell 为列数计算的宽度基准，shell 为卡片高度。
+  // 默认“标准”档与既有 208px 基准 / 256px 卡高（+12px gap = 268px 虚拟行高）一致。
+  const GRID_GAP = 12;
+  const GRID_SIZE_STEPS: readonly { readonly label: string; readonly cell: number; readonly shell: number }[] = [
+    { label: "小", cell: 144, shell: 178 },
+    { label: "较小", cell: 176, shell: 216 },
+    { label: "标准", cell: 208, shell: 256 },
+    { label: "较大", cell: 248, shell: 304 },
+    { label: "大", cell: 296, shell: 364 },
+  ];
+  const GRID_SIZE_DEFAULT_INDEX = 2;
+  let gridSizeModeIndex = $state(GRID_SIZE_DEFAULT_INDEX);
+  const gridSizeMode = $derived(
+    GRID_SIZE_STEPS[gridSizeModeIndex] ?? GRID_SIZE_STEPS[GRID_SIZE_DEFAULT_INDEX],
+  );
   const LIST_ROW = 56;
   const OVERSCAN = 2;
 
-  const rowHeight = $derived(snapshot.viewMode === "grid" ? GRID_ROW : LIST_ROW);
+  const gridColumns = $derived(Math.max(1, Math.floor(contentWidth / gridSizeMode.cell)));
+  const rowHeight = $derived(snapshot.viewMode === "grid" ? gridSizeMode.shell + GRID_GAP : LIST_ROW);
   const windowing = $derived(
     galleryVisibleRange({
       total: snapshot.assets.length,
@@ -101,22 +114,19 @@
     snapshot.assets.slice(windowing.startIndex, windowing.endIndex + 1),
   );
 
-  const breadcrumb = $derived(
-    snapshot.activeSourceId
-      ? galleryBreadcrumb(
-          snapshot.sources.find((item) => item.source_id === snapshot.activeSourceId)?.display_name
-            ?? "来源",
-          snapshot.path,
-        )
-      : [],
-  );
-
   const activeSource = $derived(
     snapshot.sources.find((item) => item.source_id === snapshot.activeSourceId) ?? null,
   );
   const activeScan = $derived(
     snapshot.scanOperation?.source_id === snapshot.activeSourceId ? snapshot.scanOperation : null,
   );
+  const scanSummary = $derived.by(() => {
+    if (activeScan?.state !== "succeeded" || activeScan.stats === null || activeScan.stats.offline) return null;
+    return {
+      visibleCount: formatCount(activeScan.stats.asset_count),
+      skippedCount: formatCount(activeScan.stats.skipped_unsupported + activeScan.stats.skipped_temporary),
+    };
+  });
   const txtStateOptions: readonly { value: string; label: string }[] = [
     { value: "", label: "全部 TXT 状态" },
     ...(Object.keys(GALLERY_TXT_STATE_LABELS) as GalleryTxtState[]).map((state) => ({
@@ -124,6 +134,21 @@
       label: GALLERY_TXT_STATE_LABELS[state],
     })),
   ];
+
+  // ---- 侧栏折叠（只作用于图库内“来源与目录”侧栏，不影响全局导航） ----
+  let treeCollapsed = $state(false);
+
+  // 已加载图片的 TXT 状态摘要；assets 为分页追加数据，只代表“已加载”结果。
+  const TXT_STATE_ORDER: readonly GalleryTxtState[] = Object.keys(GALLERY_TXT_STATE_LABELS) as GalleryTxtState[];
+  const loadedTxtSummary = $derived.by(() => {
+    const counts = new Map<GalleryTxtState, number>();
+    for (const asset of snapshot.assets) {
+      counts.set(asset.txt_state, (counts.get(asset.txt_state) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((left, right) => TXT_STATE_ORDER.indexOf(left[0]) - TXT_STATE_ORDER.indexOf(right[0]))
+      .map(([state, count]) => ({ state, count }));
+  });
 
   let searchDraft = $state("");
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -142,7 +167,7 @@
   function onContentResize(entries: ResizeObserverEntry[]): void {
     for (const entry of entries) {
       contentHeight = entry.contentRect.height;
-      gridColumns = Math.max(1, Math.floor(entry.contentRect.width / GRID_CELL));
+      contentWidth = entry.contentRect.width;
     }
   }
 
@@ -673,12 +698,17 @@
       snapshot.query,
       snapshot.includeDescendants ? "descendants" : "direct",
       snapshot.txtStateFilter ?? "",
-      snapshot.directories.map((directory) => directory.directory_id).join(","),
-      snapshot.assets.map((asset) => asset.asset_id).join(","),
     ].join("\u0000");
-    if (selectionContextKey === nextSelectionContextKey) return;
-    selectionContextKey = nextSelectionContextKey;
-    controller.clearAssetSelection();
+    if (selectionContextKey !== nextSelectionContextKey) {
+      selectionContextKey = nextSelectionContextKey;
+      controller.clearAssetSelection();
+      return;
+    }
+
+    const loadedAssetIds = new Set(snapshot.assets.map((asset) => asset.asset_id));
+    if (snapshot.selectedAssetIds.some((assetId) => !loadedAssetIds.has(assetId))) {
+      controller.clearAssetSelection();
+    }
   });
 
   function clearVisibleSelection(): void {
@@ -1477,9 +1507,33 @@
     <span class="gallery-status" data-kind={snapshot.sourcesPhase}>{snapshot.sourcesPhase === "ready" ? `${formatCount(snapshot.sources.length)} 个来源` : snapshot.sourcesPhase === "error" ? "来源加载失败" : "正在加载来源"}</span>
   </header>
 
-  <div class="gallery-body" inert={snapshot.viewerIndex >= 0 ? true : undefined} aria-hidden={snapshot.viewerIndex >= 0 ? "true" : undefined}>
-    <aside class="gallery-tree" aria-labelledby={`${uid}-tree-heading`}>
-      <h2 id={`${uid}-tree-heading`}>来源与目录</h2>
+  <div class="gallery-body" class:gallery-body--tree-collapsed={treeCollapsed} inert={snapshot.viewerIndex >= 0 ? true : undefined} aria-hidden={snapshot.viewerIndex >= 0 ? "true" : undefined}>
+    {#if treeCollapsed}
+      <aside class="gallery-tree gallery-tree--collapsed" id={`${uid}-tree`} aria-label="来源与目录（已折叠）">
+        <button
+          type="button"
+          class="gallery-tree__expand"
+          aria-label="展开来源与目录"
+          title="展开来源与目录"
+          aria-expanded="false"
+          aria-controls={`${uid}-tree`}
+          onclick={() => (treeCollapsed = false)}
+        ><span aria-hidden="true">»</span></button>
+      </aside>
+    {:else}
+    <aside class="gallery-tree" id={`${uid}-tree`} aria-labelledby={`${uid}-tree-heading`}>
+      <div class="gallery-tree__heading">
+        <h2 id={`${uid}-tree-heading`}>来源与目录{#if snapshot.sourcesPhase === "ready"}<span class="gallery-tree__count" aria-hidden="true">{formatCount(snapshot.sources.length)}</span>{/if}</h2>
+        <button
+          type="button"
+          class="gallery-tree__collapse"
+          aria-label="折叠来源与目录"
+          title="折叠来源与目录"
+          aria-expanded="true"
+          aria-controls={`${uid}-tree`}
+          onclick={() => (treeCollapsed = true)}
+        ><span aria-hidden="true">«</span></button>
+      </div>
       {#if snapshot.sourcesPhase === "loading" || snapshot.sourcesPhase === "idle"}
         <p class="gallery-hint" role="status">正在加载来源…</p>
       {:else if snapshot.sourcesPhase === "error"}
@@ -1525,8 +1579,15 @@
               </div>
               {#if snapshot.activeSourceId === source.source_id && snapshot.path.length > 0}
                 <ul class="gallery-pathlist" aria-label="当前目录路径">
-                  {#each snapshot.path as segment (segment.directory_id)}
-                    <li><button type="button" class="gallery-link" onclick={() => void controller.openDirectory(segment.directory_id)}>{segment.name}</button></li>
+                  {#each snapshot.path as segment, index (segment.directory_id)}
+                    <li style={`--path-depth: ${index + 1}`}>
+                      <button
+                        type="button"
+                        class="gallery-link"
+                        aria-current={index === snapshot.path.length - 1 ? "page" : undefined}
+                        onclick={() => void controller.openDirectory(segment.directory_id)}
+                      >{segment.name}</button>
+                    </li>
                   {/each}
                 </ul>
               {/if}
@@ -1551,6 +1612,7 @@
       </div>
       {/if}
     </aside>
+    {/if}
 
     <section class="gallery-content" aria-labelledby={`${uid}-content-heading`}>
       <h2 id={`${uid}-content-heading`} class="gallery-visually-hidden">目录内容</h2>
@@ -1562,9 +1624,14 @@
       {:else}
         {#if activeSource !== null}
           <section class="gallery-source-status" aria-label="当前来源状态">
-            <div class="gallery-source-status__heading">
-              <div>
+          <div class="gallery-source-status__heading">
+              <div class="gallery-source-status__meta">
                 <span>{sourceSubtitle(activeSource)}</span>
+                {#if scanSummary !== null}
+                  <span class="gallery-source-status__scan" role="status">扫描完成：{scanSummary.visibleCount} 张可见图片，跳过 {scanSummary.skippedCount} 个文件。</span>
+                {:else}
+                  <span class="gallery-source-status__scan" aria-hidden="true">&nbsp;</span>
+                {/if}
               </div>
               {#if !picker}
               <div class="gallery-source-status__actions">
@@ -1589,18 +1656,10 @@
                 <div><dt>已移除</dt><dd>{formatCount(activeSource.removed_count)}</dd></div>
               </dl>
             {/if}
-            {#if activeScan?.state === "running"}
-              <p class="gallery-source-progress" role="status">正在增量检查；当前索引仍可浏览。</p>
-            {:else if activeScan?.state === "failed"}
+            {#if activeScan?.state === "failed"}
               <p class="gallery-hint gallery-hint--error" role="alert">扫描失败（{activeScan.error_code}）；原有索引已保留。</p>
-            {:else if activeScan?.state === "succeeded" && activeScan.stats !== null}
-              {#if activeScan.stats.offline}
-                <p class="gallery-source-progress" role="status">来源目录当前不可用；已有索引已保留，请在来源设置中重新关联目录。</p>
-              {:else}
-                <p class="gallery-source-progress" role="status">
-                  扫描完成：{formatCount(activeScan.stats.asset_count)} 张可见图片，跳过 {formatCount(activeScan.stats.skipped_unsupported + activeScan.stats.skipped_temporary)} 个文件。
-                </p>
-              {/if}
+            {:else if activeScan?.state === "succeeded" && activeScan.stats !== null && activeScan.stats.offline}
+              <p class="gallery-source-progress" role="status">来源目录当前不可用；已有索引已保留，请在来源设置中重新关联目录。</p>
             {/if}
             {#if !picker && activeSource.reconciliation_state === "failed"}
               <div class="gallery-source-reconciliation" role="alert">
@@ -1618,17 +1677,6 @@
           </section>
         {/if}
         <nav class="gallery-toolbar" aria-label="目录浏览工具">
-          <ol class="gallery-breadcrumb" aria-label="目录路径">
-            {#each breadcrumb as segment, index (index)}
-              <li>
-                {#if index < breadcrumb.length - 1}
-                  <button type="button" class="gallery-link" onclick={() => void controller.navigateToBreadcrumb(index)}>{segment.label}</button>
-                {:else}
-                  <span aria-current="page">{segment.label}</span>
-                {/if}
-              </li>
-            {/each}
-          </ol>
           <form class="gallery-search" onsubmit={submitSearch} role="search">
             <label class="gallery-visually-hidden" for={`${uid}-search`}>搜索当前范围</label>
             <input
@@ -1645,80 +1693,94 @@
               <button type="button" onclick={clearSearch}>清除</button>
             {/if}
           </form>
-          <div class="gallery-toolbar-controls" role="group" aria-label="范围与筛选">
-            <label>
-              <span>范围</span>
-              <select value={snapshot.searchScope} onchange={(event) => void controller.setSearchScope((event.currentTarget as HTMLSelectElement).value as typeof snapshot.searchScope)}>
-                <option value="directory">当前目录</option>
-                <option value="source">整个来源</option>
-                <option value="library">整个图库</option>
-              </select>
-            </label>
-            <label>
-              <span>包含子目录</span>
-              <input
-                type="checkbox"
-                checked={snapshot.includeDescendants}
-                disabled={snapshot.searchScope !== "directory"}
-                onchange={(event) => void controller.setIncludeDescendants((event.currentTarget as HTMLInputElement).checked)}
-              />
-            </label>
-            {#if snapshot.currentDirectory !== null && activeSource !== null}
-              <label class="gallery-selection-control gallery-select-all">
+          <div class="gallery-toolbar-controls">
+            <div class="gallery-toolbar-group" role="group" aria-label="筛选">
+              <label>
+                <span>范围</span>
+                <select value={snapshot.searchScope} onchange={(event) => void controller.setSearchScope((event.currentTarget as HTMLSelectElement).value as typeof snapshot.searchScope)}>
+                  <option value="directory">当前目录</option>
+                  <option value="source">整个来源</option>
+                  <option value="library">整个图库</option>
+                </select>
+              </label>
+              <label>
+                <span>包含子目录</span>
                 <input
                   type="checkbox"
-                  checked={allVisibleItemsSelected}
-                  disabled={snapshot.assets.length === 0 && snapshot.directories.length === 0}
-                  aria-label="全选"
-                  onchange={toggleSelectAll}
+                  checked={snapshot.includeDescendants}
+                  disabled={snapshot.searchScope !== "directory"}
+                  onchange={(event) => void controller.setIncludeDescendants((event.currentTarget as HTMLInputElement).checked)}
                 />
-                <span>全选</span>
               </label>
-            {/if}
-            <label>
-              <span>TXT 状态</span>
-              <select value={snapshot.txtStateFilter ?? ""} onchange={(event) => { const value = (event.currentTarget as HTMLSelectElement).value; void controller.setTxtStateFilter(value === "" ? null : (value as GalleryTxtState)); }}>
-                {#each txtStateOptions as option (option.value)}
-                  <option value={option.value}>{option.label}</option>
-                {/each}
-              </select>
-            </label>
-            <div class="gallery-viewtoggle" role="group" aria-label="视图方式">
-              <button type="button" aria-pressed={snapshot.viewMode === "grid"} onclick={() => controller.setViewMode("grid")}>网格</button>
-              <button type="button" aria-pressed={snapshot.viewMode === "list"} onclick={() => controller.setViewMode("list")}>列表</button>
-            </div>
-            {#if !picker}
-            {#if selectedItemCount > 0}
-              <span class="gallery-toolbar-selection" data-gallery-selection-summary>
-                {#if selectedDirectorySelections.length > 0}{formatCount(selectedDirectorySelections.length)} 个目录{/if}
-                {#if selectedDirectorySelections.length > 0 && snapshot.selectedAssetIds.length > 0} · {/if}
-                {#if snapshot.selectedAssetIds.length > 0}{formatCount(snapshot.selectedAssetIds.length)} 张图片{/if} 已选
-              </span>
-              <button type="button" onclick={clearVisibleSelection}>清除选择</button>
-              {#if snapshot.selectedAssetIds.length > 0}
-                <button type="button" onclick={requestRenameSelection} disabled={singleSelectedAsset === null}>重命名…</button>
+              <label>
+                <span>TXT 状态</span>
+                <select value={snapshot.txtStateFilter ?? ""} onchange={(event) => { const value = (event.currentTarget as HTMLSelectElement).value; void controller.setTxtStateFilter(value === "" ? null : (value as GalleryTxtState)); }}>
+                  {#each txtStateOptions as option (option.value)}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                </select>
+              </label>
+              {#if snapshot.currentDirectory !== null && activeSource !== null}
+                <label class="gallery-selection-control gallery-select-all">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleItemsSelected}
+                    disabled={snapshot.assets.length === 0 && snapshot.directories.length === 0}
+                    aria-label="全选"
+                    onchange={toggleSelectAll}
+                  />
+                  <span>全选</span>
+                </label>
               {/if}
-              <button type="button" class="gallery-toolbar-danger" title="只删除当前目录中已选择的项目；跨目录选区仅用于去重或导出。" disabled={!snapshot.selectedAssetIds.length && !selectedVisibleDirectoryIds.length} onclick={requestDeleteSelection}>删除…</button>
-            {/if}
-            <button
-              type="button"
-              aria-pressed={snapshot.trashPanelPhase !== "closed"}
-              onclick={toggleTrashPanel}
-            >回收区</button>
-            <button type="button" data-gallery-dedup disabled={reviewBusy || selectedItemCount === 0} onclick={openReviewConfirmation}>去重…</button>
-            <button
-              type="button"
-              class="gallery-toolbar-export"
-              onclick={openDirectoryExport}
-              disabled={snapshot.currentDirectory === null && selectedDirectorySelections.length === 0}
-            >导出目录…</button>
-            {/if}
+            </div>
+            <div class="gallery-toolbar-group" role="group" aria-label="视图与目录操作">
+              <div class="gallery-viewtoggle" role="group" aria-label="视图方式">
+                <button type="button" aria-pressed={snapshot.viewMode === "grid"} onclick={() => controller.setViewMode("grid")}>网格</button>
+                <button type="button" aria-pressed={snapshot.viewMode === "list"} onclick={() => controller.setViewMode("list")}>列表</button>
+              </div>
+              {#if snapshot.viewMode === "grid"}
+                <label class="gallery-grid-size">
+                  <span>缩略图大小</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max={GRID_SIZE_STEPS.length - 1}
+                    step="1"
+                    value={gridSizeModeIndex}
+                    aria-valuetext={gridSizeMode.label}
+                    oninput={(event) => (gridSizeModeIndex = Number((event.currentTarget as HTMLInputElement).value))}
+                  />
+                  <span class="gallery-grid-size__value">{gridSizeMode.label}</span>
+                </label>
+              {/if}
+              {#if !picker}
+                <button
+                  type="button"
+                  aria-pressed={snapshot.trashPanelPhase !== "closed"}
+                  onclick={toggleTrashPanel}
+                >回收区</button>
+                <button
+                  type="button"
+                  class="gallery-toolbar-export"
+                  onclick={openDirectoryExport}
+                  disabled={snapshot.currentDirectory === null && selectedDirectorySelections.length === 0}
+                >导出目录…</button>
+              {/if}
+            </div>
           </div>
         </nav>
         {#if galleryRefreshNotice}<p class="gallery-hint" role="status" data-gallery-refresh-notice>{galleryRefreshNotice}</p>{/if}
+        {#if snapshot.assets.length > 0}
+          <p class="gallery-loaded-stats" data-gallery-loaded-stats>
+            <span>已加载 {formatCount(snapshot.assets.length)} 张{#if snapshot.assetCursor !== null}（可继续加载）{/if}</span>
+            {#each loadedTxtSummary as entry (entry.state)}
+              <span class:gallery-loaded-stats__abnormal={entry.state !== "normal"}>{GALLERY_TXT_STATE_LABELS[entry.state]} {formatCount(entry.count)}</span>
+            {/each}
+          </p>
+        {/if}
         {#if snapshot.query.length > 0}
           <p class="gallery-search-summary" role="status">
-            “{snapshot.query}” · {snapshot.searchScope === "directory" ? "当前目录" : snapshot.searchScope === "source" ? "整个来源" : "整个图库"} · 已载入 {formatCount(snapshot.assets.length)} 项
+            “{snapshot.query}” · {snapshot.searchScope === "directory" ? "当前目录" : snapshot.searchScope === "source" ? "整个来源" : "整个图库"}
           </p>
         {/if}
 
@@ -1777,11 +1839,11 @@
                 onscroll={onContentScroll}
                 use:resizeObserver={{ onContentResize }}
               >
-                <div class="gallery-grid" style={`grid-template-columns: repeat(${gridColumns}, minmax(0, 1fr)); height: ${windowing.totalHeight}px;`}>
+                <div class="gallery-grid" style={`--gallery-card-shell: ${gridSizeMode.shell}px; grid-template-columns: repeat(${gridColumns}, minmax(0, 1fr)); height: ${windowing.totalHeight}px;`}>
                   <div class="gallery-grid-window" style={`transform: translateY(${windowing.startOffsetY}px);`}>
                     {#each visibleAssets as asset (asset.asset_id)}
                       <div class="gallery-card-shell" class:selected={selectedIds.has(asset.asset_id)}>
-                        <label class="gallery-selection-control gallery-card__select">
+                        <label class="gallery-selection-control gallery-card__select" title={`选择图片 ${asset.name}`}>
                           <input
                             type="checkbox"
                             checked={selectedIds.has(asset.asset_id)}
@@ -1791,7 +1853,6 @@
                             onkeydown={(event) => event.stopPropagation()}
                             onchange={(event) => toggleAssetCheckbox(event, asset)}
                           />
-                          <span>选择图片</span>
                         </label>
                         <button
                           type="button"
@@ -1812,13 +1873,20 @@
                               <img src={service.thumbnailUrl(asset.asset_id, 512)} alt={asset.name} crossorigin="anonymous" loading="lazy" decoding="async" onerror={() => markThumbnailFailed(asset.asset_id)} />
                             {/if}
                           </span>
-                          <span class="gallery-card__name">{asset.name}</span>
+                          <span class="gallery-card__meta">
+                            <span class="gallery-card__name" title={asset.name}>{asset.name}</span>
+                            {#if asset.width > 0 && asset.height > 0}
+                              <span class="gallery-card__dims">{asset.width} × {asset.height}</span>
+                            {/if}
+                          </span>
                           {#if snapshot.query.length > 0}
                             <span class="gallery-card__context">{assetSourceLabel(asset)} · {asset.relative_path}</span>
                           {/if}
-                          <span class="gallery-card__badges">
-                            <span class="gallery-badge" data-kind={txtBadgeKind(asset)}>{txtBadge(asset)}</span>
-                          </span>
+                          {#if asset.txt_state !== "normal"}
+                            <span class="gallery-card__badges">
+                              <span class="gallery-badge" data-kind={txtBadgeKind(asset)} title={txtBadge(asset)}>{txtBadge(asset)}</span>
+                            </span>
+                          {/if}
                         </button>
                       </div>
                     {/each}
@@ -1894,6 +1962,23 @@
           {/if}
         {/if}
       {/if}
+        {#if !picker && selectedItemCount > 0}
+          <div class="gallery-selection-bar" role="group" aria-label="选区操作" data-gallery-selection-bar>
+            <span class="gallery-toolbar-selection gallery-selection-bar__summary" data-gallery-selection-summary>
+              {#if selectedDirectorySelections.length > 0}{formatCount(selectedDirectorySelections.length)} 个目录{/if}
+              {#if selectedDirectorySelections.length > 0 && snapshot.selectedAssetIds.length > 0} · {/if}
+              {#if snapshot.selectedAssetIds.length > 0}{formatCount(snapshot.selectedAssetIds.length)} 张图片{/if} 已选
+            </span>
+            <div class="gallery-selection-bar__actions">
+              {#if snapshot.selectedAssetIds.length > 0}
+                <button type="button" onclick={requestRenameSelection} disabled={singleSelectedAsset === null}>重命名…</button>
+              {/if}
+              <button type="button" class="gallery-toolbar-danger" title="只删除当前目录中已选择的项目；跨目录选区仅用于去重或导出。" disabled={!snapshot.selectedAssetIds.length && !selectedVisibleDirectoryIds.length} onclick={requestDeleteSelection}>删除…</button>
+              <button type="button" data-gallery-dedup disabled={reviewBusy || selectedItemCount === 0} onclick={openReviewConfirmation}>去重…</button>
+              <button type="button" onclick={clearVisibleSelection}>清除选择</button>
+            </div>
+          </div>
+        {/if}
     </section>
   </div>
   {#if picker}

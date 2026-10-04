@@ -316,6 +316,21 @@ function statesEqual(left: GalleryBrowseState, right: GalleryBrowseState): boole
   );
 }
 
+/**
+ * 追加分页会重排资产列表；锚点资产仍在列表中时把锚点重定位到其新下标，否则置空。
+ */
+function reanchoredSelectionIndex(
+  previous: GalleryBrowseState,
+  assets: readonly GalleryAssetEntry[],
+): number | null {
+  const anchorIndex = previous.selectionAnchorIndex;
+  if (anchorIndex === null) return null;
+  const anchorId = previous.assets[anchorIndex]?.asset_id;
+  if (anchorId === undefined) return null;
+  const nextIndex = assets.findIndex((asset) => asset.asset_id === anchorId);
+  return nextIndex >= 0 ? nextIndex : null;
+}
+
 export function createGalleryStore(): GalleryStore {
   let state: GalleryBrowseState = GALLERY_BROWSE_DEFAULTS;
   const listeners = new Set<(state: GalleryBrowseState) => void>();
@@ -435,21 +450,23 @@ export function createGalleryStore(): GalleryStore {
         assets: sortedAssets,
         directoryCursor: page.directory_cursor,
         assetCursor: page.asset_cursor,
+        selectionAnchorIndex: reanchoredSelectionIndex(state, sortedAssets),
       });
     },
     applySearchPage(page, append) {
       const combined = append ? [...state.assets, ...page.assets] : [...page.assets];
       const unique = new Map(combined.map((asset) => [asset.asset_id, asset]));
+      const sortedAssets = sortGalleryAssetEntries([...unique.values()]);
       return publish({
         ...state,
         directories: Object.freeze([]),
         directoryCursor: null,
-        assets: sortGalleryAssetEntries([...unique.values()]),
+        assets: sortedAssets,
         assetCursor: page.asset_cursor,
         pagePhase: "ready",
         pageErrorCode: null,
-        selectedAssetIds: Object.freeze([]),
-        selectionAnchorIndex: null,
+        selectedAssetIds: append ? state.selectedAssetIds : Object.freeze([]),
+        selectionAnchorIndex: append ? reanchoredSelectionIndex(state, sortedAssets) : null,
       });
     },
     setPageError(errorCode) {
