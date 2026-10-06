@@ -15,7 +15,7 @@ import numpy as np
 from PIL import Image
 
 from bundle import bundle_path, installed
-from preprocess import wd_prepare
+from preprocess import canary_prepare, wd_prepare
 from specs import TaggerModelSpec
 from vocabulary import Vocabulary, load_wd_csv
 
@@ -100,6 +100,78 @@ class WdOnnxAdapter:
             return np.concatenate(chunks, axis=0).astype(np.float32, copy=False)
         result = self._session.run(None, {self._input_name: prepared})[0]
         return np.asarray(result, dtype=np.float32)
+
+class TimmCanaryAdapter:
+    """ashen-sensored wd-eva02-2026-canary（timm safetensors）。
+
+    输出为原始 logits，需 sigmoid；输入 CHW/BGR/±1 归一化。
+    构造参数（img_size/ref_feat_shape/num_classes）取自 bundle 内
+    官方 config.json，权重以 strict 模式加载。
+    """
+
+    def __init__(self, spec: TaggerModelSpec, model_dir: Path):
+        if spec.adapter != "timm_canary":
+            raise TaggerAdapterError(f"{spec.key} 不是 timm_canary 适配器模型")
+        self.spec = spec
+        self.model_dir = model_dir
+        self.vocabulary: Vocabulary | None = None
+        self._model = None
+        self._input_size = 448
+        self.fingerprint = ""
+
+    def load(self) -> None:
+        if not installed(self.spec, self.model_dir):
+            raise TaggerAdapterError(f"模型未安装: {self.spec.key}")
+        try:
+            import timm
+            import torch
+            from safetensors.torch import load_file
+        except ImportError as error:
+            raise TaggerAdapterError(
+                f"缺少 torch 系依赖（timm/safetensors），请安装 tagger-torch 组: {error}"
+            ) from error
+
+        import json
+
+        path = bundle_path(self.model_dir, self.spec.key)
+        self.vocabulary = load_wd_csv(path / "selected_tags.csv")
+        config = json.loads((path / "config.json").read_text(encoding="utf-8"))
+        model_args = dict(config.get("model_args") or {})
+        num_classes = int(config.get("num_classes") or len(self.vocabulary))
+        if num_classes != len(self.vocabulary):
+            raise TaggerAdapterError(
+                f"config.json 类别数 {num_classes} 与词表 {len(self.vocabulary)} 不一致"
+            )
+        self._input_size = int(model_args.get("img_size") or 448)
+
+        self._model = timm.create_model(
+            config["architecture"],
+            pretrained=False,
+            num_classes=num_classes,
+            **model_args,
+        )
+        state_dict = load_file(str(path / "model.safetensors"))
+        self._model.load_state_dict(state_dict, strict=True)
+        self._model.eval()
+
+        digest = hashlib.sha256()
+        digest.update(f"timm_canary:v{ADAPTER_VERSION}".encode())
+        digest.update(self.spec.revision.encode())
+        digest.update(self.vocabulary.fingerprint.encode())
+        self.fingerprint = digest.hexdigest()
+
+    def infer_scores(self, images: Sequence[Image.Image]) -> np.ndarray:
+        if self._model is None:
+            raise TaggerAdapterError("模型未加载")
+        import torch
+
+        prepared = np.stack([canary_prepare(image, self._input_size) for image in images])
+        with torch.inference_mode():
+            logits = self._model(torch.from_numpy(prepared))
+            return torch.sigmoid(logits).numpy().astype(np.float32, copy=False)
+
+    def close(self) -> None:
+        self._model = None
 
     def close(self) -> None:
         self._session = None

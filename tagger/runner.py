@@ -52,8 +52,16 @@ def file_sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
-def default_adapter_factory(spec: TaggerModelSpec, model_dir: Path) -> WdOnnxAdapter:
-    return WdOnnxAdapter(spec, model_dir)
+def default_adapter_factory(spec: TaggerModelSpec, model_dir: Path):
+    from adapters import TimmCanaryAdapter, WdOnnxAdapter
+
+    factories = {
+        "wd_onnx": WdOnnxAdapter,
+        "timm_canary": TimmCanaryAdapter,
+    }
+    if spec.adapter not in factories:
+        raise KeyError(f"未知适配器类型: {spec.adapter}")
+    return factories[spec.adapter](spec, model_dir)
 
 
 class TaggerRunner:

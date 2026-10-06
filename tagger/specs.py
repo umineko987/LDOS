@@ -82,5 +82,19 @@ SPECS: dict[str, TaggerModelSpec] = {
             "SmilingWolf/wd-eva02-large-tagger-v3",
             "b25b82a03f7282e41aa2f257a52c7583b710bd1c",
         ),
+        TaggerModelSpec(
+            key="wd-eva02-2026-canary",
+            repo="ashen-sensored/wd-eva02-tagger-2026-canary",
+            revision="c45a59a3f17c0ca6066072b1c213e0c12a90e242",
+            adapter="timm_canary",
+            files=(
+                RemoteFile("model.safetensors"),
+                RemoteFile("selected_tags.csv"),
+                RemoteFile("config.json"),
+            ),
+            # 官方 README 的 P=R 阈值；character 沿用 WD 惯例
+            default_thresholds={"general": 0.6094, "character": 0.85},
+            license="apache-2.0",
+        ),
     )
 }

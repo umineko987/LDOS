@@ -46,6 +46,12 @@ dedup-cuda = [
   "torch==2.11.0 ; sys_platform == 'linux' or sys_platform == 'win32'",
   "torchvision==0.26.0 ; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
+tagger-torch = [
+  { include-group = "dedup-cpu" },
+  "timm==1.0.27",
+  "transformers==4.57.6",
+  "safetensors>=0.6",
+]
 
 [project.scripts]
 gdl-backend = "gdl_backend.__main__:main"
