@@ -25,9 +25,9 @@ describe("single-content Svelte workbench", () => {
     const nav = body.match(/<nav[^>]*aria-label="主导航"[^>]*>([\s\S]*?)<\/nav>/)?.[1];
     expect(nav).toBeDefined();
     expect(nav?.match(/data-nav-app="([^"]+)"/g)).toEqual([
-      'data-nav-app="crawl"', 'data-nav-app="tasks"', 'data-nav-app="gallery"', 'data-nav-app="review"',
+      'data-nav-app="crawl"', 'data-nav-app="tasks"', 'data-nav-app="gallery"', 'data-nav-app="review"', 'data-nav-app="tagger"',
     ]);
-    for (const label of ["采集", "批次", "图库", "去重"]) expect(nav).toContain(`<span>${label}</span>`);
+    for (const label of ["采集", "批次", "图库", "去重", "打标"]) expect(nav).toContain(`<span>${label}</span>`);
     expect(body).toContain("data-nav-settings");
     expect(body).toContain("<span>设置</span>");
     expect(body).toContain('data-nav-app="crawl" aria-current="page"');

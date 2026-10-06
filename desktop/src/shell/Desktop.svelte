@@ -37,6 +37,7 @@
     { id: "tasks", label: "批次" },
     { id: "gallery", label: "图库" },
     { id: "review", label: "去重" },
+    { id: "tagger", label: "打标" },
   ] as const;
   const settingsPages = [
     { id: "proxy", label: "代理" },

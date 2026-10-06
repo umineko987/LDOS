@@ -3,6 +3,7 @@ export const ENGLISH_UI_MESSAGES: ReadonlyArray<readonly [string, string]> = [
   ["本地服务暂时不可用", "The local service is temporarily unavailable"],
   ["正在准备工作台", "Preparing the workbench"],
   ["去重", "Deduplication"],
+  ["打标", "Tagging"],
   ["主导航", "Main navigation"],
   ["收起侧栏", "Collapse sidebar"],
   ["展开侧栏", "Expand sidebar"],
