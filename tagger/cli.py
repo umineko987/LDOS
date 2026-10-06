@@ -70,7 +70,9 @@ def command_prepare(args: argparse.Namespace) -> int:
 
     emit = json_progress if args.progress_json else (lambda payload: None)
     token = None
-    if args.token_file:
+    if args.token_file == "-":
+        token = sys.stdin.read().strip()  # 从 stdin 读，token 不落盘
+    elif args.token_file:
         token = Path(args.token_file).read_text(encoding="utf-8").strip()
     for key in args.models:
         spec = SPECS[key]
@@ -157,7 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare = subparsers.add_parser("prepare", help="下载并安装模型")
     prepare.add_argument("--progress-json", action="store_true", help="输出 JSON 行进度（供后端消费）")
     prepare.add_argument("--models", required=True, help="逗号分隔的模型 key")
-    prepare.add_argument("--token-file", type=Path, help="Hugging Face 访问令牌文件（gated 模型用）")
+    prepare.add_argument("--token-file", help="Hugging Face 访问令牌文件路径，或 - 表示 stdin（gated 模型用）")
     prepare.set_defaults(handler=command_prepare)
 
     tag = subparsers.add_parser("tag", help="批量打标并导出 caption")

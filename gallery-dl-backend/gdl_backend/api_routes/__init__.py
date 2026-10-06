@@ -10,6 +10,7 @@ from .proxy import create_proxy_router
 from .review import create_review_router
 from .scheduler import create_scheduler_router
 from .setup import create_setup_router
+from .tagger import create_tagger_router
 from .tasks import create_ordered_task_enqueuer, create_tasks_router
 
 __all__ = [
@@ -24,5 +25,6 @@ __all__ = [
     "create_review_router",
     "create_scheduler_router",
     "create_setup_router",
+    "create_tagger_router",
     "create_tasks_router",
 ]

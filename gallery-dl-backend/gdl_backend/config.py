@@ -237,6 +237,15 @@ def _desktop_distribution_data(data: dict[str, Any]) -> dict[str, Any]:
         }
     )
     projected["dedup"] = dedup
+    tagger = dict(projected.get("tagger") or {})
+    tagger.update(
+        {
+            "python_executable": str(python),
+            "model_dir": str(data_root / "tagger" / "models"),
+            "cache_path": str(data_root / "tagger" / "tags.sqlite3"),
+        }
+    )
+    projected["tagger"] = tagger
     return projected
 
 
@@ -400,6 +409,16 @@ class DedupSettings:
     no_dino: bool = False
 
 
+@dataclass(slots=True)
+class TaggerSettings:
+    enabled: bool = True
+    python_executable: Path = field(default_factory=_default_dedup_python)
+    cli_script: Path = field(default_factory=lambda: (WORKSPACE_DIR / "tagger" / "cli.py").resolve())
+    model_dir: Path = field(default_factory=lambda: (WORKSPACE_DIR / "tagger" / ".models").resolve())
+    cache_path: Path = field(default_factory=lambda: (WORKSPACE_DIR / "tagger" / "tags.sqlite3").resolve())
+    shutdown_grace_seconds: float = 10.0
+
+
 DEFAULT_SITE_POLICY: dict[str, Any] = dict(DEFAULT_EDITABLE_SITE_POLICY)
 
 
@@ -439,6 +458,7 @@ class AppSettings:
     proxy: ProxySettings = field(default_factory=ProxySettings)
     scheduler: SchedulerSettings = field(default_factory=SchedulerSettings)
     dedup: DedupSettings = field(default_factory=DedupSettings)
+    tagger: TaggerSettings = field(default_factory=TaggerSettings)
     default_site_policy: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_SITE_POLICY))
     config_path: Path | None = None
 
