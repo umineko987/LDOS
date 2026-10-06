@@ -81,3 +81,7 @@ Desktop.ini
 !/docs/source-build.en.md
 !/docs/release-install.md
 !/docs/release-install.en.md
+
+# Tagger local models and result cache
+tagger/.models/
+tagger/tags.sqlite3*
