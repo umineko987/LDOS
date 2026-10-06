@@ -33,6 +33,8 @@
     <rect x="9" y="2" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/><path d="M12 8v4M5 16v-2h14v2"/>
   {:else if name === "key"}
     <circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M18 5l2 2M15 8l2 2"/>
+  {:else if name === "tag"}
+    <path d="M3 12v4a1 1 0 0 0 1 1h3l8 5V6L7 11H4a1 1 0 0 0-1 1Z"/><path d="M18 8a5 5 0 0 1 0 8"/>
   {:else if name === "images"}
     <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>
   {:else if name === "sliders"}

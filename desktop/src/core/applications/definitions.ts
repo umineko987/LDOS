@@ -68,6 +68,18 @@ const definitions = [
     defaultWindow: { rect: DEFAULT_WINDOW_RECT, state: "maximized" },
   },
   {
+    id: "tagger",
+    route: "/tagger",
+    title: "图片打标",
+    icon: "tag",
+    group: "workflow",
+    order: 4,
+    description: "用 booru 打标模型为图片生成训练用 caption。",
+    availability: "ready",
+    dockOrder: 4,
+    defaultWindow: { rect: DEFAULT_WINDOW_RECT, state: "normal" },
+  },
+  {
     id: "policy",
     route: "/policy",
     title: "站点设置",

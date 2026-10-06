@@ -6,6 +6,7 @@
   import Gallery from "../apps/gallery/Gallery.svelte";
   import type { PickGalleryAssets } from "../apps/gallery/picker";
   import Review from "../apps/review/Review.svelte";
+  import Tagger from "../apps/tagger/Tagger.svelte";
   import Proxy from "../apps/proxy/Proxy.svelte";
   import Vault from "../apps/vault/Vault.svelte";
   import Policy from "../apps/policy/Policy.svelte";
@@ -258,6 +259,8 @@
             <Gallery {api} onPickAssets={pickAssets} suspended={!!picker} active={!picker && snapshot.focusedAppId === "gallery"} onReviewCreated={openCreatedReview} onManagePresets={() => navigate("filter-presets")} />
           {:else if appId === "review"}
             <Review {api} {polling} active={!picker && snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate} registerUnsavedChanges={(reader, discard, prepare) => shell.registerUnsavedChanges("review", reader, discard, prepare)} />
+          {:else if appId === "tagger"}
+            <Tagger {api} {polling} active={!picker && snapshot.focusedAppId === "tagger"} />
           {:else if appId === "proxy"}
             <Proxy {api} {polling} />
           {:else if appId === "vault"}
