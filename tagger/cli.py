@@ -3,11 +3,15 @@
 用法（与去重模块相同的 venv 即可运行，无额外依赖）：
   python tagger/cli.py prepare --models wd-vit-v3 [--model-dir DIR]
   python tagger/cli.py tag --models wd-vit-v3 --inputs 图库目录 [--general-thr 0.35]
+
+--progress-json 时输出 JSON 行事件（install_start/download/installed/
+progress/done），供后端子进程消费。
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -43,18 +47,41 @@ def progress_printer(stage: str, done: int, total: int) -> None:
         print()
 
 
+def json_progress(payload: dict) -> None:
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+def make_progress_callback(json_mode: bool):
+    if not json_mode:
+        return progress_printer
+
+    def callback(stage: str, done: int, total: int) -> None:
+        # 逐张输出太密：仅每 5% 或完成时打点
+        if total and done < total and done % max(1, total // 20) != 0:
+            return
+        json_progress({"type": "progress", "stage": stage, "done": done, "total": total})
+
+    return callback
+
+
 def command_prepare(args: argparse.Namespace) -> int:
     from bundle import install_by_key
     from specs import SPECS
 
+    emit = json_progress if args.progress_json else (lambda payload: None)
     token = None
     if args.token_file:
         token = Path(args.token_file).read_text(encoding="utf-8").strip()
     for key in args.models:
         spec = SPECS[key]
-        print(f"安装 {key} ({spec.repo}@{spec.revision[:12]})")
-        install_by_key(key, Path(args.model_dir), token=token or None)
-        print(f"{key} 就绪")
+        emit({"type": "install_start", "model": key, "repo": spec.repo, "revision": spec.revision})
+
+        def download_progress(name: str, done: int, total: int) -> None:
+            emit({"type": "download", "model": key, "file": name, "done": done, "total": total})
+
+        install_by_key(key, Path(args.model_dir), token=token or None, progress=download_progress)
+        emit({"type": "installed", "model": key})
+    emit({"type": "done", "command": "prepare", "models": args.models})
     return 0
 
 
@@ -89,10 +116,24 @@ def command_tag(args: argparse.Namespace) -> int:
             files, policy,
             write_captions=not args.no_captions,
             overwrite_captions=args.overwrite,
-            on_progress=progress_printer,
+            on_progress=make_progress_callback(args.progress_json),
         )
     finally:
         cache.close()
+    if args.progress_json:
+        json_progress({
+            "type": "done",
+            "command": "tag",
+            "total": stats.total,
+            "per_model": {
+                key: {"inferred": model_stats.inferred, "cache_hits": model_stats.score_cache_hits}
+                for key, model_stats in stats.per_model.items()
+            },
+            "decode_errors": stats.decode_errors,
+            "captions_written": stats.captions_written,
+            "captions_skipped": stats.captions_skipped,
+        })
+        return 0
     print(f"完成：共 {stats.total} 张")
     for key, model_stats in stats.per_model.items():
         print(f"  {key}: 新推理 {model_stats.inferred}，命中 {model_stats.score_cache_hits}")
@@ -109,13 +150,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="LDOS 打标工具")
     parser.add_argument("--model-dir", type=Path, default=DEFAULT_MODEL_DIR)
     subparsers = parser.add_subparsers(dest="command", required=True)
+    for subparser_factory in (lambda: subparsers.add_parser("prepare", help="下载并安装模型"),
+                              lambda: subparsers.add_parser("tag", help="批量打标并导出 caption")):
+        pass  # 占位说明：progress-json 分别加在两个子命令上
 
     prepare = subparsers.add_parser("prepare", help="下载并安装模型")
+    prepare.add_argument("--progress-json", action="store_true", help="输出 JSON 行进度（供后端消费）")
     prepare.add_argument("--models", required=True, help="逗号分隔的模型 key")
     prepare.add_argument("--token-file", type=Path, help="Hugging Face 访问令牌文件（gated 模型用）")
     prepare.set_defaults(handler=command_prepare)
 
     tag = subparsers.add_parser("tag", help="批量打标并导出 caption")
+    tag.add_argument("--progress-json", action="store_true", help="输出 JSON 行进度（供后端消费）")
     tag.add_argument("--models", required=True, help="逗号分隔的模型 key，首个模型写同名 txt")
     tag.add_argument("--inputs", nargs="+", required=True, help="图片文件或目录")
     tag.add_argument("--cache", type=Path, default=DEFAULT_CACHE)

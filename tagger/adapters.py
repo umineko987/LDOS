@@ -101,6 +101,10 @@ class WdOnnxAdapter:
         result = self._session.run(None, {self._input_name: prepared})[0]
         return np.asarray(result, dtype=np.float32)
 
+    def close(self) -> None:
+        self._session = None
+
+
 class TimmCanaryAdapter:
     """ashen-sensored wd-eva02-2026-canary（timm safetensors）。
 
@@ -240,6 +244,3 @@ class PixaiHfAdapter:
     def close(self) -> None:
         self._model = None
         self._processor = None
-
-    def close(self) -> None:
-        self._session = None
