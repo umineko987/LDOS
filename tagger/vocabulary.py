@@ -62,6 +62,37 @@ def load_wd_csv(path: Path) -> Vocabulary:
     return Vocabulary(names, categories)
 
 
+def load_cl_vocabulary(path: Path) -> Vocabulary:
+    """解析 CL tagger v2 的 model_vocabulary.json。
+
+    idx_to_tag 给出输出顺序，tag_to_category 给出类别（首字母大写，
+    统一转小写）。
+    """
+    import json
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    num_tags = int(data["num_tags"])
+    idx_to_tag = data["idx_to_tag"]
+    tag_to_category = data["tag_to_category"]
+    names: list[str | None] = [None] * num_tags
+    for raw_index, tag in idx_to_tag.items():
+        index = int(raw_index)
+        if not 0 <= index < num_tags:
+            raise ValueError(f"CL 词表索引越界: {raw_index}")
+        names[index] = str(tag)
+    if any(name is None for name in names):
+        missing = names.index(None)
+        raise ValueError(f"CL 词表 idx_to_tag 不完整，首个缺口 {missing}")
+    resolved = [str(name) for name in names]
+    categories: list[str] = []
+    for tag in resolved:
+        category = tag_to_category.get(tag)
+        if category is None:
+            raise ValueError(f"CL 词表缺少类别: {tag!r}")
+        categories.append(str(category).lower())
+    return Vocabulary(resolved, categories)
+
+
 def load_pixai_config(path: Path) -> Vocabulary:
     """解析 pixai-tagger config.json：tags（有序）+ tags_split（(类别, 数量) 分段）。"""
     import json

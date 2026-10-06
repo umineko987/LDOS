@@ -12,6 +12,7 @@ from .errors import ApiError
 class TaggerPrepareRequest(BaseModel):
     models: list[str] = Field(min_length=1)
     token: str | None = None
+    accept_license: bool = False
 
 
 class TaggerRunRequest(BaseModel):
@@ -55,8 +56,17 @@ def create_tagger_router() -> APIRouter:
         unknown = [key for key in payload.models if key not in known]
         if unknown:
             raise ApiError(422, "unknown_tagger_model", f"未登记的模型: {', '.join(unknown)}")
+        gated = {entry["key"] for entry in catalog if entry["gated"]}
+        wanted_gated = [key for key in payload.models if key in gated]
+        if wanted_gated and not payload.accept_license:
+            raise ApiError(
+                422, "tagger_license_required",
+                f"模型受自定义许可约束，需 accept_license=true：{', '.join(wanted_gated)}",
+            )
         try:
-            return await service.tagger.prepare(payload.models, payload.token)
+            return await service.tagger.prepare(
+                payload.models, payload.token, accept_license=payload.accept_license
+            )
         except RuntimeError as error:
             raise ApiError(409, "tagger_busy", str(error)) from error
 

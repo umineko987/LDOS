@@ -129,3 +129,34 @@ class PixaiVocabularyTests(unittest.TestCase):
             path.write_text(json.dumps(config), encoding="utf-8")
             with self.assertRaises(ValueError):
                 load_pixai_config(path)
+
+
+class ClVocabularyTests(unittest.TestCase):
+    def test_load_cl_vocabulary(self) -> None:
+        import json
+        import tempfile
+        from vocabulary import load_cl_vocabulary
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data = {
+                "num_tags": 3,
+                "idx_to_tag": {"2": "miku", "0": "tree", "1": "sky"},
+                "tag_to_category": {"tree": "General", "sky": "General", "miku": "Character"},
+            }
+            path = Path(tmp) / "model_vocabulary.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            vocab = load_cl_vocabulary(path)
+            self.assertEqual(vocab.names, ("tree", "sky", "miku"))
+            self.assertEqual(vocab.category_index["character"].tolist(), [2])
+
+    def test_cl_incomplete_idx_rejected(self) -> None:
+        import json
+        import tempfile
+        from vocabulary import load_cl_vocabulary
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data = {"num_tags": 3, "idx_to_tag": {"0": "a"}, "tag_to_category": {"a": "General"}}
+            path = Path(tmp) / "model_vocabulary.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_cl_vocabulary(path)

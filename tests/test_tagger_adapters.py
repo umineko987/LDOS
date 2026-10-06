@@ -15,8 +15,8 @@ import numpy as np
 from PIL import Image
 
 import adapters
-from adapters import TaggerAdapterError, TimmCanaryAdapter, WdOnnxAdapter
-from bundle import install
+from adapters import ClOnnxAdapter, TaggerAdapterError, TimmCanaryAdapter, WdOnnxAdapter
+from bundle import bundle_path, install, read_manifest
 from specs import RemoteFile, TaggerModelSpec
 
 CSV_ROWS = "tag_id,name,category,count\n0,solo,0,1\n1,1girl,0,1\n2,chara_a,4,1\n3,general,9,1\n"
@@ -293,3 +293,109 @@ class TimmCanaryAdapterTests(unittest.TestCase):
     def test_wrong_adapter_type_rejected(self) -> None:
         with self.assertRaises(TaggerAdapterError):
             WdOnnxAdapter(self.spec, self.model_dir)
+
+
+class ClOnnxAdapterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _make_spec(self, *, gated: bool, accept: bool | None = None):
+        import json as json_module
+
+        source = self.root / "cl-source"
+        (source / "v2_00").mkdir(parents=True, exist_ok=True)
+        (source / "v2_00" / "model.onnx").write_bytes(b"fake")
+        vocab = {
+            "num_tags": 3,
+            "idx_to_tag": {"0": "tree", "1": "sky", "2": "miku"},
+            "tag_to_category": {"tree": "General", "sky": "General", "miku": "Character"},
+        }
+        (source / "v2_00" / "model_vocabulary.json").write_text(
+            json_module.dumps(vocab), encoding="utf-8"
+        )
+
+        class LocalUrlSpec(TaggerModelSpec):
+            def url_for(self, remote_file: RemoteFile) -> str:
+                return (source / remote_file.name).as_uri()
+
+        spec = LocalUrlSpec(
+            key=f"test-cl-{gated}-{accept}",
+            repo=source,
+            revision="rev1",
+            adapter="cl_onnx",
+            files=(RemoteFile("v2_00/model.onnx"), RemoteFile("v2_00/model_vocabulary.json")),
+            default_thresholds={"general": 0.55},
+            license="test-license",
+            gated=gated,
+        )
+        # helper 一律以接受许可的方式安装成功；拒绝路径由具体用例单独覆盖
+        return install(spec, self.root / "models", accept_license=True), spec
+
+    def test_gated_requires_accept_license(self) -> None:
+        _, spec = self._make_spec(gated=True, accept=False)
+        with self.assertRaises(PermissionError):
+            install(spec, self.root / "models2", accept_license=False)
+
+    def test_load_blocked_without_license_manifest(self) -> None:
+        # 安装时接受了许可但 manifest 被篡改 -> 加载拒绝
+        _, spec = self._make_spec(gated=True, accept=True)
+        target = bundle_path(self.root / "models", spec.key)
+        manifest = read_manifest(target)
+        manifest["license_accepted"] = False
+        (target / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+        class NchwClSession(FakeSession):
+            def __init__(self, path, providers=None):
+                super().__init__(path, providers)
+                self.inputs = [FakeNode("input", ["None", 3, 16, 16])]
+                self.outputs = [FakeNode("logits", ["None", 3])]
+
+        adapter = ClOnnxAdapter(spec, self.root / "models")
+        with mock.patch("onnxruntime.InferenceSession", NchwClSession):
+            with self.assertRaises(TaggerAdapterError):
+                adapter.load()
+
+    def test_nchw_layout_and_sigmoid(self) -> None:
+        _, spec = self._make_spec(gated=False, accept=False)
+
+        class NchwClSession(FakeSession):
+            def __init__(self, path, providers=None):
+                super().__init__(path, providers)
+                self.inputs = [FakeNode("input", ["None", 3, 16, 16])]
+                self.outputs = [FakeNode("logits", ["None", 3])]
+
+            def run(self, _, feeds):
+                batch = feeds["input"]
+                self.calls.append(batch)
+                logits = batch.reshape(batch.shape[0], -1).mean(axis=1, keepdims=True) * 4.0
+                return [np.broadcast_to(logits, (batch.shape[0], 3)).copy()]
+
+        adapter = ClOnnxAdapter(spec, self.root / "models")
+        with mock.patch("onnxruntime.InferenceSession", NchwClSession):
+            adapter.load()
+        self.assertTrue(adapter._channels_first)
+        self.assertEqual(adapter._input_size, 16)
+        scores = adapter.infer_scores([Image.new("RGB", (5, 9), (10, 200, 30))])
+        self.assertEqual(scores.shape, (1, 3))
+        session = FakeSession.sessions[-1]
+        self.assertEqual(session.calls[0].shape, (1, 3, 16, 16))  # CHW
+        # sigmoid 输出在 (0,1) 且关于 0.5 对称（logit 全同值）
+        self.assertTrue(((scores > 0) & (scores < 1)).all())
+
+    def test_output_dim_mismatch_rejected(self) -> None:
+        _, spec = self._make_spec(gated=False, accept=False)
+
+        class BadDimSession(FakeSession):
+            def __init__(self, path, providers=None):
+                super().__init__(path, providers)
+                self.inputs = [FakeNode("input", ["None", 3, 16, 16])]
+                self.outputs = [FakeNode("logits", ["None", 777])]
+
+        adapter = ClOnnxAdapter(spec, self.root / "models")
+        with mock.patch("onnxruntime.InferenceSession", BadDimSession):
+            with self.assertRaises(TaggerAdapterError):
+                adapter.load()

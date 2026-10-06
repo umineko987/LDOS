@@ -76,7 +76,8 @@ def _download_to(
     token: str | None,
     progress: ProgressCallback | None,
 ) -> None:
-    """下载单个文件到 .part，完成后 rename 到目标名。"""
+    """下载单个文件到 .part，完成后 rename 到目标名（支持子目录文件）。"""
+    destination.parent.mkdir(parents=True, exist_ok=True)
     part_path = destination.with_suffix(destination.suffix + ".part")
     _reject_managed_symlink(part_path)
     part_path.unlink(missing_ok=True)
@@ -141,8 +142,17 @@ def install(
     token: str | None = None,
     progress: ProgressCallback | None = None,
     force: bool = False,
+    accept_license: bool = False,
 ) -> Path:
-    """安装（或重装）一个模型 bundle，返回最终目录。"""
+    """安装（或重装）一个模型 bundle，返回最终目录。
+
+    gated 模型要求 accept_license=True（下载即视为同意其条款，
+    确认记录写入 manifest，加载时校验）。
+    """
+    if spec.gated and not accept_license:
+        raise PermissionError(
+            f"{spec.key} 受自定义许可约束，需要显式 accept_license=True（下载即视为同意条款）"
+        )
     _private_directory(model_dir)
     if not force and installed(spec, model_dir):
         return bundle_path(model_dir, spec.key)
@@ -166,6 +176,7 @@ def install(
             "revision": spec.revision,
             "adapter": spec.adapter,
             "files": [remote.name for remote in spec.files],
+            "license_accepted": spec.gated and accept_license,
         }
         _publish(staging, target, manifest)
     finally:

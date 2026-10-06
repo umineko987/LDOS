@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "tagger"))
 import numpy as np
 from PIL import Image
 
-from preprocess import load_image, wd_prepare
+from preprocess import cl_prepare, load_image, wd_prepare
 from vocabulary import Vocabulary, load_wd_csv
 
 
@@ -86,3 +86,22 @@ class PreprocessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClPrepareTests(unittest.TestCase):
+    def test_direct_resize_no_letterbox(self) -> None:
+        # 非方形图直接缩放到 384x384（无 pad），CHW、RGB、[-1,1]
+        image = Image.new("RGB", (100, 50), (255, 0, 0))
+        array = cl_prepare(image, 32)
+        self.assertEqual(array.shape, (3, 32, 32))
+        # 纯红：R 通道 = 1.0，G/B = -1.0（RGB 顺序）
+        self.assertAlmostEqual(array[0, 16, 16], 1.0, places=5)
+        self.assertAlmostEqual(array[1, 16, 16], -1.0, places=5)
+        self.assertAlmostEqual(array[2, 16, 16], -1.0, places=5)
+
+    def test_no_white_pad_corners(self) -> None:
+        # 与 WD 配方不同：宽幅图角落不应是白底 pad
+        image = Image.new("RGB", (64, 32), (0, 128, 0))
+        array = cl_prepare(image, 32)
+        self.assertAlmostEqual(array[0, 0, 0], -1.0, places=5)  # R 低
+        self.assertAlmostEqual(array[1, 0, 0], 1 / 255 * 128 * 2 - 1, places=4)

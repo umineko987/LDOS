@@ -66,3 +66,11 @@ class TaggerApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_prepare_gated_requires_license(self) -> None:
+        response = self.client.post(
+            "/api/v1/tagger/models/prepare",
+            json={"models": ["cl-tagger-v2"]},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "tagger_license_required")

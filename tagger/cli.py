@@ -76,12 +76,24 @@ def command_prepare(args: argparse.Namespace) -> int:
         token = Path(args.token_file).read_text(encoding="utf-8").strip()
     for key in args.models:
         spec = SPECS[key]
+        if spec.gated and not args.accept_license:
+            print(
+                f"{key} 受自定义许可约束（{spec.license}）。"
+                f"确认同意后加 --accept-license 重新执行。",
+                file=sys.stderr,
+            )
+            return 3
         emit({"type": "install_start", "model": key, "repo": spec.repo, "revision": spec.revision})
 
         def download_progress(name: str, done: int, total: int) -> None:
             emit({"type": "download", "model": key, "file": name, "done": done, "total": total})
 
-        install_by_key(key, Path(args.model_dir), token=token or None, progress=download_progress)
+        install_by_key(
+            key, Path(args.model_dir),
+            token=token or None,
+            progress=download_progress,
+            accept_license=args.accept_license,
+        )
         emit({"type": "installed", "model": key})
     emit({"type": "done", "command": "prepare", "models": args.models})
     return 0
@@ -160,6 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--progress-json", action="store_true", help="输出 JSON 行进度（供后端消费）")
     prepare.add_argument("--models", required=True, help="逗号分隔的模型 key")
     prepare.add_argument("--token-file", help="Hugging Face 访问令牌文件路径，或 - 表示 stdin（gated 模型用）")
+    prepare.add_argument("--accept-license", action="store_true", help="确认接受 gated 模型的自定义许可条款")
     prepare.set_defaults(handler=command_prepare)
 
     tag = subparsers.add_parser("tag", help="批量打标并导出 caption")

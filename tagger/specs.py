@@ -118,5 +118,25 @@ SPECS: dict[str, TaggerModelSpec] = {
             },
             license="open",
         ),
+        TaggerModelSpec(
+            key="cl-tagger-v2",
+            repo="cella110n/cl_tagger_v2",
+            revision="b57909b8e9c63f71e208a26473e7aabdf45ed6b6",
+            adapter="cl_onnx",
+            files=(
+                RemoteFile("v2_00/model.onnx"),
+                RemoteFile("v2_00/model.onnx.data"),
+                RemoteFile("v2_00/model_vocabulary.json"),
+            ),
+            # 模型卡实用统一阈值（best_thr 逐标签 F1 偏过标，不采用）
+            default_thresholds={
+                "general": 0.55,
+                "character": 0.55,
+                "rating": 0.55,
+                "quality": 0.55,
+            },
+            license="CL Tagger v2 Model License v1.0（下载/执行即视为同意，禁止再分发）",
+            gated=True,
+        ),
     )
 }

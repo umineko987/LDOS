@@ -150,7 +150,9 @@ class TaggerService:
 
     # ---- 对外操作 ----
 
-    async def prepare(self, models: list[str], token: str | None = None) -> dict[str, Any]:
+    async def prepare(
+        self, models: list[str], token: str | None = None, *, accept_license: bool = False
+    ) -> dict[str, Any]:
         async with self._lock:
             if self.state.phase not in ("idle", "failed") and self._process:
                 raise RuntimeError("已有打标任务在运行")
@@ -158,6 +160,8 @@ class TaggerService:
             args = ["prepare", "--progress-json", "--models", ",".join(models)]
             if token:
                 args += ["--token-file", "-"]
+            if accept_license:
+                args += ["--accept-license"]
             await self._spawn(args, token if token else None)
             self._task = asyncio.create_task(self._drain("idle"))
             return {"phase": "preparing", "models": models}

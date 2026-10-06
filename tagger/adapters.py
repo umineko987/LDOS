@@ -14,10 +14,10 @@ from typing import Sequence
 import numpy as np
 from PIL import Image
 
-from bundle import bundle_path, installed
-from preprocess import canary_prepare, wd_prepare
+from bundle import bundle_path, installed, read_manifest
+from preprocess import canary_prepare, cl_prepare, wd_prepare
 from specs import TaggerModelSpec
-from vocabulary import Vocabulary, load_pixai_config, load_wd_csv
+from vocabulary import Vocabulary, load_cl_vocabulary, load_pixai_config, load_wd_csv
 
 # 适配器实现版本：预处理或输出解码语义变化时递增，使缓存指纹失效
 ADAPTER_VERSION = 1
@@ -244,3 +244,89 @@ class PixaiHfAdapter:
     def close(self) -> None:
         self._model = None
         self._processor = None
+
+
+class ClOnnxAdapter:
+    """cella110n/cl_tagger_v2（SigLIP2 ONNX，外置权重）。
+
+    gated 模型：加载前校验 manifest 的 license_accepted。
+    输出为原始 logits，需 sigmoid；输入 CHW 或 HWC 由 session 形状
+    动态判定，RGB、/255、mean/std 0.5。
+    """
+
+    def __init__(self, spec: TaggerModelSpec, model_dir: Path):
+        if spec.adapter != "cl_onnx":
+            raise TaggerAdapterError(f"{spec.key} 不是 cl_onnx 适配器模型")
+        self.spec = spec
+        self.model_dir = model_dir
+        self.vocabulary: Vocabulary | None = None
+        self._session = None
+        self._input_name = ""
+        self._input_size = 0
+        self._channels_first = True
+        self.fingerprint = ""
+
+    def load(self) -> None:
+        if not installed(self.spec, self.model_dir):
+            raise TaggerAdapterError(f"模型未安装: {self.spec.key}")
+        if self.spec.gated:
+            manifest = read_manifest(bundle_path(self.model_dir, self.spec.key)) or {}
+            if not manifest.get("license_accepted"):
+                raise TaggerAdapterError(
+                    f"{self.spec.key} 需要先在安装时显式接受其许可（accept_license）"
+                )
+        import onnxruntime as ort
+
+        path = bundle_path(self.model_dir, self.spec.key)
+        self.vocabulary = load_cl_vocabulary(path / "v2_00" / "model_vocabulary.json")
+        self._session = ort.InferenceSession(
+            str(path / "v2_00" / "model.onnx"),
+            providers=["CPUExecutionProvider"],
+        )
+        if "CPUExecutionProvider" not in self._session.get_providers():
+            raise TaggerAdapterError("CPU 执行提供器不可用")
+
+        inputs = self._session.get_inputs()
+        outputs = self._session.get_outputs()
+        if len(inputs) != 1 or len(outputs) != 1:
+            raise TaggerAdapterError("期望单输入单输出的 ONNX 图")
+        shape = [dimension if isinstance(dimension, int) else None for dimension in inputs[0].shape]
+        if len(shape) != 4:
+            raise TaggerAdapterError(f"期望 4 维输入，实际 {inputs[0].shape}")
+        self._input_name = inputs[0].name
+        if shape[1] == 3:  # NCHW
+            self._channels_first = True
+            self._input_size = shape[2] or shape[3]
+        elif shape[3] == 3:  # NHWC
+            self._channels_first = False
+            self._input_size = shape[1] or shape[2]
+        else:
+            raise TaggerAdapterError(f"无法识别输入布局: {inputs[0].shape}")
+        if not self._input_size:
+            raise TaggerAdapterError(f"输入尺寸非静态: {inputs[0].shape}")
+
+        output_shape = [dimension if isinstance(dimension, int) else None for dimension in outputs[0].shape]
+        expected = len(self.vocabulary)
+        if output_shape[-1] not in (expected, None) and output_shape[1] not in (expected, None):
+            raise TaggerAdapterError(
+                f"输出维度 {outputs[0].shape} 与词表数量 {expected} 不一致"
+            )
+
+        digest = hashlib.sha256()
+        digest.update(f"cl_onnx:v{ADAPTER_VERSION}".encode())
+        digest.update(self.spec.revision.encode())
+        digest.update(self.vocabulary.fingerprint.encode())
+        self.fingerprint = digest.hexdigest()
+
+    def infer_scores(self, images: Sequence[Image.Image]) -> np.ndarray:
+        if self._session is None:
+            raise TaggerAdapterError("模型未加载")
+        prepared = np.stack([cl_prepare(image, self._input_size) for image in images])
+        if not self._channels_first:
+            prepared = np.ascontiguousarray(prepared.transpose(0, 2, 3, 1))
+        logits = self._session.run(None, {self._input_name: prepared})[0]
+        logits = np.asarray(logits, dtype=np.float32)
+        return 1.0 / (1.0 + np.exp(-logits))
+
+    def close(self) -> None:
+        self._session = None
