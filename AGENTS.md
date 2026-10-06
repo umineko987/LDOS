@@ -18,7 +18,7 @@
 
 ## 已知坑（已验证）
 
-- **HF xet 仓库哈希元数据不可信**：SmilingWolf v3 系仓库 `?blobs=true` 的 `lfs.oid` 甚至 `x-linked-etag` 都可能与实际下载字节不符（selected_tags.csv 两者皆错；model.onnx 仅 lfs.oid 错）。**登记表的 SHA256 必须以实测下载内容的哈希为准**，别信 API 元数据。
+- 模型下载**不做哈希校验**（用户明确决定：纯过度防御）；下载地址固定为 `repo@revision` 直链，防的是"上游变动"而不是"字节损坏"。
 - WD 系列 ONNX：激活已烘焙进图，输出即概率，不要再 sigmoid；输入 NHWC/BGR/0-255 原始值。
 - gated 模型（如 cella110n/cl_tagger_v2）的 token 在 `/home/umineko/Projects/LDOS/hf_at.txt`，只在下载期使用、不落日志。
 

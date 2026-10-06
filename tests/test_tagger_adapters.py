@@ -54,16 +54,10 @@ class FakeSession:
 
 
 def make_bundle(root: Path, csv_text: str = CSV_ROWS) -> tuple[Path, TaggerModelSpec]:
-    import hashlib
-
     source = root / "source"
     source.mkdir(parents=True, exist_ok=True)
     (source / "model.onnx").write_bytes(b"fake")
     (source / "selected_tags.csv").write_text(csv_text, encoding="utf-8")
-
-    def remote(name: str) -> RemoteFile:
-        data = (source / name).read_bytes()
-        return RemoteFile(name, hashlib.sha256(data).hexdigest(), len(data))
 
     class LocalUrlSpec(TaggerModelSpec):
         def url_for(self, remote_file: RemoteFile) -> str:
@@ -74,7 +68,7 @@ def make_bundle(root: Path, csv_text: str = CSV_ROWS) -> tuple[Path, TaggerModel
         repo=source,
         revision="rev1",
         adapter="wd_onnx",
-        files=(remote("model.onnx"), remote("selected_tags.csv")),
+        files=(RemoteFile("model.onnx"), RemoteFile("selected_tags.csv")),
         default_thresholds={"general": 0.35},
         license="test",
     )

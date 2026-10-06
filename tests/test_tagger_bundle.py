@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tagger"))
 
 import bundle
-from bundle import install, install_by_key, installed, read_manifest, verify_bundle
+from bundle import install, install_by_key, installed, read_manifest
 from specs import RemoteFile, TaggerModelSpec
 
 
@@ -18,28 +18,21 @@ class FileUrlSpec(TaggerModelSpec):
         return (self.repo / remote_file.name).as_uri()
 
 
-def make_source(root: Path) -> tuple[Path, RemoteFile, RemoteFile]:
+def make_source(root: Path) -> Path:
     source = root / "source"
     source.mkdir()
     (source / "model.onnx").write_bytes(b"fake-onnx-weights")
     (source / "selected_tags.csv").write_bytes(b"name,category\ntest,0\n")
-    import hashlib
-
-    def remote(name: str) -> RemoteFile:
-        data = (source / name).read_bytes()
-        return RemoteFile(name, hashlib.sha256(data).hexdigest(), len(data))
-
-    return source, remote("model.onnx"), remote("selected_tags.csv")
+    return source
 
 
-def make_spec(source: Path, onnx: RemoteFile, csv: RemoteFile, key: str = "test-model",
-              revision: str = "r1") -> TaggerModelSpec:
+def make_spec(source: Path, key: str = "test-model", revision: str = "r1") -> TaggerModelSpec:
     return FileUrlSpec(
         key=key,
         repo=source,
         revision=revision,
         adapter="wd_onnx",
-        files=(onnx, csv),
+        files=(RemoteFile("model.onnx"), RemoteFile("selected_tags.csv")),
         default_thresholds={"general": 0.35},
         license="test",
     )
@@ -49,9 +42,9 @@ class TaggerBundleTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
-        self.source, self.onnx, self.csv = make_source(self.root)
+        self.source = make_source(self.root)
         self.model_dir = self.root / "models"
-        self.spec = make_spec(self.source, self.onnx, self.csv)
+        self.spec = make_spec(self.source)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -65,31 +58,28 @@ class TaggerBundleTests(unittest.TestCase):
         self.assertTrue(progress and progress[0][1] == 0)
         manifest = read_manifest(path)
         self.assertEqual(manifest["revision"], "r1")
-        self.assertEqual(manifest["files"]["model.onnx"], self.onnx.sha256)
+        self.assertEqual(manifest["files"], ["model.onnx", "selected_tags.csv"])
 
-    def test_installed_and_verify(self) -> None:
+    def test_installed_requires_manifest_and_files(self) -> None:
         self.assertFalse(installed(self.spec, self.model_dir))
         install(self.spec, self.model_dir)
         self.assertTrue(installed(self.spec, self.model_dir))
-        self.assertTrue(verify_bundle(self.spec, self.model_dir))
-        # 文件被篡改后 installed（存在性检查）仍通过，完整校验失败
+        # 文件缺失后不再视为已安装
         target = bundle.bundle_path(self.model_dir, self.spec.key)
-        (target / "model.onnx").write_bytes(b"tampered")
-        self.assertTrue(installed(self.spec, self.model_dir))
-        self.assertFalse(verify_bundle(self.spec, self.model_dir))
+        (target / "model.onnx").unlink()
+        self.assertFalse(installed(self.spec, self.model_dir))
 
-    def test_bad_sha_cleanup(self) -> None:
-        bad = RemoteFile("model.onnx", "0" * 64, self.onnx.size)
-        spec = make_spec(self.source, bad, self.csv)
-        with self.assertRaises(RuntimeError):
-            install(spec, self.model_dir)
+    def test_failed_download_cleans_staging(self) -> None:
+        # 指向不存在的源文件：下载失败后暂存目录必须清空
+        (self.source / "selected_tags.csv").unlink()
+        with self.assertRaises(Exception):
+            install(self.spec, self.model_dir)
         self.assertFalse(list(self.model_dir.glob(".staging-*")))
         self.assertFalse(list(self.model_dir.glob(".part")))
-        self.assertFalse((self.model_dir / spec.key).exists())
+        self.assertFalse((self.model_dir / self.spec.key).exists())
 
     def test_reinstall_skips_download(self) -> None:
         install(self.spec, self.model_dir)
-        # 源文件消失后再次安装：已安装则不触网
         for name in ("model.onnx", "selected_tags.csv"):
             (self.source / name).unlink()
         path = install(self.spec, self.model_dir)
@@ -98,11 +88,7 @@ class TaggerBundleTests(unittest.TestCase):
     def test_revision_change_reinstalls(self) -> None:
         install(self.spec, self.model_dir)
         (self.source / "model.onnx").write_bytes(b"updated-weights")
-        import hashlib
-
-        data = (self.source / "model.onnx").read_bytes()
-        onnx2 = RemoteFile("model.onnx", hashlib.sha256(data).hexdigest(), len(data))
-        spec2 = make_spec(self.source, onnx2, self.csv, revision="r2")
+        spec2 = make_spec(self.source, revision="r2")
         self.assertFalse(installed(spec2, self.model_dir))
         install(spec2, self.model_dir)
         target = bundle.bundle_path(self.model_dir, "test-model")

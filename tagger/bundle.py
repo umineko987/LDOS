@@ -1,17 +1,16 @@
 """模型 bundle 安装器。
 
-流程：整个 bundle 下载进暂存目录 → 逐文件 SHA256 校验 → 写 manifest →
-目录级原子发布到最终位置。任何一步失败都清空暂存目录，不会出现
-"半套模型"。已安装检测只看 manifest 与文件存在性（revision 匹配），
-完整校验仅安装时执行。
+流程：整个 bundle 下载进暂存目录 → 写 manifest → 目录级原子发布到
+最终位置。任何一步失败都清空暂存目录，不会出现"半套模型"。
+已安装检测只看 manifest 与文件存在性（revision 匹配）。
 
+下载地址由登记表固定（repo@revision 直链），不做事后哈希校验。
 代理沿用去重模块的约定：调用方设置 HTTP(S)_PROXY 环境变量。
 gated 模型通过 token 参数临时持有 Authorization 头，不落盘。
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -20,7 +19,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
-from specs import RemoteFile, SPECS, TaggerModelSpec
+from specs import SPECS, TaggerModelSpec
 
 MANIFEST_NAME = "manifest.json"
 STAGING_PREFIX = ".staging-"
@@ -42,14 +41,6 @@ def _reject_managed_symlink(path: Path) -> None:
         raise RuntimeError(f"拒绝通过符号链接管理模型文件: {path}")
 
 
-def _sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file_obj:
-        while chunk := file_obj.read(chunk_size):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def bundle_path(model_dir: Path, key: str) -> Path:
     return model_dir / key
 
@@ -66,7 +57,7 @@ def read_manifest(path: Path) -> dict | None:
 
 
 def installed(spec: TaggerModelSpec, model_dir: Path) -> bool:
-    """仅做存在性与 revision 检查；完整校验见 verify_bundle。"""
+    """manifest 的 revision 匹配且所有文件齐全。"""
     path = bundle_path(model_dir, spec.key)
     if path.is_symlink():
         return False
@@ -79,25 +70,13 @@ def installed(spec: TaggerModelSpec, model_dir: Path) -> bool:
     )
 
 
-def verify_bundle(spec: TaggerModelSpec, model_dir: Path) -> bool:
-    """逐文件完整 SHA256 校验。大模型较慢，只在显式需要时调用。"""
-    path = bundle_path(model_dir, spec.key)
-    if not installed(spec, model_dir):
-        return False
-    return all(
-        _sha256_file(path / remote.name) == remote.sha256
-        for remote in spec.files
-    )
-
-
 def _download_to(
     url: str,
     destination: Path,
-    expected_sha256: str,
     token: str | None,
     progress: ProgressCallback | None,
 ) -> None:
-    """下载单个文件到 .part，校验通过后才 rename 到目标名。"""
+    """下载单个文件到 .part，完成后 rename 到目标名。"""
     part_path = destination.with_suffix(destination.suffix + ".part")
     _reject_managed_symlink(part_path)
     part_path.unlink(missing_ok=True)
@@ -120,8 +99,6 @@ def _download_to(
                     downloaded += len(chunk)
                     if progress is not None:
                         progress(destination.name, downloaded, total)
-        if _sha256_file(part_path) != expected_sha256:
-            raise RuntimeError(f"模型文件校验失败: {destination.name}")
         _reject_managed_symlink(destination)
         os.replace(part_path, destination)
         part_created = False
@@ -180,7 +157,6 @@ def install(
             _download_to(
                 spec.url_for(remote),
                 staging / remote.name,
-                remote.sha256,
                 token,
                 progress,
             )
@@ -189,7 +165,7 @@ def install(
             "repo": str(spec.repo),
             "revision": spec.revision,
             "adapter": spec.adapter,
-            "files": {remote.name: remote.sha256 for remote in spec.files},
+            "files": [remote.name for remote in spec.files],
         }
         _publish(staging, target, manifest)
     finally:
