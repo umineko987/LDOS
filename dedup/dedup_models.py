@@ -132,17 +132,16 @@ def download_file(url: str, destination: Path, expected_sha256: str | None = Non
                         break
                     file_obj.write(chunk)
                     progress.update(len(chunk))
+        if expected_sha256:
+            # 发布前在 .part 上校验，杜绝"已发布但未校验"的中间态
+            verify_file(part_path, expected_sha256)
         _reject_managed_symlink(destination)
         os.replace(part_path, destination)
         part_created = False
         destination.chmod(0o600)
-        if expected_sha256:
-            verify_file(destination, expected_sha256)
     except Exception:
         if part_created:
             part_path.unlink(missing_ok=True)
-        if expected_sha256:
-            destination.unlink(missing_ok=True)
         raise
     return destination
 
