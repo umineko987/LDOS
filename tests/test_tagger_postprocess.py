@@ -98,3 +98,34 @@ class CaptionFileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PixaiVocabularyTests(unittest.TestCase):
+    def test_load_pixai_config(self) -> None:
+        import json
+        import tempfile
+        from vocabulary import load_pixai_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = {
+                "tags": ["1girl", "solo", "miku", "sketch", "rating:general"],
+                "tags_split": [["general", 2], ["character", 1], ["style", 1], ["rating", 1]],
+            }
+            path = Path(tmp) / "config.json"
+            path.write_text(json.dumps(config), encoding="utf-8")
+            vocab = load_pixai_config(path)
+            self.assertEqual(vocab.names, ("1girl", "solo", "miku", "sketch", "rating:general"))
+            self.assertEqual(sorted(vocab.category_index), ["character", "general", "rating", "style"])
+            self.assertEqual(vocab.category_index["character"].tolist(), [2])
+
+    def test_split_count_mismatch_rejected(self) -> None:
+        import json
+        import tempfile
+        from vocabulary import load_pixai_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = {"tags": ["a", "b", "c"], "tags_split": [["general", 2]]}
+            path = Path(tmp) / "config.json"
+            path.write_text(json.dumps(config), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_pixai_config(path)

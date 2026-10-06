@@ -96,5 +96,27 @@ SPECS: dict[str, TaggerModelSpec] = {
             default_thresholds={"general": 0.6094, "character": 0.85},
             license="apache-2.0",
         ),
+        TaggerModelSpec(
+            key="pixai-tagger-v1",
+            repo="pixai-labs/pixai-tagger-v1.0",
+            revision="9fe10addf9326e292da8a85a98ea74cd91b41771",
+            adapter="pixai_hf",
+            files=(
+                RemoteFile("model.safetensors"),
+                RemoteFile("config.json"),
+                RemoteFile("preprocessor_config.json"),
+                RemoteFile("tagger_pipeline.py"),
+            ),
+            # 模型卡各类别推荐阈值
+            default_thresholds={
+                "general": 0.17,
+                "character": 0.27,
+                "style": 0.15,
+                "copyright": 0.24,
+                "meta": 0.17,
+                "rating": 0.41,
+            },
+            license="open",
+        ),
     )
 }

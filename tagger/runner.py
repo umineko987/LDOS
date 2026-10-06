@@ -53,11 +53,12 @@ def file_sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
 
 
 def default_adapter_factory(spec: TaggerModelSpec, model_dir: Path):
-    from adapters import TimmCanaryAdapter, WdOnnxAdapter
+    from adapters import PixaiHfAdapter, TimmCanaryAdapter, WdOnnxAdapter
 
     factories = {
         "wd_onnx": WdOnnxAdapter,
         "timm_canary": TimmCanaryAdapter,
+        "pixai_hf": PixaiHfAdapter,
     }
     if spec.adapter not in factories:
         raise KeyError(f"未知适配器类型: {spec.adapter}")

@@ -60,3 +60,26 @@ def load_wd_csv(path: Path) -> Vocabulary:
     if not names:
         raise ValueError("selected_tags.csv 为空")
     return Vocabulary(names, categories)
+
+
+def load_pixai_config(path: Path) -> Vocabulary:
+    """解析 pixai-tagger config.json：tags（有序）+ tags_split（(类别, 数量) 分段）。"""
+    import json
+
+    config = json.loads(path.read_text(encoding="utf-8"))
+    tags = config.get("tags") or []
+    tags_split = config.get("tags_split") or []
+    if not isinstance(tags, list) or not tags or not isinstance(tags_split, list):
+        raise ValueError("pixai config.json 缺少 tags/tags_split")
+    names: list[str] = []
+    categories: list[str] = []
+    for category, count in tags_split:
+        if not isinstance(category, str) or not isinstance(count, int) or count < 0:
+            raise ValueError(f"tags_split 条目非法: {(category, count)!r}")
+        if count == 0:
+            continue
+        categories.extend([category] * count)
+    if len(categories) != len(tags):
+        raise ValueError(f"tags_split 总数 {len(categories)} 与 tags {len(tags)} 不一致")
+    names = [str(tag) for tag in tags]
+    return Vocabulary(names, categories)

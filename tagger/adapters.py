@@ -17,7 +17,7 @@ from PIL import Image
 from bundle import bundle_path, installed
 from preprocess import canary_prepare, wd_prepare
 from specs import TaggerModelSpec
-from vocabulary import Vocabulary, load_wd_csv
+from vocabulary import Vocabulary, load_pixai_config, load_wd_csv
 
 # 适配器实现版本：预处理或输出解码语义变化时递增，使缓存指纹失效
 ADAPTER_VERSION = 1
@@ -172,6 +172,74 @@ class TimmCanaryAdapter:
 
     def close(self) -> None:
         self._model = None
+
+
+class PixaiHfAdapter:
+    """pixai-labs/pixai-tagger-v1.0（transformers remote code）。
+
+    复用官方 ViTDetCls 与 RescalePadProcessor（从固定 revision 的本地
+    bundle 加载，local_files_only），但绕开官方 TaggerPipeline 的阈值
+    过滤，直接返回完整 sigmoid 分数。词表来自 config.json 的
+    tags + tags_split。
+    """
+
+    def __init__(self, spec: TaggerModelSpec, model_dir: Path):
+        if spec.adapter != "pixai_hf":
+            raise TaggerAdapterError(f"{spec.key} 不是 pixai_hf 适配器模型")
+        self.spec = spec
+        self.model_dir = model_dir
+        self.vocabulary: Vocabulary | None = None
+        self._model = None
+        self._processor = None
+        self.fingerprint = ""
+
+    def load(self) -> None:
+        if not installed(self.spec, self.model_dir):
+            raise TaggerAdapterError(f"模型未安装: {self.spec.key}")
+        try:
+            from transformers import AutoImageProcessor, AutoModel
+        except ImportError as error:
+            raise TaggerAdapterError(
+                f"缺少 transformers 依赖，请安装 tagger-torch 组: {error}"
+            ) from error
+
+        path = bundle_path(self.model_dir, self.spec.key)
+        self.vocabulary = load_pixai_config(path / "config.json")
+        self._model = AutoModel.from_pretrained(
+            path, trust_remote_code=True, local_files_only=True,
+        )
+        self._model.eval()
+        self._processor = AutoImageProcessor.from_pretrained(
+            path, trust_remote_code=True, local_files_only=True,
+        )
+        num_classes = int(getattr(self._model.config, "num_classes", 0) or 0)
+        if num_classes and num_classes != len(self.vocabulary):
+            raise TaggerAdapterError(
+                f"模型输出维度 {num_classes} 与词表 {len(self.vocabulary)} 不一致"
+            )
+
+        digest = hashlib.sha256()
+        digest.update(f"pixai_hf:v{ADAPTER_VERSION}".encode())
+        digest.update(self.spec.revision.encode())
+        digest.update(self.vocabulary.fingerprint.encode())
+        self.fingerprint = digest.hexdigest()
+
+    def infer_scores(self, images: Sequence[Image.Image]) -> np.ndarray:
+        if self._model is None or self._processor is None:
+            raise TaggerAdapterError("模型未加载")
+        import torch
+
+        batches = []
+        with torch.inference_mode():
+            for image in images:
+                pixel_values = self._processor(image)["pixel_values"]
+                logits = self._model(pixel_values.to(self._model.dtype))
+                batches.append(torch.sigmoid(logits))
+        return torch.cat(batches, dim=0).numpy().astype(np.float32, copy=False)
+
+    def close(self) -> None:
+        self._model = None
+        self._processor = None
 
     def close(self) -> None:
         self._session = None
