@@ -59,7 +59,16 @@
     "dedup/dedup_core.py",
     "dedup/dedup_models.py",
     "dedup/dedup_resources.py",
-    "dedup/dedup_review_worker.py"
+    "dedup/dedup_review_worker.py",
+    "tagger/adapters.py",
+    "tagger/bundle.py",
+    "tagger/cache.py",
+    "tagger/cli.py",
+    "tagger/postprocess.py",
+    "tagger/preprocess.py",
+    "tagger/runner.py",
+    "tagger/specs.py",
+    "tagger/vocabulary.py"
   ],
   "optional_resources": {
     "dedup_models": false,

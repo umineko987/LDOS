@@ -39,6 +39,8 @@ def minimal_tree(root: Path) -> dict[str, object]:
     (app / "gdl_backend").mkdir(parents=True)
     (app / "gdl_backend" / "worker_entry.py").write_text("", encoding="utf-8")
     (app / "dedup_review_worker.py").write_text("", encoding="utf-8")
+    (app / "tagger").mkdir()
+    (app / "tagger" / "cli.py").write_text("", encoding="utf-8")
     mihomo = app / "bin" / "mihomo"
     mihomo.parent.mkdir()
     mihomo.write_bytes(b"mihomo")
@@ -238,6 +240,26 @@ class DesktopReleaseTests(unittest.TestCase):
                 if item.is_file()
             }
             self.assertEqual(actual, expected)
+
+    def test_application_projection_preserves_tagger_package_and_only_ships_code(self) -> None:
+        import subprocess
+
+        with temporary_path() as tmp_path:
+            app = tmp_path / "app"
+            app.mkdir()
+            lock = json.loads((ROOT / "desktop/release/runtime-lock.json").read_text(encoding="utf-8"))
+            release.copy_application_scripts(app, lock)
+            self.assertTrue((app / "dedup_review_worker.py").is_file())
+            expected = {file.name for file in (ROOT / "tagger").glob("*.py")}
+            actual = {file.name for file in (app / "tagger").iterdir()}
+            self.assertEqual(actual, expected)
+            result = subprocess.run(
+                [sys.executable, "-I", "-B", str(app / "tagger/cli.py"), "--help"],
+                cwd=tmp_path, capture_output=True, text=True, check=True,
+            )
+            self.assertIn("prepare", result.stdout)
+            self.assertFalse((app / "tagger/tags.sqlite3").exists())
+            self.assertFalse((app / "tagger/.models").exists())
 
     def test_record_cleanup_removes_pruned_launchers_deterministically(self) -> None:
         with temporary_path() as tmp_path:

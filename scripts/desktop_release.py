@@ -539,7 +539,9 @@ def copy_application_scripts(app: Path, lock: dict[str, Any]) -> None:
         source = ROOT / relative
         if not source.is_file():
             raise ReleaseError(f"required application script is missing: {relative}")
-        shutil.copy2(source, app / source.name)
+        target = app / relative if Path(relative).parts[0] == "tagger" else app / source.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
 
 
 def copy_gallery_source(app: Path) -> None:
@@ -667,6 +669,7 @@ def write_release_manifest(
             "backend": "app/gdl_backend",
             "worker": "-m gdl_backend.worker_entry",
             "dedup_worker": "app/dedup_review_worker.py",
+            "tagger_cli": "app/tagger/cli.py",
             "dedup_core": "app/dedup_core.py",
         },
         "bundled_resources": {
@@ -780,6 +783,8 @@ def verify_tree(
         raise ReleaseError("backend worker package is missing")
     if not (app / "dedup_review_worker.py").is_file():
         raise ReleaseError("dedup worker is missing")
+    if not (app / "tagger" / "cli.py").is_file():
+        raise ReleaseError("tagger CLI is missing")
     mihomo = manifest.get("bundled_resources", {}).get("mihomo", {})
     binary_relative = mihomo.get("binary", "")
     parsed_binary = PurePosixPath(binary_relative)
@@ -913,6 +918,11 @@ import json, os, sys
 import cv2, fastapi, onnxruntime, PIL, torch, torchvision, uvicorn
 import dedup_core, dedup_review_worker, gdl_backend
 from gdl_backend import review_filter_models
+from gdl_backend.config import AppSettings
+from gdl_backend.tagger_service import TaggerService
+catalog = TaggerService(AppSettings.load()).model_catalog()
+if not any(entry['key'] == 'wd-vit-v3' for entry in catalog):
+    raise SystemExit('packaged tagger catalog is incomplete')
 expected = os.environ['LDOS_DESKTOP_PYTHON']
 if not os.path.samefile(sys.executable, expected):
     raise SystemExit('unexpected runtime interpreter')
@@ -952,6 +962,12 @@ print(json.dumps({
         )
         run(
             [python, "-B", app / "dedup_review_worker.py", "--help"],
+            cwd=app,
+            env=env,
+            capture=True,
+        )
+        run(
+            [python, "-B", app / "tagger" / "cli.py", "--help"],
             cwd=app,
             env=env,
             capture=True,
