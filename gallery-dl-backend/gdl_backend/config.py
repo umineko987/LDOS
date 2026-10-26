@@ -241,6 +241,7 @@ def _desktop_distribution_data(data: dict[str, Any]) -> dict[str, Any]:
     tagger.update(
         {
             "python_executable": str(python),
+            "cli_script": str(resource_root / "app" / "tagger" / "cli.py"),
             "model_dir": str(data_root / "tagger" / "models"),
             "cache_path": str(data_root / "tagger" / "tags.sqlite3"),
         }
@@ -483,6 +484,7 @@ class AppSettings:
         proxy_data = dict(data.get("proxy") or {})
         scheduler_data = dict(data.get("scheduler") or {})
         dedup_data = dict(data.get("dedup") or {})
+        tagger_data = dict(data.get("tagger") or {})
 
         server = ServerSettings(
             host=str(os.environ.get("GDL_BACKEND_HOST", server_data.get("host", "127.0.0.1"))),
@@ -614,6 +616,17 @@ class AppSettings:
             no_dino=bool(dedup_data.get("no_dino", False)),
         )
 
+        tagger = TaggerSettings(
+            enabled=bool(tagger_data.get("enabled", True)),
+            python_executable=_executable_path(
+                tagger_data.get("python_executable"), base, _default_dedup_python(),
+            ),
+            cli_script=_path(tagger_data.get("cli_script"), base, WORKSPACE_DIR / "tagger" / "cli.py"),
+            model_dir=_managed_path(tagger_data.get("model_dir"), base, WORKSPACE_DIR / "tagger" / ".models"),
+            cache_path=_managed_path(tagger_data.get("cache_path"), base, WORKSPACE_DIR / "tagger" / "tags.sqlite3"),
+            shutdown_grace_seconds=max(1.0, float(tagger_data.get("shutdown_grace_seconds", 10.0))),
+        )
+
         policy = _editable_default_site_policy(data.get("default_site_policy"))
         settings = cls(
             runtime_dir=runtime,
@@ -629,6 +642,7 @@ class AppSettings:
             proxy=proxy,
             scheduler=scheduler,
             dedup=dedup,
+            tagger=tagger,
             default_site_policy=policy,
             config_path=config_path,
         )

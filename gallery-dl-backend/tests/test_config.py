@@ -604,6 +604,31 @@ class AuthorizationProxyConfigTests(unittest.TestCase):
                 settings.validate()
 
 
+class TaggerConfigTests(unittest.TestCase):
+    def test_loads_disabled_and_custom_tagger_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config.json"
+            config.write_text(json.dumps({
+                "dedup": {"enabled": False},
+                "tagger": {
+                    "enabled": False,
+                    "python_executable": "venv/bin/python",
+                    "cli_script": "custom/cli.py",
+                    "model_dir": "tagger/models",
+                    "cache_path": "tagger/cache.sqlite3",
+                    "shutdown_grace_seconds": 3.5,
+                },
+            }), encoding="utf-8")
+            settings = AppSettings.load(config)
+            self.assertFalse(settings.tagger.enabled)
+            self.assertEqual(settings.tagger.python_executable, root / "venv/bin/python")
+            self.assertEqual(settings.tagger.cli_script, root / "custom/cli.py")
+            self.assertEqual(settings.tagger.model_dir, root / "tagger/models")
+            self.assertEqual(settings.tagger.cache_path, root / "tagger/cache.sqlite3")
+            self.assertEqual(settings.tagger.shutdown_grace_seconds, 3.5)
+
+
 class DesktopDistributionConfigTests(unittest.TestCase):
     def test_packaged_paths_override_stale_install_paths_and_share_python(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -622,6 +647,7 @@ class DesktopDistributionConfigTests(unittest.TestCase):
                         "gallery": {"python_executable": "/usr/bin/python", "migrate_default_auth": True},
                         "proxy": {"enabled": True, "allowed_node_roots": ["/stale/nodes"]},
                         "dedup": {"enabled": False, "python_executable": "/stale/python"},
+                        "tagger": {"enabled": False, "python_executable": "/stale/python", "cli_script": "/stale/cli.py", "model_dir": "/stale/models", "cache_path": "/stale/cache.sqlite3"},
                     }
                 ),
                 encoding="utf-8",
@@ -669,6 +695,12 @@ class DesktopDistributionConfigTests(unittest.TestCase):
             )
             self.assertTrue(settings.proxy.enabled)
             self.assertFalse(settings.gallery.migrate_default_auth)
+
+            self.assertFalse(settings.tagger.enabled)
+            self.assertEqual(settings.tagger.python_executable, python)
+            self.assertEqual(settings.tagger.cli_script, resource_root / "app/tagger/cli.py")
+            self.assertEqual(settings.tagger.model_dir, data_root / "tagger/models")
+            self.assertEqual(settings.tagger.cache_path, data_root / "tagger/tags.sqlite3")
 
     def test_partial_packaged_environment_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
