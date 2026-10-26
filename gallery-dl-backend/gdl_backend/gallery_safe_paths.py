@@ -610,6 +610,41 @@ class SafeSourceRoot:
         with self._parent_fd(marker, create=True):
             return
 
+    def copy_regular(self, source_relative: str, target_relative: str) -> None:
+        payload = self.read_bytes(source_relative)
+        self.atomic_write_bytes(
+            target_relative,
+            payload,
+            expected_disk_version=_MISSING_DISK_VERSION,
+        )
+
+    def copy_directory(self, source_relative: str, target_relative: str) -> None:
+        source_parts = validate_relative_path(source_relative)
+        target_parts = validate_relative_path(target_relative)
+        if target_parts[: len(source_parts)] == source_parts:
+            raise UnsafeSourcePathError(target_relative, "target_inside_source")
+        if not self.exists_directory(source_relative):
+            raise UnsafeSourcePathError(source_relative, "directory_missing")
+        if self.exists_directory(target_relative, allow_missing=True):
+            raise FileExistsError(target_relative)
+        self.ensure_directory(target_relative)
+        try:
+            for entry in self.iter_subtree(
+                source_relative,
+                excluded_directories=frozenset({".ldos"}),
+            ):
+                suffix = entry.relative_path[len(source_relative):].lstrip("/")
+                destination = f"{target_relative}/{suffix}" if suffix else target_relative
+                self.ensure_directory(destination)
+                for name, _metadata in entry.files:
+                    self.copy_regular(
+                        f"{entry.relative_path}/{name}",
+                        f"{destination}/{name}",
+                    )
+        except Exception:
+            self.remove_directory_tree(target_relative, missing_ok=True)
+            raise
+
     def move_regular(
         self,
         source_relative: str,

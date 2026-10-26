@@ -86,9 +86,15 @@ class GalleryTrashRequest(BaseModel):
     asset_ids: list[str] = Field(default_factory=list, max_length=2000)
     directory_ids: list[str] = Field(default_factory=list, max_length=200)
 
+
+
+class GalleryTransferRequest(BaseModel):
+    asset_ids: list[str] = Field(default_factory=list, max_length=2000)
+    directory_ids: list[str] = Field(default_factory=list, max_length=200)
+    target_directory_id: str = Field(min_length=1, max_length=128)
 class GalleryFileOperationResponse(BaseModel):
     operation_id: str = Field(min_length=1, max_length=128)
-    kind: Literal["rename", "trash", "restore", "purge"]
+    kind: Literal["rename", "trash", "restore", "purge", "move", "copy"]
     status: Literal["committed"]
     item_count: int = Field(ge=0)
     has_txt_count: int = Field(ge=0)
@@ -328,7 +334,14 @@ _FILE_OPERATION_ERROR_STATUS: dict[str, int] = {
     "invalid_cursor": 422,
     "operation_recovery_required": 500,
     "operation_failed": 500,
-    "invalid_operation_kind": 500,
+    "invalid_operation_kind": 422,
+    "asset_selection_invalid": 422,
+    "target_directory_not_found": 404,
+    "target_inside_source": 409,
+    "directory_root_not_movable": 409,
+    "source_mismatch": 409,
+    "transfer_target_conflict": 409,
+    "asset_file_missing": 409,
 }
 
 
@@ -887,6 +900,36 @@ def create_gallery_router() -> APIRouter:
                 asset_ids=request.asset_ids,
                 directory_ids=request.directory_ids,
             ) from None
+    @router.post(
+        "/gallery/file-operations/{kind}",
+        response_model=GalleryFileOperationResponse,
+    )
+    async def transfer_gallery_items(
+        kind: Literal["move", "copy"],
+        request: GalleryTransferRequest,
+        container: Any = Depends(get_service),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> Any:
+        validate_idempotency_key(idempotency_key)
+        engine: GalleryFileOperations = container.gallery_file_operations
+        try:
+            result = engine.move_or_copy(
+                request.asset_ids,
+                request.directory_ids,
+                request.target_directory_id,
+                kind=kind,
+            )
+            source_ids = result.get("source_ids", [])
+            if len(source_ids) == 1:
+                await asyncio.to_thread(container.gallery_catalog.scan_source, source_ids[0])
+            return result
+        except GalleryFileOperationError as error:
+            raise _file_operation_api_error(
+                error,
+                asset_ids=request.asset_ids,
+                directory_ids=request.directory_ids,
+            ) from None
+
 
     @router.get("/gallery/trash", response_model=GalleryTrashPageResponse)
     async def list_trash(

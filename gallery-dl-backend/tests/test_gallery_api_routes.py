@@ -794,6 +794,7 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
             },
             ("POST", "/api/v1/gallery/assets/{asset_id}/rename"): operation_keys,
             ("POST", "/api/v1/gallery/file-operations/trash"): operation_keys,
+            ("POST", "/api/v1/gallery/file-operations/{kind}"): operation_keys,
             ("POST", "/api/v1/gallery/file-operations/{operation_id}/undo"): operation_keys,
             ("POST", "/api/v1/gallery/trash/{operation_id}/restore"): operation_keys,
             ("DELETE", "/api/v1/gallery/trash/{operation_id}"): operation_keys,

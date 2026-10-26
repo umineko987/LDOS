@@ -143,6 +143,81 @@ class RenameTest(GalleryFileOperationsTestBase):
         self.assertEqual(ctx.exception.code, "asset_not_found")
 
 
+class TransferTest(GalleryFileOperationsTestBase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.source = self.scan_source(
+            {
+                "a.jpg": _png_bytes(),
+                "a.txt": "alpha",
+                "source/c.jpg": _png_bytes(),
+                "source/c.txt": "gamma",
+                "target/b.jpg": _png_bytes(),
+            }
+        )
+        self.sid = self.source["source_id"]
+
+    def test_move_asset_moves_txt_pair_and_rescan_updates_index(self) -> None:
+        asset = self.asset_by_name(self.sid, "a.jpg")
+        target = self.directory_by_path(self.sid, "target")
+
+        result = self.engine.move_or_copy(
+            [asset["asset_id"]], [], target["directory_id"], kind="move"
+        )
+        self.assertEqual(result["status"], "committed")
+        self.assertEqual(result["source_ids"], [self.sid])
+        self.assertFalse((self.root / "a.jpg").exists())
+        self.assertFalse((self.root / "a.txt").exists())
+        self.assertTrue((self.root / "target" / "a.jpg").exists())
+        self.assertTrue((self.root / "target" / "a.txt").exists())
+
+        self.container.gallery_catalog.scan_source(self.sid)
+        moved = self.asset_by_name(self.sid, "a.jpg")
+        self.assertEqual(moved["relative_path"], "target/a.jpg")
+        self.assertEqual(moved["txt_relative_path"], "target/a.txt")
+
+    def test_copy_directory_is_recursive_and_does_not_remove_source(self) -> None:
+        source_directory = self.directory_by_path(self.sid, "source")
+        target = self.directory_by_path(self.sid, "target")
+
+        result = self.engine.move_or_copy(
+            [], [source_directory["directory_id"]], target["directory_id"], kind="copy"
+        )
+        self.assertEqual(result["status"], "committed")
+        self.assertTrue((self.root / "source" / "c.jpg").exists())
+        self.assertTrue((self.root / "source" / "c.txt").exists())
+        self.assertTrue((self.root / "target" / "source" / "c.jpg").exists())
+        self.assertTrue((self.root / "target" / "source" / "c.txt").exists())
+
+        self.container.gallery_catalog.scan_source(self.sid)
+        copied = [
+            asset
+            for asset in self.db.gallery.list_directory_entries(
+                directory_id=target["directory_id"]
+            )["directories"]
+            if asset["name"] == "source"
+        ]
+        self.assertEqual(len(copied), 1)
+
+    def test_transfer_rejects_existing_target_and_descendant_target(self) -> None:
+        asset = self.asset_by_name(self.sid, "a.jpg")
+        target = self.directory_by_path(self.sid, "target")
+        (self.root / "target" / "a.jpg").write_bytes(_png_bytes())
+        with self.assertRaises(GalleryFileOperationError) as conflict:
+            self.engine.move_or_copy(
+                [asset["asset_id"]], [], target["directory_id"], kind="copy"
+            )
+        self.assertEqual(conflict.exception.code, "transfer_target_conflict")
+        self.assertTrue((self.root / "a.jpg").exists())
+
+        source_directory = self.directory_by_path(self.sid, "source")
+        with self.assertRaises(GalleryFileOperationError) as descendant:
+            self.engine.move_or_copy(
+                [], [source_directory["directory_id"]], source_directory["directory_id"], kind="move"
+            )
+        self.assertEqual(descendant.exception.code, "target_inside_source")
+
+
 class TrashTest(GalleryFileOperationsTestBase):
     def setUp(self) -> None:
         super().setUp()

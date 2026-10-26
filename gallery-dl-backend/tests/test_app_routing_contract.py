@@ -73,6 +73,7 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("PUT", "/api/v1/gallery/assets/{asset_id}/annotation"): ("put_gallery_asset_annotation_api_v1_gallery_assets__asset_id__annotation_put", ("200", "422")),
     ("POST", "/api/v1/gallery/assets/{asset_id}/rename"): ("rename_asset_api_v1_gallery_assets__asset_id__rename_post", ("200", "422")),
     ("POST", "/api/v1/gallery/file-operations/trash"): ("trash_assets_api_v1_gallery_file_operations_trash_post", ("200", "422")),
+    ("POST", "/api/v1/gallery/file-operations/{kind}"): ("transfer_gallery_items_api_v1_gallery_file_operations__kind__post", ("200", "422")),
     ("POST", "/api/v1/gallery/file-operations/{operation_id}/undo"): ("undo_trash_api_v1_gallery_file_operations__operation_id__undo_post", ("200", "422")),
     ("GET", "/api/v1/gallery/trash"): ("list_trash_api_v1_gallery_trash_get", ("200", "422")),
     ("POST", "/api/v1/gallery/trash/{operation_id}/restore"): ("restore_trash_api_v1_gallery_trash__operation_id__restore_post", ("200", "422")),

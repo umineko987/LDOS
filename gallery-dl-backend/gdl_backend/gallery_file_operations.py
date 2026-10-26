@@ -38,7 +38,7 @@ from .gallery_safe_paths import (
 )
 
 FILE_OPERATION_KINDS: frozenset[str] = frozenset(
-    {"rename", "trash", "restore", "purge"}
+    {"rename", "trash", "restore", "purge", "move", "copy"}
 )
 FILE_OPERATION_STATUSES: frozenset[str] = frozenset(
     {
@@ -285,6 +285,103 @@ class GalleryFileOperations:
         if review_snapshot is not None:
             items[0]["review_snapshot"] = review_snapshot
         return self._execute(kind="trash", items=items, operation_id=operation_id)
+    def move_or_copy(
+        self,
+        asset_ids: list[str],
+        directory_ids: list[str] | None,
+        target_directory_id: str,
+        *,
+        kind: str,
+    ) -> dict[str, Any]:
+        """Move or copy selected images/directories into one directory."""
+        if kind not in {"move", "copy"}:
+            raise GalleryFileOperationError("invalid_operation_kind")
+        directory_ids = list(directory_ids or [])
+        if not asset_ids and not directory_ids:
+            raise GalleryFileOperationError("selection_required")
+        if len(asset_ids) != len(set(asset_ids)):
+            raise GalleryFileOperationError("asset_selection_invalid")
+        if len(directory_ids) != len(set(directory_ids)):
+            raise GalleryFileOperationError("directory_selection_invalid")
+
+        assets = self._repo.get_assets_by_ids(asset_ids)
+        if len(assets) != len(set(asset_ids)):
+            raise GalleryFileOperationError("asset_not_found", {"asset_ids": asset_ids})
+        if any(asset["lifecycle_state"] != "active" for asset in assets):
+            raise GalleryFileOperationError("asset_not_active")
+        directories = [self._repo.get_directory(directory_id) for directory_id in directory_ids]
+        if any(directory is None for directory in directories):
+            raise GalleryFileOperationError("directory_not_found", {"directory_ids": directory_ids})
+        target = self._repo.get_directory(target_directory_id)
+        if target is None:
+            raise GalleryFileOperationError(
+                "target_directory_not_found", {"directory_id": target_directory_id}
+            )
+        typed_directories = [directory for directory in directories if directory is not None]
+        source_ids = {
+            *(asset["source_id"] for asset in assets),
+            *(directory["source_id"] for directory in typed_directories),
+            target["source_id"],
+        }
+        if len(source_ids) != 1:
+            raise GalleryFileOperationError("source_mismatch")
+        source_id = next(iter(source_ids))
+        for directory in typed_directories:
+            relative_path = str(directory["relative_path"])
+            if not relative_path:
+                raise GalleryFileOperationError("directory_root_not_movable")
+            if _path_is_within(str(target["relative_path"]), relative_path):
+                raise GalleryFileOperationError("target_inside_source")
+        for index, directory in enumerate(typed_directories):
+            for other in typed_directories[index + 1 :]:
+                if _path_is_within(str(directory["relative_path"]), str(other["relative_path"])) or _path_is_within(
+                    str(other["relative_path"]), str(directory["relative_path"])
+                ):
+                    raise GalleryFileOperationError("directory_selection_overlap")
+
+        target_path = str(target["relative_path"])
+        items: list[dict[str, Any]] = []
+        selected_directory_paths = [str(directory["relative_path"]) for directory in typed_directories]
+        for asset in assets:
+            if any(_path_is_within(str(asset["relative_path"]), path) for path in selected_directory_paths):
+                continue
+            name = str(asset["name"])
+            items.append(
+                {
+                    "item_type": "asset",
+                    "source_id": source_id,
+                    "asset_id": asset["asset_id"],
+                    "directory_id": asset["directory_id"],
+                    "origin_relative_path": asset["relative_path"],
+                    "target_relative_path": f"{target_path}/{name}" if target_path else name,
+                    "has_txt": bool(asset["txt_relative_path"] and asset["txt_state"] not in {"missing", "pair_conflict"}),
+                    "expected_asset_version": int(asset["content_version"]),
+                    "expected_txt_version": int(asset["txt_version"]),
+                    "txt_origin": asset["txt_relative_path"] if asset["txt_relative_path"] else "",
+                    "txt_target": _txt_target_for_rename(
+                        f"{target_path}/{name}" if target_path else name
+                    ) if asset["txt_relative_path"] and asset["txt_state"] not in {"missing", "pair_conflict"} else "",
+                }
+            )
+        for directory in typed_directories:
+            name = str(directory["name"])
+            items.append(
+                {
+                    "item_type": "directory",
+                    "source_id": source_id,
+                    "asset_id": "",
+                    "directory_id": directory["directory_id"],
+                    "origin_relative_path": directory["relative_path"],
+                    "target_relative_path": f"{target_path}/{name}" if target_path else name,
+                    "has_txt": False,
+                    "expected_asset_version": 0,
+                    "expected_txt_version": 0,
+                }
+            )
+        if not items:
+            raise GalleryFileOperationError("selection_required")
+        return self._execute(kind=kind, items=items)
+
 
     def trash_directories(self, directory_ids: list[str]) -> dict[str, Any]:
         """Compatibility helper for callers that only select directories."""
@@ -618,13 +715,14 @@ class GalleryFileOperations:
                     item["purge_of"] = self._find_trash_operation_for_item(
                         item, operation_id
                     )
-            elif kind in {"rename", "trash", "restore"}:
+            elif kind in {"rename", "trash", "restore", "move", "copy"}:
                 raise GalleryFileOperationError(
                     "asset_not_found", {"asset_id": item["asset_id"]}
                 )
         elif kind == "rename":
             raise GalleryFileOperationError("directory_rename_not_supported")
         elif kind in {"restore", "purge"}:
+
             reference_key = "undo_of" if kind == "restore" else "purge_of"
             if not item.get(reference_key):
                 item[reference_key] = self._find_trash_operation_for_item(
@@ -650,6 +748,9 @@ class GalleryFileOperations:
                         self._apply_purge(safe_root, item)
                         applied = True
                         self._commit_purge_index(item)
+                    elif kind in {"move", "copy"}:
+                        self._apply_move_copy(safe_root, kind, item)
+                        applied = True
                     else:  # pragma: no cover - kind validated at entry
                         raise GalleryFileOperationError("invalid_operation_kind")
                 except Exception:
@@ -663,6 +764,58 @@ class GalleryFileOperations:
                 "unsafe_source_path",
                 {"relative_path": error.relative_path},
             ) from error
+    def _apply_move_copy(
+        self,
+        safe_root: SafeSourceRoot,
+        kind: str,
+        item: dict[str, Any],
+    ) -> None:
+        is_copy = kind == "copy"
+        source = item["origin_relative_path"]
+        target = item["target_relative_path"]
+        if item.get("item_type", "asset") == "directory":
+            source_exists = safe_root.exists_directory(source, allow_missing=True)
+            target_exists = safe_root.exists_directory(target, allow_missing=True)
+            if target_exists:
+                raise GalleryFileOperationError("transfer_target_conflict", {"target": target})
+            if not source_exists:
+                raise GalleryFileOperationError("directory_missing", {"relative_path": source})
+            if is_copy:
+                safe_root.copy_directory(source, target)
+            else:
+                safe_root.move_directory(source, target)
+            return
+
+        moves = [(source, target)]
+        if item.get("has_txt") and item.get("txt_origin"):
+            txt_target = item.get("txt_target") or _txt_target_for_rename(target)
+            moves.append((item["txt_origin"], txt_target))
+        completed: list[tuple[str, str]] = []
+        try:
+            for source_relative, target_relative in moves:
+                source_exists = safe_root.exists_regular(source_relative)
+                target_exists = safe_root.exists_regular(target_relative)
+                if target_exists:
+                    raise GalleryFileOperationError(
+                        "transfer_target_conflict", {"target": target_relative}
+                    )
+                if not source_exists:
+                    raise GalleryFileOperationError(
+                        "asset_file_missing", {"relative_path": source_relative}
+                    )
+                if is_copy:
+                    safe_root.copy_regular(source_relative, target_relative)
+                else:
+                    safe_root.move_regular(source_relative, target_relative)
+                completed.append((source_relative, target_relative))
+        except Exception:
+            for source_relative, target_relative in reversed(completed):
+                if is_copy:
+                    safe_root.unlink_regular(target_relative, missing_ok=True)
+                elif safe_root.exists_regular(target_relative):
+                    safe_root.move_regular(target_relative, source_relative)
+            raise
+
     def _rollback_applied_files(
         self,
         safe_root: SafeSourceRoot,
@@ -1382,6 +1535,16 @@ class GalleryFileOperations:
                     item["origin_relative_path"],
                     f"{files_relative}/{item['origin_relative_path']}",
                 )]
+            elif kind in {"move", "copy"}:
+                with SafeSourceRoot(source["root_path"]) as safe_root:
+                    if kind == "copy":
+                        if safe_root.exists_directory(item["target_relative_path"], allow_missing=True):
+                            safe_root.remove_directory_tree(item["target_relative_path"], missing_ok=True)
+                    elif safe_root.exists_directory(item["target_relative_path"], allow_missing=True):
+                        safe_root.move_directory(
+                            item["target_relative_path"], item["origin_relative_path"]
+                        )
+                return
             else:
                 return
             with SafeSourceRoot(source["root_path"]) as safe_root:
@@ -1555,6 +1718,28 @@ class GalleryFileOperations:
                             "DELETE FROM gallery_search_index WHERE asset_id=?",
                             (item["asset_id"],),
                         )
+                elif kind in {"move", "copy"}:
+                    source_relative = item["target_relative_path"]
+                    target_relative = item["origin_relative_path"]
+                    if item.get("item_type", "asset") == "directory":
+                        if kind == "copy":
+                            safe_root.remove_directory_tree(source_relative, missing_ok=True)
+                        elif safe_root.exists_directory(source_relative, allow_missing=True):
+                            safe_root.move_directory(source_relative, target_relative)
+                    else:
+                        moves = [(source_relative, target_relative)]
+                        if item.get("has_txt") and item.get("txt_origin"):
+                            moves.append(
+                                (
+                                    _txt_target_for_rename(source_relative),
+                                    item["txt_origin"],
+                                )
+                            )
+                        if kind == "copy":
+                            for copied_source, _original_target in moves:
+                                safe_root.unlink_regular(copied_source, missing_ok=True)
+                        else:
+                            self._rollback_moves(safe_root, moves)
         except UnsafeSourcePathError as error:
             raise GalleryFileOperationError(
                 "unsafe_source_path", {"relative_path": error.relative_path}

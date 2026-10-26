@@ -130,6 +130,7 @@ class GalleryScanTest(GalleryServiceTestBase):
                 "6.txt": "孤儿 txt 不是资产",
                 "data.bin": b"\x00\x01",
                 "download.part": b"partial",
+                "metadata/data.jsonl": "record",  # 仅元数据，不应创建图库目录
                 "sub/7.jpg": _png_bytes(8, 8),
                 "sub/7.txt": "sub tag",
                 ".ldos/trash/op-1/x.jpg": _png_bytes(1, 1),

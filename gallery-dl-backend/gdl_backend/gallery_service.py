@@ -831,6 +831,7 @@ class GalleryCatalogService:
         with self._filesystem_locks.hold(f"source:{source_id}"):
             existing = self._repo.get_source_asset_stats(source_id)
             directories: list[dict[str, Any]] = []
+            directories_with_images: set[str] = {""}
             assets: list[dict[str, Any]] = []
             skipped = {"temporary": 0, "unsupported": 0}
             try:
@@ -858,6 +859,13 @@ class GalleryCatalogService:
                             skipped["temporary"] += 1
                         else:
                             skipped["unsupported"] += 1
+                    if file_entries:
+                        current_relative = relative_path
+                        while True:
+                            directories_with_images.add(current_relative)
+                            if not current_relative:
+                                break
+                            current_relative = current_relative.rpartition("/")[0]
                     conflicts = _pair_conflicts(image_names)
                     for file_name, file_stat in file_entries:
                         assets.append(
@@ -872,6 +880,11 @@ class GalleryCatalogService:
                         )
             finally:
                 safe_root.close()
+            directories = [
+                directory
+                for directory in directories
+                if directory["relative_path"] in directories_with_images
+            ]
             try:
                 commit = self._repo.commit_scan(
                     source_id,
