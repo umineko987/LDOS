@@ -1,7 +1,7 @@
 .workbench {
   position: relative;
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-columns: 164px minmax(0, 1fr);
   width: 100%;
   height: 100dvh;
   overflow: hidden;
@@ -18,7 +18,7 @@
 }
 
 .wallpaper--graphite {
-  background: radial-gradient(900px circle at 100% 0, rgb(124 156 196 / 0.12), transparent 70%), #0d121b;
+  background: var(--ldos-background-default);
 }
 
 .wallpaper--slate {
@@ -47,10 +47,10 @@
   flex-direction: column;
   gap: 24px;
   min-height: 0;
-  padding: 22px 12px 12px;
+  padding: 20px 10px 12px;
   overflow-y: auto;
   border-right: 1px solid var(--ldos-border-weak);
-  background: rgb(0 0 0 / 0.18);
+  background: var(--ldos-background-deepest);
 }
 
 .workbench-brand {
@@ -96,8 +96,8 @@
   gap: 12px;
   align-items: center;
   width: 100%;
-  min-height: 44px;
-  padding: 10px 14px;
+  min-height: 40px;
+  padding: 8px 12px;
   border-color: transparent;
   background: transparent;
   text-align: left;
@@ -106,7 +106,7 @@
 .workbench-nav svg,
 .workbench-settings svg { flex-shrink: 0; }
 
-.workbench button[aria-current] {
+.workbench-settings-nav button[aria-current] {
   border-color: rgb(228 184 99 / 0.25);
   color: var(--ldos-accent-highlight);
   background: rgb(228 184 99 / 0.10);
@@ -115,13 +115,13 @@
 .workbench-sidebar button[aria-current] {
   border-color: transparent;
   color: var(--ldos-accent-highlight);
-  background: transparent;
+  background: color-mix(in srgb, var(--ldos-accent) 9%, transparent);
 }
 
 .workbench-nav button:hover:not(:disabled),
 .workbench-settings:hover:not(:disabled) {
   border-color: transparent;
-  background: transparent;
+  background: var(--ldos-glass-surface-weak);
 }
 
 .workbench-nav button:hover:not(:disabled):not([aria-current]),
@@ -270,7 +270,7 @@
   .workbench,
   .workbench-sidebar,
   .about-dialog { background: Canvas; color: CanvasText; }
-  .workbench button[aria-current] { border-color: Highlight; color: Highlight; }
+  .workbench-settings-nav button[aria-current] { border-color: Highlight; color: Highlight; }
   .workbench-sidebar button[aria-current] { color: Highlight; }
   .workbench-nav-dot { background: Highlight; }
   .about-backdrop { background: Canvas; }

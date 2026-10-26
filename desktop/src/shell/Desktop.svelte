@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
 
+  import { selectionTrack } from "../core/motion/selectionTrack";
   import Crawl from "../apps/crawl/Crawl.svelte";
   import Tasks from "../apps/tasks/Tasks.svelte";
   import Gallery from "../apps/gallery/Gallery.svelte";
-  import type { PickGalleryAssets } from "../apps/gallery/picker";
+  import type { GallerySelection, PickGalleryAssets } from "../apps/gallery/picker";
   import Review from "../apps/review/Review.svelte";
   import Tagger from "../apps/tagger/Tagger.svelte";
   import Proxy from "../apps/proxy/Proxy.svelte";
@@ -59,17 +60,18 @@
   type PickerSession = {
     origin: string;
     assetIds: readonly string[];
+    directoryIds?: readonly string[];
     appId: ApplicationId;
     focus: HTMLElement | null;
     dialogs: HTMLDialogElement[];
-    resolve: (ids: string[] | null) => void;
+    resolve: (ids: GallerySelection | null) => void;
     unsubscribe: () => void;
   };
   let picker = $state.raw<PickerSession | null>(null);
   let restoringPicker = false;
   let destroyed = false;
 
-  const pickAssets: PickGalleryAssets = ({ origin, assetIds, signal }) => {
+  const pickAssets: PickGalleryAssets = ({ origin, assetIds, directoryIds, signal }) => {
     const appId = shell.getState().focusedAppId;
     if (picker || restoringPicker || destroyed || signal.aborted || !appId) return Promise.resolve(null);
     const focus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -78,7 +80,7 @@
     for (const dialog of dialogs) dialog.close();
     return new Promise((resolve) => {
       const cancel = () => finishPicker(session, null);
-      const session: PickerSession = { origin, assetIds: [...assetIds], appId, focus, dialogs, resolve,
+      const session: PickerSession = { origin, assetIds: [...assetIds], directoryIds: directoryIds ? [...directoryIds] : undefined, appId, focus, dialogs, resolve,
         unsubscribe: () => signal.removeEventListener("abort", cancel) };
       picker = session;
       signal.addEventListener("abort", cancel, { once: true });
@@ -88,7 +90,7 @@
     });
   };
 
-  function finishPicker(session: PickerSession, ids: string[] | null): void {
+  function finishPicker(session: PickerSession, ids: GallerySelection | null): void {
     if (picker !== session) return;
     session.unsubscribe(); picker = null; restoringPicker = true;
     session.resolve(ids);
@@ -208,7 +210,7 @@
   <Wallpaper scene={preferences.wallpaperColor} />
   <button type="button" class="skip-link" data-skip-link inert={aboutOpen || !!picker} onclick={() => void focusPage(snapshot.focusedAppId)}>跳到当前应用</button>
 
-  <aside class="workbench-sidebar" inert={aboutOpen || !!picker} bind:this={sidebarEl}>
+  <aside class="workbench-sidebar" inert={aboutOpen || !!picker} bind:this={sidebarEl} {@attach selectionTrack}>
     <div class="workbench-brand-row">
       <strong class="workbench-brand">LDOS</strong>
       <button
@@ -243,7 +245,7 @@
 
   <main class="workbench-main" inert={aboutOpen}>
     {#if inSettings && !picker}
-      <nav class="workbench-settings-nav" aria-label="设置导航">
+      <nav class="workbench-settings-nav" aria-label="设置导航" {@attach selectionTrack}>
         {#each settingsPages as item}
           <button type="button" data-nav-app={item.id} aria-current={snapshot.focusedAppId === item.id ? "page" : undefined} onclick={() => navigate(item.id)}>{item.label}</button>
         {/each}
@@ -261,7 +263,7 @@
           {:else if appId === "review"}
             <Review {api} {polling} active={!picker && snapshot.focusedAppId === "review"} reviewId={requestedReviewId} onNavigate={navigate} registerUnsavedChanges={(reader, discard, prepare) => shell.registerUnsavedChanges("review", reader, discard, prepare)} />
           {:else if appId === "tagger"}
-            <Tagger {api} {polling} active={!picker && snapshot.focusedAppId === "tagger"} />
+            <Tagger {api} {polling} onPickAssets={pickAssets} active={!picker && snapshot.focusedAppId === "tagger"} />
           {:else if appId === "proxy"}
             <Proxy {api} {polling} />
           {:else if appId === "vault"}
@@ -279,8 +281,8 @@
       {/each}
       {#if picker}
         {@const session = picker}
-        <section class="workbench-page" data-gallery-picker aria-label="角色参考图选取">
-          <Gallery {api} picker={{ origin: session.origin, assetIds: session.assetIds, onFinish: (ids) => finishPicker(session, ids) }} />
+        <section class="workbench-page" data-gallery-picker aria-label={session.directoryIds ? "图库图片与目录选取" : "角色参考图选取"}>
+          <Gallery {api} picker={{ origin: session.origin, assetIds: session.assetIds, directoryIds: session.directoryIds, onFinish: (ids) => finishPicker(session, ids) }} />
         </section>
       {/if}
     </div>

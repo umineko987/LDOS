@@ -80,10 +80,12 @@ describe("toggleModel", () => {
 });
 
 describe("validateStart", () => {
-  it("requires inputs and a model selection", () => {
-    expect(validateStart([], "")).toContain("路径");
-    expect(validateStart([], "/x")).toContain("模型");
-    expect(validateStart(["m"], "/x")).toBe("");
-    expect(validateStart(["m"], "  \n ")).toContain("路径");
+  it("requires a gallery image or directory and a model selection", () => {
+    expect(validateStart([], [])).toContain("图库");
+    expect(validateStart([], ["asset-1"])).toContain("模型");
+    expect(validateStart(["m"], ["asset-1"])).toBe("");
+    expect(validateStart(["m"], [], ["dir-1"])).toBe("");
+    expect(validateStart([], [], ["dir-1"])).toContain("模型");
+    expect(validateStart(["m"], [], [])).toContain("图库");
   });
 });

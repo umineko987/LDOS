@@ -1,5 +1,26 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
+  import { Button } from "$lib/components/ui/button";
+  import { Input } from "$lib/components/ui/input";
+  import { Badge } from "$lib/components/ui/badge";
+  import * as Empty from "$lib/components/ui/empty";
+  import * as NativeSelect from "$lib/components/ui/native-select";
+  import * as ToggleGroup from "$lib/components/ui/toggle-group";
+  import FolderOpenIcon from "@lucide/svelte/icons/folder-open";
+  import FolderInputIcon from "@lucide/svelte/icons/folder-input";
+  import CopyIcon from "@lucide/svelte/icons/copy";
+  import SearchIcon from "@lucide/svelte/icons/search";
+  import LayoutGridIcon from "@lucide/svelte/icons/layout-grid";
+  import ListIcon from "@lucide/svelte/icons/list";
+  import Trash2Icon from "@lucide/svelte/icons/trash-2";
+  import DownloadIcon from "@lucide/svelte/icons/download";
+  import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
+  import SlidersHorizontalIcon from "@lucide/svelte/icons/sliders-horizontal";
+  import PanelLeftCloseIcon from "@lucide/svelte/icons/panel-left-close";
+  import PanelLeftOpenIcon from "@lucide/svelte/icons/panel-left-open";
+  import ScanSearchIcon from "@lucide/svelte/icons/scan-search";
+  import ArrowRightIcon from "@lucide/svelte/icons/arrow-right";
+  import XIcon from "@lucide/svelte/icons/x";
 
   import { ApiError, type ApiClient } from "../../core/api/client";
   import { restoreFocus, trappedTabIndex, type FocusTarget } from "../../core/a11y/focus";
@@ -9,7 +30,7 @@
     type PlatformDirectoryPurpose,
   } from "../../core/platform/adapter";
   import FilterOptionsEditor from "../filter-presets/FilterOptionsEditor.svelte";
-  import type { PickGalleryAssets } from "./picker";
+  import type { GallerySelection, PickGalleryAssets } from "./picker";
   import { createFilterPresetService } from "../filter-presets/service";
   import {
     cloneFilterOptions, FILTER_LABELS, filterOptionsSummary, filterConfigBlockers,
@@ -32,6 +53,7 @@
   import { createGalleryService } from "./service";
   import { enqueueThumbnailPrefetch } from "./thumbnailPrefetch";
   import { createGalleryStore, type GalleryBrowseState } from "./state";
+  import { prepareViewerMotion } from "./viewerMotion";
   import Viewer from "./Viewer.svelte";
   import "./gallery.css";
 
@@ -39,13 +61,15 @@
     api: ApiClient;
     active?: boolean;
     suspended?: boolean;
-    picker?: { origin: string; assetIds: readonly string[]; onFinish: (ids: string[] | null) => void };
+    picker?: { origin: string; assetIds: readonly string[]; directoryIds?: readonly string[]; onFinish: (selection: GallerySelection | null) => void };
     onPickAssets?: PickGalleryAssets;
     onReviewCreated?: (reviewId: string) => void;
     onManagePresets?: () => void;
   } = $props();
   const uid = $props.id();
   let pickedIds = $state<string[]>(untrack(() => [...new Set(picker?.assetIds ?? [])].slice(0, 200)));
+  let pickedDirectoryIds = $state<string[]>(untrack(() => [...new Set(picker?.directoryIds ?? [])].slice(0, 200)));
+  const picksDirectories = $derived(picker?.directoryIds !== undefined);
   let pickerLimit = $state(false);
   function togglePicked(id: string): void {
     pickerLimit = false;
@@ -53,14 +77,28 @@
     else if (pickedIds.length < 200) pickedIds = [...pickedIds, id];
     else pickerLimit = true;
   }
+  function togglePickedDirectory(id: string): void {
+    pickerLimit = false;
+    if (pickedDirectoryIds.includes(id)) pickedDirectoryIds = pickedDirectoryIds.filter((value) => value !== id);
+    else if (pickedDirectoryIds.length < 200) pickedDirectoryIds = [...pickedDirectoryIds, id];
+    else pickerLimit = true;
+  }
   function selectPickerPage(checked: boolean): void {
     const pageIds = snapshot.assets.map((asset) => asset.asset_id);
+    const pageDirectoryIds = snapshot.directories.map((directory) => directory.directory_id);
     pickerLimit = false;
-    if (!checked) pickedIds = pickedIds.filter((id) => !pageIds.includes(id));
-    else {
+    if (!checked) {
+      pickedIds = pickedIds.filter((id) => !pageIds.includes(id));
+      pickedDirectoryIds = pickedDirectoryIds.filter((id) => !pageDirectoryIds.includes(id));
+    } else {
       const ids = [...new Set([...pickedIds, ...pageIds])];
       pickerLimit = ids.length > 200;
       pickedIds = ids.slice(0, 200);
+      if (picksDirectories) {
+        const directoryIds = [...new Set([...pickedDirectoryIds, ...pageDirectoryIds])];
+        pickerLimit ||= directoryIds.length > 200;
+        pickedDirectoryIds = directoryIds.slice(0, 200);
+      }
     }
   }
 
@@ -174,9 +212,13 @@
   // ---- 选择与查看器（G2-3） ----
   const selectedIds = $derived(new Set(picker ? pickedIds : snapshot.selectedAssetIds));
   const allVisibleItemsSelected = $derived(
-    ((!picker && snapshot.directories.length > 0) || snapshot.assets.length > 0)
-      && (picker || snapshot.directories.every((directory) => selectedDirectoryIds.has(directory.directory_id)))
+    (((!picker || picksDirectories) && snapshot.directories.length > 0) || snapshot.assets.length > 0)
+      && ((picker && !picksDirectories) || snapshot.directories.every((directory) => selectedDirectoryIds.has(directory.directory_id)))
       && snapshot.assets.every((asset) => selectedIds.has(asset.asset_id)),
+  );
+  const someVisibleItemsSelected = $derived(
+    snapshot.assets.some((asset) => selectedIds.has(asset.asset_id))
+      || ((!picker || picksDirectories) && snapshot.directories.some((directory) => selectedDirectoryIds.has(directory.directory_id))),
   );
   function toggleSelectAll(event: Event): void {
     const checked = (event.currentTarget as HTMLInputElement).checked;
@@ -189,6 +231,22 @@
     for (const directory of snapshot.directories) rememberDirectorySelection(exportSelection(directory, sourceLabel));
     controller.selectAllAssets();
   }
+  const viewerOpen = $derived(snapshot.viewerIndex >= 0);
+  const viewerMotionAssetId = $derived(snapshot.viewerAssets[snapshot.viewerIndex]?.asset_id ?? null);
+  let motionViewerWasOpen = false;
+  $effect.pre(() => {
+    const open = viewerOpen;
+    const enabled = active && !suspended;
+    const assetId = viewerMotionAssetId;
+    if (open === motionViewerWasOpen) return;
+    motionViewerWasOpen = open;
+    const root = untrack(() => galleryRoot);
+    if (!enabled || !root) return;
+    const motion = prepareViewerMotion(root, open ? assetId : null);
+    void tick().then(motion.play);
+    return motion.cancel;
+  });
+
   const currentAsset = $derived(
     snapshot.viewerAssets[snapshot.viewerIndex] ?? null,
   );
@@ -221,6 +279,7 @@
 
   function onAssetClick(event: MouseEvent, asset: GalleryAssetEntry): void {
     if (!active) return;
+    if ((event.target as Element).closest(".gallery-selection-control")) return;
     if (picker) { togglePicked(asset.asset_id); return; }
     controller.clickAsset(asset.asset_id, {
       additive: event.ctrlKey || event.metaKey,
@@ -236,6 +295,12 @@
 
   // ---- G3-3 文件操作 ----
   let renameDraft = $state("");
+  type GalleryTransferKind = "move" | "copy";
+  let directoryActionMode = $state<"export" | "transfer">("export");
+  let transferKind = $state<GalleryTransferKind>("move");
+  let transferPhase = $state<"idle" | "submitting">("idle");
+  let transferErrorCode = $state<string | null>(null);
+  let transferTargetDirectory = $state<GalleryDirectoryEntry | null>(null);
 
   let selectedTrashOperationIds = $state<string[]>([]);
   let trashBulkBusy = $state(false);
@@ -250,6 +315,48 @@
       snapshot.selectedAssetIds,
       selectedVisibleDirectoryIds,
     );
+  }
+
+  function openDirectoryTransfer(kind: GalleryTransferKind): void {
+    if (selectedItemCount === 0 || activeSource?.root_directory_id === null || activeSource === null) return;
+    directoryActionMode = "transfer";
+    transferKind = kind;
+    transferPhase = "idle";
+    transferErrorCode = null;
+    transferTargetDirectory = null;
+    directoryExportReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    directoryExportOpen = true;
+    directoryExportPickerOpen = true;
+    directoryExportPickerSourceId = activeSource.source_id;
+    directoryExportPickerCurrent = null;
+    directoryExportPickerChildren = [];
+    directoryExportPickerTrail = [];
+    directoryExportPickerCursor = null;
+    void loadDirectoryExportPicker(activeSource.source_id, activeSource.root_directory_id, []);
+  }
+
+  function selectTransferTarget(directory: GalleryDirectoryEntry): void {
+    transferTargetDirectory = directory;
+    closeDirectoryExportPicker();
+  }
+
+  async function submitDirectoryTransfer(): Promise<void> {
+    if (transferPhase === "submitting" || transferTargetDirectory === null) return;
+    transferPhase = "submitting";
+    transferErrorCode = null;
+    const succeeded = await controller.transferItems(
+      transferKind,
+      snapshot.selectedAssetIds,
+      [...selectedDirectoryIds],
+      transferTargetDirectory.directory_id,
+    );
+    if (succeeded) {
+      transferPhase = "idle";
+      closeDirectoryExport();
+    } else {
+      transferPhase = "idle";
+      transferErrorCode = snapshot.pageErrorCode ?? "gallery_transfer_failed";
+    }
   }
 
   async function confirmTrashSelection(): Promise<void> {
@@ -646,7 +753,7 @@
   // ---- 统一、显式的目录/图片选择 ----
   let selectedDirectorySelections = $state<DirectoryExportSelection[]>([]);
   const selectedDirectoryIds = $derived(
-    new Set(selectedDirectorySelections.map((selection) => selection.directoryId)),
+    new Set(picker ? pickedDirectoryIds : selectedDirectorySelections.map((selection) => selection.directoryId)),
   );
   const selectedVisibleDirectoryIds = $derived(
     snapshot.directories.filter((directory) => selectedDirectoryIds.has(directory.directory_id)).map((directory) => directory.directory_id),
@@ -664,6 +771,7 @@
     directory: GalleryDirectoryEntry,
     sourceLabel: string,
   ): void {
+    if (picker) { togglePickedDirectory(directory.directory_id); return; }
     const selection = exportSelection(directory, sourceLabel);
     if (selectedDirectoryIds.has(selection.directoryId)) {
       selectedDirectorySelections = selectedDirectorySelections.filter(
@@ -747,6 +855,7 @@
     directoryExportPhase === "starting" ||
       directoryExportPhase === "copying" ||
       directoryExportPhase === "cancelling" ||
+    transferPhase === "submitting" ||
       directoryExportOperation?.state === "copying",
   );
 
@@ -968,6 +1077,10 @@
   }
 
   function openDirectoryExport(): void {
+    directoryActionMode = "export";
+    transferPhase = "idle";
+    transferErrorCode = null;
+    transferTargetDirectory = null;
     directoryExportReturnFocus =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     directoryExportOpen = true;
@@ -1500,11 +1613,11 @@
   onfocus={onWindowFocus}
 />
 
-<section class="gallery-app" data-gallery-app data-domain-owner="gallery" data-preview-availability="live" aria-labelledby={`${uid}-heading`} bind:this={galleryRoot}>
+<section class="gallery-app" data-gallery-app data-directory-picker={picksDirectories ? true : undefined} data-domain-owner="gallery" data-preview-availability="live" aria-labelledby={`${uid}-heading`} bind:this={galleryRoot}>
   <header class="gallery-header" inert={snapshot.viewerIndex >= 0 ? true : undefined} aria-hidden={snapshot.viewerIndex >= 0 ? "true" : undefined}>
-    <h1 id={`${uid}-heading`} data-gallery-picker-heading={picker ? true : undefined} tabindex="-1">{picker ? "选择角色参考图" : "图库"}</h1>
+    <h1 id={`${uid}-heading`} data-gallery-picker-heading={picker ? true : undefined} tabindex="-1">{picker ? (picksDirectories ? "选择图库图片与目录" : "选择角色参考图") : "图库"}</h1>
     {#if picker}<span class="gallery-picker-origin">来自『{picker.origin}』</span>{/if}
-    <span class="gallery-status" data-kind={snapshot.sourcesPhase}>{snapshot.sourcesPhase === "ready" ? `${formatCount(snapshot.sources.length)} 个来源` : snapshot.sourcesPhase === "error" ? "来源加载失败" : "正在加载来源"}</span>
+    <Badge variant="secondary" class="gallery-status" data-kind={snapshot.sourcesPhase}>{snapshot.sourcesPhase === "ready" ? `${formatCount(snapshot.sources.length)} 个来源` : snapshot.sourcesPhase === "error" ? "来源加载失败" : "正在加载来源"}</Badge>
   </header>
 
   <div class="gallery-body" class:gallery-body--tree-collapsed={treeCollapsed} inert={snapshot.viewerIndex >= 0 ? true : undefined} aria-hidden={snapshot.viewerIndex >= 0 ? "true" : undefined}>
@@ -1518,7 +1631,7 @@
           aria-expanded="false"
           aria-controls={`${uid}-tree`}
           onclick={() => (treeCollapsed = false)}
-        ><span aria-hidden="true">»</span></button>
+        ><PanelLeftOpenIcon size={16} aria-hidden="true" /></button>
       </aside>
     {:else}
     <aside class="gallery-tree" id={`${uid}-tree`} aria-labelledby={`${uid}-tree-heading`}>
@@ -1532,7 +1645,7 @@
           aria-expanded="true"
           aria-controls={`${uid}-tree`}
           onclick={() => (treeCollapsed = true)}
-        ><span aria-hidden="true">«</span></button>
+        ><PanelLeftCloseIcon size={16} aria-hidden="true" /></button>
       </div>
       {#if snapshot.sourcesPhase === "loading" || snapshot.sourcesPhase === "idle"}
         <p class="gallery-hint" role="status">正在加载来源…</p>
@@ -1546,6 +1659,17 @@
           {#each snapshot.sources as source (source.source_id)}
             <li>
               <div class="gallery-source-card gallery-source-card--deletable">
+                {#if picksDirectories}
+                  <label class="gallery-selection-control gallery-source__select" title="包含此目录与全部子目录中的图库图片，不受当前筛选影响。">
+                    <input
+                      type="checkbox"
+                      checked={source.root_directory_id !== null && selectedDirectoryIds.has(source.root_directory_id)}
+                      disabled={source.availability !== "available" || !source.root_directory_id || (!selectedDirectoryIds.has(source.root_directory_id) && pickedDirectoryIds.length >= 200)}
+                      aria-label={`选择目录 ${source.display_name}`}
+                      onchange={() => { if (source.root_directory_id) togglePickedDirectory(source.root_directory_id); }}
+                    />
+                  </label>
+                {/if}
                 <button
                   type="button"
                   class="gallery-source"
@@ -1573,7 +1697,7 @@
                     disabled={batchDeleteSourceId !== null}
                     onclick={(event) => { event.stopPropagation(); requestSourceRemoval(source); }}
                   >
-                    {batchDeleteSourceId === source.source_id ? "…" : "×"}
+                    {#if batchDeleteSourceId === source.source_id}…{:else}<XIcon size={14} aria-hidden="true" />{/if}
                   </button>
                 {/if}
               </div>
@@ -1600,9 +1724,9 @@
       {/if}
       {#if !picker}
       <div class="gallery-import">
-        <button data-gallery-import type="button" onclick={requestImportDirectory} disabled={!canImportDirectories || importPhase !== "idle"}>
-          {importPhase === "importing" ? "正在导入目录…" : "导入目录…"}
-        </button>
+        <Button variant="outline" class="w-full" data-gallery-import onclick={requestImportDirectory} disabled={!canImportDirectories || importPhase !== "idle"}>
+          <FolderInputIcon aria-hidden="true" />{importPhase === "importing" ? "正在导入目录…" : "导入目录…"}
+        </Button>
         {#if !canImportDirectories}
           <p class="gallery-hint">目录导入需要桌面环境。</p>
         {/if}
@@ -1617,15 +1741,19 @@
     <section class="gallery-content" aria-labelledby={`${uid}-content-heading`}>
       <h2 id={`${uid}-content-heading`} class="gallery-visually-hidden">目录内容</h2>
       {#if snapshot.activeSourceId === null}
-        <div class="gallery-empty" role="status">
-          <strong>选择一个来源开始浏览</strong>
-          <p>左侧选择下载批次或导入目录；这里会显示目录树和图片网格。</p>
-        </div>
+        <Empty.Root role="status">
+          <Empty.Header>
+            <Empty.Media variant="icon"><FolderOpenIcon aria-hidden="true" /></Empty.Media>
+            <Empty.Title>选择一个来源开始浏览</Empty.Title>
+            <Empty.Description>左侧选择下载批次或导入目录；这里会显示目录树和图片网格。</Empty.Description>
+          </Empty.Header>
+        </Empty.Root>
       {:else}
         {#if activeSource !== null}
           <section class="gallery-source-status" aria-label="当前来源状态">
           <div class="gallery-source-status__heading">
               <div class="gallery-source-status__meta">
+                <strong class="gallery-source-status__title"><FolderOpenIcon size={18} aria-hidden="true" />{snapshot.path.at(-1)?.name ?? activeSource.display_name}</strong>
                 <span>{sourceSubtitle(activeSource)}</span>
                 {#if scanSummary !== null}
                   <span class="gallery-source-status__scan" role="status">扫描完成：{scanSummary.visibleCount} 张可见图片，跳过 {scanSummary.skippedCount} 个文件。</span>
@@ -1635,12 +1763,8 @@
               </div>
               {#if !picker}
               <div class="gallery-source-status__actions">
-                <button
-                  type="button"
-                  disabled={activeScan?.state === "running"}
-                  onclick={() => void controller.rescanActiveSource()}
-                >{activeScan?.state === "running" ? "正在扫描…" : "重新扫描"}</button>
-                <button type="button" onclick={openSourceManager}>来源设置…</button>
+                <Button variant="ghost" disabled={activeScan?.state === "running"} onclick={() => void controller.rescanActiveSource()}><RefreshCwIcon aria-hidden="true" />{activeScan?.state === "running" ? "正在扫描…" : "重新扫描"}</Button>
+                <Button variant="ghost" onclick={openSourceManager}><SlidersHorizontalIcon aria-hidden="true" />来源设置…</Button>
               </div>
               {/if}
             </div>
@@ -1679,29 +1803,24 @@
         <nav class="gallery-toolbar" aria-label="目录浏览工具">
           <form class="gallery-search" onsubmit={submitSearch} role="search">
             <label class="gallery-visually-hidden" for={`${uid}-search`}>搜索当前范围</label>
-            <input
-              id={`${uid}-search`}
-              type="search"
-              placeholder="搜索文件名、相对路径或 TXT 原文"
-              maxlength="256"
-              autocomplete="off"
-              value={searchDraft}
-              oninput={(event) => scheduleSearch((event.currentTarget as HTMLInputElement).value)}
-            />
-            <button type="submit">搜索</button>
+            <div class="gallery-search-field">
+              <SearchIcon size={16} aria-hidden="true" />
+              <Input id={`${uid}-search`} type="search" placeholder="搜索文件名、相对路径或 TXT 原文" maxlength={256} autocomplete="off" value={searchDraft} oninput={(event) => scheduleSearch((event.currentTarget as HTMLInputElement).value)} />
+            </div>
+            <Button type="submit" variant="secondary">搜索</Button>
             {#if snapshot.query.length > 0}
-              <button type="button" onclick={clearSearch}>清除</button>
+              <Button variant="ghost" onclick={clearSearch}>清除</Button>
             {/if}
           </form>
           <div class="gallery-toolbar-controls">
             <div class="gallery-toolbar-group" role="group" aria-label="筛选">
               <label>
                 <span>范围</span>
-                <select value={snapshot.searchScope} onchange={(event) => void controller.setSearchScope((event.currentTarget as HTMLSelectElement).value as typeof snapshot.searchScope)}>
+                <NativeSelect.Root value={snapshot.searchScope} onchange={(event) => void controller.setSearchScope((event.currentTarget as HTMLSelectElement).value as typeof snapshot.searchScope)}>
                   <option value="directory">当前目录</option>
                   <option value="source">整个来源</option>
                   <option value="library">整个图库</option>
-                </select>
+                </NativeSelect.Root>
               </label>
               <label>
                 <span>包含子目录</span>
@@ -1714,17 +1833,18 @@
               </label>
               <label>
                 <span>TXT 状态</span>
-                <select value={snapshot.txtStateFilter ?? ""} onchange={(event) => { const value = (event.currentTarget as HTMLSelectElement).value; void controller.setTxtStateFilter(value === "" ? null : (value as GalleryTxtState)); }}>
+                <NativeSelect.Root value={snapshot.txtStateFilter ?? ""} onchange={(event) => { const value = (event.currentTarget as HTMLSelectElement).value; void controller.setTxtStateFilter(value === "" ? null : (value as GalleryTxtState)); }}>
                   {#each txtStateOptions as option (option.value)}
                     <option value={option.value}>{option.label}</option>
                   {/each}
-                </select>
+                </NativeSelect.Root>
               </label>
               {#if snapshot.currentDirectory !== null && activeSource !== null}
                 <label class="gallery-selection-control gallery-select-all">
                   <input
                     type="checkbox"
                     checked={allVisibleItemsSelected}
+                    indeterminate={someVisibleItemsSelected && !allVisibleItemsSelected}
                     disabled={snapshot.assets.length === 0 && snapshot.directories.length === 0}
                     aria-label="全选"
                     onchange={toggleSelectAll}
@@ -1732,12 +1852,22 @@
                   <span>全选</span>
                 </label>
               {/if}
+              {#if (!picker || picksDirectories) && snapshot.currentDirectory !== null}
+                <button
+                  type="button"
+                  class="gallery-directory-action"
+                  aria-pressed={selectedDirectoryIds.has(snapshot.currentDirectory.directory_id)}
+                  title="包含此目录与全部子目录中的图库图片，不受当前筛选影响。"
+                  disabled={!!picker && !selectedDirectoryIds.has(snapshot.currentDirectory.directory_id) && pickedDirectoryIds.length >= 200}
+                  onclick={() => snapshot.currentDirectory && toggleDirectorySelection(snapshot.currentDirectory, activeSource?.display_name ?? "来源")}
+                ><span class="gallery-selection-indicator" aria-hidden="true"></span><span>选择当前目录</span></button>
+              {/if}
             </div>
             <div class="gallery-toolbar-group" role="group" aria-label="视图与目录操作">
-              <div class="gallery-viewtoggle" role="group" aria-label="视图方式">
-                <button type="button" aria-pressed={snapshot.viewMode === "grid"} onclick={() => controller.setViewMode("grid")}>网格</button>
-                <button type="button" aria-pressed={snapshot.viewMode === "list"} onclick={() => controller.setViewMode("list")}>列表</button>
-              </div>
+              <ToggleGroup.Root type="single" class="gallery-viewtoggle" value={snapshot.viewMode} onValueChange={(value) => { if (value === "grid" || value === "list") controller.setViewMode(value); }} aria-label="视图方式" variant="outline">
+                <ToggleGroup.Item value="grid"><LayoutGridIcon aria-hidden="true" />网格</ToggleGroup.Item>
+                <ToggleGroup.Item value="list"><ListIcon aria-hidden="true" />列表</ToggleGroup.Item>
+              </ToggleGroup.Root>
               {#if snapshot.viewMode === "grid"}
                 <label class="gallery-grid-size">
                   <span>缩略图大小</span>
@@ -1754,17 +1884,8 @@
                 </label>
               {/if}
               {#if !picker}
-                <button
-                  type="button"
-                  aria-pressed={snapshot.trashPanelPhase !== "closed"}
-                  onclick={toggleTrashPanel}
-                >回收区</button>
-                <button
-                  type="button"
-                  class="gallery-toolbar-export"
-                  onclick={openDirectoryExport}
-                  disabled={snapshot.currentDirectory === null && selectedDirectorySelections.length === 0}
-                >导出目录…</button>
+                <Button variant={snapshot.trashPanelPhase !== "closed" ? "secondary" : "ghost"} aria-pressed={snapshot.trashPanelPhase !== "closed"} onclick={toggleTrashPanel}><Trash2Icon aria-hidden="true" />回收区</Button>
+                <Button variant="outline" class="gallery-toolbar-export" onclick={openDirectoryExport} disabled={snapshot.currentDirectory === null && selectedDirectorySelections.length === 0}><DownloadIcon aria-hidden="true" />导出目录…</Button>
               {/if}
             </div>
           </div>
@@ -1800,16 +1921,16 @@
               {#each snapshot.directories as directory (directory.directory_id)}
                 <li class:selected={selectedDirectoryIds.has(directory.directory_id)}>
                   <div class="gallery-folder-shell">
-                    {#if !picker}
-                    <label class="gallery-selection-control gallery-folder__select">
+                    {#if !picker || picksDirectories}
+                    <label class="gallery-selection-control gallery-folder__select" title={`选择目录 ${directoryLabel(directory)}`}>
                       <input
                         type="checkbox"
                         checked={selectedDirectoryIds.has(directory.directory_id)}
+                        disabled={!!picker && !selectedDirectoryIds.has(directory.directory_id) && pickedDirectoryIds.length >= 200}
                         aria-label={`选择目录 ${directoryLabel(directory)}`}
                         onclick={(event) => event.stopPropagation()}
                         onchange={() => toggleDirectorySelection(directory, activeSource?.display_name ?? "来源")}
                       />
-                      <span>选择目录</span>
                     </label>
                     {/if}
                     <button type="button" class="gallery-folder" onclick={() => void controller.openDirectory(directory.directory_id)}>
@@ -1964,18 +2085,30 @@
       {/if}
         {#if !picker && selectedItemCount > 0}
           <div class="gallery-selection-bar" role="group" aria-label="选区操作" data-gallery-selection-bar>
+            <div class="gallery-selection-bar__preview" aria-hidden="true">
+              {#each snapshot.selectedAssetIds.slice(0, 3) as id (id)}
+                <img src={service.thumbnailUrl(id, 256)} alt="" crossorigin="anonymous" />
+              {/each}
+              {#if snapshot.selectedAssetIds.length === 0}<FolderOpenIcon size={24} />{/if}
+            </div>
             <span class="gallery-toolbar-selection gallery-selection-bar__summary" data-gallery-selection-summary>
-              {#if selectedDirectorySelections.length > 0}{formatCount(selectedDirectorySelections.length)} 个目录{/if}
-              {#if selectedDirectorySelections.length > 0 && snapshot.selectedAssetIds.length > 0} · {/if}
-              {#if snapshot.selectedAssetIds.length > 0}{formatCount(snapshot.selectedAssetIds.length)} 张图片{/if} 已选
+              {#key selectedItemCount}
+                <span class="gallery-selection-bar__count-change">
+                  {#if selectedDirectorySelections.length > 0}{formatCount(selectedDirectorySelections.length)} 个目录{/if}
+                  {#if selectedDirectorySelections.length > 0 && snapshot.selectedAssetIds.length > 0} · {/if}
+                  {#if snapshot.selectedAssetIds.length > 0}{formatCount(snapshot.selectedAssetIds.length)} 张图片{/if} 已选
+                </span>
+              {/key}
             </span>
             <div class="gallery-selection-bar__actions">
+              <Button variant="outline" onclick={() => openDirectoryTransfer("move")} disabled={selectedItemCount === 0}><FolderInputIcon aria-hidden="true" />移动到…</Button>
+              <Button variant="outline" onclick={() => openDirectoryTransfer("copy")} disabled={selectedItemCount === 0}><CopyIcon aria-hidden="true" />复制到…</Button>
               {#if snapshot.selectedAssetIds.length > 0}
-                <button type="button" onclick={requestRenameSelection} disabled={singleSelectedAsset === null}>重命名…</button>
+                <Button variant="ghost" onclick={requestRenameSelection} disabled={singleSelectedAsset === null}>重命名…</Button>
               {/if}
-              <button type="button" class="gallery-toolbar-danger" title="只删除当前目录中已选择的项目；跨目录选区仅用于去重或导出。" disabled={!snapshot.selectedAssetIds.length && !selectedVisibleDirectoryIds.length} onclick={requestDeleteSelection}>删除…</button>
-              <button type="button" data-gallery-dedup disabled={reviewBusy || selectedItemCount === 0} onclick={openReviewConfirmation}>去重…</button>
-              <button type="button" onclick={clearVisibleSelection}>清除选择</button>
+              <Button variant="destructive" title="只删除当前目录中已选择的项目；跨目录选区仅用于去重或导出。" disabled={!snapshot.selectedAssetIds.length && !selectedVisibleDirectoryIds.length} onclick={requestDeleteSelection}><Trash2Icon aria-hidden="true" />删除…</Button>
+              <Button data-gallery-dedup disabled={reviewBusy || selectedItemCount === 0} onclick={openReviewConfirmation}><ScanSearchIcon aria-hidden="true" />去重…</Button>
+              <Button variant="ghost" onclick={clearVisibleSelection}>清除选择</Button>
             </div>
           </div>
         {/if}
@@ -1984,18 +2117,21 @@
   {#if picker}
     <footer class="gallery-picker-footer" inert={snapshot.viewerIndex >= 0} data-gallery-picker-footer>
       <details>
-        <summary>已选 {pickedIds.length} 张 / 200 · 查看与移除</summary>
-        <ul class="gallery-picker-selection" aria-label="待使用的参考图">
+        <summary>{#if picksDirectories}{`已选 ${pickedIds.length} 张图片 · ${pickedDirectoryIds.length} 个目录 · 查看与移除`}{:else}已选 {pickedIds.length} 张 / 200 · 查看与移除{/if}</summary>
+        <ul class="gallery-picker-selection" aria-label={picksDirectories ? "待使用的图片与目录" : "待使用的参考图"}>
+          {#each pickedDirectoryIds as id (id)}
+            <li><FolderOpenIcon size={20} aria-hidden="true" /><span>{id}</span><button type="button" aria-label={`移除目录 ${id}`} onclick={() => togglePickedDirectory(id)}>移除目录</button></li>
+          {/each}
           {#each pickedIds as id (id)}
-            <li><img src={service.thumbnailUrl(id, 256)} alt="" crossorigin="anonymous" loading="lazy" onerror={() => markThumbnailFailed(id)} />{#if failedThumbnailIds.has(id)}<span role="status">缩略图不可读</span>{/if}<span>{id}</span><button type="button" aria-label={`移除参考图 ${id}`} onclick={() => togglePicked(id)}>移除参考图</button></li>
+            <li><img src={service.thumbnailUrl(id, 256)} alt="" crossorigin="anonymous" loading="lazy" onerror={() => markThumbnailFailed(id)} />{#if failedThumbnailIds.has(id)}<span role="status">缩略图不可读</span>{/if}<span>{id}</span><button type="button" aria-label={picksDirectories ? `移除图片 ${id}` : `移除参考图 ${id}`} onclick={() => togglePicked(id)}>{picksDirectories ? "移除图片" : "移除参考图"}</button></li>
           {/each}
         </ul>
       </details>
       <div class="gallery-picker-actions">
         <div class="gallery-picker-thumbnails" aria-hidden="true">{#each pickedIds.slice(0, 5) as id (id)}<img src={service.thumbnailUrl(id, 256)} alt="" crossorigin="anonymous" />{/each}</div>
-        {#if pickerLimit || pickedIds.length >= 200}<span role="status">最多选择 200 张参考图</span>{/if}
-        <button type="button" onclick={() => picker?.onFinish(null)}>取消选图</button>
-        <button type="button" onclick={() => picker?.onFinish([...pickedIds])}>使用这 {pickedIds.length} 张</button>
+        {#if pickerLimit || pickedIds.length >= 200 || pickedDirectoryIds.length >= 200}<span role="status">{picksDirectories ? "最多选择 200 张图片和 200 个目录" : "最多选择 200 张参考图"}</span>{/if}
+        <Button variant="outline" onclick={() => picker?.onFinish(null)}>取消选图</Button>
+        <Button onclick={() => picker?.onFinish({ assetIds: [...pickedIds], directoryIds: [...pickedDirectoryIds] })}>{#if picksDirectories}使用所选图片与目录{:else}使用这 {pickedIds.length} 张{/if}<ArrowRightIcon aria-hidden="true" /></Button>
       </div>
     </footer>
   {/if}
@@ -2118,7 +2254,7 @@
                 <li>
                   <button
                     type="button"
-                    disabled={source.root_directory_id === null || source.availability !== "available"}
+                    disabled={source.root_directory_id === null || source.availability !== "available" || (directoryActionMode === "transfer" && source.source_id !== activeSource?.source_id)}
                     onclick={() => openDirectoryExportPickerSource(source.source_id)}
                   >
                     <strong>{source.display_name}</strong>
@@ -2141,9 +2277,9 @@
               </div>
               <button
                 type="button"
-                disabled={directoryExportSelections.some((item) => item.directoryId === directoryExportPickerCurrent?.directory_id)}
-                onclick={addDirectoryExportPickerCurrent}
-              >添加此完整目录</button>
+                disabled={directoryActionMode === "export" && directoryExportSelections.some((item) => item.directoryId === directoryExportPickerCurrent?.directory_id)}
+                onclick={() => directoryActionMode === "transfer" ? selectTransferTarget(directoryExportPickerCurrent!) : addDirectoryExportPickerCurrent()}
+              >{directoryActionMode === "transfer" ? "选择此目录" : "添加此完整目录"}</button>
             </div>
             <ul class="gallery-export-picker__directories" aria-label="子目录">
               {#each directoryExportPickerChildren as directory (directory.directory_id)}
@@ -2156,11 +2292,15 @@
                     <strong>{directory.name}</strong>
                     <span>{formatCount(directory.recursive_asset_count)} 张图片</span>
                   </button>
-                  <button
-                    type="button"
-                    disabled={directoryExportSelections.some((item) => item.directoryId === directory.directory_id)}
-                    onclick={() => addDirectoryExportPickerChild(directory)}
-                  >添加</button>
+                  {#if directoryActionMode === "export"}
+                    <button
+                      type="button"
+                      disabled={directoryExportSelections.some((item) => item.directoryId === directory.directory_id)}
+                      onclick={() => addDirectoryExportPickerChild(directory)}
+                    >添加</button>
+                  {:else}
+                    <button type="button" onclick={() => selectTransferTarget(directory)}>选择</button>
+                  {/if}
                 </li>
               {/each}
             </ul>
@@ -2184,6 +2324,31 @@
           {/if}
         </div>
       {:else}
+        {#if directoryActionMode === "transfer"}
+          <div class="gallery-export-sheet__body">
+            <p class="gallery-export-sheet__intro">将当前选中的图片和目录移动或复制到同一图库来源中的目标目录。目标中存在同名文件时，整组操作会失败且不会覆盖已有内容。</p>
+            <section class="gallery-export-section" aria-labelledby="gallery-transfer-target-title">
+              <div class="gallery-export-section__title">
+                <h3 id="gallery-transfer-target-title">目标目录</h3>
+                <button type="button" disabled={directoryExportBusy} onclick={openDirectoryExportPicker}>选择目录…</button>
+              </div>
+              {#if transferTargetDirectory === null}
+                <p class="gallery-export-sheet__hint">请选择当前图库来源中的目标目录。</p>
+              {:else}
+                <div class="gallery-export-selection-list">
+                  <div>
+                    <strong>{transferTargetDirectory.name || "根目录"}</strong>
+                    <span>{transferTargetDirectory.relative_path || "来源根目录"}</span>
+                  </div>
+                </div>
+              {/if}
+            </section>
+            <p class="gallery-export-sheet__hint">操作类型：{transferKind === "move" ? "移动" : "复制"}；已选 {formatCount(selectedItemCount)} 项。</p>
+            {#if transferErrorCode !== null}
+              <p class="gallery-export-sheet__error" role="alert">操作失败（{transferErrorCode}）</p>
+            {/if}
+          </div>
+        {:else}
         <div class="gallery-export-sheet__body">
           <p class="gallery-export-sheet__intro">
             每个所选目录会以自身名称成为目标下的独立顶层目录。复制会递归保留原结构，
@@ -2311,9 +2476,18 @@
             <p class="gallery-export-sheet__error" role="alert">无法在文件管理器中显示目标目录。</p>
           {/if}
         </div>
+        {/if}
 
         <footer class="gallery-export-sheet__actions">
-          {#if directoryExportOperation?.state === "copying"}
+          {#if directoryActionMode === "transfer"}
+            <button type="button" onclick={closeDirectoryExport}>取消</button>
+            <button
+              type="button"
+              class="gallery-dialog__primary"
+              disabled={transferTargetDirectory === null || transferPhase === "submitting"}
+              onclick={() => void submitDirectoryTransfer()}
+            >{transferPhase === "submitting" ? "正在处理…" : (transferKind === "move" ? "移动到此处" : "复制到此处")}</button>
+          {:else if directoryExportOperation?.state === "copying"}
             {#if directoryExportPhase === "error"}
               <button type="button" onclick={retryDirectoryExportStatus}>重试读取进度</button>
             {/if}

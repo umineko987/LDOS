@@ -19,6 +19,60 @@ async function openPanel(page: Parameters<typeof bootDesktop>[0]) {
   return { gallery, panel, start: panel.getByRole("button", { name: "开始处理", exact: true }) };
 }
 
+for (const view of ["网格", "列表"]) {
+  test(`图库根目录可在${view}视图选择并提交去重，导航和筛选不改变完整目录范围`, async ({ page }) => {
+    const api = await bootDesktop(page);
+    await launchApp(page, "gallery");
+    const gallery = appPage(page, "gallery");
+    const source = gallery.locator(".gallery-source").filter({ hasText: "E2E 导入目录" });
+    await source.click();
+    await gallery.getByRole("radio", { name: view, exact: true }).click();
+    const currentDirectory = gallery.getByRole("button", { name: "选择当前目录", exact: true });
+    const summary = gallery.locator("[data-gallery-selection-summary]");
+    await expect(currentDirectory).toHaveAttribute("aria-pressed", "false");
+    await currentDirectory.click();
+    await expect(currentDirectory).toHaveAttribute("aria-pressed", "true");
+    await expect(summary).toContainText("1 个目录");
+    await expect(gallery.getByRole("button", { name: "删除…", exact: true })).toBeDisabled();
+    await expect(gallery.getByRole("checkbox", { name: "选择目录 subdir", exact: true })).not.toBeChecked();
+    await currentDirectory.click();
+    await expect(summary).toBeHidden();
+    await currentDirectory.click();
+    await gallery.getByRole("button", { name: "清除选择", exact: true }).click();
+    await expect(currentDirectory).toHaveAttribute("aria-pressed", "false");
+    await expect(summary).toBeHidden();
+    await currentDirectory.click();
+
+    await gallery.locator(".gallery-folder").filter({ hasText: "subdir" }).click();
+    await expect(currentDirectory).toHaveAttribute("aria-pressed", "false");
+    await expect(summary).toContainText("1 个目录");
+    await expect(gallery.getByRole("button", { name: "删除…", exact: true })).toBeDisabled();
+    await gallery.getByRole("button", { name: "导出目录…", exact: true }).click();
+    const directoryExport = gallery.getByRole("dialog", { name: "导出完整目录" });
+    await expect(directoryExport.locator(".gallery-export-selection-list li")).toHaveCount(1);
+    await expect(directoryExport.locator(".gallery-export-selection-list")).toContainText("来源根目录");
+    await directoryExport.getByRole("button", { name: "关闭目录导出", exact: true }).click();
+    await source.click();
+    await expect(currentDirectory).toHaveAttribute("aria-pressed", "true");
+    await gallery.getByRole("searchbox", { name: "搜索当前范围" }).fill("image-01");
+    await gallery.getByRole("button", { name: "搜索", exact: true }).click();
+    await expect(currentDirectory).toHaveAttribute("aria-pressed", "true");
+    await gallery.locator("[data-gallery-dedup]").click();
+    const panel = gallery.locator("[data-gallery-review-confirmation]");
+    await expect(panel).toContainText("勾选目录 1 · 勾选图片 0");
+    await panel.getByText("查看选区详情", { exact: true }).click();
+    await expect(panel).toContainText("E2E 导入目录 / 来源根目录");
+    await configureExistingDedup(panel);
+    await panel.getByRole("button", { name: "开始处理", exact: true }).click();
+    await expect(page).toHaveURL(/#\/review$/);
+    expect(api.requests.find(({ method, path }) => method === "POST" && path === reviews)?.body).toEqual({
+      directory_ids: ["gal-dir-root"], asset_ids: [],
+      filter_config: { preset_name: "画风", options: { basic_dedup: true, filter_monochrome: false, filter_sketch: false, filter_character: false, similarity_groups: true, reference_asset_ids: [] } },
+    });
+    expect(api.unhandled).toEqual([]);
+  });
+}
+
 test("已选参考图在图库面板和预设编辑器中都使用跨来源图片请求并成功解码", async ({ page }) => {
   const api = await bootDesktop(page);
   const origin = new URL(page.url()).origin;

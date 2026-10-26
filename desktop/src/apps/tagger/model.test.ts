@@ -1,7 +1,6 @@
 import { assert, expect, test } from "vitest";
 import {
   formatBytes,
-  normalizeInputs,
   normalizeThreshold,
   sanitizeCatalog,
   sanitizeStatus,
@@ -74,10 +73,6 @@ test("status falls back to failed phase on garbage", () => {
   expect(status.lastResult).toBeNull();
 });
 
-test("normalizeInputs splits, trims and caps", () => {
-  expect(normalizeInputs("/a\n /b \n\n")).toEqual(["/a", "/b"]);
-  assert.throws(() => normalizeInputs("  \n "), TypeError);
-});
 
 test("normalizeThreshold empty means model default", () => {
   expect(normalizeThreshold("  ")).toBeNull();
@@ -95,14 +90,27 @@ test("service run posts the exact payload shape", async () => {
   const api = fakeApi();
   const service = createTaggerService(api as never);
   await service.run({
-    models: ["wd-vit-v3"], inputs: ["/x"],
-    thresholds: { general: 0.2 }, categories: ["general", "character"],
+    models: ["wd-vit-v3"], assetIds: ["asset-1"],
+    thresholds: { "wd-vit-v3": { general: 0.2 } }, categories: ["general", "character"],
     writeCaptions: true, overwriteCaptions: false,
   }, new AbortController().signal);
   const call = api.calls.find((item) => item.path === TAGGER_ENDPOINTS.run);
   expect(call?.body).toEqual({
-    models: ["wd-vit-v3"], inputs: ["/x"], thresholds: { general: 0.2 },
+    models: ["wd-vit-v3"], asset_ids: ["asset-1"], thresholds: { "wd-vit-v3": { general: 0.2 } },
     categories: ["general", "character"], write_captions: true, overwrite_captions: false,
+  });
+});
+
+test("service run preserves independent thresholds for multiple models", async () => {
+  const api = fakeApi();
+  const thresholds = { "wd-vit-v3": { general: 0.4 }, "pixai-tagger-v1": { general: 0.2, style: 0.15 } };
+  await createTaggerService(api as never).run({
+    models: ["wd-vit-v3", "pixai-tagger-v1"], assetIds: ["asset-1"], thresholds,
+    writeCaptions: true, overwriteCaptions: false,
+  }, new AbortController().signal);
+  expect(api.calls[0].body).toEqual({
+    models: ["wd-vit-v3", "pixai-tagger-v1"], asset_ids: ["asset-1"], thresholds,
+    write_captions: true, overwrite_captions: false,
   });
 });
 
@@ -120,4 +128,76 @@ test("service prepare includes token and license only when given", async () => {
   await service.prepare(["cl-tagger-v2"], new AbortController().signal, { token: "hf_x", acceptLicense: true });
   const call = api.calls.find((item) => item.path === TAGGER_ENDPOINTS.prepare);
   expect(call?.body).toEqual({ models: ["cl-tagger-v2"], token: "hf_x", accept_license: true });
+});
+
+test("service run deduplicates gallery selections and never sends raw paths", async () => {
+  const api = fakeApi();
+  const service = createTaggerService(api as never);
+  await service.run({
+    models: ["wd-vit-v3"], assetIds: ["asset-1", "asset-2", "asset-1"],
+    writeCaptions: true, overwriteCaptions: false,
+  }, new AbortController().signal);
+  expect(api.calls[0].body).toEqual({
+    models: ["wd-vit-v3"], asset_ids: ["asset-1", "asset-2"],
+    write_captions: true, overwrite_captions: false,
+  });
+  await service.run({
+    models: ["wd-vit-v3"], assetIds: ["asset-3"], directoryIds: ["dir-1", "dir-2", "dir-1"],
+    thresholds: { "wd-vit-v3": { general: 0.2, rating: 0.8 } },
+    writeCaptions: true, overwriteCaptions: false,
+  }, new AbortController().signal);
+  expect(api.calls[1].body).toEqual({
+    models: ["wd-vit-v3"], asset_ids: ["asset-3"], directory_ids: ["dir-1", "dir-2"],
+    thresholds: { "wd-vit-v3": { general: 0.2, rating: 0.8 } },
+    write_captions: true, overwrite_captions: false,
+  });
+  await service.run({
+    models: ["wd-vit-v3"], assetIds: [], directoryIds: ["dir-1"],
+    writeCaptions: true, overwriteCaptions: false,
+  }, new AbortController().signal);
+  expect(api.calls[2].body).toEqual({
+    models: ["wd-vit-v3"], directory_ids: ["dir-1"], write_captions: true, overwrite_captions: false,
+  });
+});
+
+test("service run rejects empty input and oversized or invalid gallery selections", async () => {
+  const api = fakeApi();
+  const service = createTaggerService(api as never);
+  const options = { models: ["wd-vit-v3"], assetIds: [], writeCaptions: true, overwriteCaptions: false };
+  const signal = new AbortController().signal;
+  await expect(service.run(options, signal)).rejects.toThrow("invalid_tagger_inputs");
+  await expect(service.run({ ...options, assetIds: Array.from({ length: 201 }, (_, i) => `asset-${i}`) }, signal)).rejects.toThrow("invalid_tagger_assets");
+  await expect(service.run({ ...options, directoryIds: Array.from({ length: 201 }, (_, i) => `dir-${i}`) }, signal)).rejects.toThrow("invalid_tagger_directories");
+  await expect(service.run({ ...options, directoryIds: [""] }, signal)).rejects.toThrow("invalid_tagger_directories");
+  expect(api.calls).toEqual([]);
+});
+
+test("service prepare keeps mirror and download proxy separate and omits a blank proxy", async () => {
+  const api = fakeApi();
+  const service = createTaggerService(api as never);
+  const signal = new AbortController().signal;
+  await service.prepare(["cl-tagger-v2"], signal, {
+    token: "hf_x", acceptLicense: true, proxyUrl: "https://mirror.example", downloadProxy: " http://127.0.0.1:7890 ",
+  });
+  expect(api.calls[0].body).toEqual({
+    models: ["cl-tagger-v2"], token: "hf_x", accept_license: true,
+    proxy_url: "https://mirror.example", download_proxy: "http://127.0.0.1:7890",
+  });
+  await service.prepare(["wd-vit-v3"], signal, { downloadProxy: "  " });
+  expect(api.calls[1].body).toEqual({ models: ["wd-vit-v3"] });
+});
+
+test("service prepare rejects invalid download proxies before making a request", async () => {
+  const api = fakeApi();
+  const service = createTaggerService(api as never);
+  for (const downloadProxy of ["socks5://127.0.0.1:7890", "127.0.0.1:7890", "http://localhost", "http://localhost:7890/path"]) {
+    await expect(service.prepare(["wd-vit-v3"], new AbortController().signal, { downloadProxy })).rejects.toThrow("invalid_model_proxy_format");
+  }
+  expect(api.calls).toEqual([]);
+});
+
+test("service prepare forwards the mirror URL", async () => {
+  const api = fakeApi();
+  await createTaggerService(api as never).prepare(["wd-vit-v3"], new AbortController().signal, { proxyUrl: "https://mirror.example" });
+  expect(api.calls[0].body).toEqual({ models: ["wd-vit-v3"], proxy_url: "https://mirror.example" });
 });

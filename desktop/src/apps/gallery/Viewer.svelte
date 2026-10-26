@@ -1,5 +1,10 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { Button } from "$lib/components/ui/button";
+  import XIcon from "@lucide/svelte/icons/x";
+  import MaximizeIcon from "@lucide/svelte/icons/maximize";
+  import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
+  import ArrowRightIcon from "@lucide/svelte/icons/arrow-right";
   import { clampReviewPan } from "../review/engine";
   import { parseGalleryTxtTagView, type GalleryAssetEntry } from "./model";
   import type {
@@ -58,6 +63,7 @@
   let startOffsetY = 0;
   let chromeHidden = $state(false);
   let imageFailed = $state(false);
+  let imageLoaded = $state(false);
   let failedThumbnailIds = $state(new Set<string>());
   let panelWidth = $state(380);
   let stopPanelResize: (() => void) | null = null;
@@ -106,6 +112,7 @@
     offsetX = 0;
     offsetY = 0;
     imageFailed = false;
+    imageLoaded = false;
     void tick().then(() => {
       viewerRoot
         ?.querySelector<HTMLElement>('[data-gallery-viewer-thumbnail][aria-current="true"]')
@@ -305,6 +312,7 @@
 
 <div
   class="gallery-viewer"
+  data-gallery-viewer-asset={currentAsset?.asset_id}
   class:gallery-viewer--readonly={readOnly}
   class:gallery-viewer--focus={chromeHidden}
   role="dialog"
@@ -327,15 +335,15 @@
       </div>
       <div class="gallery-viewer__actions">
         {#if !readOnly}
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           class="gallery-viewer__button gallery-viewer__button--danger"
           disabled={!currentAsset || interactionBusy}
           onclick={onTrash}
-        >{snapshot.viewerOperationPhase === "trashing" ? "正在移入…" : "移入回收区"}</button>
+        >{snapshot.viewerOperationPhase === "trashing" ? "正在移入…" : "移入回收区"}</Button>
         {/if}
-        <button type="button" class="gallery-viewer__button" onclick={toggleChrome}>专注模式 <kbd>F</kbd></button>
-        <button type="button" class="gallery-viewer__button" bind:this={closeButton} onclick={onClose}>关闭 <kbd>Esc</kbd></button>
+        <Button variant="outline" class="gallery-viewer__button" onclick={toggleChrome}><MaximizeIcon aria-hidden="true" />专注模式 <kbd>F</kbd></Button>
+        <Button variant="secondary" class="gallery-viewer__button" bind:ref={closeButton} onclick={onClose}><XIcon aria-hidden="true" />关闭 <kbd>Esc</kbd></Button>
       </div>
     </header>
   {/if}
@@ -374,6 +382,8 @@
           alt=""
           crossorigin="anonymous"
           draggable="false"
+          onload={() => (imageLoaded = true)}
+          style:background-image={imageLoaded ? undefined : `url("${thumbnailUrl(currentAsset.asset_id, 512)}")`}
           onerror={() => (imageFailed = true)}
           style={`transform: translate(${offsetX}px, ${offsetY}px) scale(${scale})`}
         />
@@ -488,7 +498,7 @@
       inert={snapshot.viewerPendingAction !== null ? true : undefined}
       aria-hidden={snapshot.viewerPendingAction !== null ? "true" : undefined}
     >
-      <button type="button" disabled={!hasPrevious || interactionBusy} onclick={() => onMove(-1)} aria-label="上一张">←</button>
+      <Button variant="ghost" size="icon" disabled={!hasPrevious || interactionBusy} onclick={() => onMove(-1)} aria-label="上一张"><ArrowLeftIcon aria-hidden="true" /></Button>
       <div class="gallery-viewer__thumbs">
         {#each snapshot.viewerAssets as asset, index (asset.asset_id)}
           <button
@@ -511,7 +521,7 @@
           <span class="gallery-viewer__strip-status" role="status">正在加载更多…</span>
         {/if}
       </div>
-      <button type="button" disabled={!hasNext || interactionBusy} onclick={() => onMove(1)} aria-label="下一张">→</button>
+      <Button variant="ghost" size="icon" disabled={!hasNext || interactionBusy} onclick={() => onMove(1)} aria-label="下一张"><ArrowRightIcon aria-hidden="true" /></Button>
     </nav>
   {/if}
 

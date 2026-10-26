@@ -56,6 +56,18 @@ describe("UI localization", () => {
       ["图 2 · 推荐项", "Image 2 · Recommended"],
       ["1 / 2 组已采纳", "1 / 2 groups adopted"],
       ["当前组 2 / 3 保留", "Current group 2 / 3 kept"],
+      ["已选择 2 张图库图片", "Selected 2 gallery images"],
+      ["配置下载镜像", "Configure download mirror"],
+      ["上次：2 张，写入 2 个", "Last: 2 images, 2 captions written"],
+      ["，跳过 1 个", ", 1 skipped"],
+      ["，失败 1 张", ", 1 failed"],
+      ["安装 wd-vit-v3", "Install wd-vit-v3"],
+      ["已选择 2 张图片 · 1 个目录", "Selected 2 images · 1 folder"],
+      ["0 张图片 · 1 个目录", "0 images · 1 folder"],
+      ["已选 0 张图片 · 1 个目录 · 查看与移除", "0 images · 1 folder selected · View and remove"],
+      ["移除目录 gal-dir-sub", "Remove folder gal-dir-sub"],
+      ["移除图片 gal-asset-01", "Remove image gal-asset-01"],
+      ["跳过 1 个已有 caption", "Skipped 1 existing caption"],
     ] as const;
 
     for (const [source, expected] of cases) {
@@ -75,6 +87,27 @@ describe("UI localization", () => {
       .toBe("Do not leave this page until the action finishes and settings are refreshed.");
     expect(translateUiText("正在预览工作台配色，点击“应用”保存。", "en"))
       .toBe("Previewing the workbench palette. Select Apply to save.");
+  });
+
+  it("translates gallery move/copy controls and dynamic text fragments", () => {
+    const cases = [
+      ["移动到…", "Move to…"],
+      ["复制到…", "Copy to…"],
+      ["选择此目录", "Select this folder"],
+      ["请选择当前图库来源中的目标目录。", "Select a destination folder within the current gallery source."],
+      ["操作类型：", "Operation: "],
+      ["移动", "Move"],
+      ["复制", "Copy"],
+      ["；已选 ", "; selected "],
+      ["操作失败（", "Action failed ("],
+      ["正在处理…", "Processing…"],
+      ["移动到此处", "Move here"],
+      ["复制到此处", "Copy here"],
+    ] as const;
+    for (const [source, expected] of cases) {
+      expect(translateUiText(source, "en")).toBe(expected);
+      expect(translateUiText(source, "zh")).toBe(source);
+    }
   });
 
   it("preserves user content inside localized controls", () => {

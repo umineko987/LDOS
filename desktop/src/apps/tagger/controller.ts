@@ -29,7 +29,7 @@ export function isRunning(status: TaggerStatus | null): boolean {
   return status?.phase === "preparing" || status?.phase === "tagging";
 }
 
-/** 勾选模型（保持顺序：首位即主模型）。 */
+/** 勾选模型（保持顺序：按勾选顺序合并标签）。 */
 export function toggleModel(selected: readonly string[], key: string): readonly string[] {
   return selected.includes(key)
     ? selected.filter((item) => item !== key)
@@ -37,10 +37,8 @@ export function toggleModel(selected: readonly string[], key: string): readonly 
 }
 
 /** 开始打标前的本地校验，返回错误文案（空串 = 通过）。 */
-export function validateStart(selected: readonly string[], inputs: string): string {
-  if (!inputs.split(/\r?\n/u).some((line) => line.trim())) {
-    return "请先填写要打标的图片目录或文件路径。";
-  }
+export function validateStart(selected: readonly string[], assetIds: readonly string[], directoryIds: readonly string[] = []): string {
+  if (!assetIds.length && !directoryIds.length) return "请先选择图库图片或目录。";
   if (!selected.length) return "请至少勾选一个模型。";
   return "";
 }

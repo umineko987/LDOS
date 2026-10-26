@@ -1,4 +1,11 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import EyeIcon from "@lucide/svelte/icons/eye";
+  import EyeOffIcon from "@lucide/svelte/icons/eye-off";
   import { onMount, tick, untrack } from "svelte";
 
   import type { ApiClient } from "../../core/api/client";
@@ -256,15 +263,15 @@
 <section class="vault-app" data-vault-app data-domain-owner="vault" aria-labelledby="vault-heading" aria-busy={Boolean(snapshot.busy)}>
   <header class="vault-header">
     <h1 id="vault-heading">授权</h1>
-    <div class="vault-header-actions"><span class="vault-status" data-vault-workspace-state={presentation.state} data-kind={presentation.kind}>{presentation.label}</span><button type="button" class="vault-button" disabled={controls.refresh.disabled} onclick={refresh}>{controls.refresh.label}</button></div>
+    <div class="vault-header-actions"><Badge variant="outline" class="vault-status" data-vault-workspace-state={presentation.state} data-kind={presentation.kind}>{presentation.label}</Badge><Button variant="outline" size="sm" type="button" class="vault-button" disabled={controls.refresh.disabled} onclick={refresh}>{controls.refresh.label}</Button></div>
   </header>
 
   {#if snapshot.error}
-    <section class="vault-error" role="alert" aria-labelledby="vault-error-title">
-      <strong id="vault-error-title">{snapshot.error.title}</strong>
-      <p>{snapshot.error.message} {snapshot.error.nextStep}</p>
+    <Alert.Root variant="destructive" class="vault-error" aria-labelledby="vault-error-title">
+      <Alert.Title id="vault-error-title">{snapshot.error.title}</Alert.Title>
+      <Alert.Description>{snapshot.error.message} {snapshot.error.nextStep}</Alert.Description>
       <small>错误码：{snapshot.error.code}{snapshot.error.requestId ? ` · 请求 ${snapshot.error.requestId}` : ""}</small>
-    </section>
+    </Alert.Root>
   {/if}
   <p class="vault-live" aria-live="polite">{displayMessage(snapshot.message)} {displayMessage(presentation.message)}</p>
 
@@ -276,7 +283,7 @@
         <div class="vault-column-scroll" tabindex="0" aria-label="授权目标内容；可滚动">
           <div class="vault-site-nav" role="group" aria-label="授权站点">
             {#each siteItems as item (item.definition.id)}
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 class="vault-site-nav-button"
                 data-vault-action={`site:${item.definition.id}`}
@@ -286,7 +293,7 @@
               >
                 <span class="vault-site-mark" aria-hidden="true">{item.definition.mark}</span>
                 <span><strong>{item.definition.label}</strong><small>{item.status ? statusLabel(item.status) : "尚未读取"}</small></span>
-              </button>
+              </Button>
             {/each}
           </div>
         </div>
@@ -325,13 +332,13 @@
               <h3 id="vault-site-actions-heading">站点操作</h3>
               <div class="vault-actions">
                 {#if controls.sites[snapshot.selectedSite]?.showAuthorize}
-                  <button type="button" class="vault-button vault-button--primary" disabled={controls.sites[snapshot.selectedSite].authorize.disabled} aria-describedby="vault-authorize-reason" onclick={authorizeSelected}>{controls.sites[snapshot.selectedSite].authorize.label}</button>
+                  <Button variant="default" size="sm" type="button" class="vault-button vault-button--primary" disabled={controls.sites[snapshot.selectedSite].authorize.disabled} aria-describedby="vault-authorize-reason" onclick={authorizeSelected}>{controls.sites[snapshot.selectedSite].authorize.label}</Button>
                 {/if}
                 {#if controls.sites[snapshot.selectedSite]?.showCancel}
-                  <button type="button" class="vault-button vault-button--dangerous" disabled={controls.sites[snapshot.selectedSite].cancel.disabled} onclick={() => { clearSensitiveInputs(); controller.requestCancel(snapshot.selectedSite); }}>{controls.sites[snapshot.selectedSite].cancel.label}</button>
+                  <Button variant="outline" size="sm" type="button" class="vault-button vault-button--dangerous" disabled={controls.sites[snapshot.selectedSite].cancel.disabled} onclick={() => { clearSensitiveInputs(); controller.requestCancel(snapshot.selectedSite); }}>{controls.sites[snapshot.selectedSite].cancel.label}</Button>
                 {/if}
                 {#if controls.sites[snapshot.selectedSite]?.showClear}
-                  <button type="button" class="vault-button vault-button--dangerous" disabled={controls.sites[snapshot.selectedSite].clear.disabled} onclick={() => { clearSensitiveInputs(); controller.requestClearSite(snapshot.selectedSite); }}>{controls.sites[snapshot.selectedSite].clear.label}</button>
+                  <Button variant="outline" size="sm" type="button" class="vault-button vault-button--dangerous" disabled={controls.sites[snapshot.selectedSite].clear.disabled} onclick={() => { clearSensitiveInputs(); controller.requestClearSite(snapshot.selectedSite); }}>{controls.sites[snapshot.selectedSite].clear.label}</Button>
                 {/if}
               </div>
               <p id="vault-authorize-reason" class="vault-field-error" aria-live="polite">{controls.sites[snapshot.selectedSite]?.authorize.reason ?? ""}</p>
@@ -352,7 +359,7 @@
               <p class="vault-proxy-note">{browserRuntime.message} · {browserRuntime.source === "configured" ? "手动选择" : browserRuntime.source === "auto" ? "自动检测" : "未配置"}</p>
             {:else}<p class="empty-state">正在检测 Chrome、Chromium 和 Microsoft Edge。</p>{/if}
             {#if browserError}<p class="vault-field-error" role="alert">{browserError}</p>{/if}
-            <div class="vault-actions"><button type="button" class="vault-button" disabled={browserChangeDisabled} onclick={() => void detectBrowser()}>{browserBusy === "detect" ? "正在检测…" : "自动检测"}</button><button type="button" class="vault-button vault-button--primary" disabled={browserChangeDisabled || !platform.capabilities.selectBrowserExecutable} onclick={() => void selectBrowser()}>{browserBusy === "select" ? "正在保存…" : "选择浏览器"}</button></div>
+            <div class="vault-actions"><Button variant="outline" size="sm" type="button" class="vault-button" disabled={browserChangeDisabled} onclick={() => void detectBrowser()}>{browserBusy === "detect" ? "正在检测…" : "自动检测"}</Button><Button variant="outline" size="sm" type="button" class="vault-button vault-button--primary" disabled={browserChangeDisabled || !platform.capabilities.selectBrowserExecutable} onclick={() => void selectBrowser()}>{browserBusy === "select" ? "正在保存…" : "选择浏览器"}</Button></div>
             {#if !platform.capabilities.selectBrowserExecutable}<p class="vault-proxy-note">手动选择仅在桌面应用中可用。</p>{/if}
           </section>
 
@@ -366,7 +373,7 @@
                 <div><dt>正在清理</dt><dd>{boolLabel(snapshot.snapshot.browserProfile.resetting)}</dd></div>
               </dl>
             {:else}<p class="empty-state">尚未读取共享浏览器状态。</p>{/if}
-            <button type="button" class="vault-button vault-button--dangerous" disabled={controls.profileClear.disabled} onclick={() => { clearSensitiveInputs(); controller.requestClearProfile(); }}>{controls.profileClear.label}</button>
+            <Button variant="outline" size="sm" type="button" class="vault-button vault-button--dangerous" disabled={controls.profileClear.disabled} onclick={() => { clearSensitiveInputs(); controller.requestClearProfile(); }}>{controls.profileClear.label}</Button>
           </section>
 
           <section class="vault-proxy-panel" aria-labelledby="vault-proxy-heading">
@@ -381,12 +388,12 @@
               <p class="vault-proxy-note">{snapshot.snapshot.authorizationProxy.restartPending ? "当前授权浏览器仍使用原线路；下次授权时应用新设置。" : snapshot.snapshot.authorizationProxy.browserRunning ? "授权浏览器正在运行。" : "新设置将在下次授权时使用。"}</p>
             {:else}<p class="empty-state">尚未读取登录代理状态。</p>{/if}
             <form onsubmit={(event) => { event.preventDefault(); void saveProxy(); }}>
-              <label class="vault-field">
-                <span>代理地址（留空表示直连）</span>
-                <span class="vault-secret-input-wrap"><input class="vault-secret-input" type="text" data-revealed={proxyVisible ? "true" : "false"} maxlength="300" spellcheck="false" inputmode="url" autocomplete="off" aria-describedby="vault-proxy-input-error" bind:value={proxyDraft} /><button type="button" class="vault-reveal" aria-label={proxyVisible ? "隐藏代理输入" : "显示代理输入"} aria-pressed={proxyVisible} onclick={() => { proxyVisible = !proxyVisible; }}>◉</button></span>
-              </label>
+              <Field.Field class="vault-field">
+                <Field.Label for="vault-proxy-input">代理地址（留空表示直连）</Field.Label>
+                <div class="vault-secret-input-wrap"><Input id="vault-proxy-input" class="vault-secret-input" type="text" data-revealed={proxyVisible ? "true" : "false"} maxlength={300} spellcheck={false} inputmode="url" autocomplete="off" aria-describedby="vault-proxy-input-error" bind:value={proxyDraft} /><Button variant="ghost" size="icon-sm" type="button" class="vault-reveal" aria-label={proxyVisible ? "隐藏代理输入" : "显示代理输入"} aria-pressed={proxyVisible} onclick={() => { proxyVisible = !proxyVisible; }}>{#if proxyVisible}<EyeOffIcon size={16} aria-hidden="true" />{:else}<EyeIcon size={16} aria-hidden="true" />{/if}</Button></div>
+              </Field.Field>
               <p id="vault-proxy-input-error" class="vault-field-error" aria-live="polite">{proxyDraft ? proxyValidation.error : ""}</p>
-              <div class="vault-actions"><button type="submit" class="vault-button vault-button--primary" disabled={controls.proxySave.disabled}>{controls.proxySave.label}</button><button type="button" class="vault-button vault-button--dangerous" disabled={controls.proxyReset.disabled} onclick={() => { clearSensitiveInputs(); controller.requestResetProxy(); }}>{controls.proxyReset.label}</button></div>
+              <div class="vault-actions"><Button variant="default" size="sm" type="submit" class="vault-button vault-button--primary" disabled={controls.proxySave.disabled}>{controls.proxySave.label}</Button><Button variant="outline" size="sm" type="button" class="vault-button vault-button--dangerous" disabled={controls.proxyReset.disabled} onclick={() => { clearSensitiveInputs(); controller.requestResetProxy(); }}>{controls.proxyReset.label}</Button></div>
             </form>
           </section>
 
@@ -416,7 +423,7 @@
       <h2 id="vault-confirmation-title">{snapshot.confirmation.title}</h2>
       <p id="vault-confirmation-message">{snapshot.confirmation.message}</p>
       <p id="vault-confirmation-warning" class="vault-confirmation__warning"><strong>警告：</strong>{snapshot.confirmation.warning}</p>
-      <div><button type="button" onclick={() => resolveConfirmation(false)}>取消</button><button type="button" class="vault-button vault-button--dangerous" onclick={() => resolveConfirmation(true)}>{snapshot.confirmation.confirmLabel}</button></div>
+      <div><Button variant="outline" size="sm" type="button" onclick={() => resolveConfirmation(false)}>取消</Button><Button variant="outline" size="sm" type="button" class="vault-button vault-button--dangerous" onclick={() => resolveConfirmation(true)}>{snapshot.confirmation.confirmLabel}</Button></div>
     </section>
   </dialog>
 {/if}

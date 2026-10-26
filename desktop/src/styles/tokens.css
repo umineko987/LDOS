@@ -1,70 +1,153 @@
+/* Utilities only: legacy pages keep their existing browser/reset behavior. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+/* LDOS currently supports a dark workbench only. */
+@custom-variant dark (&:where(:root, :root *));
+
+@theme inline {
+  --font-sans: var(--ldos-font-display);
+  --font-mono: var(--ldos-font-mono);
+  --text-sm: 0.8125rem;
+  --text-xs: 0.75rem;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--muted);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--ldos-state-danger);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--primary);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
+  --radius-3xl: 16px;
+}
+
+@layer base {
+  [data-slot] { border-style: solid; border-width: 0; }
+  :where(button, input, select, textarea)[data-slot] { font-family: inherit; color: inherit; }
+  :where(button, input, select)[data-slot] { margin: 0; }
+  button[data-slot] { cursor: pointer; background-color: transparent; padding: 0; }
+  input[data-slot] { background-color: var(--input); }
+  input[data-slot]::placeholder { opacity: 1; }
+  select[data-slot] option { color: var(--foreground); background: var(--card); }
+  [data-slot="toggle-group-item"] { background-color: transparent; }
+  [data-slot="empty-media"] svg { width: 24px; height: 24px; }
+}
+
 :root {
   color-scheme: dark;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
   font-synthesis: none;
-  color: rgb(255 255 255 / 0.84);
-  background: #060a13;
+  color: var(--ldos-text-body);
+  background: var(--ldos-background-deepest);
+  accent-color: var(--ldos-accent);
+  scrollbar-color: #46464d transparent;
+  scrollbar-width: thin;
 
   --ldos-font-display: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
   --ldos-font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
-
-  --ldos-background-deepest: #060a13;
-  --ldos-background-default: #0b1322;
-  --ldos-fallback-window-solid: #0b1322;
-  --ldos-fallback-elevated-solid: #111a29;
-  --ldos-interaction-surface: rgb(11 19 34 / 0.96);
-
-  --ldos-text-heading: rgb(255 255 255 / 1);
-  --ldos-text-body: rgb(255 255 255 / 0.84);
-  --ldos-text-muted: rgb(255 255 255 / 0.62);
-  --ldos-text-fact: rgb(255 255 255 / 0.88);
-
-  --ldos-accent: #e4b863;
-  --ldos-accent-highlight: #f3dca8;
-  --ldos-focus-glow: rgb(228 184 99 / 0.18);
-  --ldos-state-danger: #ff8f88;
-  --ldos-state-warning: #f3c66d;
-  --ldos-state-success: #72d6a5;
-  --ldos-state-running: #8cc8ff;
-
-  --ldos-glass-surface-weak: rgb(255 255 255 / 0.04);
-  --ldos-glass-surface-secondary: rgb(255 255 255 / 0.05);
-  --ldos-glass-surface-input: rgb(255 255 255 / 0.06);
-  --ldos-glass-surface-default: rgb(255 255 255 / 0.08);
-  --ldos-glass-surface-button: rgb(255 255 255 / 0.10);
-  --ldos-glass-surface-environment: rgb(255 255 255 / 0.12);
-  --ldos-glass-surface-hover: rgb(255 255 255 / 0.15);
-
-  --ldos-border-weak: rgb(255 255 255 / 0.10);
-  --ldos-border-default: rgb(255 255 255 / 0.15);
-  --ldos-border-button: rgb(255 255 255 / 0.20);
-  --ldos-border-focus: rgb(255 255 255 / 0.35);
+  --ldos-background-deepest: #111113;
+  --ldos-background-default: #18181b;
+  --ldos-fallback-window-solid: #18181b;
+  --ldos-fallback-elevated-solid: #222225;
+  --ldos-interaction-surface: #222225;
+  --ldos-text-heading: #f4f4f5;
+  --ldos-text-body: #dedee2;
+  --ldos-text-muted: #a1a1aa;
+  --ldos-text-fact: #e4e4e7;
+  --ldos-accent: #e6bd75;
+  --ldos-accent-highlight: #f0d49f;
+  --ldos-focus-glow: rgb(230 189 117 / 0.18);
+  --ldos-focus-width: 2px;
+  --ldos-focus-ring: var(--ldos-accent);
+  --ldos-state-danger: #f69c98;
+  --ldos-state-warning: #e6bd75;
+  --ldos-state-success: #8bd4b1;
+  --ldos-state-running: #a5c5ee;
+  --ldos-glass-surface-weak: rgb(255 255 255 / 0.025);
+  --ldos-glass-surface-secondary: rgb(255 255 255 / 0.045);
+  --ldos-glass-surface-input: rgb(255 255 255 / 0.055);
+  --ldos-glass-surface-default: #222225;
+  --ldos-glass-surface-button: rgb(255 255 255 / 0.065);
+  --ldos-glass-surface-environment: rgb(255 255 255 / 0.08);
+  --ldos-glass-surface-hover: rgb(255 255 255 / 0.10);
+  --ldos-border-weak: #2c2c31;
+  --ldos-border-default: #39393f;
+  --ldos-border-button: #44444b;
+  --ldos-border-focus: #71717a;
   --ldos-border-width: 1px;
   --ldos-border-strong-width: 2px;
-  --ldos-text-primary: rgb(255 255 255 / 1);
-  --ldos-text-secondary: rgb(255 255 255 / 0.62);
-  --ldos-text-code: rgb(255 255 255 / 0.88);
-  --ldos-state-disabled: rgb(255 255 255 / 0.42);
+  --ldos-text-primary: var(--ldos-text-heading);
+  --ldos-text-secondary: var(--ldos-text-muted);
+  --ldos-text-code: var(--ldos-text-fact);
+  --ldos-state-disabled: #72727b;
   --ldos-glass-blur-environment: 40px;
   --ldos-glass-blur-window: 60px;
   --ldos-glass-saturation: 180%;
   --ldos-radius-window: 12px;
-  --ldos-radius-card: 10px;
+  --ldos-radius-card: 8px;
   --ldos-radius-control: 6px;
   --ldos-radius-pill: 999px;
-  --ldos-shadow-window: none;
+  --ldos-shadow-window: 0 16px 48px rgb(0 0 0 / 0.28);
   --ldos-shadow-control: none;
   --ldos-motion-duration: 140ms;
   --ldos-motion-easing: ease-out;
   --ldos-transition-standard: var(--ldos-motion-duration) var(--ldos-motion-easing);
+
+  --background: var(--ldos-background-default);
+  --foreground: var(--ldos-text-heading);
+  --card: var(--ldos-fallback-elevated-solid);
+  --primary: var(--ldos-accent);
+  --primary-foreground: #241c0f;
+  --secondary: #303034;
+  --muted: #303034;
+  --muted-foreground: var(--ldos-text-muted);
+  --border: var(--ldos-border-default);
+  --input: #303034;
+
+  /* Gallery dialogs and the image viewer share these existing surface names. */
+  --ldos-glass-surface-primary: var(--ldos-background-default);
+  --surface-base: var(--ldos-background-default);
+  --surface-default: var(--ldos-background-default);
+  --surface-raised: var(--ldos-fallback-elevated-solid);
+  --surface-hover: var(--ldos-glass-surface-hover);
+  --surface-critical: color-mix(in srgb, var(--ldos-state-danger) 10%, var(--ldos-background-default));
+  --surface-information: color-mix(in srgb, var(--ldos-state-running) 10%, var(--ldos-background-default));
+  --text-primary: var(--ldos-text-primary);
+  --text-secondary: var(--ldos-text-secondary);
+  --border-default: var(--ldos-border-default);
+  --border-subtle: var(--ldos-border-weak);
+  --state-critical-border: var(--ldos-state-danger);
+  --state-critical-text: var(--ldos-state-danger);
+  --state-info-border: var(--ldos-accent);
+  --state-info-text: var(--ldos-accent-highlight);
 }
+
+::selection { color: var(--primary-foreground); background: var(--primary); }
+input, textarea { caret-color: var(--primary); }
 
 @media (prefers-contrast: more) {
   :root {
-    --ldos-text-body: rgb(255 255 255 / 1);
-    --ldos-text-muted: rgb(255 255 255 / 0.80);
-    --ldos-border-weak: rgb(255 255 255 / 0.20);
-    --ldos-border-default: rgb(255 255 255 / 0.35);
-    --ldos-border-button: rgb(255 255 255 / 0.35);
+    --ldos-text-body: #fff;
+    --ldos-text-muted: #d4d4d8;
+    --ldos-border-weak: #71717a;
+    --ldos-border-default: #a1a1aa;
+    --ldos-border-button: #a1a1aa;
   }
 }

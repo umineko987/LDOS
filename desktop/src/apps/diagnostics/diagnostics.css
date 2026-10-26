@@ -5,13 +5,13 @@
 .diagnostics-header { justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--ldos-border-weak); }
 .diagnostics-header h1 { font-size: 1.0625rem; }
 .diagnostics-live { padding: 8px 20px 0; color: var(--ldos-text-muted); font-size: 0.75rem; }
-.diagnostics-status { display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid currentColor; border-radius: var(--ldos-radius-control); font-size: 0.75rem; }
+.diagnostics-status:not([data-slot]) { display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid currentColor; border-radius: var(--ldos-radius-control); font-size: 0.75rem; }
 .diagnostics-status[data-kind="ready"] { color: var(--ldos-state-success); }
 .diagnostics-status[data-kind="running"] { color: var(--ldos-state-running); }
 .diagnostics-status[data-kind="warning"] { color: var(--ldos-state-warning); }
 .diagnostics-status[data-kind="error"] { color: var(--ldos-state-danger); }
 .diagnostics-status[data-kind="disabled"] { color: var(--ldos-text-muted); }
-.diagnostics-error { margin: 12px 20px 0; padding: 10px; border: 1px solid var(--ldos-state-danger); }
+.diagnostics-error { width: auto; margin: 12px 20px 0; padding: 10px; border: 1px solid var(--ldos-state-danger); }
 .diagnostics-error p { margin-top: 4px; overflow-wrap: anywhere; }
 .diagnostics-workspace { min-width: 0; padding: 16px 20px 24px; }
 .diagnostics-workspace-track { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 20px; min-width: 0; }
@@ -25,8 +25,6 @@
 .diagnostics-workspace-state p { color: var(--ldos-text-muted); line-height: 1.5; }
 .diagnostics-workspace-state[data-diagnostics-workspace-state="offline"], .diagnostics-workspace-state[data-diagnostics-workspace-state="error"] { padding: 10px; border: 1px solid var(--ldos-state-danger); }
 .diagnostics-actions { margin-top: 8px; }
-.diagnostics-app button, .diagnostics-actions a { min-height: 34px; padding: 5px 10px; font-size: 0.8125rem; }
-.diagnostics-actions a { display: inline-flex; align-items: center; border: 1px solid var(--ldos-border-button); border-radius: var(--ldos-radius-control); color: var(--ldos-text-heading); text-decoration: none; }
 .diagnostics-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .diagnostics-metrics > div { display: grid; gap: 4px; }
 .diagnostics-metrics span { color: var(--ldos-text-muted); font-size: 0.75rem; }

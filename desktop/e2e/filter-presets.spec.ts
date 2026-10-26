@@ -253,6 +253,10 @@ test("统一选图跨来源、搜索与列表不丢选择，最多200张且可�
   await expect(picker.getByRole("checkbox", { name: "选择图片 image-01.jpg", exact: true })).toBeChecked();
   await picker.getByRole("checkbox", { name: "选择图片 image-02.jpg", exact: true }).check();
   await expect(picker.getByRole("checkbox", { name: "选择图片 image-03.jpg", exact: true })).toBeDisabled();
+  expect(await picker.getByRole("checkbox", { name: "选择图片 image-03.jpg", exact: true }).evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { appearance: style.appearance, width: style.width, radius: style.borderRadius, opacity: style.opacity, cursor: style.cursor };
+  })).toEqual({ appearance: "none", width: "24px", radius: "50%", opacity: "0.45", cursor: "not-allowed" });
   await picker.locator(".gallery-source").filter({ hasText: "Second source" }).click();
   await expect(picker.getByRole("checkbox", { name: "选择图片 second.jpg", exact: true })).toBeDisabled();
   await picker.locator("[data-gallery-picker-footer] summary").click();
@@ -262,7 +266,7 @@ test("统一选图跨来源、搜索与列表不丢选择，最多200张且可�
   await picker.getByRole("combobox", { name: "范围", exact: true }).selectOption("library");
   await picker.getByRole("searchbox", { name: "搜索当前范围" }).fill("image-02");
   await picker.getByRole("button", { name: "搜索", exact: true }).click();
-  await picker.getByRole("button", { name: "列表", exact: true }).click();
+  await picker.getByRole("radio", { name: "列表", exact: true }).click();
   await expect(picker.getByRole("checkbox", { name: "选择图片 image-02.jpg", exact: true })).toBeChecked();
   await picker.getByRole("combobox", { name: "TXT 状态", exact: true }).selectOption("normal");
   await expect(picker.getByRole("button", { name: "使用这 200 张", exact: true })).toBeVisible();

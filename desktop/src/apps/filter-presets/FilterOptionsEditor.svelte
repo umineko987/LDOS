@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
   import { onDestroy, untrack } from "svelte";
   import type { ApiClient } from "../../core/api/client";
   import { createGalleryService } from "../gallery/service";
@@ -86,7 +89,7 @@
       const ids = await onPickAssets({ origin: referenceOrigin, assetIds: references, signal: request.signal });
       // Keyed editor destruction cancels the request, so an old result cannot update a new draft.
       if (pickerRequest === request && !request.signal.aborted && ids !== null) {
-        onChange({ ...options, reference_asset_ids: ids });
+        onChange({ ...options, reference_asset_ids: [...ids.assetIds] });
       }
     } finally { if (pickerRequest === request) pickerRequest = null; }
   }
@@ -104,7 +107,7 @@
       <label class="filter-toggle"><input type="checkbox" checked={options.basic_dedup} onchange={(event) => change("basic_dedup", event.currentTarget.checked)} /><span>{FILTER_LABELS.basic_dedup}</span></label>
     </fieldset>
     <fieldset disabled={disabled}><legend>辅助分类</legend>
-      {#each (["filter_sketch", "filter_monochrome"] as const) as key}
+      {#each (["filter_sketch", "filter_monochrome"] as const) as key (key)}
         <label class="filter-toggle"><input type="checkbox" checked={options[key]} aria-describedby={`${uid}-${key}-capability`} onchange={(event) => change(key, event.currentTarget.checked)} /><span>{FILTER_LABELS[key]}</span></label>
         <p id={`${uid}-${key}-capability`} class="filter-help" data-filter-capability={key}>
           {#if capabilities?.[key]?.available === true}分类能力已就绪
@@ -126,7 +129,7 @@
         <h3 id={`${uid}-models-heading`}>准备已选模型</h3>
         {#if setup?.phase === "installing"}
           <div class="review-model-progress" role="status" aria-live="polite">
-            <p class="filter-help"><span>正在准备：</span>{#each setup.requestedModels as key}<span>{key === "dedup" ? "SSCD / DINOv2" : FILTER_MODELS[key].label}</span> {/each}</p>
+            <p class="filter-help"><span>正在准备：</span>{#each setup.requestedModels as key (key)}<span>{key === "dedup" ? "SSCD / DINOv2" : FILTER_MODELS[key].label}</span> {/each}</p>
             <progress max={setup.expectedBytes} value={setup.downloadedBytes}></progress>
             <span>{(setup.downloadedBytes / 1_000_000).toFixed(1)} / {(setup.expectedBytes / 1_000_000).toFixed(1)} MB{setup.usingProxy ? " · 使用本次代理" : ""}</span>
             <small>{setup.message || "正在下载并检查模型"}</small>
@@ -136,17 +139,17 @@
         {#if modelConfirmation && requiredModels.length}
           <div class="filter-model-confirmation" data-filter-model-confirmation>
             <p>仅下载当前勾选且未就绪的模型：</p>
-            <ul>{#each requiredModels as key}<li><span>{FILTER_MODELS[key].label}</span><span> · </span><span>约</span> {FILTER_MODELS[key].megabytes} MB</li>{/each}</ul>
+            <ul>{#each requiredModels as key (key)}<li><span>{FILTER_MODELS[key].label}</span><span> · </span><span>约</span> {FILTER_MODELS[key].megabytes} MB</li>{/each}</ul>
             <p class="filter-help">不会下载 SSCD/DINO；线稿/草图和单色只下载一份共用模型。确认后联网下载并进行离线推理检查。</p>
-            <label class="filter-preset-name"><span>本次下载代理（可选）</span><input type="text" bind:value={modelProxy} placeholder="http://127.0.0.1:7890" autocomplete="off" spellcheck="false" disabled={preparing || !active || prepareDisabled} aria-invalid={!!modelProxyError} aria-describedby={`${uid}-proxy-help`} /></label>
+            <Field.Field class="filter-preset-name"><Field.Label for={`${uid}-model-proxy`}>本次下载代理（可选）</Field.Label><Input id={`${uid}-model-proxy`} type="text" bind:value={modelProxy} placeholder="http://127.0.0.1:7890" autocomplete="off" spellcheck={false} disabled={preparing || !active || prepareDisabled} aria-invalid={!!modelProxyError} aria-describedby={`${uid}-proxy-help`} /></Field.Field>
             <p id={`${uid}-proxy-help`} class="filter-help">仅用于本次模型下载，不修改全局代理。</p>
             {#if modelProxyError}<p role="alert">{modelProxyError}</p>{/if}
-            <div class="filter-toolbar"><button type="button" disabled={preparing || !active || prepareDisabled} onclick={() => void refreshModels(true)}>确认准备</button><button type="button" disabled={preparing} onclick={() => { modelConfirmation = false; modelProxy = ""; modelProxyError = ""; }}>取消准备</button></div>
+            <div class="filter-toolbar"><Button variant="default" size="sm" type="button" disabled={preparing || !active || prepareDisabled} onclick={() => void refreshModels(true)}>确认准备</Button><Button variant="outline" size="sm" type="button" disabled={preparing} onclick={() => { modelConfirmation = false; modelProxy = ""; modelProxyError = ""; }}>取消准备</Button></div>
           </div>
         {:else if requiredModels.length}
-          <button type="button" disabled={preparing || !active || prepareDisabled} onclick={() => { modelConfirmation = true; modelProxyError = ""; }}>{modelError || setup?.phase === "failed" ? "重试准备模型" : "准备已选模型"}</button>
+          <Button variant="outline" size="sm" type="button" disabled={preparing || !active || prepareDisabled} onclick={() => { modelConfirmation = true; modelProxyError = ""; }}>{modelError || setup?.phase === "failed" ? "重试准备模型" : "准备已选模型"}</Button>
         {/if}
-        <button type="button" disabled={modelLoading || !active} onclick={() => void refreshModels()}>刷新模型能力</button>
+        <Button variant="outline" size="sm" type="button" disabled={modelLoading || !active} onclick={() => void refreshModels()}>刷新模型能力</Button>
       </section>
     {/if}
     <fieldset disabled={disabled}><legend>人工辅助</legend>
@@ -156,10 +159,10 @@
     <section aria-labelledby={`${uid}-references-heading`}>
       <header class="filter-toolbar"><h3 id={`${uid}-references-heading`}>角色参考图</h3><output>{references.length} / 200</output></header>
       <p class="filter-help">执行角色过滤前需添加参考图；空参考图仍可保存为模板。</p>
-      <div class="filter-toolbar"><button type="button" disabled={disabled} onclick={() => void openPicker()}>选择参考图…</button><button type="button" disabled={disabled || !references.length} onclick={() => onChange({ ...options, reference_asset_ids: [] })}>清空参考图</button></div>
+      <div class="filter-toolbar"><Button variant="outline" size="sm" type="button" disabled={disabled} onclick={() => void openPicker()}>选择参考图…</Button><Button variant="outline" size="sm" type="button" disabled={disabled || !references.length} onclick={() => onChange({ ...options, reference_asset_ids: [] })}>清空参考图</Button></div>
       <ul class="filter-reference-grid" aria-label="已保存到配置的参考图">
         {#each references as id, index (id)}
-          <li class="filter-reference"><img src={gallery.thumbnailUrl(id, 256)} alt="" crossorigin="anonymous" loading="lazy" decoding="async" /><span id={`${uid}-reference-${index}`}>{id}</span><button type="button" disabled={disabled} aria-describedby={`${uid}-reference-${index}`} onclick={() => remove(id)}>移除参考图</button></li>
+          <li class="filter-reference"><img src={gallery.thumbnailUrl(id, 256)} alt="" crossorigin="anonymous" loading="lazy" decoding="async" /><span id={`${uid}-reference-${index}`}>{id}</span><Button variant="outline" size="sm" type="button" disabled={disabled} aria-describedby={`${uid}-reference-${index}`} onclick={() => remove(id)}>移除参考图</Button></li>
         {:else}<li class="filter-help">尚未添加参考图</li>{/each}
       </ul>
     </section>

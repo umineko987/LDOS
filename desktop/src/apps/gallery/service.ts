@@ -103,6 +103,16 @@ export interface GalleryService {
     expectedDiskVersion: string,
   ): Promise<GalleryAnnotation>;
   renameAsset(assetId: string, newStem: string): Promise<GalleryFileOperationResult>;
+  moveItems(
+    assetIds: readonly string[],
+    directoryIds: readonly string[],
+    targetDirectoryId: string,
+  ): Promise<GalleryFileOperationResult>;
+  copyItems(
+    assetIds: readonly string[],
+    directoryIds: readonly string[],
+    targetDirectoryId: string,
+  ): Promise<GalleryFileOperationResult>;
   trashAssets(assetIds: readonly string[], directoryIds?: readonly string[]): Promise<GalleryFileOperationResult>;
   undoTrash(operationId: string): Promise<GalleryFileOperationResult>;
   restoreTrash(operationId: string): Promise<GalleryFileOperationResult>;
@@ -119,6 +129,39 @@ function endpointId(id: string): string {
     throw new TypeError("invalid_gallery_id");
   }
   return encodeURIComponent(id);
+}
+
+
+function transferGalleryItems(
+  api: ApiClient,
+  kind: "move" | "copy",
+  assetIds: readonly string[],
+  directoryIds: readonly string[],
+  targetDirectoryId: string,
+): Promise<GalleryFileOperationResult> {
+  if (
+    !Array.isArray(assetIds) ||
+    !Array.isArray(directoryIds) ||
+    assetIds.length + directoryIds.length === 0 ||
+    assetIds.length > 2000 ||
+    directoryIds.length > 200 ||
+    new Set(assetIds).size !== assetIds.length ||
+    new Set(directoryIds).size !== directoryIds.length
+  ) {
+    return Promise.reject(new TypeError("gallery_transfer_selection: invalid item count"));
+  }
+  for (const assetId of assetIds) endpointId(assetId);
+  for (const directoryId of directoryIds) endpointId(directoryId);
+  endpointId(targetDirectoryId);
+  return api.post(
+    `${GALLERY_ENDPOINTS.fileOperations}/${kind}`,
+    {
+      asset_ids: [...assetIds],
+      directory_ids: [...directoryIds],
+      target_directory_id: targetDirectoryId,
+    },
+    { idempotencyKey: true },
+  ).then(sanitizeGalleryFileOperationResult);
 }
 
 export function directoryEntriesPath(request: GalleryDirectoryRequest): string {
@@ -347,6 +390,12 @@ export function createGalleryService(api: ApiClient): GalleryService {
           new_stem: newStem,
         }),
       );
+    },
+    async moveItems(assetIds, directoryIds, targetDirectoryId) {
+      return transferGalleryItems(api, "move", assetIds, directoryIds, targetDirectoryId);
+    },
+    async copyItems(assetIds, directoryIds, targetDirectoryId) {
+      return transferGalleryItems(api, "copy", assetIds, directoryIds, targetDirectoryId);
     },
     async trashAssets(assetIds, directoryIds = []) {
       if (

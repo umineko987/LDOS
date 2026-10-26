@@ -4,14 +4,14 @@
 .proxy-header, .proxy-section-heading, .proxy-actions, .proxy-row-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .proxy-header { padding: 12px 20px; border-bottom: 1px solid var(--ldos-border-weak); }
 .proxy-header h1 { font-size: 1.0625rem; }
-.proxy-status { display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid currentColor; border-radius: var(--ldos-radius-control); font-size: 0.75rem; }
+.proxy-status:not([data-slot]) { display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid currentColor; border-radius: var(--ldos-radius-control); font-size: 0.75rem; }
 .proxy-status[data-kind="ready"] { color: var(--ldos-state-success); }
 .proxy-status[data-kind="running"] { color: var(--ldos-state-running); }
 .proxy-status[data-kind="warning"] { color: var(--ldos-state-warning); }
 .proxy-status[data-kind="error"] { color: var(--ldos-state-danger); }
 .proxy-status[data-kind="disabled"] { color: var(--ldos-text-muted); }
 .proxy-live { padding: 8px 20px 0; color: var(--ldos-text-muted); font-size: 0.75rem; }
-.proxy-error { padding: 10px; border: 1px solid var(--ldos-state-danger); background: var(--ldos-glass-surface-weak); }
+.proxy-error { width: auto; padding: 10px; border: 1px solid var(--ldos-state-danger); background: var(--ldos-glass-surface-weak); }
 .proxy-app > .proxy-error { margin: 12px 20px 0; }
 .proxy-error p, .proxy-error small { display: block; margin-top: 4px; overflow-wrap: anywhere; }
 .proxy-workspace { min-width: 0; padding: 16px 20px 24px; }
@@ -35,7 +35,6 @@
 .proxy-panel dt, .proxy-node dt { color: var(--ldos-text-muted); }
 .proxy-panel dd, .proxy-node dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .proxy-actions, .proxy-row-actions { justify-content: flex-start; }
-.proxy-app button { min-height: 34px; padding: 5px 10px; font-size: 0.8125rem; }
 .proxy-control-reasons { display: grid; gap: 4px; margin-top: 8px; color: var(--ldos-text-muted); font-size: 0.75rem; }
 .proxy-actions .primary { border-color: var(--ldos-accent); }
 .proxy-app .danger, .proxy-confirmation .danger { border-color: var(--ldos-state-danger); color: var(--ldos-state-danger); }
@@ -53,7 +52,6 @@
 .proxy-source-card small { color: var(--ldos-text-muted); font-size: 0.75rem; }
 .proxy-source-card form, .proxy-source-group > form { display: grid; gap: 8px; }
 .proxy-field { display: grid; gap: 5px; min-width: 0; }
-.proxy-field input, .proxy-field textarea { width: 100%; min-width: 0; min-height: 36px; padding: 7px 9px; border: 1px solid var(--ldos-border-button); border-radius: var(--ldos-radius-control); color: var(--ldos-text-heading); background: var(--ldos-glass-surface-input); }
 .proxy-field textarea { resize: vertical; }
 .proxy-source-group form > button, .proxy-source-card > button { justify-self: start; }
 .proxy-validation:empty { display: none; }

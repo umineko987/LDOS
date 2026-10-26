@@ -147,19 +147,18 @@ export function sanitizeStatus(value: unknown): TaggerStatus {
   };
 }
 
-export const TAGGER_CATEGORIES = ["general", "character", "copyright", "quality", "meta", "rating"] as const;
+export const TAGGER_CATEGORIES = ["general", "character", "copyright", "quality", "meta", "rating", "style"] as const;
 export type TaggerCategory = (typeof TAGGER_CATEGORIES)[number];
 
-/** 输入路径基本合法性（存在性由后端校验）。 */
-export function normalizeInputs(value: string): readonly string[] {
-  const inputs = value
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !/[\u0000-\u001f]/u.test(line));
-  if (!inputs.length || inputs.length > 16) throw new TypeError("invalid_tagger_inputs");
-  return inputs;
-}
-
+export const TAGGER_THRESHOLD_LABELS: Record<TaggerCategory, string> = {
+  general: "一般标签阈值",
+  character: "角色阈值",
+  copyright: "版权 / 作品阈值",
+  quality: "质量标签阈值",
+  meta: "元信息阈值",
+  rating: "内容分级阈值",
+  style: "风格阈值",
+};
 /** 阈值输入：空串 = 不覆盖（用模型默认）。 */
 export function normalizeThreshold(value: string): number | null {
   const trimmed = value.trim();

@@ -1,4 +1,9 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as NativeSelect from "$lib/components/ui/native-select/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { onMount, tick, untrack } from "svelte";
 
   import type { ApplicationId } from "../../core/applications/definitions";
@@ -130,18 +135,18 @@
     <div>
       <h1 id="tasks-heading">批次</h1>
     </div>
-    <span class="tasks-status" data-status-kind={presentation.kind}>{presentation.label}</span>
+    <Badge variant="outline" class="tasks-status" data-status-kind={presentation.kind}>{presentation.label}</Badge>
   </header>
 
   {#if snapshot.error}
-    <section class="tasks-error" role="alert" aria-labelledby="tasks-error-title">
+    <Alert.Root variant="destructive" class="tasks-error" aria-labelledby="tasks-error-title">
       <div>
-        <strong id="tasks-error-title">{snapshot.error.title}</strong>
-        <p>{displayMessage(`${snapshot.error.message} ${snapshot.error.nextStep}`)}</p>
+        <Alert.Title id="tasks-error-title">{snapshot.error.title}</Alert.Title>
+        <Alert.Description>{displayMessage(`${snapshot.error.message} ${snapshot.error.nextStep}`)}</Alert.Description>
         <small>错误码：{snapshot.error.code}{snapshot.error.requestId ? ` · 请求 ${snapshot.error.requestId}` : ""}</small>
       </div>
-      <button type="button" onclick={() => onNavigate(snapshot.error!.targetApp)}>打开恢复工具</button>
-    </section>
+      <Button variant="outline" size="sm" type="button" onclick={() => onNavigate(snapshot.error!.targetApp)}>打开恢复工具</Button>
+    </Alert.Root>
   {/if}
 
   <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-scrollable task workspace) -->
@@ -152,9 +157,9 @@
           <h2 id="tasks-recent-heading">最近批次</h2>
         </header>
         <div class="tasks-column__scroll" tabindex="0" aria-label="最近批次内容；可滚动">
-          <label class="tasks-field">
-            <span class="visually-hidden">批次筛选</span>
-            <select
+          <Field.Field class="tasks-field">
+            <Field.Label for="tasks-filter" class="visually-hidden">批次筛选</Field.Label>
+            <NativeSelect.Root id="tasks-filter"
               aria-label="批次筛选"
               value={snapshot.recentFilter}
               disabled={Boolean(snapshot.busy)}
@@ -164,8 +169,8 @@
               <option value="active">活动批次</option>
               <option value="attention">需要处理</option>
               <option value="terminal">已结束</option>
-            </select>
-          </label>
+            </NativeSelect.Root>
+          </Field.Field>
 
           <label class="tasks-field">
             <span class="visually-hidden">最近批次列表</span>
@@ -187,17 +192,17 @@
           </label>
           <p class="tasks-muted">当前筛选显示 {recent.length} / 最近 {snapshot.recent.length} 个批次。</p>
           <div class="tasks-button-stack">
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               class="tasks-primary"
               disabled={Boolean(snapshot.busy || !snapshot.selectedRecentId)}
               onclick={() => void controller.loadSelected()}
-            >{snapshot.busy === "load" ? "正在加载…" : "查看所选批次"}</button>
-            <button
+            >{snapshot.busy === "load" ? "正在加载…" : "查看所选批次"}</Button>
+            <Button variant="outline" size="sm"
               type="button"
               disabled={Boolean(snapshot.busy)}
               onclick={() => void controller.refresh()}
-            >{snapshot.busy === "refresh" ? "正在刷新…" : "刷新批次"}</button>
+            >{snapshot.busy === "refresh" ? "正在刷新…" : "刷新批次"}</Button>
           </div>
 
           <p class="tasks-muted tasks-polling-note">{snapshot.summary ? snapshot.phase === "terminal" ? "批次已结束，自动刷新已停止。" : "每 1.5 秒自动刷新。" : "选择批次后查看任务进度。"}</p>
@@ -227,16 +232,18 @@
               <span>批次进度</span>
               <strong>{progress.terminal} / {progress.total} 个任务已结束 · {progress.percent}%</strong>
             </label>
-            <progress id="tasks-progress" max="100" value={progress.percent}>{progress.percent}%</progress>
+            <div class="workbench-progress" data-running={snapshot.summary.statusKind === "running"} data-complete={snapshot.summary.status === "succeeded"}>
+              <progress id="tasks-progress" max="100" value={progress.percent}>{progress.percent}%</progress>
+            </div>
 
             <section class="tasks-facts" aria-labelledby="tasks-sources-heading">
               <h3 id="tasks-sources-heading" class="visually-hidden">来源地址进度</h3>
               {#if snapshot.summary.addressesTruncated}
                 <p class="tasks-muted" role="status">来源地址数量过多；当前仅显示前 2,000 项，可按批次任务分页继续查看。</p>
               {/if}
-              <label class="tasks-field">
-                <span>任务地址筛选</span>
-                <select
+              <Field.Field class="tasks-field">
+                <Field.Label for="tasks-address-filter">任务地址筛选</Field.Label>
+                <NativeSelect.Root id="tasks-address-filter"
                   aria-label="任务地址筛选"
                   value={snapshot.addressId}
                   disabled={Boolean(snapshot.busy && snapshot.busy !== "load")}
@@ -250,8 +257,8 @@
                       {/each}
                     </optgroup>
                   {/each}
-                </select>
-              </label>
+                </NativeSelect.Root>
+              </Field.Field>
               <details class="tasks-source-summary">
                 <summary>来源进度汇总（{snapshot.summary.sources.length}）</summary>
                 <div class="tasks-source-grid">
@@ -300,17 +307,17 @@
               </div>
               {#if !tasks.length}<p class="tasks-muted">任务建立或切换到该页后会在这里显示。</p>{/if}
               <nav class="tasks-pagination" aria-label="任务分页">
-                <button
+                <Button variant="outline" size="sm"
                   type="button"
                   disabled={Boolean(snapshot.busy && snapshot.busy !== "load") || snapshot.pageIndex === 0}
                   onclick={() => void controller.setPage(snapshot.pageIndex - 1)}
-                >上一页</button>
+                >上一页</Button>
                 <span aria-live="polite">第 {snapshot.pageIndex + 1} 页，共 {pages} 页</span>
-                <button
+                <Button variant="outline" size="sm"
                   type="button"
                   disabled={Boolean(snapshot.busy && snapshot.busy !== "load") || snapshot.pageIndex + 1 >= pages}
                   onclick={() => void controller.setPage(snapshot.pageIndex + 1)}
-                >下一页</button>
+                >下一页</Button>
               </nav>
             </section>
 
@@ -353,9 +360,9 @@
             <h3 id="tasks-batch-actions-heading">批次操作</h3>
             <p>修复问题后重试未完成项；重新规划会重新建立任务，取消会停止后续采集。</p>
             <div class="tasks-button-stack">
-              <button type="button" class="tasks-primary" disabled={!availability.retry} onclick={() => controller.requestOperation("retry")}>重试未完成项</button>
-              <button type="button" disabled={!availability.rerun} onclick={() => controller.requestOperation("rerun")}>重新规划</button>
-              <button type="button" class="tasks-danger" disabled={!availability.cancel} onclick={() => controller.requestOperation("cancel")}>取消批次</button>
+              <Button variant="default" size="sm" type="button" class="tasks-primary" disabled={!availability.retry} onclick={() => controller.requestOperation("retry")}>重试未完成项</Button>
+              <Button variant="outline" size="sm" type="button" disabled={!availability.rerun} onclick={() => controller.requestOperation("rerun")}>重新规划</Button>
+              <Button variant="outline" size="sm" type="button" class="tasks-danger" disabled={!availability.cancel} onclick={() => controller.requestOperation("cancel")}>取消批次</Button>
             </div>
           </section>
 
@@ -365,14 +372,14 @@
               <div class="tasks-recovery-card">
                 <span class="tasks-status" data-status-kind="warning">{recovery.authSites.length} 个来源需要授权</span>
                 <p>修复授权后，再使用批次级重试。</p>
-                <button type="button" onclick={() => onNavigate("vault")}>打开授权管理</button>
+                <Button variant="outline" size="sm" type="button" onclick={() => onNavigate("vault")}>打开授权管理</Button>
               </div>
             {/if}
             {#if recovery.proxyIssue}
               <div class="tasks-recovery-card">
                 <span class="tasks-status" data-status-kind="warning">检测到代理或网络类失败</span>
                 <p>先检查代理池，再使用批次级重试。</p>
-                <button type="button" onclick={() => onNavigate("proxy")}>打开代理管理</button>
+                <Button variant="outline" size="sm" type="button" onclick={() => onNavigate("proxy")}>打开代理管理</Button>
               </div>
             {/if}
             {#if !recovery.authSites.length && !recovery.proxyIssue}
@@ -403,8 +410,8 @@
       <p id="tasks-confirmation-message">{snapshot.confirmation.message}</p>
       <p id="tasks-confirmation-warning" class="tasks-confirmation__warning"><strong>警告：</strong>{displayMessage(snapshot.confirmation.warning)}</p>
       <div>
-        <button type="button" onclick={() => resolveConfirmation(false)}>取消</button>
-        <button type="button" class="tasks-danger" onclick={() => resolveConfirmation(true)}>{snapshot.confirmation.confirmLabel}</button>
+        <Button variant="outline" size="sm" type="button" onclick={() => resolveConfirmation(false)}>取消</Button>
+        <Button variant="outline" size="sm" type="button" class="tasks-danger" onclick={() => resolveConfirmation(true)}>{snapshot.confirmation.confirmLabel}</Button>
       </div>
     </section>
   </dialog>

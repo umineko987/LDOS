@@ -459,9 +459,9 @@ test.describe("可用应用关键旅程", () => {
     await expect(directoryExport.locator(".gallery-export-selection-list")).toContainText("subdir");
     await directoryExport.getByRole("button", { name: "关闭" }).click();
     await expect(directoryExport).toBeHidden();
-    await gallery.getByRole("button", { name: "列表" }).click();
+    await gallery.getByRole("radio", { name: "列表" }).click();
     await expect(gallery.getByRole("checkbox", { name: /选择图片/ })).toHaveCount(4);
-    await gallery.getByRole("button", { name: "网格" }).click();
+    await gallery.getByRole("radio", { name: "网格" }).click();
     await gallery.getByRole("button", { name: "清除选择" }).click();
     await expect(selectionSummary).toBeHidden();
     expect(api.unhandled).toEqual([]);
@@ -838,7 +838,7 @@ test.describe("空数据与服务失败", () => {
       const api = await bootDesktop(page, { failPaths: [scenario.path] });
       await launchApp(page, scenario.appId);
       const window = appPage(page, scenario.appId);
-      const alert = window.locator("section[role=\"alert\"]").first();
+      const alert = window.getByRole("alert").first();
       await expect(alert).toBeVisible();
       await expect(alert).toContainText(scenario.alert);
       expect(api.unhandled).toEqual([]);

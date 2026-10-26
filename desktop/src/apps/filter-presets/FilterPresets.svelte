@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { onMount, untrack } from "svelte";
   import type { ApiClient } from "../../core/api/client";
   import { translateCurrentUiText } from "../../core/i18n";
@@ -134,30 +138,30 @@
 <section class="filter-presets-app" data-filter-presets-app aria-labelledby="filter-presets-heading" aria-busy={busy || loading}>
   <header class="filter-presets-header"><h1 id="filter-presets-heading">筛选预设</h1><span role="status">{busy ? "正在保存…" : dirty ? "有未保存的更改" : ""}</span></header>
   <p class="filter-help">各功能可自由组合；线稿/草图、单色仅辅助分类，不自动排除。未就绪的模型可保存配置，但不能执行。</p>
-  {#if loadError}<p role="alert">{loadError}</p><button type="button" disabled={loading || !active} onclick={() => void load()}>重试</button>{/if}
+  {#if loadError}<Alert.Root variant="destructive"><Alert.Description>{loadError}</Alert.Description></Alert.Root><Button variant="outline" size="sm" type="button" disabled={loading || !active} onclick={() => void load()}>重试</Button>{/if}
   {#if loading}<p role="status">正在加载筛选预设…</p>{/if}
   <div class="filter-presets-layout">
     <aside class="filter-presets-list" aria-label="筛选预设列表">
-      <button type="button" disabled={busy || !loaded} onclick={() => newPreset(false)}>新建预设</button>
+      <Button variant="outline" size="sm" type="button" disabled={busy || !loaded} onclick={() => newPreset(false)}>新建预设</Button>
       <h2>内置预设</h2>
-      <ul>{#each items.filter((item) => item.builtin) as item (item.id)}<li><button type="button" disabled={busy} aria-current={selectedId === item.id ? "true" : undefined} onclick={() => choose(item)}>{label(item)}</button></li>{/each}</ul>
+      <ul>{#each items.filter((item) => item.builtin) as item (item.id)}<li><Button variant="outline" size="sm" type="button" disabled={busy} aria-current={selectedId === item.id ? "true" : undefined} onclick={() => choose(item)}>{label(item)}</Button></li>{/each}</ul>
       <h2>自定义预设</h2>
-      <ul>{#each items.filter((item) => !item.builtin) as item (item.id)}<li><button type="button" disabled={busy} aria-current={selectedId === item.id ? "true" : undefined} onclick={() => choose(item)}>{item.name}</button></li>{:else}<li class="filter-help">暂无自定义预设</li>{/each}</ul>
+      <ul>{#each items.filter((item) => !item.builtin) as item (item.id)}<li><Button variant="outline" size="sm" type="button" disabled={busy} aria-current={selectedId === item.id ? "true" : undefined} onclick={() => choose(item)}>{item.name}</Button></li>{:else}<li class="filter-help">暂无自定义预设</li>{/each}</ul>
     </aside>
     <section class="filter-preset-detail" aria-label="筛选预设编辑">
       {#if selected || creating}
         <div class="filter-toolbar">
-          <button type="button" disabled={busy} onclick={() => newPreset(true)}>{selected?.builtin ? "另存为自定义" : "复制预设"}</button>
-          {#if selected && !selected.builtin}<button type="button" disabled={busy} onclick={() => void remove()}>删除预设</button>{/if}
+          <Button variant="outline" size="sm" type="button" disabled={busy} onclick={() => newPreset(true)}>{selected?.builtin ? "另存为自定义" : "复制预设"}</Button>
+          {#if selected && !selected.builtin}<Button variant="outline" size="sm" type="button" disabled={busy} onclick={() => void remove()}>删除预设</Button>{/if}
         </div>
         {#if selected?.builtin}<p class="filter-help">内置预设是初始配置，可直接修改并保存。</p>{/if}
-        <label class="filter-preset-name"><span>预设名称</span><input type="text" value={name} maxlength="80" disabled={busy || !active} oninput={(event) => { name = event.currentTarget.value; }} aria-describedby="filter-name-help" /></label>
+        <Field.Field class="filter-preset-name"><Field.Label for="filter-preset-name">预设名称</Field.Label><Input id="filter-preset-name" type="text" value={name} maxlength={80} disabled={busy || !active} oninput={(event) => { name = event.currentTarget.value; }} aria-describedby="filter-name-help" /></Field.Field>
         <p id="filter-name-help" class="filter-help">名称需为 1–80 个字符，不能包含控制字符。</p>
-        {#if capabilityError}<p role="alert">{capabilityError}</p><button type="button" disabled={busy || !active} onclick={() => void loadCapabilities()}>重试过滤能力</button>{/if}
+        {#if capabilityError}<p role="alert">{capabilityError}</p><Button variant="outline" size="sm" type="button" disabled={busy || !active} onclick={() => void loadCapabilities()}>重试过滤能力</Button>{/if}
         {#key editorRevision}
           <FilterOptionsEditor {api} {options} {onPickAssets} referenceOrigin={`筛选预设 / ${name || "新预设"}`} {capabilities} {active} setup={modelSetup} onModelSetup={updateModelSetup} prepareDisabled={busy} disabled={busy || !active} onChange={(next) => { options = cloneFilterOptions(next); }} />
         {/key}
-        <div class="filter-toolbar filter-preset-actions"><button type="button" disabled={busy || !dirty || !validName || !active} onclick={() => void save()}>保存预设</button><button type="button" disabled={busy || !dirty} onclick={discard}>取消修改</button></div>
+        <div class="filter-toolbar filter-preset-actions"><Button variant="default" size="sm" type="button" disabled={busy || !dirty || !validName || !active} onclick={() => void save()}>保存预设</Button><Button variant="outline" size="sm" type="button" disabled={busy || !dirty} onclick={discard}>取消修改</Button></div>
       {:else if loaded}<p>新建预设或选择一个已有预设。</p>{/if}
       <p role="status" aria-live="polite">{message}</p>
     </section>

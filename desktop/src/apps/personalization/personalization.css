@@ -3,7 +3,7 @@
 .personalization-app h1, .personalization-app h2, .personalization-app h3, .personalization-app p { margin: 0; overflow-wrap: anywhere; }
 .personalization-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--ldos-border-weak); }
 .personalization-header h1 { font-size: 1.0625rem; }
-.personalization-status { display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid currentColor; border-radius: var(--ldos-radius-control); font-size: 0.75rem; }
+.personalization-status:not([data-slot]) { display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid currentColor; border-radius: var(--ldos-radius-control); font-size: 0.75rem; }
 .personalization-status[data-kind="ready"] { color: var(--ldos-state-success); }
 .personalization-status[data-kind="running"] { color: var(--ldos-state-running); }
 .personalization-status[data-kind="warning"] { color: var(--ldos-state-warning); }
@@ -51,7 +51,6 @@
 .personalization-preview-images i { background: var(--ldos-glass-surface-environment); border: 1px solid var(--ldos-border-weak); }
 .personalization-preview-images i:nth-child(2n) { background: var(--ldos-glass-surface-secondary); }
 .personalization-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.personalization-button { min-height: 34px; padding: 5px 10px; font-size: 0.8125rem; }
 .personalization-button--primary { border-color: var(--ldos-accent); }
 .personalization-save-status { padding: 8px 0 8px 10px; border-left: 2px solid var(--ldos-border-weak); color: var(--ldos-text-secondary); font-size: 0.75rem; line-height: 1.5; }
 .personalization-save-status[data-personalization-status="clean"], .personalization-save-status[data-personalization-status="success"] { border-color: var(--ldos-state-success); }

@@ -13,7 +13,7 @@ export interface MockApiOptions {
   readonly emptyRecent?: boolean;
   readonly failPaths?: readonly string[];
   readonly directoryExportScenario?: "completed" | "copying" | "failed" | "conflict";
-  readonly galleryScenario?: "ready" | "reconciliation_failed" | "scan_failed" | "batch_delete";
+  readonly galleryScenario?: "ready" | "flat" | "reconciliation_failed" | "scan_failed" | "batch_delete";
   readonly delayMs?: number;
   readonly baseModelsReady?: boolean;
 }
@@ -962,6 +962,7 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
         options.galleryScenario === "reconciliation_failed" && !galleryReconciliationRetried;
       const projection = gallerySource({
         display_name: galleryDisplayName,
+        ...(options.galleryScenario === "flat" ? { asset_count: 4, kept_count: 4 } : {}),
         ...(options.galleryScenario === "reconciliation_failed"
           ? {
               asset_count: 4,
@@ -1044,6 +1045,10 @@ export async function installMockApi(page: Page, options: MockApiOptions = {}): 
       const directoryId = decodeURIComponent(galleryEntriesMatch[1]);
       const query = (url.searchParams.get("query") ?? "").trim().toLowerCase();
       const page = galleryDirectoryPage(directoryId);
+      if (options.galleryScenario === "flat" && directoryId === GALLERY_ROOT_DIR) {
+        page.directory = galleryDirectory(GALLERY_ROOT_DIR, galleryDisplayName, "", null, 4, 4, 0);
+        page.directories = [];
+      }
       if (galleryTrashedDirectoryIds.has(directoryId)) {
         page.directories = [];
         page.assets = [];

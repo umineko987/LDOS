@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { onMount, untrack } from "svelte";
 
   import { createMotionController } from "../../core/motion/controller";
@@ -53,7 +55,7 @@
 <section class="personalization-app" data-personalization-app data-domain-owner="personalization" aria-labelledby="personalization-heading" aria-busy={snapshot.busy} data-personalization-state={snapshot.presentation.state}>
   <header class="personalization-header">
     <h1 id="personalization-heading">外观</h1>
-    <span class="personalization-status" data-kind={snapshot.presentation.kind}>{snapshot.presentation.label}</span>
+    <Badge variant="outline" class="personalization-status" data-kind={snapshot.presentation.kind}>{snapshot.presentation.label}</Badge>
   </header>
   <p class="personalization-live" aria-live="polite">{snapshot.message}</p>
   <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-scrollable personalization workspace) -->
@@ -123,7 +125,7 @@
           </div>
           <p class="personalization-preview-fact" aria-live="polite">配色：{sceneLabel(snapshot.draft.wallpaperColor)}</p><p class="personalization-preview-fact" aria-live="polite">动效：{snapshot.motion.limitedBySystem ? "已开启动效，但系统“减少动态效果”正在限制部分效果。" : snapshot.draft.animations === "on" ? "界面动效已开启并生效。" : "界面动效已关闭。"}</p>
           <form class="personalization-actions" autocomplete="off" onsubmit={(event) => { event.preventDefault(); void controller.commit(); }}>
-            <button type="submit" class="personalization-button personalization-button--primary" disabled={!snapshot.dirty || snapshot.busy}>{snapshot.busy ? "正在保存…" : "应用"}</button><button type="button" class="personalization-button" disabled={!snapshot.dirty || snapshot.busy} onclick={() => controller.cancel()}>取消</button><button type="button" class="personalization-button" disabled={snapshot.busy} onclick={restoreDefaults}>恢复默认</button>
+            <Button variant="default" size="sm" type="submit" class="personalization-button personalization-button--primary" disabled={!snapshot.dirty || snapshot.busy}>{snapshot.busy ? "正在保存…" : "应用"}</Button><Button variant="outline" size="sm" type="button" class="personalization-button" disabled={!snapshot.dirty || snapshot.busy} onclick={() => controller.cancel()}>取消</Button><Button variant="outline" size="sm" type="button" class="personalization-button" disabled={snapshot.busy} onclick={restoreDefaults}>恢复默认</Button>
           </form>
           <p class="personalization-save-status" data-personalization-status={snapshot.presentation.state} role="status" aria-live="polite">{snapshot.message}</p>
         </div>

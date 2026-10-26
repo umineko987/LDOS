@@ -1,4 +1,10 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { onMount, tick, untrack } from "svelte";
 
   import type { ApiClient } from "../../core/api/client";
@@ -159,16 +165,16 @@
 <section class="proxy-app" data-proxy-app data-domain-owner="proxy" aria-labelledby="proxy-heading" aria-busy={Boolean(snapshot.busy)}>
   <header class="proxy-header">
     <h1 id="proxy-heading">代理</h1>
-    <span class="proxy-status" data-kind={workspace.kind}>{workspace.label}</span>
+    <Badge variant="outline" class="proxy-status" data-kind={workspace.kind}>{workspace.label}</Badge>
   </header>
 
   {#if snapshot.error}
-    <section class="proxy-error" role="alert" aria-labelledby="proxy-error-title">
-      <strong id="proxy-error-title">{snapshot.error.title}</strong>
-      <p>{snapshot.error.message} {snapshot.error.nextStep}</p>
+    <Alert.Root variant="destructive" class="proxy-error" aria-labelledby="proxy-error-title">
+      <Alert.Title id="proxy-error-title">{snapshot.error.title}</Alert.Title>
+      <Alert.Description>{snapshot.error.message} {snapshot.error.nextStep}</Alert.Description>
       {#if snapshot.error.detail}<small>{snapshot.error.detail}</small>{/if}
       <small>错误码：{snapshot.error.code}{snapshot.error.requestId ? ` · 请求 ${snapshot.error.requestId}` : ""}</small>
-    </section>
+    </Alert.Root>
   {/if}
   <p class="proxy-live" role="status" aria-live="polite">{displayMessage(snapshot.message)} {displayMessage(workspace.message)}</p>
 
@@ -213,11 +219,11 @@
         <div class="proxy-column__scroll" tabindex="0" aria-label="代理运行池内容；可滚动">
           <div class="proxy-action-panel" aria-label="代理池操作">
             <div class="proxy-actions" aria-label="代理池操作">
-              <button type="button" disabled={controls.start} aria-describedby={controls.start ? "proxy-start-reason" : undefined} onclick={() => void controller.runtime("start")}>{snapshot.busy === "start" ? "正在启动…" : "启动代理池"}</button>
-              <button type="button" class="danger" disabled={controls.stop} aria-describedby={controls.stop ? "proxy-stop-reason" : undefined} onclick={() => void controller.runtime("stop")}>{snapshot.busy === "stop" ? "正在停止…" : "停止代理池"}</button>
-              <button type="button" class="primary" disabled={controls.reload} aria-describedby={controls.reload ? "proxy-reload-reason" : undefined} onclick={() => void controller.runtime("reload")}>{snapshot.busy === "reload" ? "正在应用…" : "应用并重新加载"}</button>
-              <button type="button" disabled={controls.probe} aria-describedby={controls.probe ? "proxy-probe-reason" : undefined} onclick={() => void controller.runtime("probe")}>{snapshot.busy === "probe" ? "正在检测…" : "检测全部节点"}</button>
-              <button type="button" disabled={controls.refresh} onclick={() => void controller.refresh()}>{snapshot.busy === "refresh" ? "正在刷新…" : "刷新"}</button>
+              <Button variant="outline" size="sm" type="button" disabled={controls.start} aria-describedby={controls.start ? "proxy-start-reason" : undefined} onclick={() => void controller.runtime("start")}>{snapshot.busy === "start" ? "正在启动…" : "启动代理池"}</Button>
+              <Button variant="outline" size="sm" type="button" class="danger" disabled={controls.stop} aria-describedby={controls.stop ? "proxy-stop-reason" : undefined} onclick={() => void controller.runtime("stop")}>{snapshot.busy === "stop" ? "正在停止…" : "停止代理池"}</Button>
+              <Button variant="default" size="sm" type="button" class="primary" disabled={controls.reload} aria-describedby={controls.reload ? "proxy-reload-reason" : undefined} onclick={() => void controller.runtime("reload")}>{snapshot.busy === "reload" ? "正在应用…" : "应用并重新加载"}</Button>
+              <Button variant="outline" size="sm" type="button" disabled={controls.probe} aria-describedby={controls.probe ? "proxy-probe-reason" : undefined} onclick={() => void controller.runtime("probe")}>{snapshot.busy === "probe" ? "正在检测…" : "检测全部节点"}</Button>
+              <Button variant="outline" size="sm" type="button" disabled={controls.refresh} onclick={() => void controller.refresh()}>{snapshot.busy === "refresh" ? "正在刷新…" : "刷新"}</Button>
             </div>
             <div class="proxy-control-reasons" aria-live="polite">
               {#if controls.start}<span id="proxy-start-reason">启动：代理池当前不可启动。</span>{/if}
@@ -265,32 +271,32 @@
               <article class="proxy-source-card" data-source-id={item.id}>
                 <strong>{item.displayUrl}</strong><p>{item.scheme.toUpperCase()} · {item.host || "主机已隐藏"}{item.port ? `:${item.port}` : ""}</p>
                 <small>{item.redacted ? "敏感部分已脱敏" : "未包含额外敏感部分"}</small>
-                <div class="proxy-row-actions"><button type="button" disabled={!sourceEditable()} onclick={() => { clearDrafts(); replacement = { kind: "subscription", id: item.id, value: "" }; }}>替换</button><button type="button" class="danger" disabled={!sourceEditable()} onclick={() => controller.requestRemove("subscription-delete", item.id)}>删除</button></div>
+                <div class="proxy-row-actions"><Button variant="outline" size="sm" type="button" disabled={!sourceEditable()} onclick={() => { clearDrafts(); replacement = { kind: "subscription", id: item.id, value: "" }; }}>替换</Button><Button variant="outline" size="sm" type="button" class="danger" disabled={!sourceEditable()} onclick={() => controller.requestRemove("subscription-delete", item.id)}>删除</Button></div>
                 {#if replacement?.kind === "subscription" && replacement.id === item.id}
                   <form onsubmit={(event) => { event.preventDefault(); void submitReplacement(); }}>
-                    <label class="proxy-field"><span>完整新订阅地址</span><input type="url" autocomplete="off" value={replacement.value} oninput={(event) => { if (replacement) replacement.value = (event.currentTarget as HTMLInputElement).value; }} /></label>
+                    <Field.Field class="proxy-field"><Field.Label for={`proxy-subscription-${item.id}`}>完整新订阅地址</Field.Label><Input id={`proxy-subscription-${item.id}`} type="url" autocomplete="off" value={replacement.value} oninput={(event) => { if (replacement) replacement.value = (event.currentTarget as HTMLInputElement).value; }} /></Field.Field>
                     <p class="proxy-validation" role="status">{inputMessage("subscription", replacement.value)}</p>
-                    <div><button type="submit" disabled={!sourceEditable()}>保存替换</button><button type="button" onclick={() => { replacement = null; }}>取消</button></div>
+                    <div><Button variant="outline" size="sm" type="submit" disabled={!sourceEditable()}>保存替换</Button><Button variant="outline" size="sm" type="button" onclick={() => { replacement = null; }}>取消</Button></div>
                   </form>
                 {/if}
               </article>
             {:else}<p class="proxy-empty">尚未配置订阅地址。</p>{/each}
             <form onsubmit={(event) => { event.preventDefault(); void submitSubscription(); }}>
-              <label class="proxy-field"><span>添加完整订阅地址</span><input type="url" autocomplete="off" bind:value={subscriptionDraft} /></label>
+              <Field.Field class="proxy-field"><Field.Label for="proxy-subscription">添加完整订阅地址</Field.Label><Input id="proxy-subscription" type="url" autocomplete="off" bind:value={subscriptionDraft} /></Field.Field>
               <p class="proxy-validation" role="status">{inputMessage("subscription", subscriptionDraft)}</p>
-              <button type="submit" disabled={!sourceEditable()}>保存订阅</button>
+              <Button variant="outline" size="sm" type="submit" disabled={!sourceEditable()}>保存订阅</Button>
             </form>
           </section>
 
           <section class="proxy-source-group" aria-labelledby="proxy-file-heading">
             <h3 id="proxy-file-heading">节点文件</h3>
             {#if snapshot.sources?.nodeFile.configured}
-              <article class="proxy-source-card"><strong>{snapshot.sources.nodeFile.displayPath || "路径已隐藏"}</strong><button type="button" class="danger" disabled={!sourceEditable()} onclick={() => controller.requestRemove("node-file-clear")}>清除节点文件</button></article>
+              <article class="proxy-source-card"><strong>{snapshot.sources.nodeFile.displayPath || "路径已隐藏"}</strong><Button variant="outline" size="sm" type="button" class="danger" disabled={!sourceEditable()} onclick={() => controller.requestRemove("node-file-clear")}>清除节点文件</Button></article>
             {/if}
             <form onsubmit={(event) => { event.preventDefault(); void submitNodeFile(); }}>
-              <label class="proxy-field"><span>允许目录中的节点文件</span><input type="text" autocomplete="off" bind:value={nodeFileDraft} /></label>
+              <Field.Field class="proxy-field"><Field.Label for="proxy-node-file">允许目录中的节点文件</Field.Label><Input id="proxy-node-file" type="text" autocomplete="off" bind:value={nodeFileDraft} /></Field.Field>
               <p class="proxy-validation" role="status">{inputMessage("node-file", nodeFileDraft)}</p>
-              <button type="submit" disabled={!sourceEditable()}>保存节点文件</button>
+              <Button variant="outline" size="sm" type="submit" disabled={!sourceEditable()}>保存节点文件</Button>
             </form>
           </section>
 
@@ -299,24 +305,24 @@
             {#each inlineNodes as item (item.id)}
               <article class="proxy-source-card" data-source-id={item.id}>
                 <strong>{item.displayEndpoint}</strong><p>{item.scheme.toUpperCase()} · {item.host || "主机已隐藏"}{item.port ? `:${item.port}` : ""}</p><small>{item.requiresTransportCore ? "需要 Mihomo 传输核心" : "无需 Mihomo 传输核心"}</small>
-                <div class="proxy-row-actions"><button type="button" disabled={!sourceEditable()} onclick={() => { clearDrafts(); replacement = { kind: "inline", id: item.id, value: "" }; }}>替换</button><button type="button" class="danger" disabled={!sourceEditable()} onclick={() => controller.requestRemove("inline-delete", item.id)}>删除</button></div>
+                <div class="proxy-row-actions"><Button variant="outline" size="sm" type="button" disabled={!sourceEditable()} onclick={() => { clearDrafts(); replacement = { kind: "inline", id: item.id, value: "" }; }}>替换</Button><Button variant="outline" size="sm" type="button" class="danger" disabled={!sourceEditable()} onclick={() => controller.requestRemove("inline-delete", item.id)}>删除</Button></div>
                 {#if replacement?.kind === "inline" && replacement.id === item.id}
                   <form onsubmit={(event) => { event.preventDefault(); void submitReplacement(); }}>
-                    <label class="proxy-field"><span>完整新节点</span><textarea rows="3" autocomplete="off" value={replacement.value} oninput={(event) => { if (replacement) replacement.value = (event.currentTarget as HTMLTextAreaElement).value; }}></textarea></label>
+                    <Field.Field class="proxy-field"><Field.Label for={`proxy-inline-${item.id}`}>完整新节点</Field.Label><Textarea id={`proxy-inline-${item.id}`} rows={3} autocomplete="off" value={replacement.value} oninput={(event) => { if (replacement) replacement.value = (event.currentTarget as HTMLTextAreaElement).value; }} /></Field.Field>
                     <p class="proxy-validation" role="status">{inputMessage("inline", replacement.value)}</p>
-                    <div><button type="submit" disabled={!sourceEditable()}>保存替换</button><button type="button" onclick={() => { replacement = null; }}>取消</button></div>
+                    <div><Button variant="outline" size="sm" type="submit" disabled={!sourceEditable()}>保存替换</Button><Button variant="outline" size="sm" type="button" onclick={() => { replacement = null; }}>取消</Button></div>
                   </form>
                 {/if}
               </article>
             {:else}<p class="proxy-empty">尚未配置手动节点。</p>{/each}
             <form onsubmit={(event) => { event.preventDefault(); void submitInline(); }}>
-              <label class="proxy-field"><span>批量添加手动节点（每行一个）</span><textarea rows="6" autocomplete="off" bind:value={inlineDraft}></textarea></label>
+              <Field.Field class="proxy-field"><Field.Label for="proxy-inline">批量添加手动节点（每行一个）</Field.Label><Textarea id="proxy-inline" rows={6} autocomplete="off" bind:value={inlineDraft} /></Field.Field>
               <p class="proxy-validation" role="status">{inputMessage("inline", inlineDraft, true)}</p>
-              <button type="submit" disabled={!sourceEditable()}>批量保存节点</button>
+              <Button variant="outline" size="sm" type="submit" disabled={!sourceEditable()}>批量保存节点</Button>
             </form>
           </section>
 
-          <section class="proxy-danger-zone" aria-labelledby="proxy-danger-heading"><h3 id="proxy-danger-heading">危险操作</h3><p>删除界面保存的来源并恢复配置文件默认值；运行池不会自动更新。</p><button type="button" class="danger" disabled={Boolean(snapshot.busy || !snapshot.sources?.hasRuntimeOverride)} onclick={() => controller.requestRemove("override-reset")}>恢复配置文件默认值</button></section>
+          <section class="proxy-danger-zone" aria-labelledby="proxy-danger-heading"><h3 id="proxy-danger-heading">危险操作</h3><p>删除界面保存的来源并恢复配置文件默认值；运行池不会自动更新。</p><Button variant="outline" size="sm" type="button" class="danger" disabled={Boolean(snapshot.busy || !snapshot.sources?.hasRuntimeOverride)} onclick={() => controller.requestRemove("override-reset")}>恢复配置文件默认值</Button></section>
         </div>
       </aside>
     </div>
@@ -339,7 +345,7 @@
       <h2 id="proxy-confirmation-title">{snapshot.confirmation.title}</h2>
       <p id="proxy-confirmation-message">{snapshot.confirmation.message}</p>
       <p id="proxy-confirmation-warning" class="proxy-confirmation__warning"><strong>警告：</strong>{snapshot.confirmation.warning}</p>
-      <div><button type="button" onclick={() => resolveConfirmation(false)}>取消</button><button type="button" class="danger" onclick={() => resolveConfirmation(true)}>{snapshot.confirmation.confirmLabel}</button></div>
+      <div><Button variant="outline" size="sm" type="button" onclick={() => resolveConfirmation(false)}>取消</Button><Button variant="outline" size="sm" type="button" class="danger" onclick={() => resolveConfirmation(true)}>{snapshot.confirmation.confirmLabel}</Button></div>
     </section>
   </dialog>
 {/if}

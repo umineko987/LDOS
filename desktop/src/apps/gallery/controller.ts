@@ -63,6 +63,13 @@ export interface GalleryController {
   closeViewer(): boolean;
   setTxtViewMode(mode: GalleryTxtViewMode): boolean;
   refreshDirectory(): Promise<boolean>;
+  // ---- G3-3 移动/复制 ----
+  transferItems(
+    kind: "move" | "copy",
+    assetIds: readonly string[],
+    directoryIds: readonly string[],
+    targetDirectoryId: string,
+  ): Promise<boolean>;
   // ---- G3-3 TXT 编辑 ----
   setTxtDraft(draft: string): boolean;
   saveTxtAnnotation(options: { advance: boolean }): Promise<boolean>;
@@ -668,6 +675,25 @@ export function createGalleryController({ store, service, readOnly = false }: {
         return false;
       }
     },
+    async transferItems(kind, assetIds, directoryIds, targetDirectoryId) {
+      if (readOnly || !active || destroyed || (assetIds.length === 0 && directoryIds.length === 0)) return false;
+      const sourceId = store.getState().activeSourceId;
+      if (sourceId === null) return false;
+      try {
+        if (kind === "move") await service.moveItems(assetIds, directoryIds, targetDirectoryId);
+        else await service.copyItems(assetIds, directoryIds, targetDirectoryId);
+        if (destroyed) return false;
+        store.clearSelection();
+        await loadSources();
+        await loadPage(false);
+        return true;
+      } catch (error) {
+        if (!destroyed && store.getState().activeSourceId === sourceId) {
+          store.patch({ pageErrorCode: errorCode(error) });
+        }
+        return false;
+      }
+    },
     cancelRename() {
       return run(() => store.closeRenameDialog());
     },
@@ -1004,7 +1030,7 @@ export function createGalleryController({ store, service, readOnly = false }: {
     if (state.viewerOperationPhase === "trashing") return false;
     store.setViewerOperation("trashing", null);
     try {
-      const result = await service.trashAssets([assetId]);
+      await service.trashAssets([assetId]);
       if (destroyed) return false;
       const deletedIndex = state.viewerIndex;
       let followingPageAttempts = 0;
@@ -1016,7 +1042,6 @@ export function createGalleryController({ store, service, readOnly = false }: {
         followingPageAttempts += 1;
         if (!(await loadNextViewerPage())) break;
       }
-      store.showUndoToast(result.operation_id, result.item_count);
       store.removeViewerAsset(assetId);
       if (store.getState().viewerIndex < 0) {
         closeViewerImmediately();

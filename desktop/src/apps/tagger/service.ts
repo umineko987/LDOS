@@ -1,4 +1,5 @@
 import type { ApiClient } from "../../core/api/client";
+import { normalizeModelProxyUrl } from "../review/service";
 import {
   sanitizeCatalog,
   sanitizeStatus,
@@ -16,8 +17,9 @@ export const TAGGER_ENDPOINTS = Object.freeze({
 
 export interface TaggerRunOptions {
   readonly models: readonly string[];
-  readonly inputs: readonly string[];
-  readonly thresholds?: Readonly<Record<string, number>>;
+  readonly assetIds: readonly string[];
+  readonly directoryIds?: readonly string[];
+  readonly thresholds?: Readonly<Record<string, Readonly<Record<string, number>>>>;
   readonly categories?: readonly string[];
   readonly writeCaptions: boolean;
   readonly overwriteCaptions: boolean;
@@ -26,7 +28,7 @@ export interface TaggerRunOptions {
 export interface TaggerService {
   readCatalog(signal: AbortSignal): Promise<readonly TaggerCatalogEntry[]>;
   readStatus(signal: AbortSignal): Promise<TaggerStatus>;
-  prepare(models: readonly string[], signal: AbortSignal, options?: { token?: string; acceptLicense?: boolean }): Promise<void>;
+  prepare(models: readonly string[], signal: AbortSignal, options?: { token?: string; acceptLicense?: boolean; proxyUrl?: string; downloadProxy?: string }): Promise<void>;
   run(options: TaggerRunOptions, signal: AbortSignal): Promise<void>;
   cancel(signal: AbortSignal): Promise<void>;
 }
@@ -39,27 +41,35 @@ export function createTaggerService(api: ApiClient): TaggerService {
     async readStatus(signal: AbortSignal) {
       return sanitizeStatus(await api.get(TAGGER_ENDPOINTS.status, { signal }));
     },
-    async prepare(models: readonly string[], signal: AbortSignal, options?: { token?: string; acceptLicense?: boolean }) {
+    async prepare(models: readonly string[], signal: AbortSignal, options?: { token?: string; acceptLicense?: boolean; proxyUrl?: string; downloadProxy?: string }) {
       if (!models.length || models.length > 8 || models.some((key) => !key || key.length > 64)) {
         throw new TypeError("invalid_tagger_models");
       }
+      const downloadProxy = normalizeModelProxyUrl(options?.downloadProxy ?? "");
       await api.post(TAGGER_ENDPOINTS.prepare, {
         models: [...new Set(models)],
         ...(options?.token ? { token: options.token } : {}),
         ...(options?.acceptLicense ? { accept_license: true } : {}),
+        ...(options?.proxyUrl ? { proxy_url: options.proxyUrl } : {}),
+        ...(downloadProxy ? { download_proxy: downloadProxy } : {}),
       }, { signal });
     },
     async run(options: TaggerRunOptions, signal: AbortSignal) {
-      const { models, inputs } = options;
+      const { models, assetIds, directoryIds = [] } = options;
       if (!models.length || models.length > 8 || models.some((key) => !key || key.length > 64)) {
         throw new TypeError("invalid_tagger_models");
       }
-      if (!inputs.length || inputs.length > 16 || inputs.some((path) => !path || path.length > 2048)) {
-        throw new TypeError("invalid_tagger_inputs");
+      if (!assetIds.length && !directoryIds.length) throw new TypeError("invalid_tagger_inputs");
+      if (assetIds.length > 200 || assetIds.some((id) => !id || id.length > 128)) {
+        throw new TypeError("invalid_tagger_assets");
+      }
+      if (directoryIds.length > 200 || directoryIds.some((id) => !id || id.length > 128)) {
+        throw new TypeError("invalid_tagger_directories");
       }
       await api.post(TAGGER_ENDPOINTS.run, {
         models: [...new Set(models)],
-        inputs: [...inputs],
+        ...(assetIds.length ? { asset_ids: [...new Set(assetIds)] } : {}),
+        ...(directoryIds.length ? { directory_ids: [...new Set(directoryIds)] } : {}),
         ...(options.thresholds && Object.keys(options.thresholds).length ? { thresholds: options.thresholds } : {}),
         ...(options.categories?.length ? { categories: [...options.categories] } : {}),
         write_captions: options.writeCaptions,

@@ -181,6 +181,38 @@ describe("Gallery file operation service", () => {
     );
   });
 
+  it("posts mixed asset and directory selections to move/copy endpoints", async () => {
+    const post = vi.fn(async () => ({ ...operationProjection, kind: "move" }));
+    const service = createGalleryService({ post } as unknown as ApiClient);
+
+    await expect(service.moveItems(["asset-1"], ["directory-1"], "directory-target")).resolves.toMatchObject({
+      kind: "move",
+    });
+    expect(post).toHaveBeenLastCalledWith(
+      `${GALLERY_ENDPOINTS.fileOperations}/move`,
+      {
+        asset_ids: ["asset-1"],
+        directory_ids: ["directory-1"],
+        target_directory_id: "directory-target",
+      },
+      { idempotencyKey: true },
+    );
+
+    post.mockResolvedValue({ ...operationProjection, kind: "copy" });
+    await expect(service.copyItems([], ["directory-1"], "directory-target")).resolves.toMatchObject({
+      kind: "copy",
+    });
+    expect(post).toHaveBeenLastCalledWith(
+      `${GALLERY_ENDPOINTS.fileOperations}/copy`,
+      {
+        asset_ids: [],
+        directory_ids: ["directory-1"],
+        target_directory_id: "directory-target",
+      },
+      { idempotencyKey: true },
+    );
+  });
+
 
   it("loads the bounded trash projection with the desktop view", async () => {
     const page = {

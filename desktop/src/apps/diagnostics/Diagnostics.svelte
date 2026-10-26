@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { onMount, untrack } from "svelte";
 
   import type { ApiClient } from "../../core/api/client";
@@ -55,11 +58,11 @@
 <section class="diagnostics-app" data-diagnostics-app data-domain-owner="diagnostics" aria-labelledby="diagnostics-heading" aria-busy={snapshot.busy}>
   <header class="diagnostics-header">
     <h1 id="diagnostics-heading">诊断</h1>
-    <div class="diagnostics-header-actions"><span class="diagnostics-status" data-kind={presentation.kind}>{presentation.label}</span><button type="button" disabled={snapshot.busy} onclick={() => void controller.refresh()}>{snapshot.busy ? "正在刷新…" : "刷新诊断"}</button></div>
+    <div class="diagnostics-header-actions"><Badge variant="outline" class="diagnostics-status" data-kind={presentation.kind}>{presentation.label}</Badge><Button variant="outline" size="sm" type="button" disabled={snapshot.busy} onclick={() => void controller.refresh()}>{snapshot.busy ? "正在刷新…" : "刷新诊断"}</Button></div>
   </header>
   <p class="diagnostics-live" role="status" aria-live="polite">{displayMessage(snapshot.message)}</p>
 
-  {#if snapshot.error}<section class="diagnostics-error" role="alert" aria-labelledby="diagnostics-error-title"><strong id="diagnostics-error-title">{snapshot.error.title}</strong><p>{snapshot.error.message} {snapshot.error.nextStep}</p></section>{/if}
+  {#if snapshot.error}<Alert.Root variant="destructive" class="diagnostics-error" aria-labelledby="diagnostics-error-title"><Alert.Title id="diagnostics-error-title">{snapshot.error.title}</Alert.Title><Alert.Description>{snapshot.error.message} {snapshot.error.nextStep}</Alert.Description></Alert.Root>{/if}
 
   <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard-scrollable Diagnostics workspace) -->
   <section class="diagnostics-workspace" tabindex="0" aria-label="系统诊断；可纵向滚动">
@@ -68,7 +71,7 @@
         <header><h2 id="diagnostics-summary-heading">连接与检查</h2></header>
         <div class="diagnostics-column-scroll" tabindex="0" aria-label="诊断摘要内容；可滚动">
           <section class="diagnostics-workspace-state" data-diagnostics-workspace-state={presentation.state} role="status" aria-live="polite"><span class="diagnostics-status" data-kind={presentation.kind}>{presentation.label}</span><p>{displayMessage(presentation.message)}</p></section>
-          <div class="diagnostics-actions"><button type="button" disabled={!snapshot.snapshot || snapshot.busy} onclick={copySummary}>复制诊断摘要</button><a href="/docs" target="_blank" rel="noreferrer noopener">打开 API 文档</a></div>
+          <div class="diagnostics-actions"><Button variant="outline" size="sm" type="button" disabled={!snapshot.snapshot || snapshot.busy} onclick={copySummary}>复制诊断摘要</Button><Button variant="outline" size="sm" href="/docs" target="_blank" rel="noreferrer noopener">打开 API 文档</Button></div>
           {#if snapshot.snapshot}<div class="diagnostics-metrics"><div><span>连接</span><strong>{snapshot.snapshot.offline ? "离线" : "在线"}</strong></div><div><span>健康</span><strong>{statusLabel(snapshot.snapshot.health?.ok)}</strong></div><div><span>就绪</span><strong>{snapshot.snapshot.readiness?.ready ? "已就绪" : "未完全就绪"}</strong></div><div><span>检查时间</span><strong>{formatCheckedAt(snapshot.snapshot.lastCheckedAt)}</strong></div></div>{/if}
           <p class:diagnostics-stale-marker={snapshot.snapshot?.stale} class="diagnostics-boundary-note">{summary(snapshot.snapshot)}</p>
         </div>
@@ -95,7 +98,7 @@
                 <div class="diagnostics-component-heading"><h3>{component.label}</h3><span class="diagnostics-status" data-kind={componentKind(component.status)}>{component.statusLabel}</span></div>
                 {#if component.detail}<p>{component.detail}</p>{/if}
                 <div class="diagnostics-next-step"><strong>下一步</strong><p>{component.nextStep}</p></div>
-                {#if component.targetApp === "proxy" || component.targetApp === "tasks"}<button type="button" onclick={() => navigate(component.targetApp)}>打开{component.targetApp === "proxy" ? "代理管理" : "批次管理"}</button>{/if}
+                {#if component.targetApp === "proxy" || component.targetApp === "tasks"}<Button variant="outline" size="sm" type="button" onclick={() => navigate(component.targetApp)}>打开{component.targetApp === "proxy" ? "代理管理" : "批次管理"}</Button>{/if}
               </article>
             {/each}
           {:else}<p class="diagnostics-empty">尚未读取组件状态。</p>{/if}

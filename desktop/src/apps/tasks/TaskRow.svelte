@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { formatTaskBytes, shortBatchId, siteLabel, type TaskEntity } from "./model";
 
   let { task }: { task: TaskEntity } = $props();
@@ -19,7 +20,7 @@
     <strong>{siteLabel(task.site)}</strong>
     <span>{task.addressId ? shortBatchId(task.addressId) : "地址不可用"}</span>
   </td>
-  <td><span class="tasks-status" data-status-kind={task.statusKind}>{task.statusLabel}</span></td>
+  <td><Badge variant="outline" class="tasks-status" data-status-kind={task.statusKind}>{task.statusLabel}</Badge></td>
   <td>{task.attemptCount}/{task.maxAttempts}</td>
   <td>{errorLabel}</td>
   <td>{fileLabel}</td>

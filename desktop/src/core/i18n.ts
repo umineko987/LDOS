@@ -1008,6 +1008,18 @@ const ENGLISH_TRANSLATIONS = new Map<string, string>([
 type DynamicUiTranslation = readonly [RegExp, (match: string, ...groups: string[]) => string];
 
 const DYNAMIC_UI_TRANSLATIONS: readonly DynamicUiTranslation[] = [
+  [/^已选择 (.+) 张图片 · (.+) 个目录$/u, (_, images, folders) => `Selected ${images} image${images === "1" ? "" : "s"} · ${folders} folder${folders === "1" ? "" : "s"}`],
+  [/^(.+) 张图片 · (.+) 个目录$/u, (_, images, folders) => `${images} image${images === "1" ? "" : "s"} · ${folders} folder${folders === "1" ? "" : "s"}`],
+  [/^已选 (.+) 张图片 · (.+) 个目录 · 查看与移除$/u, (_, images, folders) => `${images} image${images === "1" ? "" : "s"} · ${folders} folder${folders === "1" ? "" : "s"} selected · View and remove`],
+  [/^移除目录 (.+)$/u, (_, id) => `Remove folder ${id}`],
+  [/^移除图片 (.+)$/u, (_, id) => `Remove image ${id}`],
+  [/^跳过 (.+) 个已有 caption$/u, (_, count) => `Skipped ${count} existing caption${count === "1" ? "" : "s"}`],
+  [/^已选择 (\d+) 张图库图片$/u, (_, count) => `Selected ${count} gallery images`],
+  [/^(隐藏|配置)下载镜像$/u, (_, action) => `${action === "隐藏" ? "Hide" : "Configure"} download mirror`],
+  [/^上次：(\d+) 张，写入 (\d+) 个$/u, (_, images, captions) => `Last: ${images} images, ${captions} captions written`],
+  [/^，跳过 (\d+) 个$/u, (_, count) => `, ${count} skipped`],
+  [/^，失败 (\d+) 张$/u, (_, count) => `, ${count} failed`],
+  [/^安装 (.+)$/u, (_, model) => `Install ${model}`],
   [/^使用这 (\d+) 张$/u, (_, count) => `Use these ${count} images`],
   [/^已选 (\d+) 张 \/ 200 · 查看与移除$/u, (_, count) => `${count} / 200 selected · View and remove`],
   [/^移除参考图 (.+)$/u, (_, id) => `Remove reference ${id}`],

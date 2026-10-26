@@ -1068,7 +1068,7 @@ describe("gallery file operations controller (G3-3 TXT 编辑/重命名/回收)"
     expect(store.getState().txtDraft).toBeNull();
   });
 
-  it("guards viewer trash, then advances and exposes the paired-item undo count", async () => {
+  it("guards viewer trash, then advances without showing an undo toast", async () => {
     let trashed = false;
     const listDirectoryEntries = vi.fn(async () => ({
       directory: rootDirectory,
@@ -1092,8 +1092,8 @@ describe("gallery file operations controller (G3-3 TXT 编辑/重命名/回收)"
 
     expect(trashAssets).toHaveBeenCalledWith(["asset-1"]);
     expect(store.getState().viewerAssets[store.getState().viewerIndex]?.asset_id).toBe("asset-2");
-    expect(store.getState().undoToastVisible).toBe(true);
-    expect(store.getState().undoItemCount).toBe(2);
+    expect(store.getState().undoToastVisible).toBe(false);
+    expect(store.getState().undoableOperationId).toBeNull();
   });
 
   it("loads the next cursor page before a viewer-boundary delete advances", async () => {
@@ -1132,5 +1132,6 @@ describe("gallery file operations controller (G3-3 TXT 编辑/重命名/回收)"
     );
     expect(store.getState().viewerAssets.map((asset) => asset.asset_id)).toEqual(["asset-2"]);
     expect(store.getState().viewerAssets[store.getState().viewerIndex]?.asset_id).toBe("asset-2");
+    expect(store.getState().undoToastVisible).toBe(false);
   });
 });

@@ -8,7 +8,7 @@
 .filter-presets-list { display: grid; align-content: start; gap: 12px; min-width: 0; }
 .filter-presets-list ul, .filter-reference-grid { list-style: none; padding: 0; margin: 0; }
 .filter-presets-list li + li { margin-top: 4px; }
-.filter-presets-list button { width: 100%; text-align: start; overflow-wrap: anywhere; }
+.filter-presets-list button { width: 100%; height: auto; min-height: 30px; justify-content: flex-start; white-space: normal; text-align: start; overflow-wrap: anywhere; }
 .filter-presets-list button[aria-current] { border-color: var(--ldos-accent); color: var(--ldos-accent-highlight); }
 .filter-preset-detail { min-width: 0; display: grid; align-content: start; gap: 12px; }
 .filter-preset-name { display: grid; gap: 6px; }
@@ -19,7 +19,7 @@
 .filter-toggle { display: flex; align-items: center; gap: 8px; min-height: 32px; }
 .filter-toggle input { accent-color: var(--ldos-accent); }
 .filter-help { color: var(--ldos-text-secondary); line-height: 1.5; margin: 6px 0; overflow-wrap: anywhere; }
-.filter-help strong, .filter-presets-app [role="alert"] { color: var(--ldos-state-warning); }
+.filter-help strong, .filter-presets-app [role="alert"]:not([data-slot]) { color: var(--ldos-state-warning); }
 .filter-reference-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; margin-top: 10px; }
 .filter-reference { min-width: 0; display: grid; align-content: start; gap: 6px; padding: 8px; border: 1px solid var(--ldos-border-weak); border-radius: var(--ldos-radius-control); overflow-wrap: anywhere; }
 .filter-reference img { width: 100%; height: 96px; object-fit: contain; background: var(--ldos-background-deepest); }
@@ -27,6 +27,7 @@
 .filter-preset-actions { border-top: 1px solid var(--ldos-border-weak); padding-top: 12px; }
 .filter-presets-app button, .filter-options-editor button { min-height: 32px; }
 .filter-model-setup, .filter-model-confirmation { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--ldos-border-weak); border-radius: var(--ldos-radius-control); }
+.filter-model-setup > button { justify-self: start; }
 .filter-model-setup .review-model-progress { display: grid; gap: 6px; min-width: 0; }
 .filter-model-setup progress { width: 100%; accent-color: var(--ldos-accent); }
 .filter-model-setup [role="alert"] { color: var(--ldos-state-warning); overflow-wrap: anywhere; }

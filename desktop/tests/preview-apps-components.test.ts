@@ -73,7 +73,9 @@ describe("Svelte Gallery live integration", () => {
     expect(galleryCss).toContain("@media (forced-colors: active)");
     expect(galleryCss).toContain("@media (prefers-reduced-motion: reduce)");
     expect(galleryCss).toContain(':root[data-motion="off"]');
-    expect(galleryCss).not.toMatch(/^\s*(?:-webkit-)?backdrop-filter\s*:/m);
+    // Only the small selection dock may blur; never the image canvas or grid.
+    expect(galleryCss.match(/\bbackdrop-filter\s*:/g)).toHaveLength(1);
+    expect(galleryCss).toMatch(/\.gallery-selection-bar\s*\{[^}]*backdrop-filter:\s*blur\(16px\)/);
     expect(galleryCss).not.toMatch(/^\s*filter\s*:/m);
   });
 });
