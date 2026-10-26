@@ -176,7 +176,7 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
         self.assertEqual(response.headers["Access-Control-Allow-Origin"], VITE_ORIGIN)
         self.assertEqual(
             response.headers["Access-Control-Allow-Methods"],
-            "GET, POST, PUT, DELETE",
+            "GET, POST, PUT, PATCH, DELETE",
         )
         allowed_headers = {
             value.strip().lower()
@@ -197,6 +197,19 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
             },
         )
         self.assertEqual(denied.status_code, 400, denied.text)
+
+    def test_preflight_allows_patch_for_source_rename(self) -> None:
+        # 打包版从 tauri:// 跨域重命名来源走 PATCH；预检被拒时浏览器直接拦下请求。
+        response = self.client.options(
+            "/api/v1/gallery/sources/1",
+            headers={
+                **self.cross_origin_headers(VITE_ORIGIN),
+                "Access-Control-Request-Method": "PATCH",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("PATCH", response.headers["Access-Control-Allow-Methods"])
 
     def test_cross_origin_write_keeps_request_id_and_error_envelope_contract(self) -> None:
         request_id = "desktop-write-contract"
