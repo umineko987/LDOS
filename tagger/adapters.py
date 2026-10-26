@@ -8,6 +8,7 @@ WD 系列 ONNX：激活函数已烘焙进计算图，输出即概率，直接透
 from __future__ import annotations
 
 import hashlib
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Sequence
 
@@ -27,7 +28,29 @@ class TaggerAdapterError(RuntimeError):
     pass
 
 
-class WdOnnxAdapter:
+class TaggerAdapter(ABC):
+    """打标模型适配器协议：统一"装、加载、喂图得分数、卸载"四动作。"""
+
+    @abstractmethod
+    def load(self) -> None:
+        """加载模型到内存，验证词表与输出维度，计算指纹。"""
+        ...
+
+    @abstractmethod
+    def infer_scores(self, images: Sequence[Image.Image]) -> np.ndarray:
+        """返回 [B, N] 未筛选分数，与词表顺序严格一致，未做任何阈值过滤。"""
+        ...
+
+    @abstractmethod
+    def close(self) -> None:
+        """卸载模型，释放资源。"""
+        ...
+
+    vocabulary: Vocabulary | None
+    fingerprint: str
+    spec: TaggerModelSpec
+
+class WdOnnxAdapter(TaggerAdapter):
     """SmilingWolf WD 系列 ONNX 模型。"""
 
     def __init__(self, spec: TaggerModelSpec, model_dir: Path):
@@ -91,13 +114,16 @@ class WdOnnxAdapter:
         if self._session is None:
             raise TaggerAdapterError("模型未加载")
         prepared = np.stack([wd_prepare(image, self._input_size) for image in images])
-        if self._max_batch and prepared.shape[0] > self._max_batch:
+        if self._max_batch:
             chunks = []
             for start in range(0, prepared.shape[0], self._max_batch):
-                chunks.append(
-                    self._session.run(None, {self._input_name: prepared[start:start + self._max_batch]})[0]
-                )
-            return np.concatenate(chunks, axis=0).astype(np.float32, copy=False)
+                chunk = prepared[start:start + self._max_batch]
+                size = len(chunk)
+                if size < self._max_batch:
+                    chunk = np.concatenate([chunk, np.repeat(chunk[-1:], self._max_batch - size, axis=0)])
+                result = self._session.run(None, {self._input_name: chunk})[0]
+                chunks.append(np.asarray(result, dtype=np.float32)[:size])
+            return np.concatenate(chunks, axis=0)
         result = self._session.run(None, {self._input_name: prepared})[0]
         return np.asarray(result, dtype=np.float32)
 
@@ -105,7 +131,7 @@ class WdOnnxAdapter:
         self._session = None
 
 
-class TimmCanaryAdapter:
+class TimmCanaryAdapter(TaggerAdapter):
     """ashen-sensored wd-eva02-2026-canary（timm safetensors）。
 
     输出为原始 logits，需 sigmoid；输入 CHW/BGR/±1 归一化。
@@ -178,7 +204,7 @@ class TimmCanaryAdapter:
         self._model = None
 
 
-class PixaiHfAdapter:
+class PixaiHfAdapter(TaggerAdapter):
     """pixai-labs/pixai-tagger-v1.0（transformers remote code）。
 
     复用官方 ViTDetCls 与 RescalePadProcessor（从固定 revision 的本地
@@ -246,7 +272,7 @@ class PixaiHfAdapter:
         self._processor = None
 
 
-class ClOnnxAdapter:
+class ClOnnxAdapter(TaggerAdapter):
     """cella110n/cl_tagger_v2（SigLIP2 ONNX，外置权重）。
 
     gated 模型：加载前校验 manifest 的 license_accepted。
@@ -264,6 +290,7 @@ class ClOnnxAdapter:
         self._input_name = ""
         self._input_size = 0
         self._channels_first = True
+        self._max_batch = 1
         self.fingerprint = ""
 
     def load(self) -> None:
@@ -294,6 +321,7 @@ class ClOnnxAdapter:
         if len(shape) != 4:
             raise TaggerAdapterError(f"期望 4 维输入，实际 {inputs[0].shape}")
         self._input_name = inputs[0].name
+        self._max_batch = shape[0] or 0
         if shape[1] == 3:  # NCHW
             self._channels_first = True
             self._input_size = shape[2] or shape[3]
@@ -324,9 +352,28 @@ class ClOnnxAdapter:
         prepared = np.stack([cl_prepare(image, self._input_size) for image in images])
         if not self._channels_first:
             prepared = np.ascontiguousarray(prepared.transpose(0, 2, 3, 1))
-        logits = self._session.run(None, {self._input_name: prepared})[0]
-        logits = np.asarray(logits, dtype=np.float32)
+        if self._max_batch:
+            chunks = []
+            for start in range(0, len(prepared), self._max_batch):
+                chunk = prepared[start:start + self._max_batch]
+                size = len(chunk)
+                if size < self._max_batch:
+                    chunk = np.concatenate([chunk, np.repeat(chunk[-1:], self._max_batch - size, axis=0)])
+                result = self._session.run(None, {self._input_name: chunk})[0]
+                chunks.append(np.asarray(result, dtype=np.float32)[:size])
+            logits = np.concatenate(chunks, axis=0)
+        else:
+            logits = np.asarray(self._session.run(None, {self._input_name: prepared})[0], dtype=np.float32)
         return 1.0 / (1.0 + np.exp(-logits))
 
     def close(self) -> None:
         self._session = None
+
+
+# 适配器注册表：新增适配器只需在此登记
+ADAPTERS: dict[str, type[TaggerAdapter]] = {
+    "wd_onnx": WdOnnxAdapter,
+    "timm_canary": TimmCanaryAdapter,
+    "pixai_hf": PixaiHfAdapter,
+    "cl_onnx": ClOnnxAdapter,
+}

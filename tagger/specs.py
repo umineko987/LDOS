@@ -7,6 +7,7 @@ Hugging Face 直链，不做事后哈希校验（用户决定：纯过度防御�
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -30,13 +31,14 @@ class TaggerModelSpec:
     gated: bool = False
 
     def url_for(self, remote_file: RemoteFile) -> str:
-        return f"https://huggingface.co/{self.repo}/resolve/{self.revision}/{remote_file.name}"
+        endpoint = (os.environ.get("HF_ENDPOINT") or "https://huggingface.co").rstrip("/")
+        return f"{endpoint}/{self.repo}/resolve/{self.revision}/{remote_file.name}"
 
 
 # v3 系五个模型共用同一份词表。
 _WD_V3_VOCAB = RemoteFile("selected_tags.csv")
 
-_WD_DEFAULT_THRESHOLDS = {"general": 0.35, "character": 0.85}
+_WD_DEFAULT_THRESHOLDS = {"general": 0.35, "character": 0.85, "rating": 0.0}
 
 
 def _wd_spec(key: str, repo: str, revision: str) -> TaggerModelSpec:
@@ -93,7 +95,7 @@ SPECS: dict[str, TaggerModelSpec] = {
                 RemoteFile("config.json"),
             ),
             # 官方 README 的 P=R 阈值；character 沿用 WD 惯例
-            default_thresholds={"general": 0.6094, "character": 0.85},
+            default_thresholds={"general": 0.6094, "character": 0.85, "rating": 0.0},
             license="apache-2.0",
         ),
         TaggerModelSpec(
@@ -132,6 +134,8 @@ SPECS: dict[str, TaggerModelSpec] = {
             default_thresholds={
                 "general": 0.55,
                 "character": 0.55,
+                "copyright": 0.55,
+                "meta": 0.55,
                 "rating": 0.55,
                 "quality": 0.55,
             },

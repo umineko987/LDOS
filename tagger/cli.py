@@ -115,19 +115,36 @@ def command_tag(args: argparse.Namespace) -> int:
                 ("general", args.general_thr),
                 ("character", args.character_thr),
                 ("rating", args.rating_thr),
+                ("copyright", args.copyright_thr),
+                ("quality", args.quality_thr),
+                ("meta", args.meta_thr),
+                ("style", args.style_thr),
             )
             if value is not None
         },
-        categories=tuple(args.categories.split(",")),
+        categories=tuple(category.strip() for category in args.categories.split(",") if category.strip()),
     )
+    specs = resolve_specs(args.models)
+    model_thresholds: dict[str, dict[str, float]] = {}
+    for model, category, raw_value in args.model_threshold:
+        try:
+            spec = next(spec for spec in specs if spec.key == model)
+            value = float(raw_value)
+            if category not in spec.default_thresholds or not 0.01 <= value <= 0.99:
+                raise ValueError
+        except (StopIteration, ValueError):
+            print(f"无效模型阈值: {model} {category} {raw_value}", file=sys.stderr)
+            return 2
+        model_thresholds.setdefault(model, {})[category] = value
     cache = TaggerCache(Path(args.cache))
     try:
         runner = TaggerRunner(
-            Path(args.model_dir), cache, resolve_specs(args.models),
+            Path(args.model_dir), cache, specs,
             batch_size=args.batch_size,
         )
         stats = runner.run(
             files, policy,
+            model_thresholds=model_thresholds,
             write_captions=not args.no_captions,
             overwrite_captions=args.overwrite,
             on_progress=make_progress_callback(args.progress_json),
@@ -177,13 +194,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     tag = subparsers.add_parser("tag", help="批量打标并导出 caption")
     tag.add_argument("--progress-json", action="store_true", help="输出 JSON 行进度（供后端消费）")
-    tag.add_argument("--models", required=True, help="逗号分隔的模型 key，首个模型写同名 txt")
+    tag.add_argument("--models", required=True, help="逗号分隔的模型 key，按指定顺序合并去重并写入同名 txt")
     tag.add_argument("--inputs", nargs="+", required=True, help="图片文件或目录")
     tag.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
     tag.add_argument("--general-thr", type=float)
     tag.add_argument("--character-thr", type=float)
     tag.add_argument("--rating-thr", type=float)
-    tag.add_argument("--categories", default="general,character")
+    tag.add_argument("--copyright-thr", type=float)
+    tag.add_argument("--quality-thr", type=float)
+    tag.add_argument("--meta-thr", type=float)
+    tag.add_argument("--style-thr", type=float)
+    tag.add_argument("--model-threshold", nargs=3, action="append", default=[], metavar=("MODEL", "CATEGORY", "VALUE"),
+                     help="单独覆盖模型的分类阈值，可重复指定；优先于全局阈值")
+    tag.add_argument("--categories", default="", help="逗号分隔的类别；默认输出模型的全部类别")
     tag.add_argument("--batch-size", type=int, default=8)
     tag.add_argument("--no-captions", action="store_true")
     tag.add_argument("--overwrite", action="store_true")

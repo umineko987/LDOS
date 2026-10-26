@@ -7,8 +7,8 @@
 - 解码预取：推理当前块时预解码下一块，窗口有界避免内存堆积；
 - 改策略只重算筛选层，绝不重新推理。
 
-caption 输出：第一个模型写 image 同名 .txt；其余模型写
-stem.{模型key}.txt，避免多模型互相覆盖。
+caption 输出：按模型选择顺序合并标签，重复标签跳过，新标签追加；
+每张图片只写一个同名 .txt。
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from postprocess import SelectionPolicy, caption_from_tags, select, write_captio
 from preprocess import load_image
 from specs import SPECS, TaggerModelSpec
 
-ProgressCallback = Callable[[str, int, int], None]  # (阶段, 已完成, 总数)
+RunProgressCallback = Callable[[str, int, int], None]  # (阶段, 已完成, 总数)
 
 
 @dataclass(slots=True)
@@ -53,17 +53,11 @@ def file_sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
 
 
 def default_adapter_factory(spec: TaggerModelSpec, model_dir: Path):
-    from adapters import ClOnnxAdapter, PixaiHfAdapter, TimmCanaryAdapter, WdOnnxAdapter
+    from adapters import ADAPTERS
 
-    factories = {
-        "wd_onnx": WdOnnxAdapter,
-        "timm_canary": TimmCanaryAdapter,
-        "pixai_hf": PixaiHfAdapter,
-        "cl_onnx": ClOnnxAdapter,
-    }
-    if spec.adapter not in factories:
+    if spec.adapter not in ADAPTERS:
         raise KeyError(f"未知适配器类型: {spec.adapter}")
-    return factories[spec.adapter](spec, model_dir)
+    return ADAPTERS[spec.adapter](spec, model_dir)
 
 
 class TaggerRunner:
@@ -86,9 +80,11 @@ class TaggerRunner:
         self.batch_size = max(1, batch_size)
         self.decode_workers = max(1, decode_workers)
 
-    def _effective_policy(self, spec: TaggerModelSpec, policy: SelectionPolicy) -> SelectionPolicy:
-        # 策略未显式给出的类别回退到模型推荐阈值；指纹随有效值变化
-        merged = {**spec.default_thresholds, **policy.thresholds}
+    def _effective_policy(
+        self, spec: TaggerModelSpec, policy: SelectionPolicy, overrides: dict[str, float],
+    ) -> SelectionPolicy:
+        # 模型独立设置优先；未覆盖的类别保留 CLI 全局设置或模型默认值。
+        merged = {**spec.default_thresholds, **policy.thresholds, **overrides}
         return replace(policy, thresholds=merged)
 
     def run(
@@ -96,9 +92,10 @@ class TaggerRunner:
         files: Sequence[Path],
         policy: SelectionPolicy,
         *,
+        model_thresholds: dict[str, dict[str, float]] | None = None,
         write_captions: bool = True,
         overwrite_captions: bool = False,
-        on_progress: ProgressCallback | None = None,
+        on_progress: RunProgressCallback | None = None,
     ) -> RunStats:
         paths = [Path(item) for item in files]
         stats = RunStats(total=len(paths))
@@ -119,6 +116,7 @@ class TaggerRunner:
             self._infer_missing(paths, hashes, adapters, stats, on_progress)
             self._select_and_write(
                 paths, hashes, adapters, policy, stats,
+                model_thresholds=model_thresholds or {},
                 write_captions=write_captions,
                 overwrite_captions=overwrite_captions,
                 on_progress=on_progress,
@@ -134,7 +132,7 @@ class TaggerRunner:
         hashes: list[str],
         adapters: list,
         stats: RunStats,
-        on_progress: ProgressCallback | None,
+        on_progress: RunProgressCallback | None,
     ) -> None:
         missing: list[set[str]] = []
         for adapter in adapters:
@@ -167,30 +165,29 @@ class TaggerRunner:
 
             for _ in range(min(window, total)):
                 submit_next()
-            done = 0
             while consumed < total:
-                position = union[consumed]
-                future = futures.pop(position)
-                try:
-                    image = future.result()
-                except Exception:
-                    stats.decode_errors.append(str(paths[position]))
-                    done += 1
+                positions = union[consumed:consumed + self.batch_size]
+                batch = []
+                for position in positions:
+                    future = futures.pop(position)
+                    try:
+                        batch.append((position, future.result()))
+                    except Exception:
+                        stats.decode_errors.append(str(paths[position]))
                     consumed += 1
-                    on_progress and on_progress("inferring", done, total)
                     submit_next()
-                    continue
-                file_hash = hashes[position]
-                for adapter, needed in zip(adapters, missing):
-                    if file_hash not in needed:
-                        continue
-                    scores = adapter.infer_scores([image])[0]
-                    self.cache.put_scores(adapter.fingerprint, [(file_hash, scores)])
-                    stats.per_model[adapter.spec.key].inferred += 1
-                done += 1
-                consumed += 1
-                submit_next()
-                on_progress and on_progress("inferring", done, total)
+                try:
+                    for adapter, needed in zip(adapters, missing):
+                        pending = [(hashes[position], image) for position, image in batch if hashes[position] in needed]
+                        if not pending:
+                            continue
+                        scores = adapter.infer_scores([image for _, image in pending])
+                        self.cache.put_scores(adapter.fingerprint, list(zip((digest for digest, _ in pending), scores, strict=True)))
+                        stats.per_model[adapter.spec.key].inferred += len(pending)
+                finally:
+                    for _, image in batch:
+                        image.close()
+                on_progress and on_progress("inferring", consumed, total)
         for adapter, spec_stats, needed in zip(adapters, stats.per_model.values(), missing):
             spec_stats.score_cache_hits = len(hashes) - len(needed)
 
@@ -202,9 +199,10 @@ class TaggerRunner:
         policy: SelectionPolicy,
         stats: RunStats,
         *,
+        model_thresholds: dict[str, dict[str, float]],
         write_captions: bool,
         overwrite_captions: bool,
-        on_progress: ProgressCallback | None,
+        on_progress: RunProgressCallback | None,
     ) -> None:
         on_progress and on_progress("selecting", 0, len(paths))
         pending: list[tuple[int, str]] = []
@@ -213,8 +211,9 @@ class TaggerRunner:
                 continue
             pending.append((position, file_hash))
         for position, _file_hash in pending:
-            for model_position, adapter in enumerate(adapters):
-                effective = self._effective_policy(adapter.spec, policy)
+            merged_categories: list[dict[str, float]] = []
+            for adapter in adapters:
+                effective = self._effective_policy(adapter.spec, policy, model_thresholds.get(adapter.spec.key, {}))
                 scores = self.cache.get_scores(adapter.fingerprint, hashes[position])
                 if scores is None:
                     continue
@@ -229,21 +228,14 @@ class TaggerRunner:
                         effective.fingerprint,
                         [(hashes[position], categories)],
                     )
-                if write_captions and model_position == 0:
-                    caption = caption_from_tags(categories)
-                    if write_caption_file(paths[position], caption, overwrite=overwrite_captions):
-                        stats.captions_written += 1
-                    else:
-                        stats.captions_skipped += 1
-                elif write_captions:
-                    caption = caption_from_tags(categories)
-                    suffix_path = paths[position].with_name(
-                        f"{paths[position].stem}.{adapter.spec.key}.txt"
-                    )
-                    if write_caption_file(suffix_path, caption, overwrite=overwrite_captions):
-                        stats.captions_written += 1
-                    else:
-                        stats.captions_skipped += 1
+                if write_captions:
+                    merged_categories.extend(categories)
+            if write_captions:
+                caption = caption_from_tags(merged_categories)
+                if write_caption_file(paths[position], caption, overwrite=overwrite_captions):
+                    stats.captions_written += 1
+                else:
+                    stats.captions_skipped += 1
             on_progress and on_progress("selecting", position + 1, len(paths))
 
 

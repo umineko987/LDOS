@@ -1,5 +1,9 @@
 import sys
 import tempfile
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import patch
 import unittest
 from pathlib import Path
 
@@ -96,6 +100,40 @@ class TaggerBundleTests(unittest.TestCase):
         self.assertTrue(installed(spec2, self.model_dir))
         self.assertFalse(list(self.model_dir.glob(".trash-*")))
         self.assertFalse(list(self.model_dir.glob(".staging-*")))
+
+    def test_install_uses_mirror_endpoint_for_actual_downloads(self) -> None:
+        requests: list[str] = []
+        files = {"model.onnx": b"mirror-weights", "selected_tags.csv": b"name,category\ntest,0\n"}
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append(self.path)
+                payload = files[self.path.rsplit("/", 1)[-1]]
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *_args):
+                pass
+
+        spec = TaggerModelSpec(
+            key="mirror-test", repo="test/repo", revision="r1", adapter="wd_onnx",
+            files=(RemoteFile("model.onnx"), RemoteFile("selected_tags.csv")),
+            default_thresholds={"general": 0.35}, license="test",
+        )
+        with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with patch.dict(os.environ, {"HF_ENDPOINT": f"http://127.0.0.1:{server.server_port}/"}):
+                    target = install(spec, self.model_dir)
+            finally:
+                server.shutdown()
+                thread.join()
+        self.assertEqual(requests, ["/test/repo/resolve/r1/model.onnx", "/test/repo/resolve/r1/selected_tags.csv"])
+        self.assertEqual((target / "model.onnx").read_bytes(), b"mirror-weights")
+        self.assertTrue(installed(spec, self.model_dir))
 
     def test_unknown_key_rejected(self) -> None:
         with self.assertRaises(KeyError):

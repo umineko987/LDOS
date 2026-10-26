@@ -25,7 +25,7 @@ MANIFEST_NAME = "manifest.json"
 STAGING_PREFIX = ".staging-"
 TRASH_PREFIX = ".trash-"
 
-ProgressCallback = Callable[[str, int, int], None]  # (文件名, 已下载字节, 总字节)
+DownloadProgressCallback = Callable[[str, int, int], None]  # (文件名, 已下载字节, 总字节)
 
 
 def _private_directory(path: Path) -> None:
@@ -74,7 +74,7 @@ def _download_to(
     url: str,
     destination: Path,
     token: str | None,
-    progress: ProgressCallback | None,
+    progress: DownloadProgressCallback | None,
 ) -> None:
     """下载单个文件到 .part，完成后 rename 到目标名（支持子目录文件）。"""
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -140,7 +140,7 @@ def install(
     model_dir: Path,
     *,
     token: str | None = None,
-    progress: ProgressCallback | None = None,
+    progress: DownloadProgressCallback | None = None,
     force: bool = False,
     accept_license: bool = False,
 ) -> Path:

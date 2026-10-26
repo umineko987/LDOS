@@ -25,12 +25,13 @@ _PLAIN_TAG = re.compile(r"^[a-z0-9_]+$")
 @dataclass(frozen=True, slots=True)
 class SelectionPolicy:
     thresholds: Mapping[str, float]
-    categories: tuple[str, ...] = ("general", "character")
+    categories: tuple[str, ...] = ()
     rating_mode: str = "argmax"  # "argmax" | "threshold"
 
     @property
     def fingerprint(self) -> str:
         digest = hashlib.sha256()
+        digest.update(b"selection:v2")
         digest.update(self.rating_mode.encode())
         for category in sorted(self.thresholds):
             digest.update(f"{category}:{self.thresholds[category]!r}".encode())
@@ -48,16 +49,18 @@ def select(
     if scores.shape != (len(vocabulary),):
         raise ValueError(f"分数形状 {scores.shape} 与词表 {len(vocabulary)} 不一致")
     selected: dict[str, dict[str, float]] = {}
-    for category in policy.categories:
+    categories = policy.categories or tuple(vocabulary.category_index)
+    for category in categories:
         positions = vocabulary.category_index.get(category)
         if positions is None or positions.size == 0:
             continue
         if category == "rating" and policy.rating_mode == "argmax":
             block = scores[positions]
             best = int(np.argmax(block))
-            selected[category] = {
-                vocabulary.names[int(positions[best])]: float(block[best])
-            }
+            if float(block[best]) >= float(policy.thresholds.get("rating", 0.0)):
+                selected[category] = {
+                    vocabulary.names[int(positions[best])]: float(block[best])
+                }
             continue
         threshold = float(policy.thresholds.get(category, 0.5))
         picked: dict[str, float] = {}
@@ -67,7 +70,7 @@ def select(
                 picked[vocabulary.names[position]] = score
         if picked:
             selected[category] = picked
-    return [selected.get(category, {}) for category in policy.categories]
+    return [selected.get(category, {}) for category in categories]
 
 
 def caption_from_tags(
@@ -76,14 +79,17 @@ def caption_from_tags(
     underscore_to_space: bool = True,
     escape_parens: bool = False,
 ) -> str:
-    """按类别顺序拼 caption；仅普通标签做下划线转空格（kaomoji/符号标签原样）。"""
+    """按类别顺序拼 caption，并按最终标签文本去重；普通标签的下划线转空格。"""
     parts: list[str] = []
+    seen: set[str] = set()
     for tags in categories:
         for name in tags:
             tag = name.replace("_", " ") if underscore_to_space and _PLAIN_TAG.match(name) else name
             if escape_parens:
                 tag = tag.replace("(", "\\(").replace(")", "\\)")
-            parts.append(tag)
+            if tag not in seen:
+                seen.add(tag)
+                parts.append(tag)
     return ", ".join(parts)
 
 

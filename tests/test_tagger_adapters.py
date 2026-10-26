@@ -119,6 +119,17 @@ def make_timm_bundle(root: Path, num_classes: int = N_TAGS,
     return install(spec, root / "models"), spec
 
 
+class AdapterRegistryTests(unittest.TestCase):
+    def test_every_registered_model_has_a_concrete_adapter(self) -> None:
+        from specs import SPECS
+        for spec in SPECS.values():
+            with self.subTest(model=spec.key):
+                adapter = adapters.ADAPTERS[spec.adapter](spec, Path("unused-models"))
+                self.assertEqual(adapter.spec, spec)
+                self.assertIsNone(adapter.vocabulary)
+                self.assertEqual(adapter.fingerprint, "")
+
+
 class WdOnnxAdapterTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -168,6 +179,26 @@ class WdOnnxAdapterTests(unittest.TestCase):
         self.assertEqual(scores.shape, (3, N_TAGS))
         session = FakeSession.sessions[-1]
         self.assertEqual(len(session.calls), 3)
+
+    def test_static_batch_pads_partial_tail_and_trims_results(self) -> None:
+        class StaticSession(FakeSession):
+            def __init__(self, path, providers=None):
+                super().__init__(path, providers)
+                self.inputs = [FakeNode("input", [2, 32, 32, 3])]
+
+            def run(self, outputs, feeds):
+                assert feeds["input"].shape[0] == 2
+                return super().run(outputs, feeds)
+
+        adapter = WdOnnxAdapter(self.spec, self.model_dir)
+        with mock.patch("onnxruntime.InferenceSession", StaticSession):
+            adapter.load()
+        images = [Image.new("RGB", (10, 10), (i * 20, 10, 10)) for i in range(3)]
+        scores = adapter.infer_scores(images)
+        self.assertEqual(scores.shape, (3, N_TAGS))
+        self.assertEqual([len(batch) for batch in FakeSession.sessions[-1].calls], [2, 2])
+        single = adapter.infer_scores([images[-1]])
+        np.testing.assert_allclose(scores[-1], single[0])
 
     def test_output_dim_mismatch_rejected(self) -> None:
         adapter = WdOnnxAdapter(self.spec, self.model_dir)
@@ -385,6 +416,28 @@ class ClOnnxAdapterTests(unittest.TestCase):
         self.assertEqual(session.calls[0].shape, (1, 3, 16, 16))  # CHW
         # sigmoid 输出在 (0,1) 且关于 0.5 对称（logit 全同值）
         self.assertTrue(((scores > 0) & (scores < 1)).all())
+
+    def test_fixed_cl_batch_splits_and_pads(self) -> None:
+        _, spec = self._make_spec(gated=False, accept=False)
+
+        class FixedClSession(FakeSession):
+            def __init__(self, path, providers=None):
+                super().__init__(path, providers)
+                self.inputs = [FakeNode("input", [2, 3, 16, 16])]
+                self.outputs = [FakeNode("logits", [2, 3])]
+
+            def run(self, _, feeds):
+                batch = feeds["input"]
+                assert len(batch) == 2
+                self.calls.append(batch)
+                return [np.zeros((2, 3), dtype=np.float32)]
+
+        adapter = ClOnnxAdapter(spec, self.root / "models")
+        with mock.patch("onnxruntime.InferenceSession", FixedClSession):
+            adapter.load()
+        scores = adapter.infer_scores([Image.new("RGB", (8, 8)) for _ in range(3)])
+        self.assertEqual(scores.shape, (3, 3))
+        self.assertEqual([len(batch) for batch in FakeSession.sessions[-1].calls], [2, 2])
 
     def test_output_dim_mismatch_rejected(self) -> None:
         _, spec = self._make_spec(gated=False, accept=False)

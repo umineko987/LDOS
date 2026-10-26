@@ -30,13 +30,13 @@ def approx(result: list[dict[str, float]]) -> list[dict[str, float]]:
 
 class SelectTests(unittest.TestCase):
     def test_threshold_and_order(self) -> None:
-        policy = SelectionPolicy(thresholds={"general": 0.35, "character": 0.85})
+        policy = SelectionPolicy(thresholds={"general": 0.35, "character": 0.85}, categories=("general", "character"))
         result = select(sample_scores(), sample_vocab(), policy)
         self.assertEqual(approx(result), [{"solo": 0.9, "1girl": 0.5}, {"hatsune_miku": 0.9}])
         # 0.34 < 0.35 被截掉，保持词表顺序
 
     def test_threshold_change_keeps_order_and_includes_more(self) -> None:
-        policy = SelectionPolicy(thresholds={"general": 0.3, "character": 0.85})
+        policy = SelectionPolicy(thresholds={"general": 0.3, "character": 0.85}, categories=("general", "character"))
         result = select(sample_scores(), sample_vocab(), policy)
         self.assertEqual(list(result[0]), ["solo", "1girl", "long_hair"])
 
@@ -47,6 +47,18 @@ class SelectTests(unittest.TestCase):
         )
         result = select(sample_scores(), sample_vocab(), policy)
         self.assertEqual(approx(result)[1], {"sensitive": 0.8})
+
+    def test_rating_argmax_respects_threshold(self) -> None:
+        rejected = SelectionPolicy(thresholds={"rating": 0.99}, categories=("rating",))
+        accepted = SelectionPolicy(thresholds={"rating": 0.01}, categories=("rating",))
+        self.assertEqual(select(sample_scores(), sample_vocab(), rejected), [{}])
+        self.assertEqual(approx(select(sample_scores(), sample_vocab(), accepted)), [{"sensitive": 0.8}])
+
+    def test_no_categories_selects_all_vocabulary_categories(self) -> None:
+        categories = ["general", "character", "copyright", "quality", "meta", "style", "rating", "artist"]
+        vocab = Vocabulary([f"tag_{category}" for category in categories], categories)
+        result = select(np.full(len(categories), 0.9, dtype=np.float32), vocab, SelectionPolicy(thresholds={}))
+        self.assertEqual([list(tags) for tags in result], [[f"tag_{category}"] for category in categories])
 
     def test_rating_threshold_mode(self) -> None:
         policy = SelectionPolicy(
@@ -75,6 +87,23 @@ class CaptionTests(unittest.TestCase):
         categories = [{"long_hair": 0.9, "^_^": 0.8, "hatsune_miku": 0.7, "group(c)": 0.6}]
         caption = caption_from_tags(categories)
         self.assertEqual(caption, "long hair, ^_^, hatsune miku, group(c)")
+
+    def test_duplicate_tags_keep_first_position_after_formatting(self) -> None:
+        categories = [
+            {"solo": 0.8, "long_hair": 0.9, "^_^": 0.7},
+            {"hero": 0.9},
+            {"long hair": 0.95, "solo": 0.99, "smile": 0.8, "^_^": 0.9},
+            {"hero": 0.95, "new_character": 0.9},
+        ]
+        self.assertEqual(caption_from_tags(categories), "solo, long hair, ^_^, hero, smile, new character")
+        self.assertEqual(
+            caption_from_tags(categories, underscore_to_space=False),
+            "solo, long_hair, ^_^, hero, long hair, smile, new_character",
+        )
+
+    def test_deduplication_preserves_symbol_tags_with_commas(self) -> None:
+        categories = [{"0,0": 0.8, "group(c)": 0.8}, {"0,0": 0.9, "group(c)": 0.9, "smile": 0.8}]
+        self.assertEqual(caption_from_tags(categories, escape_parens=True), "0,0, group\\(c\\), smile")
 
     def test_escape_parens(self) -> None:
         caption = caption_from_tags([{"group(c)": 0.6}], escape_parens=True)
