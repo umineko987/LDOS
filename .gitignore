@@ -85,3 +85,6 @@ Desktop.ini
 # Tagger local models and result cache
 tagger/.models/
 tagger/tags.sqlite3*
+
+# Local Hugging Face access token for gated model downloads
+/hf_at.txt
