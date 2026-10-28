@@ -826,6 +826,19 @@ class GalleryDirectoryExportService:
                 self._cancel_events[operation_id].set()
             return self._project(operation)
 
+    def has_active_operations(self) -> bool:
+        """只读内存状态；活动中心采样器用它判断是否需要采样。"""
+
+        with self._lock:
+            return any(
+                operation["state"] == "copying"
+                for operation in self._operations.values()
+            )
+
+    def list_operations(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [self._project(operation) for operation in self._operations.values()]
+
     def stop(self) -> None:
         with self._lock:
             self._stopping = True
