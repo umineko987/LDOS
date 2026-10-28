@@ -1,3 +1,4 @@
+import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import adapter from "@sveltejs/adapter-static";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
@@ -11,6 +12,8 @@ export default defineConfig({
   clearScreen: false,
   build: { assetsInlineLimit: 0 },
   plugins: [
+    // 编译选项在 project.inlang/paraglide.config.ts。
+    paraglideVitePlugin({ project: "./project.inlang" }),
     tailwindcss(),
     sveltekit({
       // Tauri 从 dist/ 加载；hash 路由下 SvelteKit 只产出一个 index.html，路由全部走 location.hash。

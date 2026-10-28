@@ -1,17 +1,15 @@
 /*
- * LDOS design tokens: the single source for colour, type, density and motion.
+ * LDOS 设计令牌：颜色、字号、密度、动效的唯一来源。
  *
- * Gold is reserved. It appears in exactly four places: the selected-item dot,
- * the focus ring, the primary action and an active slider. A selected cell is
- * filled with --gold-12. Anything else that wants emphasis uses --fg.
+ * 金色是保留色，只出现在四处：选中项的圆点、焦点环、主操作按钮、拖动中的滑块。
+ * 选中的格子用 --gold-12 填充。其余需要强调的地方一律用 --fg。
  *
- * WebKitGTK budget: no blur, gradients or backdrop-filter, and animate only
- * transform and opacity.
+ * WebKitGTK 预算：不用模糊、渐变、backdrop-filter；动画只动 transform 和 opacity。
  */
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* The workbench is dark only. */
+/* 工作台只有深色主题。 */
 @custom-variant dark (&:where(:root, :root *));
 
 :root {
@@ -55,7 +53,7 @@
   --radius: 6px;
   --shadow-overlay: 0 18px 48px rgb(0 0 0 / 0.55), 0 0 0 1px var(--line2);
 
-  /* shadcn-svelte semantic names, mapped onto the palette above. */
+  /* shadcn-svelte 的语义变量，映射到上面的调色板。 */
   --background: var(--bg0);
   --foreground: var(--fg);
   --card: var(--bg1);
@@ -219,7 +217,7 @@
   }
 }
 
-/* Reduced motion zeroes everything, including tw-animate-css enter/exit. */
+/* 减少动效时全部归零，包括 tw-animate-css 的进出场动画。 */
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,

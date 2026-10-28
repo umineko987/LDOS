@@ -1,0 +1,8 @@
+{
+  "$schema": "https://inlang.com/schema/inlang-message-format",
+  "app_name": "LDOS",
+  "app_tagline": "数据集工作台",
+  "locale_en": "EN",
+  "locale_switch": "界面语言",
+  "locale_zh_cn": "中"
+}

@@ -9,7 +9,7 @@
 	let { ...restProps }: SonnerProps = $props();
 </script>
 
-<!-- The workbench is dark only, so the theme is fixed instead of following mode-watcher. -->
+<!-- 工作台只有深色主题，主题固定，不依赖 mode-watcher。 -->
 <Sonner
 	theme="dark"
 	position="bottom-right"
