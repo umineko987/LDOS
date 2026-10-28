@@ -8,6 +8,7 @@ Pillow 有界探测，失败进入固定 error_code，不外泄原始异常文�
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -36,6 +37,8 @@ from .gallery_safe_paths import (
     SafeSourceRoot,
     UnsafeSourcePathError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class GallerySourceNotFound(Exception):
@@ -213,6 +216,8 @@ class GalleryCatalogService:
         self._review_status_lookup: Callable[[str], str | None] | None = None
         # 活动中心 JobRegistry（由容器注入）；扫描开始/结束直接发事件。
         self._jobs: Any | None = None
+        # 扫描提交后的监听者（数据集用它给成员补哈希）；异常只记日志。
+        self._scan_listeners: list[Callable[[str], None]] = []
 
     def set_review_status_lookup(
         self, lookup: Callable[[str], str | None]
@@ -221,6 +226,16 @@ class GalleryCatalogService:
 
     def set_job_registry(self, jobs: Any) -> None:
         self._jobs = jobs
+
+    def add_scan_listener(self, listener: Callable[[str], None]) -> None:
+        self._scan_listeners.append(listener)
+
+    def _notify_scan_committed(self, source_id: str) -> None:
+        for listener in list(self._scan_listeners):
+            try:
+                listener(source_id)
+            except Exception:
+                logger.exception("gallery scan listener failed; source_id=%s", source_id)
 
     def _review_status(self, source: dict[str, Any]) -> str | None:
         batch_id = source.get("batch_id")
@@ -923,6 +938,7 @@ class GalleryCatalogService:
                 return self.scan_source(
                     source_id, _snapshot_retries=_snapshot_retries - 1
                 )
+            self._notify_scan_committed(source_id)
             return {
                 "asset_count": commit["asset_count"],
                 "candidate_count": commit["candidate_count"],

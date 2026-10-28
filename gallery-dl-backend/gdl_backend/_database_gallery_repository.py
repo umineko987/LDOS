@@ -876,6 +876,13 @@ class GalleryRepository:
                         name=excluded.name,
                         extension=excluded.extension,
                         sort_key=excluded.sort_key,
+                        -- SET 右侧读的是更新前的行：文件大小、修改时间变了，
+                        -- 或者这条记录刚从 missing 回来，旧哈希就不再可信。
+                        content_sha256=CASE
+                            WHEN gallery_assets.size_bytes!=excluded.size_bytes
+                              OR gallery_assets.modified_ns!=excluded.modified_ns
+                              OR gallery_assets.lifecycle_state!='active'
+                            THEN '' ELSE gallery_assets.content_sha256 END,
                         size_bytes=excluded.size_bytes,
                         modified_ns=excluded.modified_ns,
                         format=excluded.format,
@@ -1508,6 +1515,31 @@ class GalleryRepository:
                 "SELECT * FROM gallery_assets WHERE id=?", (asset_id,)
             ).fetchone()
         return self._project_asset_row(updated)
+
+    def set_content_sha256(
+        self,
+        asset_id: str,
+        content_sha256: str,
+        *,
+        size_bytes: int,
+        modified_ns: int,
+    ) -> bool:
+        """条件写入文件哈希：只有索引里的大小和修改时间仍是哈希时读到的值才写。
+
+        扫描在两次读取之间更新了这行（文件已变化）时返回 False，不写入。
+        """
+        if len(content_sha256) != 64:
+            raise ValueError("invalid_content_sha256")
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE gallery_assets SET content_sha256=?
+                WHERE id=? AND size_bytes=? AND modified_ns=?
+                  AND lifecycle_state='active' AND content_sha256=''
+                """,
+                (content_sha256, asset_id, int(size_bytes), int(modified_ns)),
+            )
+            return cursor.rowcount == 1
 
     def get_assets_by_ids(self, asset_ids: Iterable[str]) -> list[dict[str, Any]]:
         ids = list(dict.fromkeys(asset_ids))
