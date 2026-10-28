@@ -119,6 +119,7 @@ class PublicDedupConfig(BaseModel):
     python_executable: str
     worker_script: str
     core_script: str
+    atlas_script: str
     model_dir: str
     device: str
     workers: int

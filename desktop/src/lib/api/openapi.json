@@ -5461,6 +5461,10 @@
       },
       "PublicDedupConfig": {
         "properties": {
+          "atlas_script": {
+            "title": "Atlas Script",
+            "type": "string"
+          },
           "core_script": {
             "title": "Core Script",
             "type": "string"
@@ -5519,6 +5523,7 @@
           "python_executable",
           "worker_script",
           "core_script",
+          "atlas_script",
           "model_dir",
           "device",
           "workers",
