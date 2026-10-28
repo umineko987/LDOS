@@ -233,6 +233,7 @@ def _desktop_distribution_data(data: dict[str, Any]) -> dict[str, Any]:
             "python_executable": str(python),
             "worker_script": str(resource_root / "app" / "dedup_review_worker.py"),
             "core_script": str(resource_root / "app" / "dedup_core.py"),
+            "atlas_script": str(resource_root / "app" / "atlas_worker.py"),
             "model_dir": str(data_root / "models"),
         }
     )
@@ -396,6 +397,7 @@ class DedupSettings:
     python_executable: Path = field(default_factory=_default_dedup_python)
     worker_script: Path = field(default_factory=lambda: (WORKSPACE_DIR / "dedup" / "dedup_review_worker.py").resolve())
     core_script: Path = field(default_factory=lambda: (WORKSPACE_DIR / "dedup" / "dedup_core.py").resolve())
+    atlas_script: Path = field(default_factory=lambda: (WORKSPACE_DIR / "dedup" / "atlas_worker.py").resolve())
     model_dir: Path = field(default_factory=lambda: (WORKSPACE_DIR / ".models").resolve())
     device: str = "auto"
     # 0 表示由 worker 根据设备和 CPU 数量选择；显式正整数始终覆盖 profile。
@@ -594,6 +596,11 @@ class AppSettings:
                 dedup_data.get("core_script"),
                 base,
                 WORKSPACE_DIR / "dedup" / "dedup_core.py",
+            ),
+            atlas_script=_path(
+                dedup_data.get("atlas_script"),
+                base,
+                WORKSPACE_DIR / "dedup" / "atlas_worker.py",
             ),
             model_dir=_managed_path(
                 dedup_data.get("model_dir"),
@@ -914,6 +921,7 @@ class AppSettings:
                 "python_executable": str(self.dedup.python_executable),
                 "worker_script": str(self.dedup.worker_script),
                 "core_script": str(self.dedup.core_script),
+                "atlas_script": str(self.dedup.atlas_script),
                 "model_dir": str(self.dedup.model_dir),
                 "device": self.dedup.device,
                 "workers": self.dedup.workers,

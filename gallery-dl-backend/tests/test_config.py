@@ -9,7 +9,7 @@ from io import StringIO
 from unittest.mock import patch
 from pathlib import Path
 
-from gdl_backend.config import AppSettings, normalize_authorization_proxy
+from gdl_backend.config import WORKSPACE_DIR, AppSettings, normalize_authorization_proxy
 from gdl_backend.encrypted_dns import (
     DEFAULT_DOH_ENDPOINT,
     DEFAULT_DOH_MAX_RESPONSE_BYTES,
@@ -437,6 +437,27 @@ class DedupResourceConfigTests(unittest.TestCase):
         self.assertEqual(public["torch_threads"], 2)
         self.assertEqual(public["neighbor_block_size"], 96)
 
+    def test_atlas_script_defaults_to_workspace_worker_and_accepts_relative_override(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config_path = root / "config.json"
+            base = {
+                "runtime_dir": "runtime",
+                "database_path": "runtime/backend.sqlite3",
+                "default_output_root": "runtime/downloads",
+            }
+            config_path.write_text(json.dumps({**base, "dedup": {"enabled": False}}), encoding="utf-8")
+            default = AppSettings.load(config_path)
+            config_path.write_text(
+                json.dumps({**base, "dedup": {"enabled": False, "atlas_script": "tools/atlas.py"}}),
+                encoding="utf-8",
+            )
+            custom = AppSettings.load(config_path)
+
+            self.assertEqual(default.dedup.atlas_script, (WORKSPACE_DIR / "dedup" / "atlas_worker.py").resolve())
+            self.assertEqual(custom.dedup.atlas_script, (root / "tools" / "atlas.py").resolve())
+            self.assertEqual(custom.public_dict()["dedup"]["atlas_script"], str(custom.dedup.atlas_script))
+
     @unittest.skipIf(os.name == "nt", "POSIX 符号链接权限验证")
     def test_managed_runtime_symlink_is_rejected_without_touching_target(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -682,6 +703,10 @@ class DesktopDistributionConfigTests(unittest.TestCase):
             self.assertEqual(
                 settings.dedup.worker_script,
                 (resource_root / "app" / "dedup_review_worker.py").resolve(),
+            )
+            self.assertEqual(
+                settings.dedup.atlas_script,
+                (resource_root / "app" / "atlas_worker.py").resolve(),
             )
             self.assertEqual(
                 settings.allowed_cookie_roots,
