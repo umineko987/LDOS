@@ -2124,6 +2124,127 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "JobListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JobResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "last_event_id": {
+            "description": "打开 /api/v1/events 时作为 last_event_id 传入，可无缝衔接",
+            "title": "Last Event Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "last_event_id"
+        ],
+        "title": "JobListResponse",
+        "type": "object"
+      },
+      "JobResponse": {
+        "properties": {
+          "current": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "tagger.prepare | tagger.tag | gallery.scan | crawl.batch | dedup.review | gallery.export | models.install | …",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ref": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "关联对象 id，例如 dataset_id、batch_id、source_id",
+            "title": "Ref",
+            "type": "object"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "number"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "status",
+          "message",
+          "ref",
+          "started_at",
+          "updated_at"
+        ],
+        "title": "JobResponse",
+        "type": "object"
+      },
       "ModelInstallRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5007,6 +5128,89 @@
         "summary": "List Crawl Tasks"
       }
     },
+    "/api/v1/events": {
+      "get": {
+        "description": "SSE 事件流。事件类型：hello（新连接）与 resync（游标无法补齐，客户端须全量重新拉取），data 均为 {last_event_id, reason}；job.updated 的 data 为 {job: JobResponse}，以及各领域服务发布的 `<领域>.<动作>` 事件。断线重连时浏览器自动带 Last-Event-ID；首次连接可用 last_event_id 查询参数衔接 GET /api/v1/jobs 返回的游标。",
+        "operationId": "stream_events_api_v1_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "last_event_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last Event Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "properties": {
+                    "data": {
+                      "type": "string"
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Events",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
     "/api/v1/gallery/assets/{asset_id}": {
       "get": {
         "operationId": "get_gallery_asset_api_v1_gallery_assets__asset_id__get",
@@ -7100,6 +7304,27 @@
           }
         },
         "summary": "Restore Trash"
+      }
+    },
+    "/api/v1/jobs": {
+      "get": {
+        "operationId": "list_jobs_api_v1_jobs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Jobs",
+        "tags": [
+          "jobs"
+        ]
       }
     },
     "/api/v1/proxy/probe": {

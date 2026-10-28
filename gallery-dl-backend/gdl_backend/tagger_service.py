@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .config import AppSettings
 from .redaction import redact_text
+
+if TYPE_CHECKING:
+    from .events import JobRegistry
 
 
 @dataclass(slots=True)
@@ -30,12 +34,30 @@ class TaggerTaskState:
 
 
 class TaggerService:
-    def __init__(self, settings: AppSettings):
+    def __init__(self, settings: AppSettings, *, jobs: JobRegistry | None = None):
         self._settings = settings
         self._lock = asyncio.Lock()
         self._process: asyncio.subprocess.Process | None = None
         self._task: asyncio.Task[None] | None = None
         self.state = TaggerTaskState()
+        # 活动中心：每次 prepare/tag 登记一个 Job，进度随 CLI 事件推送。
+        self._jobs = jobs
+        self._job_id: str | None = None
+        self._cancelling = False
+
+    def _job_start(self, kind: str, title: str, *, total: int | None, ref: Mapping[str, Any]) -> None:
+        self._job_id = None
+        if self._jobs is not None:
+            self._job_id = self._jobs.start(kind, title, total=total, ref=ref)["id"]
+
+    def _job_update(self, **changes: Any) -> None:
+        if self._jobs is not None and self._job_id is not None:
+            self._jobs.update(self._job_id, **changes)
+
+    def _job_finish(self, status: str, message: str = "") -> None:
+        if self._jobs is not None and self._job_id is not None:
+            self._jobs.finish(self._job_id, status, message=message)  # type: ignore[arg-type]
+        self._job_id = None
 
     # ---- 状态查询 ----
 
@@ -107,6 +129,7 @@ class TaggerService:
         except Exception as error:
             self.state.phase = "failed"
             self.state.message = str(error)
+            self._job_finish("failed", redact_text(error)[-500:])
             raise
         self._process = process
         self._task = asyncio.create_task(self._drain("idle"))
@@ -156,26 +179,37 @@ class TaggerService:
             self.state.message = redact_text(error)[-500:]
         finally:
             self._process = None
+            if self.state.phase == "failed":
+                self._job_finish("cancelled" if self._cancelling else "failed", "" if self._cancelling else self.state.message)
+            else:
+                self._job_finish("succeeded")
 
     def _apply_event(self, event: dict[str, Any]) -> None:
         kind = event.get("type")
         if kind == "install_start":
             self.state.message = f"下载 {event.get('model')}"
+            self._job_update(message=self.state.message)
         elif kind == "download":
             model = str(event.get("model") or "")
             entry = {"file": event.get("file"), "done": event.get("done", 0), "total": event.get("total", 0)}
             downloads = dict(self.state.download)
             downloads[model] = entry
             self.state.download = downloads
+            self._job_update(
+                current=entry["done"], total=entry["total"] or None,
+                message=f"{model} · {entry['file'] or ''}".rstrip(" ·"),
+            )
         elif kind == "installed":
             downloads = dict(self.state.download)
             downloads.pop(str(event.get("model") or ""), None)
             self.state.download = downloads
             self.state.message = f"{event.get('model')} 就绪"
+            self._job_update(message=self.state.message)
         elif kind == "progress":
             self.state.stage = str(event.get("stage") or "")
             self.state.done = int(event.get("done") or 0)
             self.state.total = int(event.get("total") or 0)
+            self._job_update(current=self.state.done, total=self.state.total or None, message=self.state.stage)
         elif kind == "done":
             self.state.last_result = dict(event)
             self.state.stage = ""
@@ -186,11 +220,16 @@ class TaggerService:
     async def prepare(
         self, models: list[str], token: str | None = None, *, accept_license: bool = False,
         proxy_url: str | None = None, download_proxy: str | None = None,
+        job_ref: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         async with self._lock:
             if self._process is not None:
                 raise RuntimeError("已有打标任务在运行")
             self.state = TaggerTaskState(phase="preparing", message="准备下载")
+            self._job_start(
+                "tagger.prepare", "下载打标模型", total=None,
+                ref={"models": ",".join(models), **(job_ref or {})},
+            )
             args = ["prepare", "--progress-json", "--models", ",".join(models)]
             if token:
                 args += ["--token-file", "-"]
@@ -216,11 +255,16 @@ class TaggerService:
         write_captions: bool = True,
         overwrite_captions: bool = False,
         batch_size: int = 8,
+        job_ref: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         async with self._lock:
             if self._process is not None:
                 raise RuntimeError("已有打标任务在运行")
             self.state = TaggerTaskState(phase="tagging", message="")
+            self._job_start(
+                "tagger.tag", f"打标 {len(inputs)} 张", total=len(inputs),
+                ref={"models": ",".join(models), **(job_ref or {})},
+            )
             args = [
                 "tag", "--progress-json",
                 "--models", ",".join(models),
@@ -245,19 +289,23 @@ class TaggerService:
             process = self._process
             if process is None:
                 return {"phase": self.state.phase, "message": "没有运行中的任务"}
+            self._cancelling = True
             try:
                 process.terminate()
             except ProcessLookupError:
                 pass
-            if self._task:
-                try:
-                    await asyncio.wait_for(asyncio.shield(self._task), timeout=self._settings.tagger.shutdown_grace_seconds)
-                except asyncio.TimeoutError:
+            try:
+                if self._task:
                     try:
-                        process.kill()
-                    except ProcessLookupError:
-                        pass
-                    await self._task
+                        await asyncio.wait_for(asyncio.shield(self._task), timeout=self._settings.tagger.shutdown_grace_seconds)
+                    except asyncio.TimeoutError:
+                        try:
+                            process.kill()
+                        except ProcessLookupError:
+                            pass
+                        await self._task
+            finally:
+                self._cancelling = False
             self.state.phase = "failed"
             self.state.message = "已取消"
             return {"phase": self.state.phase}

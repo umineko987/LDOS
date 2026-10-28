@@ -211,11 +211,16 @@ class GalleryCatalogService:
         self._scan_threads: dict[str, threading.Thread] = {}
         # 审核状态查询回调（由容器注入，避免服务层直接依赖审核仓储）。
         self._review_status_lookup: Callable[[str], str | None] | None = None
+        # 活动中心 JobRegistry（由容器注入）；扫描开始/结束直接发事件。
+        self._jobs: Any | None = None
 
     def set_review_status_lookup(
         self, lookup: Callable[[str], str | None]
     ) -> None:
         self._review_status_lookup = lookup
+
+    def set_job_registry(self, jobs: Any) -> None:
+        self._jobs = jobs
 
     def _review_status(self, source: dict[str, Any]) -> str | None:
         batch_id = source.get("batch_id")
@@ -742,6 +747,13 @@ class GalleryCatalogService:
                 daemon=True,
             )
             self._scan_threads[source_id] = thread
+            if self._jobs is not None:
+                self._jobs.start(
+                    "gallery.scan",
+                    f"扫描 {source.get('display_name') or source_id[:8]}",
+                    job_id=f"scan:{source_id}",
+                    ref={"source_id": source_id, "operation_id": operation_id},
+                )
             thread.start()
         return self.get_scan(source_id)
 
@@ -806,6 +818,19 @@ class GalleryCatalogService:
                     job["error_code"] = "scan_interrupted"
                 if self._scan_threads.get(source_id) is threading.current_thread():
                     self._scan_threads.pop(source_id, None)
+                finished = dict(job) if job is not None and job["operation_id"] == operation_id else None
+            if self._jobs is not None and finished is not None:
+                stats = finished.get("stats") or {}
+                if finished["state"] == "succeeded":
+                    self._jobs.finish(
+                        f"scan:{source_id}", "succeeded",
+                        message=(
+                            "来源离线" if stats.get("offline")
+                            else f"{int(stats.get('asset_count') or 0)} 张图片"
+                        ),
+                    )
+                else:
+                    self._jobs.finish(f"scan:{source_id}", "failed", message=finished["error_code"])
 
     def scan_source(
         self, source_id: str, *, _snapshot_retries: int = 1

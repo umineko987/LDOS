@@ -25,6 +25,7 @@ from .api_routes import (
     create_diagnostics_router,
     create_discovery_router,
     create_gallery_router,
+    create_jobs_router,
     create_ordered_task_enqueuer,
     create_policies_router,
     create_proxy_router,
@@ -51,7 +52,9 @@ from .crawl import CrawlPlanner
 from .database import Database
 from .discovery import DiscoveryService
 from .encrypted_dns import EncryptedDNSResolver, NetworkTargetValidator
+from .events import EventBus, JobRegistry
 from .gallery import GalleryRunner
+from .job_sampler import JobSampler, default_job_sources
 from .log_writer import TaskLogWriter
 from .model_setup import ModelSetupManager
 from .tagger_service import TaggerService
@@ -79,6 +82,9 @@ class ServiceContainer:
         if os.name != "nt":
             os.umask(0o077)
         self.settings = settings
+        # 活动中心：事件总线与统一 Job 表，供各服务发布进度。
+        self.events = EventBus()
+        self.jobs = JobRegistry(self.events)
         self.runtime_config = RuntimeConfigStore(settings.config_path)
         self.db = Database(
             settings.database_path,
@@ -110,6 +116,7 @@ class ServiceContainer:
         )
         # 批次终态 → 图库来源自动注册（无冲突时）；异常绝不阻断爬取收尾。
         self.db.gallery_batch_registrar = self._register_gallery_batch_source
+        self.gallery_catalog.set_job_registry(self.jobs)
         # 图库来源投影需要审核状态来推导有效去重状态（§3.8）。
         self.gallery_catalog.set_review_status_lookup(
             lambda batch_id: (
@@ -171,7 +178,8 @@ class ServiceContainer:
         self.model_setup = ModelSetupManager(
             settings, self.runtime_config, self.reviews.start
         )
-        self.tagger = TaggerService(settings)
+        self.tagger = TaggerService(settings, jobs=self.jobs)
+        self.job_sampler = JobSampler(self.events, self.jobs, default_job_sources(self))
         self._health_task: asyncio.Task | None = None
         self._started = False
         self._stopping = False
@@ -272,6 +280,7 @@ class ServiceContainer:
             return
         self._started = True
         self._stopping = False
+        self.events.reopen()
         if self.settings.proxy.enabled and self.settings.proxy.auto_start:
             try:
                 await asyncio.to_thread(self.proxy.start, force_refresh=True)
@@ -308,9 +317,13 @@ class ServiceContainer:
                 self.gallery_catalog.retry_pending_review_reconciliations
             )
             self._health_task = asyncio.create_task(self._proxy_health_loop(), name="proxy-health-monitor")
+            self.job_sampler.start()
 
     async def stop(self) -> None:
         self._stopping = True
+        # 先结束 SSE 流，再停各服务；采样器随后停止。
+        self.events.close()
+        await self.job_sampler.stop()
         if self._health_task is not None:
             self._health_task.cancel()
             await asyncio.gather(self._health_task, return_exceptions=True)
@@ -614,5 +627,6 @@ def create_app(
     app.include_router(create_gallery_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
+    app.include_router(create_jobs_router())
 
     return app

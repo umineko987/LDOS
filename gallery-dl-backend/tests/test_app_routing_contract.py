@@ -38,6 +38,8 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("GET", "/api/v1/auth/browser"): ("auth_browser_runtime_api_v1_auth_browser_get", ("200", "422")),
     ("PUT", "/api/v1/auth/browser"): ("auth_select_browser_api_v1_auth_browser_put", ("200", "422")),
     ("DELETE", "/api/v1/auth/browser"): ("auth_clear_browser_api_v1_auth_browser_delete", ("200", "422")),
+    ("GET", "/api/v1/jobs"): ("list_jobs_api_v1_jobs_get", ("200",)),
+    ("GET", "/api/v1/events"): ("stream_events_api_v1_events_get", ("200", "422")),
     ("GET", "/api/v1/tagger/models"): ("models_api_v1_tagger_models_get", ("200",)),
     ("GET", "/api/v1/tagger/status"): ("status_endpoint_api_v1_tagger_status_get", ("200",)),
     ("POST", "/api/v1/tagger/models/prepare"): ("prepare_api_v1_tagger_models_prepare_post", ("202", "422")),
@@ -233,6 +235,7 @@ class AppRoutingContractTests(unittest.TestCase):
             "policies": "gdl_backend.api_routes.policies",
             "proxy": "gdl_backend.api_routes.proxy",
             "scheduler": "gdl_backend.api_routes.scheduler",
+            "jobs": "gdl_backend.api_routes.jobs",
         }
 
         for key, route in routes.items():
@@ -265,6 +268,8 @@ class AppRoutingContractTests(unittest.TestCase):
                 domain = "proxy"
             elif path.startswith("/api/v1/scheduler"):
                 domain = "scheduler"
+            elif path in {"/api/v1/jobs", "/api/v1/events"}:
+                domain = "jobs"
             else:
                 self.fail(f"unowned route: {key}")
             self.assertEqual(route.endpoint.__module__, expected_modules[domain], key)

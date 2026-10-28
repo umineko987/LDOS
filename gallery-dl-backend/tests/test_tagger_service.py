@@ -10,6 +10,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
+from gdl_backend.events import EventBus, JobRegistry
 from gdl_backend.tagger_service import TaggerService
 from tests.helpers import make_settings
 
@@ -208,3 +209,78 @@ time.sleep(30)
         await self.service.tag(["wd-vit-v3"], ["/second"])
         await self.finish()
         self.assertEqual(self.service.state.phase, "idle")
+
+
+class TaggerJobReportingTests(unittest.IsolatedAsyncioTestCase):
+    """每次 prepare/tag 登记为活动中心 Job，进度与终态随 CLI 事件推送。"""
+
+    setUp = TaggerServiceTests.setUp
+    asyncTearDown = TaggerServiceTests.asyncTearDown
+    script = TaggerServiceTests.script
+    finish = TaggerServiceTests.finish
+
+    async def asyncSetUp(self) -> None:
+        self.bus = EventBus(epoch="e1")
+        self.jobs = JobRegistry(self.bus, min_publish_interval=0.0)
+        self.service = TaggerService(self.settings, jobs=self.jobs)
+
+    def only_job(self) -> dict:
+        items = self.jobs.list()
+        self.assertEqual(len(items), 1)
+        return items[0]
+
+    async def test_tag_progress_reaches_job_and_finishes_succeeded(self) -> None:
+        self.script("""
+import json
+for done in (1, 2):
+    print(json.dumps({'type': 'progress', 'stage': 'inferring', 'done': done, 'total': 2}), flush=True)
+print(json.dumps({'type': 'done'}), flush=True)
+""")
+        await self.service.tag(["wd-vit-v3", "pixai-tagger-v1"], ["/a", "/b"], job_ref={"dataset_id": "ds1"})
+        await self.finish()
+        job = self.only_job()
+        self.assertEqual(
+            (job["kind"], job["title"], job["status"], job["current"], job["total"]),
+            ("tagger.tag", "打标 2 张", "succeeded", 2, 2),
+        )
+        self.assertEqual(job["ref"], {"models": "wd-vit-v3,pixai-tagger-v1", "dataset_id": "ds1"})
+        events, _ = self.bus.events_after(0)
+        progress = [event.data["job"]["current"] for event in events if event.data["job"]["status"] == "running"]
+        self.assertEqual(progress, [None, 1, 2])
+
+    async def test_prepare_failure_finishes_job_failed_with_stderr_tail(self) -> None:
+        self.script("""
+import json, sys
+print(json.dumps({'type': 'download', 'model': 'wd-vit-v3', 'file': 'model.onnx', 'done': 5, 'total': 10}), flush=True)
+sys.stderr.write('network down\\n')
+raise SystemExit(3)
+""")
+        await self.service.prepare(["wd-vit-v3"])
+        await self.finish()
+        job = self.only_job()
+        self.assertEqual((job["kind"], job["status"]), ("tagger.prepare", "failed"))
+        self.assertEqual((job["current"], job["total"]), (5, 10))
+        self.assertIn("network down", job["message"])
+
+    async def test_cancel_finishes_job_cancelled(self) -> None:
+        self.script("""
+import json, time
+print(json.dumps({'type': 'progress', 'stage': 'inferring', 'done': 0, 'total': 1}), flush=True)
+time.sleep(30)
+""")
+        await self.service.tag(["wd-vit-v3"], ["/a"])
+        async with asyncio.timeout(5):
+            while self.service.state.stage != "inferring":
+                await asyncio.sleep(0.01)
+        await self.service.cancel()
+        job = self.only_job()
+        self.assertEqual((job["status"], job["message"]), ("cancelled", ""))
+        self.assertIsNotNone(job["finished_at"])
+
+    async def test_spawn_failure_finishes_job_failed(self) -> None:
+        with self.assertRaises(FileNotFoundError):
+            await self.service.tag(["wd-vit-v3"], ["/a"])
+        job = self.only_job()
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("tagger CLI 不存在", job["message"])
+        self.assertFalse(self.jobs.has_active())

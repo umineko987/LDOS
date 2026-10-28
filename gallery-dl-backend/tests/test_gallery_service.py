@@ -18,6 +18,7 @@ from gdl_backend._database_gallery_repository import (
     GallerySourceConflictError,
 )
 from gdl_backend.database import Database
+from gdl_backend.events import EventBus, JobRegistry
 from gdl_backend.gallery_service import (
     GalleryCatalogService,
     GalleryFilesystemLocks,
@@ -289,6 +290,49 @@ class GalleryScanTest(GalleryServiceTestBase):
     def test_async_scan_missing_source(self) -> None:
         with self.assertRaises(GallerySourceNotFound):
             self.service.start_scan("missing-source")
+
+    def _wait_scan(self, source_id: str) -> dict:
+        for _ in range(200):
+            state = self.service.get_scan(source_id)
+            if state["state"] != "running":
+                return state
+            time.sleep(0.02)
+        self.fail("scan did not finish")
+
+    def test_async_scan_reports_job_lifecycle(self) -> None:
+        bus = EventBus(epoch="e1")
+        jobs = JobRegistry(bus, min_publish_interval=0.0)
+        self.service.set_job_registry(jobs)
+        source = self.make_source({"a.jpg": _png_bytes(), "b.jpg": _png_bytes()})
+        record = self.service.start_scan(source["source_id"])
+        self._wait_scan(source["source_id"])
+        self.service.stop()
+        job = jobs.get(f"scan:{source['source_id']}")
+        self.assertEqual(
+            (job["kind"], job["status"], job["title"], job["message"]),
+            ("gallery.scan", "succeeded", "扫描 图库A", "2 张图片"),
+        )
+        self.assertEqual(
+            job["ref"],
+            {"source_id": source["source_id"], "operation_id": record["operation_id"]},
+        )
+        events, complete = bus.events_after(0)
+        self.assertTrue(complete)
+        self.assertEqual(
+            [event.data["job"]["status"] for event in events],
+            ["running", "succeeded"],
+        )
+
+    def test_async_scan_failure_finishes_job_with_error_code(self) -> None:
+        jobs = JobRegistry(EventBus(epoch="e1"), min_publish_interval=0.0)
+        self.service.set_job_registry(jobs)
+        source = self.make_source({"a.jpg": _png_bytes()})
+        with mock.patch.object(self.service, "scan_source", side_effect=RuntimeError("boom")):
+            self.service.start_scan(source["source_id"])
+            self._wait_scan(source["source_id"])
+            self.service.stop()
+        job = jobs.get(f"scan:{source['source_id']}")
+        self.assertEqual((job["status"], job["message"]), ("failed", "scan_failed"))
 
 
 class GalleryBatchAutoRegisterTest(GalleryServiceTestBase):

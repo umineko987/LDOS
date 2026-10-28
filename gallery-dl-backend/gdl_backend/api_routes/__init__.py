@@ -5,6 +5,7 @@ from .crawls import create_crawls_router
 from .diagnostics import create_diagnostics_router
 from .discovery import create_discovery_router
 from .gallery import create_gallery_router
+from .jobs import create_jobs_router
 from .policies import create_policies_router
 from .proxy import create_proxy_router
 from .review import create_review_router
@@ -20,6 +21,7 @@ __all__ = [
     "create_discovery_router",
     "create_ordered_task_enqueuer",
     "create_gallery_router",
+    "create_jobs_router",
     "create_policies_router",
     "create_proxy_router",
     "create_review_router",
