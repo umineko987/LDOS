@@ -28,8 +28,36 @@ class TaggerAdapterError(RuntimeError):
     pass
 
 
+def model_fingerprint(adapter_name: str, spec: TaggerModelSpec, vocabulary: Vocabulary) -> str:
+    """模型指纹 = 适配器实现版本 × 固定 revision × 词表指纹；缓存以它为键。"""
+    digest = hashlib.sha256()
+    digest.update(f"{adapter_name}:v{ADAPTER_VERSION}".encode())
+    digest.update(spec.revision.encode())
+    digest.update(vocabulary.fingerprint.encode())
+    return digest.hexdigest()
+
+
 class TaggerAdapter(ABC):
-    """打标模型适配器协议：统一"装、加载、喂图得分数、卸载"四动作。"""
+    """打标模型适配器协议：统一"装、加载、喂图得分数、卸载"四动作。
+
+    describe() 是 load() 的只读子集：只读词表等元数据，得到与 load()
+    完全相同的 vocabulary 与 fingerprint，不加载权重、不导入推理运行时。
+    查缓存、做筛选只需要 describe()；infer_scores() 仍需先 load()。
+    """
+
+    adapter_name: str
+    model_dir: Path
+
+    def describe(self) -> None:
+        if not installed(self.spec, self.model_dir):
+            raise TaggerAdapterError(f"模型未安装: {self.spec.key}")
+        self.vocabulary = self._read_vocabulary(bundle_path(self.model_dir, self.spec.key))
+        self.fingerprint = model_fingerprint(self.adapter_name, self.spec, self.vocabulary)
+
+    @abstractmethod
+    def _read_vocabulary(self, path: Path) -> Vocabulary:
+        """从已安装的 bundle 目录读出有序词表。"""
+        ...
 
     @abstractmethod
     def load(self) -> None:
@@ -53,6 +81,8 @@ class TaggerAdapter(ABC):
 class WdOnnxAdapter(TaggerAdapter):
     """SmilingWolf WD 系列 ONNX 模型。"""
 
+    adapter_name = "wd_onnx"
+
     def __init__(self, spec: TaggerModelSpec, model_dir: Path):
         if spec.adapter != "wd_onnx":
             raise TaggerAdapterError(f"{spec.key} 不是 wd_onnx 适配器模型")
@@ -65,13 +95,14 @@ class WdOnnxAdapter(TaggerAdapter):
         self._max_batch = 1
         self.fingerprint = ""
 
+    def _read_vocabulary(self, path: Path) -> Vocabulary:
+        return load_wd_csv(path / "selected_tags.csv")
+
     def load(self) -> None:
-        if not installed(self.spec, self.model_dir):
-            raise TaggerAdapterError(f"模型未安装: {self.spec.key}")
+        self.describe()
         import onnxruntime as ort
 
         path = bundle_path(self.model_dir, self.spec.key)
-        self.vocabulary = load_wd_csv(path / "selected_tags.csv")
         self._session = ort.InferenceSession(
             str(path / "model.onnx"),
             providers=["CPUExecutionProvider"],
@@ -103,12 +134,6 @@ class WdOnnxAdapter(TaggerAdapter):
                 f"输出维度 {outputs[0].shape} 与词表数量 {expected} 不一致"
             )
 
-        digest = hashlib.sha256()
-        digest.update(f"wd_onnx:v{ADAPTER_VERSION}".encode())
-        digest.update(self.spec.revision.encode())
-        digest.update(self.vocabulary.fingerprint.encode())
-        self.fingerprint = digest.hexdigest()
-
     def infer_scores(self, images: Sequence[Image.Image]) -> np.ndarray:
         """返回 [B, N] 概率，与词表顺序一致，未做任何阈值筛选。"""
         if self._session is None:
@@ -139,6 +164,8 @@ class TimmCanaryAdapter(TaggerAdapter):
     官方 config.json，权重以 strict 模式加载。
     """
 
+    adapter_name = "timm_canary"
+
     def __init__(self, spec: TaggerModelSpec, model_dir: Path):
         if spec.adapter != "timm_canary":
             raise TaggerAdapterError(f"{spec.key} 不是 timm_canary 适配器模型")
@@ -149,9 +176,11 @@ class TimmCanaryAdapter(TaggerAdapter):
         self._input_size = 448
         self.fingerprint = ""
 
+    def _read_vocabulary(self, path: Path) -> Vocabulary:
+        return load_wd_csv(path / "selected_tags.csv")
+
     def load(self) -> None:
-        if not installed(self.spec, self.model_dir):
-            raise TaggerAdapterError(f"模型未安装: {self.spec.key}")
+        self.describe()
         try:
             import timm
             import torch
@@ -164,7 +193,6 @@ class TimmCanaryAdapter(TaggerAdapter):
         import json
 
         path = bundle_path(self.model_dir, self.spec.key)
-        self.vocabulary = load_wd_csv(path / "selected_tags.csv")
         config = json.loads((path / "config.json").read_text(encoding="utf-8"))
         model_args = dict(config.get("model_args") or {})
         num_classes = int(config.get("num_classes") or len(self.vocabulary))
@@ -183,12 +211,6 @@ class TimmCanaryAdapter(TaggerAdapter):
         state_dict = load_file(str(path / "model.safetensors"))
         self._model.load_state_dict(state_dict, strict=True)
         self._model.eval()
-
-        digest = hashlib.sha256()
-        digest.update(f"timm_canary:v{ADAPTER_VERSION}".encode())
-        digest.update(self.spec.revision.encode())
-        digest.update(self.vocabulary.fingerprint.encode())
-        self.fingerprint = digest.hexdigest()
 
     def infer_scores(self, images: Sequence[Image.Image]) -> np.ndarray:
         if self._model is None:
@@ -213,6 +235,8 @@ class PixaiHfAdapter(TaggerAdapter):
     tags + tags_split。
     """
 
+    adapter_name = "pixai_hf"
+
     def __init__(self, spec: TaggerModelSpec, model_dir: Path):
         if spec.adapter != "pixai_hf":
             raise TaggerAdapterError(f"{spec.key} 不是 pixai_hf 适配器模型")
@@ -223,9 +247,11 @@ class PixaiHfAdapter(TaggerAdapter):
         self._processor = None
         self.fingerprint = ""
 
+    def _read_vocabulary(self, path: Path) -> Vocabulary:
+        return load_pixai_config(path / "config.json")
+
     def load(self) -> None:
-        if not installed(self.spec, self.model_dir):
-            raise TaggerAdapterError(f"模型未安装: {self.spec.key}")
+        self.describe()
         try:
             from transformers import AutoImageProcessor, AutoModel
         except ImportError as error:
@@ -234,7 +260,6 @@ class PixaiHfAdapter(TaggerAdapter):
             ) from error
 
         path = bundle_path(self.model_dir, self.spec.key)
-        self.vocabulary = load_pixai_config(path / "config.json")
         self._model = AutoModel.from_pretrained(
             path, trust_remote_code=True, local_files_only=True,
         )
@@ -247,12 +272,6 @@ class PixaiHfAdapter(TaggerAdapter):
             raise TaggerAdapterError(
                 f"模型输出维度 {num_classes} 与词表 {len(self.vocabulary)} 不一致"
             )
-
-        digest = hashlib.sha256()
-        digest.update(f"pixai_hf:v{ADAPTER_VERSION}".encode())
-        digest.update(self.spec.revision.encode())
-        digest.update(self.vocabulary.fingerprint.encode())
-        self.fingerprint = digest.hexdigest()
 
     def infer_scores(self, images: Sequence[Image.Image]) -> np.ndarray:
         if self._model is None or self._processor is None:
@@ -280,6 +299,8 @@ class ClOnnxAdapter(TaggerAdapter):
     动态判定，RGB、/255、mean/std 0.5。
     """
 
+    adapter_name = "cl_onnx"
+
     def __init__(self, spec: TaggerModelSpec, model_dir: Path):
         if spec.adapter != "cl_onnx":
             raise TaggerAdapterError(f"{spec.key} 不是 cl_onnx 适配器模型")
@@ -293,6 +314,9 @@ class ClOnnxAdapter(TaggerAdapter):
         self._max_batch = 1
         self.fingerprint = ""
 
+    def _read_vocabulary(self, path: Path) -> Vocabulary:
+        return load_cl_vocabulary(path / "v2_00" / "model_vocabulary.json")
+
     def load(self) -> None:
         if not installed(self.spec, self.model_dir):
             raise TaggerAdapterError(f"模型未安装: {self.spec.key}")
@@ -302,10 +326,10 @@ class ClOnnxAdapter(TaggerAdapter):
                 raise TaggerAdapterError(
                     f"{self.spec.key} 需要先在安装时显式接受其许可（accept_license）"
                 )
+        self.describe()
         import onnxruntime as ort
 
         path = bundle_path(self.model_dir, self.spec.key)
-        self.vocabulary = load_cl_vocabulary(path / "v2_00" / "model_vocabulary.json")
         self._session = ort.InferenceSession(
             str(path / "v2_00" / "model.onnx"),
             providers=["CPUExecutionProvider"],
@@ -340,12 +364,6 @@ class ClOnnxAdapter(TaggerAdapter):
                 f"输出维度 {outputs[0].shape} 与词表数量 {expected} 不一致"
             )
 
-        digest = hashlib.sha256()
-        digest.update(f"cl_onnx:v{ADAPTER_VERSION}".encode())
-        digest.update(self.spec.revision.encode())
-        digest.update(self.vocabulary.fingerprint.encode())
-        self.fingerprint = digest.hexdigest()
-
     def infer_scores(self, images: Sequence[Image.Image]) -> np.ndarray:
         if self._session is None:
             raise TaggerAdapterError("模型未加载")
@@ -372,8 +390,15 @@ class ClOnnxAdapter(TaggerAdapter):
 
 # 适配器注册表：新增适配器只需在此登记
 ADAPTERS: dict[str, type[TaggerAdapter]] = {
-    "wd_onnx": WdOnnxAdapter,
-    "timm_canary": TimmCanaryAdapter,
-    "pixai_hf": PixaiHfAdapter,
-    "cl_onnx": ClOnnxAdapter,
+    adapter.adapter_name: adapter
+    for adapter in (WdOnnxAdapter, TimmCanaryAdapter, PixaiHfAdapter, ClOnnxAdapter)
 }
+
+
+def describe(spec: TaggerModelSpec, model_dir: Path) -> TaggerAdapter:
+    """只读元数据得到模型指纹与词表，不加载权重。"""
+    if spec.adapter not in ADAPTERS:
+        raise TaggerAdapterError(f"未知适配器类型: {spec.adapter}")
+    adapter = ADAPTERS[spec.adapter](spec, model_dir)
+    adapter.describe()
+    return adapter

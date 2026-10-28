@@ -21,6 +21,7 @@ class Vocabulary:
         if len(names) != len(categories):
             raise ValueError("标签名与类别数量不一致")
         self.names = tuple(names)
+        self.category_of = tuple(categories)  # 下标 -> 类别
         index_by_category: dict[str, list[int]] = {}
         for position, category in enumerate(categories):
             index_by_category.setdefault(category, []).append(position)

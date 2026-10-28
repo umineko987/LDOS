@@ -452,3 +452,163 @@ class ClOnnxAdapterTests(unittest.TestCase):
         with mock.patch("onnxruntime.InferenceSession", BadDimSession):
             with self.assertRaises(TaggerAdapterError):
                 adapter.load()
+
+
+def make_cl_bundle(root: Path, *, gated: bool = False) -> tuple[Path, TaggerModelSpec]:
+    source = root / f"cl-describe-source-{gated}"
+    (source / "v2_00").mkdir(parents=True, exist_ok=True)
+    (source / "v2_00" / "model.onnx").write_bytes(b"fake")
+    (source / "v2_00" / "model_vocabulary.json").write_text(json.dumps({
+        "num_tags": 3,
+        "idx_to_tag": {"0": "tree", "1": "miku", "2": "sky"},
+        "tag_to_category": {"tree": "General", "sky": "General", "miku": "Character"},
+    }), encoding="utf-8")
+
+    class LocalUrlSpec(TaggerModelSpec):
+        def url_for(self, remote_file: RemoteFile) -> str:
+            return (source / remote_file.name).as_uri()
+
+    spec = LocalUrlSpec(
+        key=f"test-cl-describe-{gated}", repo=source, revision="rev-cl", adapter="cl_onnx",
+        files=(RemoteFile("v2_00/model.onnx"), RemoteFile("v2_00/model_vocabulary.json")),
+        default_thresholds={"general": 0.55}, license="test-license", gated=gated,
+    )
+    return install(spec, root / "models", accept_license=True), spec
+
+
+def make_pixai_bundle(root: Path) -> tuple[Path, TaggerModelSpec]:
+    source = root / "pixai-source"
+    source.mkdir(parents=True, exist_ok=True)
+    (source / "model.safetensors").write_bytes(b"fake")
+    (source / "config.json").write_text(json.dumps({
+        "tags": ["1girl", "solo", "miku", "general"],
+        "tags_split": [["general", 2], ["character", 1], ["copyright", 0], ["rating", 1]],
+    }), encoding="utf-8")
+    (source / "preprocessor_config.json").write_text("{}", encoding="utf-8")
+    (source / "tagger_pipeline.py").write_text("", encoding="utf-8")
+
+    class LocalUrlSpec(TaggerModelSpec):
+        def url_for(self, remote_file: RemoteFile) -> str:
+            return (source / remote_file.name).as_uri()
+
+    spec = LocalUrlSpec(
+        key="test-pixai", repo=source, revision="rev-pixai", adapter="pixai_hf",
+        files=(RemoteFile("model.safetensors"), RemoteFile("config.json"),
+               RemoteFile("preprocessor_config.json"), RemoteFile("tagger_pipeline.py")),
+        default_thresholds={"general": 0.17}, license="test",
+    )
+    return install(spec, root / "models"), spec
+
+
+def fake_transformers(num_classes: int) -> types.ModuleType:
+    class FakePixaiModel:
+        config = types.SimpleNamespace(num_classes=num_classes)
+
+        def eval(self):
+            return self
+
+    module = types.ModuleType("transformers")
+    module.AutoModel = types.SimpleNamespace(from_pretrained=lambda *args, **kwargs: FakePixaiModel())
+    module.AutoImageProcessor = types.SimpleNamespace(from_pretrained=lambda *args, **kwargs: object())
+    return module
+
+
+def refuse_inference_session(*args, **kwargs):
+    raise AssertionError("describe() 不能创建推理 session")
+
+
+# 屏蔽所有推理运行时：describe() 一旦尝试导入就会 ImportError
+NO_RUNTIMES = {"timm": None, "transformers": None, "safetensors": None, "safetensors.torch": None}
+
+
+class DescribeTests(unittest.TestCase):
+    """describe() 只读词表即得到与 load() 完全相同的指纹与词表。"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.model_dir = self.root / "models"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def described(self, spec: TaggerModelSpec):
+        with mock.patch("onnxruntime.InferenceSession", refuse_inference_session), \
+                mock.patch.dict(sys.modules, NO_RUNTIMES):
+            return adapters.describe(spec, self.model_dir)
+
+    def assert_matches_load(self, spec: TaggerModelSpec, loaded) -> None:
+        described = self.described(spec)
+        self.assertIs(type(described), type(loaded))
+        self.assertTrue(described.fingerprint)
+        self.assertEqual(described.fingerprint, loaded.fingerprint)
+        self.assertEqual(described.vocabulary.names, loaded.vocabulary.names)
+        self.assertEqual(described.vocabulary.category_of, loaded.vocabulary.category_of)
+        self.assertEqual(described.vocabulary.fingerprint, loaded.vocabulary.fingerprint)
+
+    def test_wd_onnx(self) -> None:
+        _, spec = make_bundle(self.root)
+        loaded = WdOnnxAdapter(spec, self.model_dir)
+        with mock.patch("onnxruntime.InferenceSession", FakeSession):
+            loaded.load()
+        self.assert_matches_load(spec, loaded)
+
+    def test_timm_canary(self) -> None:
+        _, spec = make_timm_bundle(self.root)
+        fake_timm, fake_safetensors = make_timm_session_patch()
+        loaded = TimmCanaryAdapter(spec, self.model_dir)
+        with mock.patch.dict(sys.modules, {"timm": fake_timm, "safetensors": fake_safetensors,
+                                           "safetensors.torch": fake_safetensors.torch}):
+            loaded.load()
+        self.assert_matches_load(spec, loaded)
+
+    def test_pixai_hf(self) -> None:
+        _, spec = make_pixai_bundle(self.root)
+        loaded = adapters.PixaiHfAdapter(spec, self.model_dir)
+        with mock.patch.dict(sys.modules, {"transformers": fake_transformers(4)}):
+            loaded.load()
+        self.assert_matches_load(spec, loaded)
+
+    def test_cl_onnx_including_gated(self) -> None:
+        class NchwClSession(FakeSession):
+            def __init__(self, path, providers=None):
+                super().__init__(path, providers)
+                self.inputs = [FakeNode("input", ["None", 3, 16, 16])]
+                self.outputs = [FakeNode("logits", ["None", 3])]
+
+        for gated in (False, True):
+            with self.subTest(gated=gated):
+                _, spec = make_cl_bundle(self.root, gated=gated)
+                loaded = ClOnnxAdapter(spec, self.model_dir)
+                with mock.patch("onnxruntime.InferenceSession", NchwClSession):
+                    loaded.load()
+                self.assert_matches_load(spec, loaded)
+
+    def test_fingerprint_changes_with_revision_and_vocabulary(self) -> None:
+        from dataclasses import replace
+
+        _, spec = make_bundle(self.root)
+        described = self.described(spec)
+        moved = replace(spec, revision="rev2")
+        self.assertNotEqual(
+            adapters.model_fingerprint("wd_onnx", moved, described.vocabulary), described.fingerprint,
+        )
+        other_root = self.root / "other"
+        _, other_spec = make_bundle(other_root, CSV_ROWS + "4,smile,0,1\n")
+        other = adapters.describe(other_spec, other_root / "models")
+        self.assertNotEqual(other.fingerprint, described.fingerprint)
+
+    def test_requires_install_and_known_adapter(self) -> None:
+        from dataclasses import replace
+
+        _, spec = make_bundle(self.root)
+        with self.assertRaises(TaggerAdapterError):
+            adapters.describe(spec, self.root / "empty")
+        with self.assertRaises(TaggerAdapterError):
+            adapters.describe(replace(spec, adapter="unknown"), self.model_dir)
+
+    def test_describe_then_infer_still_requires_load(self) -> None:
+        _, spec = make_bundle(self.root)
+        adapter = self.described(spec)
+        with self.assertRaises(TaggerAdapterError):
+            adapter.infer_scores([Image.new("RGB", (4, 4))])
