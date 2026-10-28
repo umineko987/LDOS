@@ -18,6 +18,12 @@ from ..redaction import redact_text
 from ..schemas import CrawlRerunRequest, CrawlRequest, RetryRequest
 from .dependencies import get_service
 from .errors import ApiError
+from .passthrough_models import (
+    CrawlBatchListResponse,
+    CrawlBatchOperationResponse,
+    CrawlBatchResponse,
+    CrawlTaskListResponse,
+)
 from .request_inputs import allowed_request_files, managed_request_credentials
 from .validation import (
     range_argument_present,
@@ -392,7 +398,11 @@ async def _perform_crawl(
 def create_crawls_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
-    @router.post("/crawls")
+    @router.post(
+        "/crawls",
+        response_model=CrawlBatchResponse,
+        response_model_exclude_unset=True,
+    )
     async def create_crawl(
         body: CrawlRequest,
         idempotency_key: str | None = Header(
@@ -410,7 +420,11 @@ def create_crawls_router() -> APIRouter:
         content = _desktop_crawl_operation(result) if view == "desktop" else result
         return JSONResponse(status_code=202 if created else 200, content=content)
 
-    @router.get("/crawls")
+    @router.get(
+        "/crawls",
+        response_model=CrawlBatchListResponse,
+        response_model_exclude_unset=True,
+    )
     async def list_crawls(
         limit: int = Query(default=50, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
@@ -430,7 +444,11 @@ def create_crawls_router() -> APIRouter:
             "offset": offset,
         }
 
-    @router.get("/crawls/{batch_id}")
+    @router.get(
+        "/crawls/{batch_id}",
+        response_model=CrawlBatchResponse,
+        response_model_exclude_unset=True,
+    )
     async def get_crawl(
         batch_id: str,
         view: CrawlResponseView = Query("legacy"),
@@ -451,7 +469,11 @@ def create_crawls_router() -> APIRouter:
             batch["review"] = {"batch_id": batch_id, "status": status}
         return _desktop_batch_crawl(batch) if view == "desktop" else batch
 
-    @router.get("/crawls/{batch_id}/tasks")
+    @router.get(
+        "/crawls/{batch_id}/tasks",
+        response_model=CrawlTaskListResponse,
+        response_model_exclude_unset=True,
+    )
     async def list_crawl_tasks(
         batch_id: str,
         address_id: str | None = None,
@@ -472,7 +494,11 @@ def create_crawls_router() -> APIRouter:
             items = [_tasks_view_item(task) for task in items]
         return {"items": items, "limit": limit, "offset": offset}
 
-    @router.post("/crawls/{batch_id}/cancel")
+    @router.post(
+        "/crawls/{batch_id}/cancel",
+        response_model=CrawlBatchResponse,
+        response_model_exclude_unset=True,
+    )
     async def cancel_crawl(
         batch_id: str,
         view: CrawlResponseView = Query("legacy"),
@@ -488,7 +514,12 @@ def create_crawls_router() -> APIRouter:
         result = container.db.get_crawl_batch(batch_id)
         return _desktop_crawl_operation(result) if view == "desktop" else result
 
-    @router.post("/crawls/{batch_id}/retry", status_code=202)
+    @router.post(
+        "/crawls/{batch_id}/retry",
+        status_code=202,
+        response_model=CrawlBatchOperationResponse,
+        response_model_exclude_unset=True,
+    )
     async def retry_crawl_failed(
         batch_id: str,
         body: RetryRequest,
@@ -542,7 +573,12 @@ def create_crawls_router() -> APIRouter:
             "batch": batch,
         }
 
-    @router.post("/crawls/{batch_id}/rerun", status_code=202)
+    @router.post(
+        "/crawls/{batch_id}/rerun",
+        status_code=202,
+        response_model=CrawlBatchOperationResponse,
+        response_model_exclude_unset=True,
+    )
     async def rerun_crawl(
         batch_id: str,
         body: CrawlRerunRequest,

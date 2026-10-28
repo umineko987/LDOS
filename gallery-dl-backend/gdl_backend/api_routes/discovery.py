@@ -23,6 +23,12 @@ from ..redaction import redact_text
 from ..schemas import SearchRequest
 from .dependencies import get_service
 from .errors import ApiError
+from .passthrough_models import (
+    DesktopSearchResponse,
+    SearchAutocompleteResponse,
+    SearchResponse,
+    SearchSiteListResponse,
+)
 from .request_inputs import allowed_request_files, managed_request_credentials
 from .validation import validate_network_target
 
@@ -933,11 +939,19 @@ def _desktop_search_response(value: dict[str, Any]) -> dict[str, Any]:
 def create_discovery_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
-    @router.get("/search/sites")
+    @router.get(
+        "/search/sites",
+        response_model=SearchSiteListResponse,
+        response_model_exclude_unset=True,
+    )
     async def supported_search_sites():
         return {"items": search_site_catalog()}
 
-    @router.get("/search/autocomplete")
+    @router.get(
+        "/search/autocomplete",
+        response_model=SearchAutocompleteResponse,
+        response_model_exclude_unset=True,
+    )
     async def search_autocomplete(
         q: str,
         limit: int = 10,
@@ -965,7 +979,11 @@ def create_discovery_router() -> APIRouter:
             "items": result["items"],
         }
 
-    @router.post("/search")
+    @router.post(
+        "/search",
+        response_model=DesktopSearchResponse | SearchResponse,
+        response_model_exclude_unset=True,
+    )
     async def search_candidates(
         body: SearchRequest,
         view: Literal["legacy", "desktop"] = "legacy",

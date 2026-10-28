@@ -13,6 +13,13 @@ from ..schemas import RetryRequest, TaskCreate, TaskPolicy
 from ..site import SiteInfo
 from .dependencies import get_service
 from .errors import ApiError
+from .passthrough_models import (
+    TaskEventListResponse,
+    TaskFileListResponse,
+    TaskListResponse,
+    TaskLogListResponse,
+    TaskResponse,
+)
 from .request_inputs import allowed_request_files, managed_request_credentials
 from .validation import (
     canonical_site_name,
@@ -244,7 +251,7 @@ def create_ordered_task_enqueuer(service: Any) -> OrderedTaskEnqueuer:
 def create_tasks_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
-    @router.post("/tasks")
+    @router.post("/tasks", response_model=TaskResponse, response_model_exclude_unset=True)
     async def create_task(
         body: TaskCreate,
         request: Request,
@@ -258,7 +265,7 @@ def create_tasks_router() -> APIRouter:
         )
         return JSONResponse(status_code=202 if created else 200, content=task)
 
-    @router.get("/tasks")
+    @router.get("/tasks", response_model=TaskListResponse, response_model_exclude_unset=True)
     async def list_tasks(
         status: str | None = None,
         site: str | None = None,
@@ -274,21 +281,28 @@ def create_tasks_router() -> APIRouter:
         )
         return {"items": items, "limit": limit, "offset": offset}
 
-    @router.get("/tasks/{task_id}")
+    @router.get("/tasks/{task_id}", response_model=TaskResponse, response_model_exclude_unset=True)
     async def get_task(task_id: str, container: Any = Depends(get_service)):
         task = container.db.get_task(task_id)
         if task is None:
             raise ApiError(404, "task_not_found", "任务不存在")
         return task
 
-    @router.post("/tasks/{task_id}/cancel")
+    @router.post(
+        "/tasks/{task_id}/cancel", response_model=TaskResponse, response_model_exclude_unset=True
+    )
     async def cancel_task(task_id: str, container: Any = Depends(get_service)):
         task = await container.scheduler.cancel(task_id)
         if task is None:
             raise ApiError(404, "task_not_found", "任务不存在")
         return task
 
-    @router.post("/tasks/{task_id}/retry", status_code=202)
+    @router.post(
+        "/tasks/{task_id}/retry",
+        status_code=202,
+        response_model=TaskResponse,
+        response_model_exclude_unset=True,
+    )
     async def retry_task(
         task_id: str,
         body: RetryRequest,
@@ -311,7 +325,9 @@ def create_tasks_router() -> APIRouter:
             raise ApiError(404, "task_not_found", "任务不存在")
         return task
 
-    @router.get("/tasks/{task_id}/logs")
+    @router.get(
+        "/tasks/{task_id}/logs", response_model=TaskLogListResponse, response_model_exclude_unset=True
+    )
     async def task_logs(
         task_id: str,
         since: int = Query(default=0, ge=0),
@@ -330,7 +346,11 @@ def create_tasks_router() -> APIRouter:
             )
         }
 
-    @router.get("/tasks/{task_id}/events")
+    @router.get(
+        "/tasks/{task_id}/events",
+        response_model=TaskEventListResponse,
+        response_model_exclude_unset=True,
+    )
     async def task_events(
         task_id: str,
         since: int = Query(default=0, ge=0),
@@ -347,7 +367,9 @@ def create_tasks_router() -> APIRouter:
             )
         }
 
-    @router.get("/tasks/{task_id}/files")
+    @router.get(
+        "/tasks/{task_id}/files", response_model=TaskFileListResponse, response_model_exclude_unset=True
+    )
     async def list_task_files(
         task_id: str,
         container: Any = Depends(get_service),
