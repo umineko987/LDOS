@@ -669,6 +669,7 @@ def write_release_manifest(
             "backend": "app/gdl_backend",
             "worker": "-m gdl_backend.worker_entry",
             "dedup_worker": "app/dedup_review_worker.py",
+            "atlas_worker": "app/atlas_worker.py",
             "tagger_cli": "app/tagger/cli.py",
             "dedup_core": "app/dedup_core.py",
         },
@@ -783,6 +784,8 @@ def verify_tree(
         raise ReleaseError("backend worker package is missing")
     if not (app / "dedup_review_worker.py").is_file():
         raise ReleaseError("dedup worker is missing")
+    if not (app / "atlas_worker.py").is_file():
+        raise ReleaseError("atlas worker is missing")
     if not (app / "tagger" / "cli.py").is_file():
         raise ReleaseError("tagger CLI is missing")
     mihomo = manifest.get("bundled_resources", {}).get("mihomo", {})
@@ -962,6 +965,12 @@ print(json.dumps({
         )
         run(
             [python, "-B", app / "dedup_review_worker.py", "--help"],
+            cwd=app,
+            env=env,
+            capture=True,
+        )
+        run(
+            [python, "-B", app / "atlas_worker.py", "--help"],
             cwd=app,
             env=env,
             capture=True,

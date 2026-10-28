@@ -39,6 +39,7 @@ def minimal_tree(root: Path) -> dict[str, object]:
     (app / "gdl_backend").mkdir(parents=True)
     (app / "gdl_backend" / "worker_entry.py").write_text("", encoding="utf-8")
     (app / "dedup_review_worker.py").write_text("", encoding="utf-8")
+    (app / "atlas_worker.py").write_text("", encoding="utf-8")
     (app / "tagger").mkdir()
     (app / "tagger" / "cli.py").write_text("", encoding="utf-8")
     mihomo = app / "bin" / "mihomo"
@@ -250,6 +251,7 @@ class DesktopReleaseTests(unittest.TestCase):
             lock = json.loads((ROOT / "desktop/release/runtime-lock.json").read_text(encoding="utf-8"))
             release.copy_application_scripts(app, lock)
             self.assertTrue((app / "dedup_review_worker.py").is_file())
+            self.assertTrue((app / "atlas_worker.py").is_file())
             expected = {file.name for file in (ROOT / "tagger").glob("*.py")}
             actual = {file.name for file in (app / "tagger").iterdir()}
             self.assertEqual(actual, expected)
@@ -258,6 +260,11 @@ class DesktopReleaseTests(unittest.TestCase):
                 cwd=tmp_path, capture_output=True, text=True, check=True,
             )
             self.assertIn("prepare", result.stdout)
+            result = subprocess.run(
+                [sys.executable, "-I", "-B", str(app / "atlas_worker.py"), "--help"],
+                cwd=tmp_path, capture_output=True, text=True, check=True,
+            )
+            self.assertIn("--job", result.stdout)
             self.assertFalse((app / "tagger/tags.sqlite3").exists())
             self.assertFalse((app / "tagger/.models").exists())
 

@@ -56,6 +56,7 @@
     "requirements-dedup-cpu.txt"
   ],
   "application_scripts": [
+    "dedup/atlas_worker.py",
     "dedup/dedup_core.py",
     "dedup/dedup_models.py",
     "dedup/dedup_resources.py",
