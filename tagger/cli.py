@@ -3,15 +3,27 @@
 用法（与去重模块相同的 venv 即可运行，无额外依赖）：
   python tagger/cli.py prepare --models wd-vit-v3 [--model-dir DIR]
   python tagger/cli.py tag --models wd-vit-v3 --inputs 图库目录 [--general-thr 0.35]
+  python tagger/cli.py tag --models wd-vit-v3 --inputs-file - --no-captions --emit-results
+  python tagger/cli.py candidates --models wd-vit-v3 --inputs-file - [--floor 0.05] [--compute]
+  python tagger/cli.py compose --models wd-vit-v3 --inputs-file - [--model-threshold M general 0.4]
 
 --progress-json 时输出 JSON 行事件（install_start/download/installed/
-progress/done），供后端子进程消费。
+progress/done），供后端子进程消费。candidates/compose 与 tag --emit-results
+另输出数据行（models/candidates/result），一律 ASCII 转义，与控制台编码无关。
+
+--inputs-file：UTF-8 文本，每行一个图片文件或目录，空行忽略；`-` 表示 stdin。
+行可写成 "<64 位小写 sha256>\\t<路径>" 给出已知内容哈希：candidates（不带
+--compute）与 compose 直接采用它查缓存；会推理写缓存的 tag 与 --compute
+一律按内容重算。POSIX 下无法按 UTF-8 解码的字节经 surrogateescape 往返。
+
+退出码：0 成功；1 没有图片；2 参数无效；3 需要接受许可；4 模型不可用。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -19,6 +31,8 @@ WORKSPACE_DIR = Path(__file__).resolve().parent
 DEFAULT_MODEL_DIR = WORKSPACE_DIR / ".models"
 DEFAULT_CACHE = WORKSPACE_DIR / "tags.sqlite3"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"}
+THRESHOLD_CATEGORIES = ("general", "character", "rating", "copyright", "quality", "meta", "style")
+_KNOWN_HASH = re.compile(r"[0-9a-f]{64}")
 
 
 def scan_images(roots: list[Path]) -> list[Path]:
@@ -36,6 +50,43 @@ def scan_images(roots: list[Path]) -> list[Path]:
     return images
 
 
+def read_inputs_file(source: str):
+    """解析 --inputs-file，返回 [LookupInput]（哈希未给出时为 None）。"""
+    from runner import LookupInput
+
+    if source == "-":
+        stream = getattr(sys.stdin, "buffer", None)
+        raw = stream.read() if stream is not None else sys.stdin.read().encode("utf-8", "surrogateescape")
+    else:
+        raw = Path(source).read_bytes()
+    text = raw.decode("utf-8-sig", errors="surrogateescape")
+    entries = []
+    for line in text.split("\n"):
+        line = line.removesuffix("\r")
+        if not line.strip():
+            continue
+        digest = None
+        if len(line) > 65 and line[64] == "\t" and _KNOWN_HASH.fullmatch(line[:64]):
+            digest, line = line[:64], line[65:]
+        entries.append(LookupInput(Path(line), digest))
+    return entries
+
+
+def collect_inputs(args: argparse.Namespace):
+    """--inputs 按目录扫描；--inputs-file 里的目录展开，其余条目原样保留（缺失文件由下游报告）。"""
+    from runner import LookupInput
+
+    if args.inputs_file is None:
+        return [LookupInput(path) for path in scan_images([Path(item) for item in args.inputs])]
+    collected = []
+    for entry in read_inputs_file(args.inputs_file):
+        if entry.sha256 is None and entry.path.is_dir():
+            collected.extend(LookupInput(path) for path in scan_images([entry.path]))
+        else:
+            collected.append(entry)
+    return collected
+
+
 def progress_printer(stage: str, done: int, total: int) -> None:
     labels = {
         "hashing": "计算哈希",
@@ -51,6 +102,11 @@ def json_progress(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False), flush=True)
 
 
+def emit_line(payload: dict) -> None:
+    """数据行：ASCII 转义（路径里的任意字符与 surrogate 都能经 JSON 往返），紧凑分隔。"""
+    print(json.dumps(payload, ensure_ascii=True, separators=(",", ":")), flush=True)
+
+
 def make_progress_callback(json_mode: bool):
     if not json_mode:
         return progress_printer
@@ -62,6 +118,45 @@ def make_progress_callback(json_mode: bool):
         json_progress({"type": "progress", "stage": stage, "done": done, "total": total})
 
     return callback
+
+
+def build_policy(args: argparse.Namespace):
+    from postprocess import SelectionPolicy
+
+    return SelectionPolicy(
+        thresholds={
+            category: value
+            for category in THRESHOLD_CATEGORIES
+            if (value := getattr(args, f"{category}_thr")) is not None
+        },
+        categories=tuple(category.strip() for category in args.categories.split(",") if category.strip()),
+    )
+
+
+def parse_model_thresholds(args: argparse.Namespace, specs) -> dict[str, dict[str, float]] | None:
+    """--model-threshold 校验：模型须已选中、类别须是该模型支持的、值在 [0.01, 0.99]。无效返回 None。"""
+    model_thresholds: dict[str, dict[str, float]] = {}
+    for model, category, raw_value in args.model_threshold:
+        try:
+            spec = next(spec for spec in specs if spec.key == model)
+            value = float(raw_value)
+            if category not in spec.default_thresholds or not 0.01 <= value <= 0.99:
+                raise ValueError
+        except (StopIteration, ValueError):
+            print(f"无效模型阈值: {model} {category} {raw_value}", file=sys.stderr)
+            return None
+        model_thresholds.setdefault(model, {})[category] = value
+    return model_thresholds
+
+
+def _resolve(args: argparse.Namespace):
+    from runner import resolve_specs
+
+    try:
+        return resolve_specs(args.models)
+    except KeyError as error:
+        print(error.args[0], file=sys.stderr)
+        return None
 
 
 def command_prepare(args: argparse.Namespace) -> int:
@@ -100,42 +195,23 @@ def command_prepare(args: argparse.Namespace) -> int:
 
 
 def command_tag(args: argparse.Namespace) -> int:
+    from adapters import TaggerAdapterError
     from cache import TaggerCache
-    from postprocess import SelectionPolicy
-    from runner import TaggerRunner, resolve_specs
+    from runner import TaggerRunner
 
-    files = scan_images([Path(item) for item in args.inputs])
+    # 会推理写缓存：忽略调用方给出的哈希，一律按内容计算
+    files = [entry.path for entry in collect_inputs(args)]
     if not files:
         print("没有找到图片", file=sys.stderr)
         return 1
-    policy = SelectionPolicy(
-        thresholds={
-            category: value
-            for category, value in (
-                ("general", args.general_thr),
-                ("character", args.character_thr),
-                ("rating", args.rating_thr),
-                ("copyright", args.copyright_thr),
-                ("quality", args.quality_thr),
-                ("meta", args.meta_thr),
-                ("style", args.style_thr),
-            )
-            if value is not None
-        },
-        categories=tuple(category.strip() for category in args.categories.split(",") if category.strip()),
-    )
-    specs = resolve_specs(args.models)
-    model_thresholds: dict[str, dict[str, float]] = {}
-    for model, category, raw_value in args.model_threshold:
-        try:
-            spec = next(spec for spec in specs if spec.key == model)
-            value = float(raw_value)
-            if category not in spec.default_thresholds or not 0.01 <= value <= 0.99:
-                raise ValueError
-        except (StopIteration, ValueError):
-            print(f"无效模型阈值: {model} {category} {raw_value}", file=sys.stderr)
-            return 2
-        model_thresholds.setdefault(model, {})[category] = value
+    policy = build_policy(args)
+    specs = _resolve(args)
+    if specs is None:
+        return 2
+    model_thresholds = parse_model_thresholds(args, specs)
+    if model_thresholds is None:
+        return 2
+    json_mode = args.progress_json or args.emit_results
     cache = TaggerCache(Path(args.cache))
     try:
         runner = TaggerRunner(
@@ -147,11 +223,17 @@ def command_tag(args: argparse.Namespace) -> int:
             model_thresholds=model_thresholds,
             write_captions=not args.no_captions,
             overwrite_captions=args.overwrite,
-            on_progress=make_progress_callback(args.progress_json),
+            underscore_to_space=not args.keep_underscores,
+            escape_parens=args.escape_parens,
+            on_progress=make_progress_callback(json_mode),
+            on_result=(lambda result: emit_line(result.to_payload())) if args.emit_results else None,
         )
+    except TaggerAdapterError as error:
+        print(error, file=sys.stderr)
+        return 4
     finally:
         cache.close()
-    if args.progress_json:
+    if json_mode:
         json_progress({
             "type": "done",
             "command": "tag",
@@ -161,6 +243,7 @@ def command_tag(args: argparse.Namespace) -> int:
                 for key, model_stats in stats.per_model.items()
             },
             "decode_errors": stats.decode_errors,
+            "unreadable": stats.unreadable,
             "captions_written": stats.captions_written,
             "captions_skipped": stats.captions_skipped,
         })
@@ -168,22 +251,105 @@ def command_tag(args: argparse.Namespace) -> int:
     print(f"完成：共 {stats.total} 张")
     for key, model_stats in stats.per_model.items():
         print(f"  {key}: 新推理 {model_stats.inferred}，命中 {model_stats.score_cache_hits}")
-    if stats.decode_errors:
-        print(f"解码失败 {len(stats.decode_errors)} 张：", file=sys.stderr)
-        for item in stats.decode_errors:
-            print(f"  {item}", file=sys.stderr)
+    for label, items in (("解码失败", stats.decode_errors), ("无法读取", stats.unreadable)):
+        if items:
+            print(f"{label} {len(items)} 张：", file=sys.stderr)
+            for item in items:
+                print(f"  {item}", file=sys.stderr)
     if stats.captions_written or stats.captions_skipped:
         print(f"caption：写入 {stats.captions_written}，跳过已存在 {stats.captions_skipped}")
     return 0
+
+
+def _stream(lines) -> int:
+    from adapters import TaggerAdapterError
+
+    try:
+        for line in lines:
+            emit_line(line)
+    except TaggerAdapterError as error:
+        print(error, file=sys.stderr)
+        return 4
+    return 0
+
+
+def command_candidates(args: argparse.Namespace, *, adapter_factory=None) -> int:
+    from cache import TaggerCache
+    from runner import default_adapter_factory, run_candidates
+
+    if not 0.0 <= args.floor <= 1.0:
+        print(f"无效候选下限: {args.floor}", file=sys.stderr)
+        return 2
+    specs = _resolve(args)
+    if specs is None:
+        return 2
+    inputs = collect_inputs(args)
+    if not inputs:
+        print("没有找到图片", file=sys.stderr)
+        return 1
+    cache = TaggerCache(Path(args.cache))
+    try:
+        return _stream(run_candidates(
+            Path(args.model_dir), cache, specs, inputs,
+            floor=args.floor,
+            compute=args.compute,
+            batch_size=args.batch_size,
+            adapter_factory=adapter_factory or default_adapter_factory,
+            on_progress=make_progress_callback(True) if args.progress_json else None,
+        ))
+    finally:
+        cache.close()
+
+
+def command_compose(args: argparse.Namespace, *, adapter_factory=None) -> int:
+    from cache import TaggerCache
+    from runner import default_adapter_factory, run_compose
+
+    specs = _resolve(args)
+    if specs is None:
+        return 2
+    model_thresholds = parse_model_thresholds(args, specs)
+    if model_thresholds is None:
+        return 2
+    inputs = collect_inputs(args)
+    if not inputs:
+        print("没有找到图片", file=sys.stderr)
+        return 1
+    cache = TaggerCache(Path(args.cache))
+    try:
+        return _stream(run_compose(
+            Path(args.model_dir), cache, specs, inputs, build_policy(args),
+            model_thresholds=model_thresholds,
+            underscore_to_space=not args.keep_underscores,
+            escape_parens=args.escape_parens,
+            adapter_factory=adapter_factory or default_adapter_factory,
+            on_progress=make_progress_callback(True) if args.progress_json else None,
+        ))
+    finally:
+        cache.close()
+
+
+def _add_input_arguments(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--inputs", nargs="+", help="图片文件或目录")
+    group.add_argument("--inputs-file", help="每行一个路径的 UTF-8 文件，或 - 表示 stdin；可选 \"sha256<TAB>路径\"")
+    parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+
+
+def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
+    for category in THRESHOLD_CATEGORIES:
+        parser.add_argument(f"--{category}-thr", type=float)
+    parser.add_argument("--model-threshold", nargs=3, action="append", default=[], metavar=("MODEL", "CATEGORY", "VALUE"),
+                        help="单独覆盖模型的分类阈值，可重复指定；优先于全局阈值")
+    parser.add_argument("--categories", default="", help="逗号分隔的类别；默认输出模型的全部类别")
+    parser.add_argument("--keep-underscores", action="store_true", help="不把普通标签的下划线换成空格")
+    parser.add_argument("--escape-parens", action="store_true", help="把括号转义为 \\( \\)")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="LDOS 打标工具")
     parser.add_argument("--model-dir", type=Path, default=DEFAULT_MODEL_DIR)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for subparser_factory in (lambda: subparsers.add_parser("prepare", help="下载并安装模型"),
-                              lambda: subparsers.add_parser("tag", help="批量打标并导出 caption")):
-        pass  # 占位说明：progress-json 分别加在两个子命令上
 
     prepare = subparsers.add_parser("prepare", help="下载并安装模型")
     prepare.add_argument("--progress-json", action="store_true", help="输出 JSON 行进度（供后端消费）")
@@ -195,22 +361,29 @@ def build_parser() -> argparse.ArgumentParser:
     tag = subparsers.add_parser("tag", help="批量打标并导出 caption")
     tag.add_argument("--progress-json", action="store_true", help="输出 JSON 行进度（供后端消费）")
     tag.add_argument("--models", required=True, help="逗号分隔的模型 key，按指定顺序合并去重并写入同名 txt")
-    tag.add_argument("--inputs", nargs="+", required=True, help="图片文件或目录")
-    tag.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
-    tag.add_argument("--general-thr", type=float)
-    tag.add_argument("--character-thr", type=float)
-    tag.add_argument("--rating-thr", type=float)
-    tag.add_argument("--copyright-thr", type=float)
-    tag.add_argument("--quality-thr", type=float)
-    tag.add_argument("--meta-thr", type=float)
-    tag.add_argument("--style-thr", type=float)
-    tag.add_argument("--model-threshold", nargs=3, action="append", default=[], metavar=("MODEL", "CATEGORY", "VALUE"),
-                     help="单独覆盖模型的分类阈值，可重复指定；优先于全局阈值")
-    tag.add_argument("--categories", default="", help="逗号分隔的类别；默认输出模型的全部类别")
+    _add_input_arguments(tag)
+    _add_policy_arguments(tag)
     tag.add_argument("--batch-size", type=int, default=8)
     tag.add_argument("--no-captions", action="store_true")
     tag.add_argument("--overwrite", action="store_true")
+    tag.add_argument("--emit-results", action="store_true", help="每张图输出一行 result（含 JSON 进度）")
     tag.set_defaults(handler=command_tag)
+
+    candidates = subparsers.add_parser("candidates", help="从缓存输出稀疏候选分数（JSON 行）")
+    candidates.add_argument("--progress-json", action="store_true", help="同时输出 JSON 行进度")
+    candidates.add_argument("--models", required=True, help="逗号分隔的模型 key")
+    _add_input_arguments(candidates)
+    candidates.add_argument("--floor", type=float, default=0.05, help="只输出分数不低于它的标签（rating 类全部输出）")
+    candidates.add_argument("--compute", action="store_true", help="缺分数时先推理入库")
+    candidates.add_argument("--batch-size", type=int, default=8)
+    candidates.set_defaults(handler=command_candidates)
+
+    compose = subparsers.add_parser("compose", help="按策略从缓存分数组出最终标签（JSON 行，不写文件）")
+    compose.add_argument("--progress-json", action="store_true", help="同时输出 JSON 行进度")
+    compose.add_argument("--models", required=True, help="逗号分隔的模型 key，按顺序合并去重")
+    _add_input_arguments(compose)
+    _add_policy_arguments(compose)
+    compose.set_defaults(handler=command_compose)
     return parser
 
 
