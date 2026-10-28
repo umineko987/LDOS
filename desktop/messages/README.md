@@ -12,6 +12,7 @@
 
 | area | 用在哪里 |
 | --- | --- |
+| `api` | API 错误说明（`#lib/api/messages.ts`） |
 | `app` | 应用名、标语 |
 | `boot` | 启动门（等待后端、失败、重试） |
 | `common` | 跨页面的通用词（重试、关闭、复制） |
@@ -42,8 +43,8 @@
   import { m } from "#lib/paraglide/messages.js";
 </script>
 
-<h1>{m.page_jobs_title()}</h1>
-<p>{m.diag_uptime({ seconds: 42 })}</p>
+<h1>{m.app_name()}</h1>
+<p>{m.api_error_http_status({ status: 502 })}</p>
 ```
 
 切换语言用 `#lib/i18n/locale.svelte.ts` 的 `i18n.set(locale)`，不要直接调 Paraglide 的 `setLocale`：前者不刷新页面，并让根布局重新渲染。

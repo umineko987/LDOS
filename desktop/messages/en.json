@@ -1,5 +1,12 @@
 {
   "$schema": "https://inlang.com/schema/inlang-message-format",
+  "api_error_http": "Request failed",
+  "api_error_http_status": "Request failed (HTTP {status})",
+  "api_error_invalid_response": "The service returned malformed data",
+  "api_error_network": "Cannot reach the LDOS service",
+  "api_error_read_failed": "Failed to read the service response",
+  "api_error_too_large": "The service response exceeds the size limit",
+  "api_error_unexpected": "Something went wrong",
   "app_name": "LDOS",
   "app_tagline": "Dataset workbench",
   "locale_en": "EN",

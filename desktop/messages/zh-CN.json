@@ -1,5 +1,12 @@
 {
   "$schema": "https://inlang.com/schema/inlang-message-format",
+  "api_error_http": "请求失败",
+  "api_error_http_status": "请求失败（HTTP {status}）",
+  "api_error_invalid_response": "服务返回的数据格式无效",
+  "api_error_network": "无法连接到 LDOS 服务",
+  "api_error_read_failed": "读取服务响应失败",
+  "api_error_too_large": "服务响应超出安全大小限制",
+  "api_error_unexpected": "发生了意外错误",
   "app_name": "LDOS",
   "app_tagline": "数据集工作台",
   "locale_en": "EN",
