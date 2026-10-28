@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from gdl_backend import __main__ as backend_entrypoint
+from gdl_backend.events import EventBus
 
 
 class _BlockingStream:
@@ -51,6 +52,29 @@ class BackendEntrypointTests(unittest.TestCase):
 
         self.assertTrue(server.should_exit)
 
+    def test_parent_pipe_eof_closes_event_streams_before_exit(self) -> None:
+        server = SimpleNamespace(should_exit=False)
+        seen: list[bool] = []
+        backend_entrypoint._watch_parent_pipe(
+            server, io.BytesIO(), lambda: seen.append(server.should_exit)
+        )
+        self.assertEqual(seen, [False])
+        self.assertTrue(server.should_exit)
+
+        def broken() -> None:
+            raise RuntimeError("boom")
+
+        server.should_exit = False
+        backend_entrypoint._watch_parent_pipe(server, io.BytesIO(), broken)
+        self.assertTrue(server.should_exit)
+
+    def test_close_event_streams_uses_the_app_container_bus(self) -> None:
+        bus = EventBus(epoch="e1")
+        app = SimpleNamespace(state=SimpleNamespace(container=SimpleNamespace(events=bus)))
+        backend_entrypoint._close_event_streams(app)
+        self.assertTrue(bus.closed)
+        backend_entrypoint._close_event_streams(object())
+
     def test_normal_cli_path_keeps_uvicorn_run_contract(self) -> None:
         app = object()
         settings = SimpleNamespace(
@@ -69,6 +93,7 @@ class BackendEntrypointTests(unittest.TestCase):
             host="127.0.0.1",
             port=8787,
             log_level="info",
+            timeout_graceful_shutdown=3,
         )
         config.assert_not_called()
         server.assert_not_called()
@@ -118,6 +143,7 @@ class BackendEntrypointTests(unittest.TestCase):
             host="127.0.0.1",
             port=9123,
             log_level="info",
+            timeout_graceful_shutdown=3,
         )
         server_type.assert_called_once_with(config)
         run.assert_not_called()

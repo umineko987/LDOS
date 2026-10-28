@@ -4,8 +4,10 @@ import argparse
 import os
 import sys
 import threading
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 import uvicorn
 
@@ -13,11 +15,31 @@ from .app import create_app
 from .config import AppSettings, PROJECT_DIR
 
 
-def _watch_parent_pipe(server: uvicorn.Server, stream: BinaryIO) -> None:
+# SSE 长连接不会自行结束；uvicorn 关停时先等连接，超过这个时限才取消请求并执行 lifespan 收尾。
+GRACEFUL_SHUTDOWN_SECONDS = 3
+
+
+def _close_event_streams(app: Any) -> None:
+    container = getattr(getattr(app, "state", None), "container", None)
+    events = getattr(container, "events", None)
+    if events is not None:
+        events.close()
+
+
+def _watch_parent_pipe(
+    server: uvicorn.Server,
+    stream: BinaryIO,
+    on_exit: Callable[[], None] | None = None,
+) -> None:
     try:
         stream.read()
     except (OSError, ValueError):
         pass
+    if on_exit is not None:
+        try:
+            on_exit()
+        except Exception:
+            pass
     server.should_exit = True
 
 
@@ -27,6 +49,7 @@ def _run_server(settings: AppSettings, parent_stream: BinaryIO | None = None) ->
         "host": settings.server.host,
         "port": settings.server.port,
         "log_level": "info",
+        "timeout_graceful_shutdown": GRACEFUL_SHUTDOWN_SECONDS,
     }
     if parent_stream is None:
         uvicorn.run(app, **options)
@@ -35,7 +58,8 @@ def _run_server(settings: AppSettings, parent_stream: BinaryIO | None = None) ->
     server = uvicorn.Server(uvicorn.Config(app, **options))
     threading.Thread(
         target=_watch_parent_pipe,
-        args=(server, parent_stream),
+        # 桌面端要求退出时先结束 SSE 流，uvicorn 就不必等到超时。
+        args=(server, parent_stream, partial(_close_event_streams, app)),
         name="gdl-backend-parent-pipe",
         daemon=True,
     ).start()
