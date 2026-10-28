@@ -21,6 +21,8 @@ Desktop.ini
 **/.venv/
 **/venv/
 /desktop/node_modules/
+/desktop/.svelte-kit/
+/desktop/static/legacy/
 /desktop/coverage/
 /desktop/playwright-report/
 /desktop/test-results/

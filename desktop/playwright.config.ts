@@ -7,6 +7,10 @@ const localChromium = process.platform === "linux" && existsSync("/usr/bin/chrom
   : undefined;
 const executablePath = configuredExecutable || localChromium;
 
+// 和 tauri.conf.json 的 devUrl 同一个主机名：devCsp 只放行 ws://localhost:1420 的 HMR 连接。
+const DEV_URL = "http://localhost:1420";
+const DIST_URL = "http://localhost:1421";
+
 export default defineConfig({
   testDir: "./e2e",
   outputDir: "./test-results",
@@ -21,7 +25,6 @@ export default defineConfig({
   timeout: 30_000,
   use: {
     ...devices["Desktop Chrome"],
-    baseURL: "http://127.0.0.1:1420",
     viewport: { width: 1280, height: 800 },
     colorScheme: "dark",
     locale: "zh-CN",
@@ -34,10 +37,25 @@ export default defineConfig({
     video: process.env.CI ? "retain-on-failure" : "off",
     launchOptions: executablePath ? { executablePath } : {},
   },
-  webServer: {
-    command: "npm run dev -- --host 127.0.0.1",
-    url: "http://127.0.0.1:1420",
-    reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
-  },
+  projects: [
+    // 开发服务器：每个文档响应都补上 devCsp（见 fixtures/test.ts）。
+    { name: "dev", testIgnore: /\.dist\.spec\.ts$/, use: { baseURL: DEV_URL } },
+    // 构建产物：serve-dist 带生产 CSP 头。
+    { name: "dist", testMatch: /\.dist\.spec\.ts$/, use: { baseURL: DIST_URL } },
+  ],
+  webServer: [
+    {
+      // 不走 `npm run dev`：旧版构建由下面的 dist 服务负责，两边并发写 static/legacy 会互相覆盖。
+      command: "npx vite dev",
+      url: DEV_URL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
+      command: "npm run build && node scripts/serve-dist.mjs 1421",
+      url: DIST_URL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 180_000,
+    },
+  ],
 });

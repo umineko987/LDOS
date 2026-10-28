@@ -1,24 +1,55 @@
-import { expect, test as base, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { expect, test as base } from "@playwright/test";
 
-import { installMockApi, type MockApi, type MockApiOptions } from "./mock-api";
+const tauriConfig = JSON.parse(
+  readFileSync(new URL("../../src-tauri/tauri.conf.json", import.meta.url), "utf8"),
+) as { app: { security: { csp: string; devCsp: string } } };
 
-type RuntimeFixtures = {
+/** Tauri 开发窗口的 CSP；开发服务器自己给 HTML 加上它（见 scripts/external-boot.ts）。 */
+export const DEV_CSP = tauriConfig.app.security.devCsp;
+export const PRODUCTION_CSP = tauriConfig.app.security.csp;
+
+declare global {
+  interface Window {
+    __cspViolations?: string[];
+  }
+}
+
+type Fixtures = {
+  /** 置为 true 时不因 console.error 失败（只给旧版冒烟测试用，它的接口没有全部模拟）。 */
+  allowConsoleErrors: boolean;
   runtimeErrors: string[];
+  cspViolations: void;
 };
 
-export const test = base.extend<RuntimeFixtures>({
-  runtimeErrors: [async ({ page }, use) => {
+export const test = base.extend<Fixtures>({
+  allowConsoleErrors: [false, { option: true }],
+
+  cspViolations: [async ({ page }, use) => {
+    await page.addInitScript(() => {
+      window.__cspViolations = [];
+      document.addEventListener("securitypolicyviolation", (event) => {
+        window.__cspViolations?.push(`${event.effectiveDirective} ${event.blockedURI || "inline"}`);
+      });
+    });
+    await use();
+    const violations = page.isClosed() ? [] : await page.evaluate(() => window.__cspViolations ?? []).catch(() => []);
+    expect(violations, "页面不应触发 CSP 拦截").toEqual([]);
+  }, { auto: true }],
+
+  runtimeErrors: [async ({ page, allowConsoleErrors }, use) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
     page.on("console", (message) => {
-      if (message.type() === "error" && !message.text().startsWith("Failed to load resource: the server responded with a status of")) {
-        errors.push(`console.error: ${message.text()}`);
-      }
+      if (message.type() !== "error" || allowConsoleErrors) return;
+      if (message.text().startsWith("Failed to load resource: the server responded with a status of")) return;
+      // tauri.conf.json 的 CSP 里有 `http://[::1]:*`，CSP 语法不接受 IPv6 字面量，Chromium 会提示并忽略它。
+      if (/Content Security Policy directive '[a-z-]+' contains an invalid source: 'http:\/\/\[::1\]:\*'/.test(message.text())) return;
+      errors.push(`console.error: ${message.text()}`);
     });
     page.on("response", (response) => {
       const pathname = new URL(response.url()).pathname;
-      const isStaticAsset = /\.(?:css|ico|jpe?g|js|mjs|png|svg|webp|woff2?)$/i.test(pathname);
-      if (response.status() >= 400 && isStaticAsset) {
+      if (response.status() >= 400 && /\.(?:css|js|mjs|png|svg|webp|woff2?)$/i.test(pathname)) {
         errors.push(`static resource HTTP ${response.status()}: ${pathname}`);
       }
     });
@@ -28,43 +59,3 @@ export const test = base.extend<RuntimeFixtures>({
 });
 
 export { expect };
-
-export async function bootDesktop(page: Page, options: MockApiOptions = {}, entryPath = "/"): Promise<MockApi> {
-  const api = await installMockApi(page, options);
-  await page.goto(entryPath);
-  await expect(page.locator("[data-desktop][data-workbench]")).toBeVisible();
-  return api;
-}
-
-export async function launchApp(page: Page, appId: string): Promise<void> {
-  const navigation = page.locator(`[data-nav-app="${appId}"]`);
-  if (!await navigation.isVisible()) await page.locator("[data-nav-settings]").click();
-  await navigation.click();
-  await expect(page).toHaveURL(new RegExp(`#/${appId}$`));
-  await expect(page.locator(`[data-app-page][data-app-id="${appId}"]`)).toBeVisible();
-}
-
-export async function expectDesktopInsideViewport(page: Page): Promise<void> {
-  const dimensions = await page.evaluate(() => ({
-    width: window.innerWidth,
-    height: window.innerHeight,
-    scrollWidth: document.documentElement.scrollWidth,
-    scrollHeight: document.documentElement.scrollHeight,
-  }));
-  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.width);
-  expect(dimensions.scrollHeight).toBeLessThanOrEqual(dimensions.height);
-}
-
-export async function expectPageInsideWorkspace(page: Page, appId: string): Promise<void> {
-  const app = page.locator(`[data-app-page][data-app-id="${appId}"]`);
-  const workspace = page.locator("[data-workspace]");
-  const [appBox, workspaceBox] = await Promise.all([app.boundingBox(), workspace.boundingBox()]);
-  expect(appBox).not.toBeNull();
-  expect(workspaceBox).not.toBeNull();
-  if (!appBox || !workspaceBox) return;
-  expect(appBox.x).toBeGreaterThanOrEqual(workspaceBox.x - 1);
-  expect(appBox.y).toBeGreaterThanOrEqual(workspaceBox.y - 1);
-  expect(appBox.x + appBox.width).toBeLessThanOrEqual(workspaceBox.x + workspaceBox.width + 1);
-  expect(appBox.y + appBox.height).toBeLessThanOrEqual(workspaceBox.y + workspaceBox.height + 1);
-  expect(await app.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
-}

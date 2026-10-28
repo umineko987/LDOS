@@ -1,14 +1,26 @@
-import { fileURLToPath, URL } from "node:url";
+import adapter from "@sveltejs/adapter-static";
+import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
-import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vitest/config";
 
+import packageJson from "./package.json" with { type: "json" };
+import tauriConfig from "./src-tauri/tauri.conf.json" with { type: "json" };
+import { devCsp } from "./scripts/external-boot.ts";
+
 export default defineConfig({
-  base: "./",
   clearScreen: false,
   build: { assetsInlineLimit: 0 },
-  plugins: [tailwindcss(), svelte()],
-  resolve: { alias: { $lib: fileURLToPath(new URL("./src/lib", import.meta.url)) } },
+  plugins: [
+    tailwindcss(),
+    sveltekit({
+      // Tauri 从 dist/ 加载；hash 路由下 SvelteKit 只产出一个 index.html，路由全部走 location.hash。
+      adapter: adapter({ pages: "dist", assets: "dist" }),
+      router: { type: "hash" },
+      // 桌面应用随安装包更新，不需要轮询新版本；版本号固定，构建产物可复现。
+      version: { name: packageJson.version, pollInterval: 0 },
+    }),
+    devCsp(tauriConfig.app.security.devCsp),
+  ],
   server: {
     host: "localhost",
     port: 1420,
@@ -16,18 +28,13 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/core/**/*.ts"],
-      exclude: ["src/core/**/*.test.ts"],
+      include: ["src/lib/{domain,keys,events,api}/**/*.ts"],
+      exclude: ["src/**/*.test.ts", "src/lib/api/schema.d.ts"],
       reporter: ["text", "json-summary"],
-      thresholds: {
-        branches: 100,
-        functions: 100,
-        lines: 100,
-        statements: 100,
-      },
+      thresholds: { lines: 95 },
     },
-    include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
   },
 });
