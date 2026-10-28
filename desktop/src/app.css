@@ -1,1 +1,241 @@
-#ldos-root { display: contents; }
+/*
+ * LDOS design tokens: the single source for colour, type, density and motion.
+ *
+ * Gold is reserved. It appears in exactly four places: the selected-item dot,
+ * the focus ring, the primary action and an active slider. A selected cell is
+ * filled with --gold-12. Anything else that wants emphasis uses --fg.
+ *
+ * WebKitGTK budget: no blur, gradients or backdrop-filter, and animate only
+ * transform and opacity.
+ */
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* The workbench is dark only. */
+@custom-variant dark (&:where(:root, :root *));
+
+:root {
+  color-scheme: dark;
+
+  --bg0: #0c0d0f;
+  --bg1: #121418;
+  --bg2: #181b20;
+  --bg3: #1e2127;
+  --line: #262a31;
+  --line2: #333842;
+  --line3: #444a55;
+  --fg: #e8e6e1;
+  --fg2: #a19f99;
+  --fg3: #6e6c67;
+  --gold: #e6bd75;
+  --gold-hover: #ecc888;
+  --gold-ink: #1a1408;
+  --gold-12: rgb(230 189 117 / 0.12);
+  --gold-30: rgb(230 189 117 / 0.3);
+  --danger: #d77a6e;
+  --danger-12: rgb(215 122 110 / 0.12);
+  --ok: #8db58a;
+  --warn: #d9a86b;
+  --scrim: rgb(5 6 7 / 0.6);
+
+  --tag-character: #e6bd75;
+  --tag-copyright: #b39be0;
+  --tag-artist: #72c0be;
+  --tag-general: #cfccc5;
+  --tag-meta: #6e6c67;
+  --tag-rating: #8e98a8;
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-color: 120ms;
+  --t-move: 180ms;
+  --t-over: 220ms;
+
+  --row: 32px;
+  --control: 28px;
+  --radius: 6px;
+  --shadow-overlay: 0 18px 48px rgb(0 0 0 / 0.55), 0 0 0 1px var(--line2);
+
+  /* shadcn-svelte semantic names, mapped onto the palette above. */
+  --background: var(--bg0);
+  --foreground: var(--fg);
+  --card: var(--bg1);
+  --popover: var(--bg1);
+  --primary: var(--gold);
+  --primary-foreground: var(--gold-ink);
+  --secondary: var(--bg2);
+  --muted: var(--bg2);
+  --muted-foreground: var(--fg2);
+  --accent: var(--bg3);
+  --destructive: var(--danger);
+  --border: var(--line);
+  --input: var(--line2);
+  --ring: var(--gold);
+}
+
+[data-density="comfortable"] {
+  --row: 40px;
+  --control: 32px;
+}
+
+[data-motion="reduced"] {
+  --t-color: 0ms;
+  --t-move: 0ms;
+  --t-over: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-color: 0ms;
+    --t-move: 0ms;
+    --t-over: 0ms;
+  }
+}
+
+@theme inline {
+  --color-bg0: var(--bg0);
+  --color-bg1: var(--bg1);
+  --color-bg2: var(--bg2);
+  --color-bg3: var(--bg3);
+  --color-line: var(--line);
+  --color-line2: var(--line2);
+  --color-line3: var(--line3);
+  --color-fg: var(--fg);
+  --color-fg2: var(--fg2);
+  --color-fg3: var(--fg3);
+  --color-gold: var(--gold);
+  --color-gold-hover: var(--gold-hover);
+  --color-gold-ink: var(--gold-ink);
+  --color-gold-12: var(--gold-12);
+  --color-danger: var(--danger);
+  --color-danger-12: var(--danger-12);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-scrim: var(--scrim);
+
+  --color-tag-character: var(--tag-character);
+  --color-tag-copyright: var(--tag-copyright);
+  --color-tag-artist: var(--tag-artist);
+  --color-tag-general: var(--tag-general);
+  --color-tag-meta: var(--tag-meta);
+  --color-tag-rating: var(--tag-rating);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --font-sans: "Inter", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Sarasa Mono SC", ui-monospace, monospace;
+  --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
+  --text-xs: 12px;
+  --text-xs--line-height: 18px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --text-base: 14px;
+  --text-base--line-height: 22px;
+  --text-lg: 18px;
+  --text-lg--line-height: 26px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+
+  --spacing-row: var(--row);
+  --spacing-control: var(--control);
+
+  --shadow-over: var(--shadow-overlay);
+  --ease-ldos: var(--ease);
+  --default-transition-duration: var(--t-color);
+  --default-transition-timing-function: var(--ease);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--line);
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    overflow: hidden;
+    background: var(--bg0);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+    font-synthesis: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 1.5px solid var(--gold);
+    outline-offset: 1px;
+  }
+
+  ::selection {
+    background: var(--line2);
+  }
+
+  input,
+  textarea {
+    caret-color: var(--fg);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 5px;
+    background: var(--line2);
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* Reduced motion zeroes everything, including tw-animate-css enter/exit. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0ms !important;
+    transition-duration: 0ms !important;
+  }
+}
+
+[data-motion="reduced"] *,
+[data-motion="reduced"] ::before,
+[data-motion="reduced"] ::after {
+  animation-duration: 0ms !important;
+  transition-duration: 0ms !important;
+}
+
+#ldos-root {
+  display: contents;
+}
