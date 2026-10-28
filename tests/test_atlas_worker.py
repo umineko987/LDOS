@@ -390,12 +390,17 @@ class RunJobTests(unittest.TestCase):
 
     def test_model_failure_is_reported_as_model_unavailable(self):
         items = self.good_items()[:4]
+        # 上一次的结果与雪碧图不能留下来冒充本次结果
+        (self.output_dir / "sprites").mkdir(parents=True)
+        (self.output_dir / "atlas.json").write_text("{}", encoding="utf-8")
+        (self.output_dir / "sprites" / "sheet-0000.webp").write_bytes(b"old")
         with mock.patch.object(dedup_models, "DeepEmbeddingExtractor", side_effect=RuntimeError("offline")), \
                 mock.patch.object(dedup_resources, "configure_process_resources"):
             with self.assertRaises(atlas_worker.WorkerError) as raised:
                 self.run_job(items)
         self.assertEqual(raised.exception.code, "model_unavailable")
         self.assertFalse((self.output_dir / "atlas.json").exists())
+        self.assertFalse((self.output_dir / "sprites" / "sheet-0000.webp").exists())
 
     def test_job_without_usable_items_writes_empty_atlas(self):
         atlas = self.run_job([{"asset_id": "gone", "path": str(self.root / "gone.png"), "sha256": None}])

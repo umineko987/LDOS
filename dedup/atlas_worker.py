@@ -242,6 +242,10 @@ def prepare_output_dir(value: str) -> Path:
         # 只收紧 worker 新建的目录；已有目录保留调用方的权限策略。
         if not existed:
             path.chmod(0o700)
+        # 旧 atlas.json 引用的雪碧图马上会被删掉：先删它，保持“atlas.json 存在即本次完成”
+        previous = path / "atlas.json"
+        if previous.is_file() and not previous.is_symlink():
+            previous.unlink()
         sprites = path / "sprites"
         _reject_symlinks(sprites)
         sprites.mkdir(mode=0o700, exist_ok=True)
