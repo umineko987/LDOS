@@ -34,7 +34,7 @@ export default defineConfig({
     include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/lib/{domain,keys,events,api}/**/*.ts"],
+      include: ["src/lib/{domain,keys,events,api,boot,platform}/**/*.ts"],
       exclude: ["src/**/*.test.ts", "src/lib/api/schema.d.ts"],
       reporter: ["text", "json-summary"],
       thresholds: { lines: 95 },
