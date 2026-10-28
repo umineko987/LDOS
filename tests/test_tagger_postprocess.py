@@ -110,6 +110,59 @@ class CaptionTests(unittest.TestCase):
         self.assertEqual(caption, "group\\(c\\)")
 
 
+class SelectionSemanticsTests(unittest.TestCase):
+    """前端 JS 移植版依赖的边界语义。"""
+
+    def test_threshold_compares_widened_float32_in_float64(self) -> None:
+        vocab = Vocabulary(["below", "above", "exact"], ["general"] * 3)
+        just_below = np.float32(0.35)  # float32 最近值 0.3499999940… < 0.35
+        just_above = np.nextafter(just_below, np.float32(1))
+        scores = np.array([just_below, just_above, 0.5], dtype=np.float32)
+        result = select(scores, vocab, SelectionPolicy(thresholds={"general": 0.35}))
+        self.assertEqual(list(result[0]), ["above", "exact"])
+        self.assertEqual(result[0]["above"], float(just_above))  # 无损扩展，未取整
+        exact = select(scores, vocab, SelectionPolicy(thresholds={"general": 0.5}))
+        self.assertEqual(list(exact[0]), ["exact"])  # 相等即入选
+
+    def test_rating_argmax_tie_takes_first_in_vocabulary_order(self) -> None:
+        vocab = Vocabulary(["general", "sensitive", "questionable"], ["rating"] * 3)
+        scores = np.array([0.2, 0.7, 0.7], dtype=np.float32)
+        self.assertEqual(list(select(scores, vocab, SelectionPolicy(thresholds={}))[0]), ["sensitive"])
+
+    def test_policy_categories_default_to_first_appearance_order(self) -> None:
+        from postprocess import policy_categories
+
+        vocab = Vocabulary(["a", "b", "c", "d"], ["general", "character", "general", "rating"])
+        self.assertEqual(policy_categories(vocab, SelectionPolicy(thresholds={})), ("general", "character", "rating"))
+        explicit = SelectionPolicy(thresholds={}, categories=("rating", "artist"))
+        self.assertEqual(policy_categories(vocab, explicit), ("rating", "artist"))
+
+
+class MergeSelectionsTests(unittest.TestCase):
+    def test_format_tag_rules(self) -> None:
+        from postprocess import format_tag
+
+        self.assertEqual(format_tag("long_hair"), "long hair")
+        self.assertEqual(format_tag("Long_Hair"), "Long_Hair")  # 只有纯小写 [a-z0-9_] 才替换
+        self.assertEqual(format_tag("hatsune_miku_(vocaloid)"), "hatsune_miku_(vocaloid)")
+        self.assertEqual(format_tag("^_^"), "^_^")
+        self.assertEqual(format_tag("long_hair", underscore_to_space=False), "long_hair")
+        self.assertEqual(format_tag("miku_(cosplay)", escape_parens=True), "miku_\\(cosplay\\)")
+
+    def test_merge_attributes_model_and_category_and_dedups_by_text(self) -> None:
+        from postprocess import merge_selections
+
+        merged = merge_selections([
+            ("model-a", "general", {"blue_hair": 0.9, "solo": 0.8}),
+            ("model-a", "character", {"hero": 0.7}),
+            ("model-b", "general", {"blue hair": 0.95, "smile": 0.6}),
+        ])
+        self.assertEqual([tag["text"] for tag in merged], ["blue hair", "solo", "hero", "smile"])
+        self.assertEqual(merged[0], {"name": "blue_hair", "text": "blue hair", "category": "general",
+                                     "score": 0.9, "model": "model-a"})
+        self.assertEqual(merged[3]["model"], "model-b")
+
+
 class CaptionFileTests(unittest.TestCase):
     def test_write_and_skip_existing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
