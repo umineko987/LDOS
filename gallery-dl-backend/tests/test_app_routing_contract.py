@@ -20,8 +20,8 @@ from tests.helpers import local_test_client, make_settings
 # operation IDs as well as paths and methods stable: generated clients use them.
 _EXPECTED_OPENAPI_OPERATIONS = {
     ("GET", "/"): ("root__get", ("200",)),
-    ("GET", "/healthz"): ("healthz_healthz_get", ("200",)),
-    ("GET", "/readyz"): ("readyz_readyz_get", ("200",)),
+    ("GET", "/healthz"): ("healthz_healthz_get", ("200", "503")),
+    ("GET", "/readyz"): ("readyz_readyz_get", ("200", "503")),
     ("GET", "/api/v1/config"): ("public_config_api_v1_config_get", ("200", "422")),
     ("GET", "/api/v1/auth"): ("auth_statuses_api_v1_auth_get", ("200", "422")),
     ("GET", "/api/v1/auth/proxy"): ("auth_proxy_status_api_v1_auth_proxy_get", ("200", "422")),

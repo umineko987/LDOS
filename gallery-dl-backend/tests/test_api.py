@@ -282,6 +282,11 @@ class ApiTests(unittest.TestCase):
         legacy_payload = legacy_config.json()
         self.assertIn("runtime_dir", legacy_payload)
         self.assertEqual(legacy_payload["runtime_dir"], str(self.settings.runtime_dir))
+        # response_model 不得悄悄丢字段：legacy 视图必须与 public_dict() 完全一致。
+        self.assertEqual(
+            legacy_payload,
+            json.loads(json.dumps(self.container.settings.public_dict())),
+        )
 
         safe_config = self.client.get("/api/v1/config?view=diagnostics")
         self.assertEqual(safe_config.status_code, 200, safe_config.text)
