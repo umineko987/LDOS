@@ -15,6 +15,7 @@ from ._database_crawl_repository import (
     CrawlRepository,
     refresh_crawl_batch_counts,
 )
+from ._database_dataset_repository import DatasetRepository
 from ._database_gallery_repository import GalleryRepository
 from ._database_policy_repository import SitePolicyRepository
 from ._database_proxy_repository import ProxyProbeRepository
@@ -120,6 +121,11 @@ class Database:
             clock=lambda: time.time(),
         )
         self._gallery_repository = GalleryRepository(
+            read=self._read,
+            transaction=self._transaction,
+            clock=lambda: time.time(),
+        )
+        self._dataset_repository = DatasetRepository(
             read=self._read,
             transaction=self._transaction,
             clock=lambda: time.time(),
@@ -751,6 +757,11 @@ class Database:
     @property
     def gallery(self) -> GalleryRepository:
         return self._gallery_repository
+
+    # 数据集（v15）读写同样经由各自仓储的单一写事务边界。
+    @property
+    def datasets(self) -> DatasetRepository:
+        return self._dataset_repository
 
     def incomplete_processes(self) -> list[dict[str, Any]]:
         return self._task_repository.incomplete_processes()

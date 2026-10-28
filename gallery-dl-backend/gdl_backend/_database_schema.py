@@ -5,11 +5,12 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 
-CURRENT_SCHEMA_VERSION = 14
+CURRENT_SCHEMA_VERSION = 15
 SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION = 8
 GALLERY_EXPORT_SCHEMA_VERSION = 9
 GALLERY_RECONCILIATION_SCHEMA_VERSION = 10
 GALLERY_DIRECTORY_TRASH_SCHEMA_VERSION = 11
+DATASET_SCHEMA_VERSION = 15
 TransactionFactory = Callable[[], AbstractContextManager[sqlite3.Connection]]
 
 
@@ -35,6 +36,85 @@ def _ensure_gallery_search_index(connection: sqlite3.Connection) -> None:
             "当前 Python runtime 的 SQLite 缺少 FTS5，无法创建 gallery_search_index；"
             "请按 docs/图库(含导出).md §5.4 更换受控搜索索引实现"
         ) from exc
+
+
+def _ensure_dataset_schema(connection: sqlite3.Connection) -> None:
+    # v15：数据集是流水线的一等对象。成员不落表，由根目录 + 决定实时推导；
+    # 只有被决定过的图才在 dataset_decisions 里占一行。
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS datasets (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            trigger_word TEXT NOT NULL DEFAULT '',
+            config_json TEXT NOT NULL DEFAULT '{}',
+            cover_asset_id TEXT,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_datasets_updated
+            ON datasets(updated_at);
+
+        CREATE TABLE IF NOT EXISTS dataset_roots (
+            id TEXT PRIMARY KEY,
+            dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+            source_id TEXT NOT NULL REFERENCES gallery_sources(id) ON DELETE CASCADE,
+            directory_id TEXT NOT NULL,
+            relative_path TEXT NOT NULL DEFAULT '',
+            origin TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            UNIQUE(dataset_id, source_id, relative_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dataset_roots_source
+            ON dataset_roots(source_id, dataset_id);
+
+        CREATE TABLE IF NOT EXISTS dataset_crawls (
+            dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+            batch_id TEXT NOT NULL REFERENCES crawl_batches(id) ON DELETE CASCADE,
+            state TEXT NOT NULL DEFAULT 'pending',
+            root_id TEXT,
+            error_code TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY(dataset_id, batch_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dataset_crawls_state
+            ON dataset_crawls(state, batch_id);
+
+        CREATE TABLE IF NOT EXISTS dataset_decisions (
+            dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+            stage TEXT NOT NULL,
+            asset_id TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY(dataset_id, stage, asset_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dataset_decisions_asset
+            ON dataset_decisions(dataset_id, asset_id);
+
+        CREATE TABLE IF NOT EXISTS dataset_stage_runs (
+            id TEXT PRIMARY KEY,
+            dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+            stage TEXT NOT NULL,
+            status TEXT NOT NULL,
+            ref_id TEXT NOT NULL DEFAULT '',
+            input_digest TEXT NOT NULL DEFAULT '',
+            stats_json TEXT NOT NULL DEFAULT '{}',
+            error_code TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            finished_at REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_dataset_stage_runs_stage
+            ON dataset_stage_runs(dataset_id, stage, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_gallery_assets_content_sha256
+            ON gallery_assets(content_sha256) WHERE content_sha256 != '';
+        """
+    )
 
 
 def initialize_schema(
@@ -589,6 +669,7 @@ def initialize_schema(
         """
     )
     _ensure_gallery_search_index(connection)
+    _ensure_dataset_schema(connection)
 
     address_columns = {
         str(row["name"])
@@ -727,3 +808,12 @@ def initialize_schema(
             if "reference_snapshot_json" not in columns:
                 conn.execute("ALTER TABLE gallery_reviews ADD COLUMN reference_snapshot_json TEXT NOT NULL DEFAULT '[]'")
             conn.execute("UPDATE meta SET value='14' WHERE key='schema_version'")
+
+    if schema_version < DATASET_SCHEMA_VERSION:
+        # v15 迁移：数据集表与 content_sha256 索引都是新增对象，DDL 已由
+        # _ensure_dataset_schema 幂等建齐；本块只提交目标版本。
+        with transaction() as conn:
+            conn.execute(
+                "UPDATE meta SET value=? WHERE key='schema_version'",
+                (str(DATASET_SCHEMA_VERSION),),
+            )
