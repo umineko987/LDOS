@@ -37,6 +37,7 @@ from .api_routes import (
 )
 # Keep these names importable from gdl_backend.app while their implementations
 # live outside the composition root.
+from .api_routes.datasets import create_datasets_router
 from .api_routes.errors import ApiError
 from .gallery_service import GalleryCatalogService
 from .gallery_directory_export import GalleryDirectoryExportService
@@ -50,6 +51,7 @@ from .auth import AuthManager
 from .config import AppSettings
 from .crawl import CrawlPlanner
 from .database import Database
+from .dataset_service import DatasetService
 from .discovery import DiscoveryService
 from .encrypted_dns import EncryptedDNSResolver, NetworkTargetValidator
 from .events import EventBus, JobRegistry
@@ -180,6 +182,8 @@ class ServiceContainer:
         )
         self.tagger = TaggerService(settings, jobs=self.jobs)
         self.job_sampler = JobSampler(self.events, self.jobs, default_job_sources(self))
+        # 数据集：扫描后补成员哈希、爬取批次结束后自动挂根（见 dataset_service）。
+        self.datasets = DatasetService.for_container(self)
         self._health_task: asyncio.Task | None = None
         self._started = False
         self._stopping = False
@@ -316,6 +320,7 @@ class ServiceContainer:
             await asyncio.to_thread(
                 self.gallery_catalog.retry_pending_review_reconciliations
             )
+            await asyncio.to_thread(self.datasets.reconcile)
             self._health_task = asyncio.create_task(self._proxy_health_loop(), name="proxy-health-monitor")
             self.job_sampler.start()
 
@@ -336,6 +341,7 @@ class ServiceContainer:
         await self.auth.stop()
         await asyncio.to_thread(self.gallery_directory_exports.stop)
         await asyncio.to_thread(self.gallery_catalog.stop)
+        await asyncio.to_thread(self.datasets.stop)
         try:
             await asyncio.to_thread(self.proxy.stop, force=True)
         except Exception as exc:
@@ -625,6 +631,7 @@ def create_app(
     app.include_router(create_tagger_router())
     app.include_router(create_policies_router())
     app.include_router(create_gallery_router())
+    app.include_router(create_datasets_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
     app.include_router(create_jobs_router())

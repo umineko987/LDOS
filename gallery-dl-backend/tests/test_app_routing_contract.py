@@ -84,7 +84,23 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("POST", "/api/v1/gallery/directory-exports"): ("start_gallery_directory_export_api_v1_gallery_directory_exports_post", ("202", "422")),
     ("GET", "/api/v1/gallery/directory-exports/{operation_id}"): ("get_gallery_directory_export_api_v1_gallery_directory_exports__operation_id__get", ("200", "422")),
     ("DELETE", "/api/v1/gallery/directory-exports/{operation_id}"): ("cancel_gallery_directory_export_api_v1_gallery_directory_exports__operation_id__delete", ("200", "422")),
-    ("POST", "/api/v1/tasks"): ("create_task_api_v1_tasks_post", ("200", "422")),
+    ("GET", "/api/v1/datasets"): ("list_datasets_api_v1_datasets_get", ("200",)),
+    ("POST", "/api/v1/datasets"): ("create_dataset_api_v1_datasets_post", ("201", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}"): ("get_dataset_api_v1_datasets__dataset_id__get", ("200", "422")),
+    ("PATCH", "/api/v1/datasets/{dataset_id}"): ("patch_dataset_api_v1_datasets__dataset_id__patch", ("200", "422")),
+    ("DELETE", "/api/v1/datasets/{dataset_id}"): ("delete_dataset_api_v1_datasets__dataset_id__delete", ("204", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/funnel"): ("get_dataset_funnel_api_v1_datasets__dataset_id__funnel_get", ("200", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/roots"): ("list_dataset_roots_api_v1_datasets__dataset_id__roots_get", ("200", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/roots"): ("add_dataset_root_api_v1_datasets__dataset_id__roots_post", ("201", "422")),
+    ("DELETE", "/api/v1/datasets/{dataset_id}/roots/{root_id}"): ("delete_dataset_root_api_v1_datasets__dataset_id__roots__root_id__delete", ("204", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/members"): ("list_dataset_members_api_v1_datasets__dataset_id__members_get", ("200", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/decisions"): ("record_dataset_decisions_api_v1_datasets__dataset_id__decisions_post", ("200", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/stage-runs"): ("list_dataset_stage_runs_api_v1_datasets__dataset_id__stage_runs_get", ("200", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/hashing"): ("get_dataset_hashing_api_v1_datasets__dataset_id__hashing_get", ("200", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/hashing"): ("start_dataset_hashing_api_v1_datasets__dataset_id__hashing_post", ("202", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/crawls"): ("list_dataset_crawls_api_v1_datasets__dataset_id__crawls_get", ("200", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/crawls"): ("create_dataset_crawl_api_v1_datasets__dataset_id__crawls_post", ("202", "422")),
+    ("POST", "/api/v1/tasks"):("create_task_api_v1_tasks_post", ("200", "422")),
     ("GET", "/api/v1/tasks"): ("list_tasks_api_v1_tasks_get", ("200", "422")),
     ("GET", "/api/v1/tasks/{task_id}"): ("get_task_api_v1_tasks__task_id__get", ("200", "422")),
     ("POST", "/api/v1/tasks/{task_id}/cancel"): ("cancel_task_api_v1_tasks__task_id__cancel_post", ("200", "422")),
@@ -232,7 +248,8 @@ class AppRoutingContractTests(unittest.TestCase):
             "review": "gdl_backend.api_routes.review",
             "gallery": "gdl_backend.api_routes.gallery",
             "gallery_review": "gdl_backend.api_routes.gallery_review",
-            "policies": "gdl_backend.api_routes.policies",
+            "datasets": "gdl_backend.api_routes.datasets",
+            "policies":"gdl_backend.api_routes.policies",
             "proxy": "gdl_backend.api_routes.proxy",
             "scheduler": "gdl_backend.api_routes.scheduler",
             "jobs": "gdl_backend.api_routes.jobs",
@@ -256,6 +273,8 @@ class AppRoutingContractTests(unittest.TestCase):
                 domain = "discovery"
             elif path.startswith(("/api/v1/gallery/reviews", "/api/v1/gallery/review-presets")):
                 domain = "gallery_review"
+            elif path.startswith("/api/v1/datasets"):
+                domain = "datasets"
             elif "/review" in path:
                 domain = "review"
             elif path.startswith("/api/v1/crawls"):

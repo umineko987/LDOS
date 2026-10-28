@@ -22,6 +22,9 @@ DATASET_DECISIONS = frozenset({"exclude", "approve"})
 DATASET_STAGE_RUN_STATUSES = frozenset({"running", "succeeded", "failed", "cancelled"})
 DATASET_CRAWL_STATES = frozenset({"pending", "attached", "failed"})
 
+# 成员过滤参数（excluded / approved）对应的决定取值；undecided 单独处理。
+_DECISION_FILTERS = {"excluded": "exclude", "approved": "approve"}
+
 MEMBER_PAGE_DEFAULT_LIMIT = 100
 MEMBER_PAGE_MAX_LIMIT = 500
 
@@ -515,8 +518,8 @@ class DatasetRepository:
             if stage is None:
                 raise ValueError("dataset_decision_filter_requires_stage")
             params["stage"] = stage
-            if decision in DATASET_DECISIONS:
-                params["decision"] = decision
+            if decision in _DECISION_FILTERS:
+                params["decision"] = _DECISION_FILTERS[decision]
                 restrictions.append(
                     """EXISTS (
                         SELECT 1 FROM dataset_decisions AS f
