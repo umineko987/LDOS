@@ -34,7 +34,7 @@ export default defineConfig({
     include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/lib/{domain,keys,events,api,boot,platform,nav,gfx}/**/*.ts"],
+      include: ["src/lib/{domain,keys,events,api,boot,platform,nav,gfx,prefs}/**/*.ts"],
       // .svelte.ts 只是把注册表接到组件生命周期上；GL 和 Canvas 绘制要真实上下文。两者都由 e2e 覆盖。
       exclude: [
         "src/**/*.test.ts",

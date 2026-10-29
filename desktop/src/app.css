@@ -75,6 +75,7 @@
   --control: 32px;
 }
 
+/* 偏好里的「减少动效」：reduced 总是关掉；full 不理会系统设置；没有属性时跟随系统。 */
 [data-motion="reduced"] {
   --t-color: 0ms;
   --t-move: 0ms;
@@ -82,7 +83,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root {
+  :root:not([data-motion="full"]) {
     --t-color: 0ms;
     --t-move: 0ms;
     --t-over: 0ms;
@@ -219,9 +220,9 @@
 
 /* 减少动效时全部归零，包括 tw-animate-css 的进出场动画。 */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  ::before,
-  ::after {
+  :root:not([data-motion="full"]) *,
+  :root:not([data-motion="full"]) ::before,
+  :root:not([data-motion="full"]) ::after {
     animation-duration: 0ms !important;
     transition-duration: 0ms !important;
   }

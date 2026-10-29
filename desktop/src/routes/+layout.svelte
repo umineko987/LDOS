@@ -13,11 +13,13 @@
   import { createKeymap } from "#lib/keys/keymap.ts";
   import { createPlatformAdapter } from "#lib/platform/adapter.ts";
   import { setPlatform } from "#lib/platform/context.ts";
+  import { prefs } from "#lib/prefs/prefs.svelte.ts";
 
   // 根布局：启动门 → QueryClient → 外壳。语言切换时整棵树按 {#key} 重建，文案随之刷新。
   let { children } = $props();
 
   syncDocumentLang(i18n.current);
+  prefs.sync();
 
   const platform = setPlatform(createPlatformAdapter());
   const keymap = setKeymap(createKeymap());
