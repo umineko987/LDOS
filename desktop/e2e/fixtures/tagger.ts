@@ -163,8 +163,8 @@ export class FakeTagger {
         body: {
           run_id: `run${this.runs.length}`,
           dataset_id: datasetOf(request),
-          stage: "tag",
-          status: "running",
+          stage: "tag" as const,
+          status: "running" as const,
           ref_id: `tagger:${this.runs.length}`,
           input_digest: "e2e",
           stats: { models: body.models },

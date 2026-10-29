@@ -102,7 +102,7 @@ export class FakeCaptions {
   }
 
   private versionOf(entry: Entry): string {
-    return entry.state === "missing" ? "" : `v${entry.version}`;
+    return entry.state === "missing" ? "missing" : `v${entry.version}`;
   }
 
   private item(assetId: string, name: string): Schemas["CaptionItem"] {
