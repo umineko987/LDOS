@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, Depends, Header, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from ..ordered_crawl import EnqueueBatchCancelled
 from ..schemas import RetryRequest, TaskCreate, TaskPolicy
@@ -379,7 +379,11 @@ def create_tasks_router() -> APIRouter:
             raise ApiError(404, "task_not_found", "任务不存在")
         return {"items": await asyncio.to_thread(task_files, task)}
 
-    @router.get("/tasks/{task_id}/files/{relative_path:path}")
+    @router.get(
+        "/tasks/{task_id}/files/{relative_path:path}",
+        response_class=Response,
+        responses={200: {"content": {"application/octet-stream": {}}, "description": "任务输出文件"}},
+    )
     async def download_task_file(
         task_id: str,
         relative_path: str,

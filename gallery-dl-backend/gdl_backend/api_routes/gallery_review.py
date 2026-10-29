@@ -13,6 +13,7 @@ from ..schemas import FilterConfig, FilterPresetWrite
 from .dependencies import get_service
 from .errors import ApiError
 from .review import _desktop_review_operation, _desktop_review_response
+from .review_models import DesktopGalleryReview, DesktopGalleryReviewOperation, ReviewPreset, ReviewPresetList
 
 
 class GalleryReviewCreate(BaseModel):
@@ -69,15 +70,15 @@ def create_gallery_review_presets_router() -> APIRouter:
             return ApiError(404, "review_preset_not_found", "筛选预设不存在")
         return ApiError(409, "review_preset_builtin", "内置预设不可删除")
 
-    @router.get("")
+    @router.get("", response_model=ReviewPresetList, response_model_exclude_unset=True)
     async def list_presets(container: Any = Depends(get_service)):
         return {"items": await asyncio.to_thread(container.db.gallery_reviews.list_presets)}
 
-    @router.post("", status_code=201)
+    @router.post("", status_code=201, response_model=ReviewPreset, response_model_exclude_unset=True)
     async def create_preset(body: FilterPresetWrite, container: Any = Depends(get_service)):
         return await asyncio.to_thread(container.db.gallery_reviews.save_preset, body.name, body.options.model_dump())
 
-    @router.put("/{preset_id}")
+    @router.put("/{preset_id}", response_model=ReviewPreset, response_model_exclude_unset=True)
     async def update_preset(preset_id: str, body: FilterPresetWrite, container: Any = Depends(get_service)):
         try:
             return await asyncio.to_thread(container.db.gallery_reviews.save_preset, body.name, body.options.model_dump(), preset_id=preset_id)
@@ -98,7 +99,7 @@ def create_gallery_review_presets_router() -> APIRouter:
 def create_gallery_review_router() -> APIRouter:
     router = APIRouter(prefix="/gallery/reviews")
 
-    @router.post("", status_code=202)
+    @router.post("", status_code=202, response_model=DesktopGalleryReviewOperation, response_model_exclude_unset=True)
     async def create_review(body: GalleryReviewCreate, container: Any = Depends(get_service)):
         if not container.settings.dedup.enabled:
             raise ApiError(409, "dedup_disabled", "去重功能未启用")
@@ -109,7 +110,7 @@ def create_gallery_review_router() -> APIRouter:
             raise review_error(exc) from None
         return gallery_review_response(result)
 
-    @router.get("/{review_id}")
+    @router.get("/{review_id}", response_model=DesktopGalleryReview, response_model_exclude_unset=True)
     async def get_review(review_id: str, limit: int = Query(12, ge=1, le=50), offset: int = Query(0, ge=0),
                          view: Literal["desktop"] = Query("desktop"),
                          classification: Literal["rough", "monochrome"] | None = Query(None),
@@ -128,7 +129,8 @@ def create_gallery_review_router() -> APIRouter:
         except KeyError as exc:
             raise review_error(exc) from None
 
-    @router.post("/{review_id}/groups/{group_id}/adopt")
+    @router.post("/{review_id}/groups/{group_id}/adopt", response_model=DesktopGalleryReviewOperation,
+                 response_model_exclude_unset=True)
     async def adopt(review_id: str, group_id: str, body: GalleryReviewAdopt, container: Any = Depends(get_service)):
         try:
             result = await asyncio.to_thread(
@@ -138,7 +140,8 @@ def create_gallery_review_router() -> APIRouter:
         except (KeyError, ValueError, RuntimeError, OSError) as exc:
             raise review_error(exc) from None
 
-    @router.post("/{review_id}/retry", status_code=202)
+    @router.post("/{review_id}/retry", status_code=202, response_model=DesktopGalleryReviewOperation,
+                 response_model_exclude_unset=True)
     async def retry(review_id: str, container: Any = Depends(get_service)):
         try:
             if not await asyncio.to_thread(container.gallery_reviews.retry_analysis, review_id):
@@ -155,7 +158,9 @@ def create_gallery_review_router() -> APIRouter:
             raise review_error(exc) from None
         return Response(status_code=204)
 
-    @router.get("/{review_id}/images/{image_id}")
+    @router.get("/{review_id}/images/{image_id}", response_class=Response,
+                responses={200: {"content": {"image/*": {}, "application/octet-stream": {}},
+                                 "description": "审核图片原文件"}})
     async def image_content(review_id: str, image_id: str, container: Any = Depends(get_service)):
         try:
             handle, name = await asyncio.to_thread(container.gallery_reviews.image_content, review_id, image_id)

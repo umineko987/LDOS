@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from ..database import CrawlReviewGroupLimitExceeded, MAX_CRAWL_REVIEW_GROUPS
 from ..redaction import safe_exception_category
@@ -15,6 +15,7 @@ from ..review import resolve_review_file
 from ..schemas import ReviewDecisions
 from .dependencies import get_service
 from .errors import ApiError
+from .review_models import CrawlReviewOperationResponse, CrawlReviewResponse
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +168,11 @@ def _sync_gallery_after_apply(container: Any, batch_id: str) -> None:
 def create_review_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
-    @router.get("/crawls/{batch_id}/review")
+    @router.get(
+        "/crawls/{batch_id}/review",
+        response_model=CrawlReviewResponse,
+        response_model_exclude_unset=True,
+    )
     async def get_crawl_review(
         batch_id: str,
         kind: str | None = Query(
@@ -238,7 +243,12 @@ def create_review_router() -> APIRouter:
             return _desktop_review_response(review, page)
         return {**review, "groups": page}
 
-    @router.post("/crawls/{batch_id}/review/start", status_code=202)
+    @router.post(
+        "/crawls/{batch_id}/review/start",
+        status_code=202,
+        response_model=CrawlReviewOperationResponse,
+        response_model_exclude_unset=True,
+    )
     async def start_crawl_review(
         batch_id: str,
         view: ReviewResponseView = Query("legacy"),
@@ -254,7 +264,11 @@ def create_review_router() -> APIRouter:
         except RuntimeError as exc:
             raise ApiError(409, "review_state_conflict", str(exc)) from exc
 
-    @router.put("/crawls/{batch_id}/review/decisions")
+    @router.put(
+        "/crawls/{batch_id}/review/decisions",
+        response_model=CrawlReviewOperationResponse,
+        response_model_exclude_unset=True,
+    )
     async def update_crawl_review_decisions(
         batch_id: str,
         body: ReviewDecisions,
@@ -279,7 +293,11 @@ def create_review_router() -> APIRouter:
             raise ApiError(404, "review_not_found", "审核批次不存在")
         return _desktop_review_operation(review) if view == "desktop" else review
 
-    @router.post("/crawls/{batch_id}/review/apply")
+    @router.post(
+        "/crawls/{batch_id}/review/apply",
+        response_model=CrawlReviewOperationResponse,
+        response_model_exclude_unset=True,
+    )
     async def apply_crawl_review(
         batch_id: str,
         view: ReviewResponseView = Query("legacy"),
@@ -306,7 +324,12 @@ def create_review_router() -> APIRouter:
         except RuntimeError as exc:
             raise ApiError(409, "review_state_conflict", str(exc)) from exc
 
-    @router.post("/crawls/{batch_id}/review/retry", status_code=202)
+    @router.post(
+        "/crawls/{batch_id}/review/retry",
+        status_code=202,
+        response_model=CrawlReviewOperationResponse,
+        response_model_exclude_unset=True,
+    )
     async def retry_crawl_review(
         batch_id: str,
         view: ReviewResponseView = Query("legacy"),
@@ -321,7 +344,11 @@ def create_review_router() -> APIRouter:
         review = container.db.get_crawl_review(batch_id)
         return _desktop_review_operation(review) if view == "desktop" else review
 
-    @router.get("/crawls/{batch_id}/review/images/{image_id}")
+    @router.get(
+        "/crawls/{batch_id}/review/images/{image_id}",
+        response_class=Response,
+        responses={200: {"content": {"image/*": {}}, "description": "审核图片原文件"}},
+    )
     async def get_crawl_review_image(
         batch_id: str,
         image_id: str,

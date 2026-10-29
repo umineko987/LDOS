@@ -13,7 +13,7 @@ import hashlib
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .._database_gallery_repository import (
@@ -710,7 +710,21 @@ def create_gallery_router() -> APIRouter:
         _attach_source_roots(container, payload, [asset])
         return payload
 
-    @router.get("/gallery/assets/{asset_id}/content")
+    @router.get(
+        "/gallery/assets/{asset_id}/content",
+        response_class=Response,
+        responses={
+            200: {
+                "content": {
+                    "image/jpeg": {},
+                    "image/png": {},
+                    "image/webp": {},
+                    "application/octet-stream": {},
+                },
+                "description": "图片原文件",
+            },
+        },
+    )
     async def get_gallery_asset_content(
         asset_id: str,
         container: Any = Depends(get_service),
@@ -746,7 +760,11 @@ def create_gallery_router() -> APIRouter:
             },
         )
 
-    @router.get("/gallery/assets/{asset_id}/thumbnail")
+    @router.get(
+        "/gallery/assets/{asset_id}/thumbnail",
+        response_class=Response,
+        responses={200: {"content": {"image/jpeg": {}}, "description": "JPEG 缩略图"}},
+    )
     async def get_gallery_asset_thumbnail(
         asset_id: str,
         size: int = Query(default=256),

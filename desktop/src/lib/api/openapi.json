@@ -5324,6 +5324,460 @@
         "title": "DedupGroupResponse",
         "type": "object"
       },
+      "DesktopCrawlReview": {
+        "additionalProperties": true,
+        "properties": {
+          "automaticGroupCount": {
+            "title": "Automaticgroupcount",
+            "type": "integer"
+          },
+          "automaticRejectedImageCount": {
+            "title": "Automaticrejectedimagecount",
+            "type": "integer"
+          },
+          "batch_id": {
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "decidedGroupCount": {
+            "title": "Decidedgroupcount",
+            "type": "integer"
+          },
+          "duplicateGroupCount": {
+            "title": "Duplicategroupcount",
+            "type": "integer"
+          },
+          "failedImageCount": {
+            "title": "Failedimagecount",
+            "type": "integer"
+          },
+          "groups": {
+            "$ref": "#/components/schemas/DesktopReviewGroupPage"
+          },
+          "hasError": {
+            "title": "Haserror",
+            "type": "boolean"
+          },
+          "keptImageCount": {
+            "title": "Keptimagecount",
+            "type": "integer"
+          },
+          "rejectedImageCount": {
+            "title": "Rejectedimagecount",
+            "type": "integer"
+          },
+          "response_profile": {
+            "const": "desktop-review-v1",
+            "title": "Response Profile",
+            "type": "string"
+          },
+          "selectedImageCount": {
+            "title": "Selectedimagecount",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "totalGroupCount": {
+            "title": "Totalgroupcount",
+            "type": "integer"
+          },
+          "totalImageCount": {
+            "title": "Totalimagecount",
+            "type": "integer"
+          },
+          "unreadableImageCount": {
+            "title": "Unreadableimagecount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "response_profile",
+          "status",
+          "totalImageCount",
+          "totalGroupCount",
+          "duplicateGroupCount",
+          "unreadableImageCount",
+          "automaticGroupCount",
+          "automaticRejectedImageCount",
+          "selectedImageCount",
+          "decidedGroupCount",
+          "keptImageCount",
+          "rejectedImageCount",
+          "failedImageCount",
+          "hasError",
+          "batch_id",
+          "groups"
+        ],
+        "title": "DesktopCrawlReview",
+        "type": "object"
+      },
+      "DesktopCrawlReviewOperation": {
+        "additionalProperties": true,
+        "properties": {
+          "automaticGroupCount": {
+            "title": "Automaticgroupcount",
+            "type": "integer"
+          },
+          "automaticRejectedImageCount": {
+            "title": "Automaticrejectedimagecount",
+            "type": "integer"
+          },
+          "batch_id": {
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "decidedGroupCount": {
+            "title": "Decidedgroupcount",
+            "type": "integer"
+          },
+          "duplicateGroupCount": {
+            "title": "Duplicategroupcount",
+            "type": "integer"
+          },
+          "failedImageCount": {
+            "title": "Failedimagecount",
+            "type": "integer"
+          },
+          "hasError": {
+            "title": "Haserror",
+            "type": "boolean"
+          },
+          "keptImageCount": {
+            "title": "Keptimagecount",
+            "type": "integer"
+          },
+          "rejectedImageCount": {
+            "title": "Rejectedimagecount",
+            "type": "integer"
+          },
+          "response_profile": {
+            "const": "desktop-review-operation-v1",
+            "title": "Response Profile",
+            "type": "string"
+          },
+          "selectedImageCount": {
+            "title": "Selectedimagecount",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "totalGroupCount": {
+            "title": "Totalgroupcount",
+            "type": "integer"
+          },
+          "totalImageCount": {
+            "title": "Totalimagecount",
+            "type": "integer"
+          },
+          "unreadableImageCount": {
+            "title": "Unreadableimagecount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "response_profile",
+          "status",
+          "totalImageCount",
+          "totalGroupCount",
+          "duplicateGroupCount",
+          "unreadableImageCount",
+          "automaticGroupCount",
+          "automaticRejectedImageCount",
+          "selectedImageCount",
+          "decidedGroupCount",
+          "keptImageCount",
+          "rejectedImageCount",
+          "failedImageCount",
+          "hasError",
+          "batch_id"
+        ],
+        "title": "DesktopCrawlReviewOperation",
+        "type": "object"
+      },
+      "DesktopGalleryReview": {
+        "additionalProperties": true,
+        "properties": {
+          "automaticGroupCount": {
+            "title": "Automaticgroupcount",
+            "type": "integer"
+          },
+          "automaticRejectedImageCount": {
+            "title": "Automaticrejectedimagecount",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Created At"
+          },
+          "decidedGroupCount": {
+            "title": "Decidedgroupcount",
+            "type": "integer"
+          },
+          "directories": {
+            "items": {
+              "$ref": "#/components/schemas/GalleryReviewDirectory"
+            },
+            "title": "Directories",
+            "type": "array"
+          },
+          "duplicateGroupCount": {
+            "title": "Duplicategroupcount",
+            "type": "integer"
+          },
+          "failedImageCount": {
+            "title": "Failedimagecount",
+            "type": "integer"
+          },
+          "filter_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewFilterConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filteredImageCount": {
+            "title": "Filteredimagecount",
+            "type": "integer"
+          },
+          "groups": {
+            "$ref": "#/components/schemas/DesktopReviewGroupPage"
+          },
+          "hasError": {
+            "title": "Haserror",
+            "type": "boolean"
+          },
+          "keptImageCount": {
+            "title": "Keptimagecount",
+            "type": "integer"
+          },
+          "rejectedImageCount": {
+            "title": "Rejectedimagecount",
+            "type": "integer"
+          },
+          "response_profile": {
+            "const": "desktop-gallery-review-v1",
+            "title": "Response Profile",
+            "type": "string"
+          },
+          "review_id": {
+            "title": "Review Id",
+            "type": "string"
+          },
+          "selectedImageCount": {
+            "title": "Selectedimagecount",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "totalGroupCount": {
+            "title": "Totalgroupcount",
+            "type": "integer"
+          },
+          "totalImageCount": {
+            "title": "Totalimagecount",
+            "type": "integer"
+          },
+          "unreadableImageCount": {
+            "title": "Unreadableimagecount",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "response_profile",
+          "status",
+          "totalImageCount",
+          "totalGroupCount",
+          "duplicateGroupCount",
+          "unreadableImageCount",
+          "automaticGroupCount",
+          "automaticRejectedImageCount",
+          "selectedImageCount",
+          "decidedGroupCount",
+          "keptImageCount",
+          "rejectedImageCount",
+          "failedImageCount",
+          "hasError",
+          "review_id",
+          "version",
+          "directories",
+          "created_at",
+          "updated_at",
+          "filter_config",
+          "filteredImageCount",
+          "groups"
+        ],
+        "title": "DesktopGalleryReview",
+        "type": "object"
+      },
+      "DesktopGalleryReviewOperation": {
+        "additionalProperties": true,
+        "properties": {
+          "automaticGroupCount": {
+            "title": "Automaticgroupcount",
+            "type": "integer"
+          },
+          "automaticRejectedImageCount": {
+            "title": "Automaticrejectedimagecount",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Created At"
+          },
+          "decidedGroupCount": {
+            "title": "Decidedgroupcount",
+            "type": "integer"
+          },
+          "directories": {
+            "items": {
+              "$ref": "#/components/schemas/GalleryReviewDirectory"
+            },
+            "title": "Directories",
+            "type": "array"
+          },
+          "duplicateGroupCount": {
+            "title": "Duplicategroupcount",
+            "type": "integer"
+          },
+          "failedImageCount": {
+            "title": "Failedimagecount",
+            "type": "integer"
+          },
+          "filter_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewFilterConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filteredImageCount": {
+            "title": "Filteredimagecount",
+            "type": "integer"
+          },
+          "hasError": {
+            "title": "Haserror",
+            "type": "boolean"
+          },
+          "keptImageCount": {
+            "title": "Keptimagecount",
+            "type": "integer"
+          },
+          "rejectedImageCount": {
+            "title": "Rejectedimagecount",
+            "type": "integer"
+          },
+          "response_profile": {
+            "const": "desktop-gallery-review-operation-v1",
+            "title": "Response Profile",
+            "type": "string"
+          },
+          "review_id": {
+            "title": "Review Id",
+            "type": "string"
+          },
+          "selectedImageCount": {
+            "title": "Selectedimagecount",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "totalGroupCount": {
+            "title": "Totalgroupcount",
+            "type": "integer"
+          },
+          "totalImageCount": {
+            "title": "Totalimagecount",
+            "type": "integer"
+          },
+          "unreadableImageCount": {
+            "title": "Unreadableimagecount",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "response_profile",
+          "status",
+          "totalImageCount",
+          "totalGroupCount",
+          "duplicateGroupCount",
+          "unreadableImageCount",
+          "automaticGroupCount",
+          "automaticRejectedImageCount",
+          "selectedImageCount",
+          "decidedGroupCount",
+          "keptImageCount",
+          "rejectedImageCount",
+          "failedImageCount",
+          "hasError",
+          "review_id",
+          "version",
+          "directories",
+          "created_at",
+          "updated_at",
+          "filter_config",
+          "filteredImageCount"
+        ],
+        "title": "DesktopGalleryReviewOperation",
+        "type": "object"
+      },
       "DesktopProxyInlineNode": {
         "additionalProperties": true,
         "properties": {
@@ -6052,6 +6506,240 @@
         "title": "DesktopProxyTransportCore",
         "type": "object"
       },
+      "DesktopReviewGroup": {
+        "additionalProperties": true,
+        "properties": {
+          "decided": {
+            "title": "Decided",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/DesktopReviewImage"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "ordinal",
+          "kind",
+          "decided",
+          "images"
+        ],
+        "title": "DesktopReviewGroup",
+        "type": "object"
+      },
+      "DesktopReviewGroupPage": {
+        "additionalProperties": true,
+        "properties": {
+          "byte_truncated": {
+            "title": "Byte Truncated",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DesktopReviewGroup"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "byte_truncated",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "DesktopReviewGroupPage",
+        "type": "object"
+      },
+      "DesktopReviewImage": {
+        "additionalProperties": true,
+        "properties": {
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Id"
+          },
+          "directory_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directory Id"
+          },
+          "disposition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disposition"
+          },
+          "hasError": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Haserror"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/DesktopReviewImageMetadata"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "readable": {
+            "title": "Readable",
+            "type": "boolean"
+          },
+          "recommended": {
+            "title": "Recommended",
+            "type": "boolean"
+          },
+          "relative_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Path"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "source_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Display Name"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "id",
+          "ordinal",
+          "readable",
+          "recommended",
+          "selected",
+          "metadata"
+        ],
+        "title": "DesktopReviewImage",
+        "type": "object"
+      },
+      "DesktopReviewImageMetadata": {
+        "additionalProperties": true,
+        "properties": {
+          "classification": {
+            "anyOf": [
+              {
+                "enum": [
+                  "rough",
+                  "monochrome"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classification"
+          },
+          "h": {
+            "title": "H",
+            "type": "integer"
+          },
+          "w": {
+            "title": "W",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "w",
+          "h"
+        ],
+        "title": "DesktopReviewImageMetadata",
+        "type": "object"
+      },
       "DesktopSearchAuthResponse": {
         "additionalProperties": true,
         "properties": {
@@ -6606,6 +7294,92 @@
         "title": "DesktopSearchSourceResponse",
         "type": "object"
       },
+      "DiagnosticsBackgroundLoop": {
+        "additionalProperties": true,
+        "properties": {
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "last_error_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error At"
+          },
+          "last_error_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Category"
+          },
+          "last_recovery_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Recovery At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "operational": {
+            "title": "Operational",
+            "type": "boolean"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "running",
+          "operational",
+          "consecutive_failures",
+          "last_error_category",
+          "last_error_at",
+          "last_success_at",
+          "last_recovery_at"
+        ],
+        "title": "DiagnosticsBackgroundLoop",
+        "type": "object"
+      },
       "DiagnosticsConfigResponse": {
         "description": "diagnostics 视图：不含主机路径与秘密的最小能力投影。",
         "properties": {
@@ -6694,6 +7468,43 @@
         "title": "DiagnosticsGalleryConfig",
         "type": "object"
       },
+      "DiagnosticsOrderedCrawls": {
+        "additionalProperties": true,
+        "properties": {
+          "active_batches": {
+            "title": "Active Batches",
+            "type": "integer"
+          },
+          "address_parallelism": {
+            "enum": [
+              "media_tasks",
+              "unknown"
+            ],
+            "title": "Address Parallelism",
+            "type": "string"
+          },
+          "execution_order": {
+            "enum": [
+              "source_then_address",
+              "unknown"
+            ],
+            "title": "Execution Order",
+            "type": "string"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "running",
+          "active_batches",
+          "execution_order",
+          "address_parallelism"
+        ],
+        "title": "DiagnosticsOrderedCrawls",
+        "type": "object"
+      },
       "DiagnosticsProxyConfig": {
         "properties": {
           "auto_start": {
@@ -6728,6 +7539,67 @@
           "max_concurrent_tasks"
         ],
         "title": "DiagnosticsSchedulerConfig",
+        "type": "object"
+      },
+      "DiagnosticsSchedulerStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "ordered_crawls": {
+            "$ref": "#/components/schemas/DiagnosticsOrderedCrawls"
+          },
+          "response_profile": {
+            "const": "diagnostics",
+            "title": "Response Profile",
+            "type": "string"
+          },
+          "secrets_exposed": {
+            "title": "Secrets Exposed",
+            "type": "boolean"
+          },
+          "tasks": {
+            "$ref": "#/components/schemas/DiagnosticsSchedulerTasks"
+          }
+        },
+        "required": [
+          "response_profile",
+          "secrets_exposed",
+          "tasks",
+          "ordered_crawls"
+        ],
+        "title": "DiagnosticsSchedulerStatus",
+        "type": "object"
+      },
+      "DiagnosticsSchedulerTasks": {
+        "additionalProperties": true,
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "active_site_count": {
+            "title": "Active Site Count",
+            "type": "integer"
+          },
+          "dispatch_loop": {
+            "$ref": "#/components/schemas/DiagnosticsBackgroundLoop"
+          },
+          "max_concurrent": {
+            "title": "Max Concurrent",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "running",
+          "active",
+          "max_concurrent",
+          "active_site_count",
+          "dispatch_loop"
+        ],
+        "title": "DiagnosticsSchedulerTasks",
         "type": "object"
       },
       "DiagnosticsServerConfig": {
@@ -7842,6 +8714,68 @@
           }
         },
         "title": "GalleryReviewCreate",
+        "type": "object"
+      },
+      "GalleryReviewDirectory": {
+        "additionalProperties": true,
+        "properties": {
+          "directory_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directory Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "relative_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Path"
+          },
+          "source_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Display Name"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          }
+        },
+        "title": "GalleryReviewDirectory",
         "type": "object"
       },
       "GalleryScanOperationResponse": {
@@ -9017,6 +9951,649 @@
         "title": "LegacyBrowserRuntime",
         "type": "object"
       },
+      "LegacyCrawlReview": {
+        "additionalProperties": true,
+        "properties": {
+          "applied_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
+          },
+          "automatic_group_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Group Count"
+          },
+          "automatic_rejected_image_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Rejected Image Count"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "decided_group_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided Group Count"
+          },
+          "duplicate_group_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Group Count"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed_image_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed Image Count"
+          },
+          "groups": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LegacyCrawlReviewGroupPage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kept_image_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kept Image Count"
+          },
+          "ready_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready At"
+          },
+          "rejected_image_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejected Image Count"
+          },
+          "selected_image_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Image Count"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "total_group_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Group Count"
+          },
+          "total_image_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Image Count"
+          },
+          "unreadable_image_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unreadable Image Count"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "title": "LegacyCrawlReview",
+        "type": "object"
+      },
+      "LegacyCrawlReviewGroup": {
+        "additionalProperties": true,
+        "properties": {
+          "decided": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "image_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Count"
+          },
+          "images": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LegacyCrawlReviewImage"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Images"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "match_levels": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Levels"
+          },
+          "ordinal": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordinal"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "selected_image_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Image Count"
+          }
+        },
+        "title": "LegacyCrawlReviewGroup",
+        "type": "object"
+      },
+      "LegacyCrawlReviewGroupPage": {
+        "additionalProperties": true,
+        "properties": {
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LegacyCrawlReviewGroup"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offset"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "title": "LegacyCrawlReviewGroupPage",
+        "type": "object"
+      },
+      "LegacyCrawlReviewImage": {
+        "additionalProperties": true,
+        "properties": {
+          "disposition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disposition"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "file_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Hash"
+          },
+          "final_relative_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Relative Path"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "ordinal": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordinal"
+          },
+          "readable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readable"
+          },
+          "recommended": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommended"
+          },
+          "relative_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Path"
+          },
+          "selected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "title": "LegacyCrawlReviewImage",
+        "type": "object"
+      },
+      "LegacyOrderedCrawls": {
+        "additionalProperties": true,
+        "properties": {
+          "active_batches": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Batches"
+          },
+          "address_parallelism": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Parallelism"
+          },
+          "execution_order": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Order"
+          },
+          "max_concurrent_batches": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Concurrent Batches"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          },
+          "running_batch_loops": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running Batch Loops"
+          },
+          "site_planning_locked": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site Planning Locked"
+          }
+        },
+        "title": "LegacyOrderedCrawls",
+        "type": "object"
+      },
       "LegacyPixivSession": {
         "additionalProperties": true,
         "properties": {
@@ -9538,6 +11115,99 @@
         "title": "LegacyProxyStatus",
         "type": "object"
       },
+      "LegacySchedulerStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "ordered_crawls": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LegacyOrderedCrawls"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tasks": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LegacySchedulerTasks"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "LegacySchedulerStatus",
+        "type": "object"
+      },
+      "LegacySchedulerTasks": {
+        "additionalProperties": true,
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "dispatch_loop": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatch Loop"
+          },
+          "max_concurrent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Concurrent"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          },
+          "sites": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sites"
+          }
+        },
+        "title": "LegacySchedulerTasks",
+        "type": "object"
+      },
       "LegacySitePolicies": {
         "additionalProperties": true,
         "properties": {
@@ -9746,6 +11416,46 @@
         "title": "ModelInstallStarted",
         "type": "object"
       },
+      "ModelInstallState": {
+        "additionalProperties": true,
+        "properties": {
+          "downloaded_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downloaded Bytes"
+          },
+          "expected_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Bytes"
+          },
+          "installed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed"
+          }
+        },
+        "title": "ModelInstallState",
+        "type": "object"
+      },
       "ModelItem": {
         "properties": {
           "display_name": {
@@ -9911,6 +11621,132 @@
           "total"
         ],
         "title": "ModelProgress",
+        "type": "object"
+      },
+      "ModelSetupStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "downloaded_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downloaded Bytes"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "expected_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Bytes"
+          },
+          "installed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "models": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/ModelInstallState"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "requested_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Models"
+          },
+          "review_filters": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/ReviewFilterCapability"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Filters"
+          },
+          "using_proxy": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Using Proxy"
+          }
+        },
+        "title": "ModelSetupStatus",
         "type": "object"
       },
       "PolicyFields": {
@@ -10825,6 +12661,95 @@
         "title": "ReviewDecisions",
         "type": "object"
       },
+      "ReviewFilterCapability": {
+        "additionalProperties": true,
+        "properties": {
+          "available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "ReviewFilterCapability",
+        "type": "object"
+      },
+      "ReviewFilterConfig": {
+        "additionalProperties": true,
+        "properties": {
+          "options": {
+            "$ref": "#/components/schemas/ReviewFilterOptions"
+          },
+          "preset_name": {
+            "title": "Preset Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preset_name",
+          "options"
+        ],
+        "title": "ReviewFilterConfig",
+        "type": "object"
+      },
+      "ReviewFilterOptions": {
+        "additionalProperties": true,
+        "properties": {
+          "basic_dedup": {
+            "title": "Basic Dedup",
+            "type": "boolean"
+          },
+          "filter_character": {
+            "title": "Filter Character",
+            "type": "boolean"
+          },
+          "filter_monochrome": {
+            "title": "Filter Monochrome",
+            "type": "boolean"
+          },
+          "filter_sketch": {
+            "title": "Filter Sketch",
+            "type": "boolean"
+          },
+          "reference_asset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reference Asset Ids",
+            "type": "array"
+          },
+          "similarity_groups": {
+            "title": "Similarity Groups",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "basic_dedup",
+          "filter_monochrome",
+          "filter_sketch",
+          "filter_character",
+          "similarity_groups",
+          "reference_asset_ids"
+        ],
+        "title": "ReviewFilterOptions",
+        "type": "object"
+      },
       "ReviewGroupSelection": {
         "additionalProperties": false,
         "properties": {
@@ -10847,6 +12772,51 @@
           "group_id"
         ],
         "title": "ReviewGroupSelection",
+        "type": "object"
+      },
+      "ReviewPreset": {
+        "additionalProperties": true,
+        "properties": {
+          "builtin": {
+            "title": "Builtin",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/ReviewFilterOptions"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "builtin",
+          "options"
+        ],
+        "title": "ReviewPreset",
+        "type": "object"
+      },
+      "ReviewPresetList": {
+        "additionalProperties": true,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewPreset"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ReviewPresetList",
         "type": "object"
       },
       "SearchAutocompleteResponse": {
@@ -15120,7 +17090,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopCrawlReview"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyCrawlReview"
+                    }
+                  ],
+                  "title": "Response Get Crawl Review Api V1 Crawls  Batch Id  Review Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -15171,7 +17151,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopCrawlReviewOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyCrawlReview"
+                    }
+                  ],
+                  "title": "Response Apply Crawl Review Api V1 Crawls  Batch Id  Review Apply Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -15232,7 +17222,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopCrawlReviewOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyCrawlReview"
+                    }
+                  ],
+                  "title": "Response Update Crawl Review Decisions Api V1 Crawls  Batch Id  Review Decisions Put"
+                }
               }
             },
             "description": "Successful Response"
@@ -15277,11 +17277,9 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "image/*": {}
             },
-            "description": "Successful Response"
+            "description": "审核图片原文件"
           },
           "422": {
             "content": {
@@ -15329,7 +17327,17 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopCrawlReviewOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyCrawlReview"
+                    }
+                  ],
+                  "title": "Response Retry Crawl Review Api V1 Crawls  Batch Id  Review Retry Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -15380,7 +17388,17 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopCrawlReviewOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyCrawlReview"
+                    }
+                  ],
+                  "title": "Response Start Crawl Review Api V1 Crawls  Batch Id  Review Start Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -17938,13 +19956,12 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Response Get Gallery Asset Content Api V1 Gallery Assets  Asset Id  Content Get"
-                }
-              }
+              "application/octet-stream": {},
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
             },
-            "description": "Successful Response"
+            "description": "图片原文件"
           },
           "422": {
             "content": {
@@ -18052,13 +20069,9 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Response Get Gallery Asset Thumbnail Api V1 Gallery Assets  Asset Id  Thumbnail Get"
-                }
-              }
+              "image/jpeg": {}
             },
-            "description": "Successful Response"
+            "description": "JPEG 缩略图"
           },
           "422": {
             "content": {
@@ -18618,7 +20631,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPresetList"
+                }
               }
             },
             "description": "Successful Response"
@@ -18642,7 +20657,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPreset"
+                }
               }
             },
             "description": "Successful Response"
@@ -18719,7 +20736,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPreset"
+                }
               }
             },
             "description": "Successful Response"
@@ -18755,7 +20774,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopGalleryReviewOperation"
+                }
               }
             },
             "description": "Successful Response"
@@ -18846,7 +20867,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopGalleryReview"
+                }
               }
             },
             "description": "Successful Response"
@@ -18934,7 +20957,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopGalleryReviewOperation"
+                }
               }
             },
             "description": "Successful Response"
@@ -18979,11 +21004,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "application/octet-stream": {},
+              "image/*": {}
             },
-            "description": "Successful Response"
+            "description": "审核图片原文件"
           },
           "422": {
             "content": {
@@ -19017,7 +21041,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopGalleryReviewOperation"
+                }
               }
             },
             "description": "Successful Response"
@@ -20853,7 +22879,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DiagnosticsSchedulerStatus"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacySchedulerStatus"
+                    }
+                  ],
+                  "title": "Response Scheduler Status Api V1 Scheduler Status Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -21062,7 +23098,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSetupStatus"
+                }
               }
             },
             "description": "Successful Response"
@@ -21088,7 +23126,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSetupStatus"
+                }
               }
             },
             "description": "Successful Response"
@@ -21827,11 +23867,9 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "application/octet-stream": {}
             },
-            "description": "Successful Response"
+            "description": "任务输出文件"
           },
           "422": {
             "content": {

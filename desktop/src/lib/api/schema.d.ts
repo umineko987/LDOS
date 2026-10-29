@@ -3845,6 +3845,182 @@ export interface components {
             /** Winner Asset Id */
             winner_asset_id: string | null;
         };
+        /** DesktopCrawlReview */
+        DesktopCrawlReview: {
+            /** Automaticgroupcount */
+            automaticGroupCount: number;
+            /** Automaticrejectedimagecount */
+            automaticRejectedImageCount: number;
+            /** Batch Id */
+            batch_id: string;
+            /** Decidedgroupcount */
+            decidedGroupCount: number;
+            /** Duplicategroupcount */
+            duplicateGroupCount: number;
+            /** Failedimagecount */
+            failedImageCount: number;
+            groups: components["schemas"]["DesktopReviewGroupPage"];
+            /** Haserror */
+            hasError: boolean;
+            /** Keptimagecount */
+            keptImageCount: number;
+            /** Rejectedimagecount */
+            rejectedImageCount: number;
+            /**
+             * Response Profile
+             * @constant
+             */
+            response_profile: "desktop-review-v1";
+            /** Selectedimagecount */
+            selectedImageCount: number;
+            /** Status */
+            status: string;
+            /** Totalgroupcount */
+            totalGroupCount: number;
+            /** Totalimagecount */
+            totalImageCount: number;
+            /** Unreadableimagecount */
+            unreadableImageCount: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /** DesktopCrawlReviewOperation */
+        DesktopCrawlReviewOperation: {
+            /** Automaticgroupcount */
+            automaticGroupCount: number;
+            /** Automaticrejectedimagecount */
+            automaticRejectedImageCount: number;
+            /** Batch Id */
+            batch_id: string;
+            /** Decidedgroupcount */
+            decidedGroupCount: number;
+            /** Duplicategroupcount */
+            duplicateGroupCount: number;
+            /** Failedimagecount */
+            failedImageCount: number;
+            /** Haserror */
+            hasError: boolean;
+            /** Keptimagecount */
+            keptImageCount: number;
+            /** Rejectedimagecount */
+            rejectedImageCount: number;
+            /**
+             * Response Profile
+             * @constant
+             */
+            response_profile: "desktop-review-operation-v1";
+            /** Selectedimagecount */
+            selectedImageCount: number;
+            /** Status */
+            status: string;
+            /** Totalgroupcount */
+            totalGroupCount: number;
+            /** Totalimagecount */
+            totalImageCount: number;
+            /** Unreadableimagecount */
+            unreadableImageCount: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /** DesktopGalleryReview */
+        DesktopGalleryReview: {
+            /** Automaticgroupcount */
+            automaticGroupCount: number;
+            /** Automaticrejectedimagecount */
+            automaticRejectedImageCount: number;
+            /** Created At */
+            created_at: number;
+            /** Decidedgroupcount */
+            decidedGroupCount: number;
+            /** Directories */
+            directories: components["schemas"]["GalleryReviewDirectory"][];
+            /** Duplicategroupcount */
+            duplicateGroupCount: number;
+            /** Failedimagecount */
+            failedImageCount: number;
+            filter_config: components["schemas"]["ReviewFilterConfig"] | null;
+            /** Filteredimagecount */
+            filteredImageCount: number;
+            groups: components["schemas"]["DesktopReviewGroupPage"];
+            /** Haserror */
+            hasError: boolean;
+            /** Keptimagecount */
+            keptImageCount: number;
+            /** Rejectedimagecount */
+            rejectedImageCount: number;
+            /**
+             * Response Profile
+             * @constant
+             */
+            response_profile: "desktop-gallery-review-v1";
+            /** Review Id */
+            review_id: string;
+            /** Selectedimagecount */
+            selectedImageCount: number;
+            /** Status */
+            status: string;
+            /** Totalgroupcount */
+            totalGroupCount: number;
+            /** Totalimagecount */
+            totalImageCount: number;
+            /** Unreadableimagecount */
+            unreadableImageCount: number;
+            /** Updated At */
+            updated_at: number;
+            /** Version */
+            version: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /** DesktopGalleryReviewOperation */
+        DesktopGalleryReviewOperation: {
+            /** Automaticgroupcount */
+            automaticGroupCount: number;
+            /** Automaticrejectedimagecount */
+            automaticRejectedImageCount: number;
+            /** Created At */
+            created_at: number;
+            /** Decidedgroupcount */
+            decidedGroupCount: number;
+            /** Directories */
+            directories: components["schemas"]["GalleryReviewDirectory"][];
+            /** Duplicategroupcount */
+            duplicateGroupCount: number;
+            /** Failedimagecount */
+            failedImageCount: number;
+            filter_config: components["schemas"]["ReviewFilterConfig"] | null;
+            /** Filteredimagecount */
+            filteredImageCount: number;
+            /** Haserror */
+            hasError: boolean;
+            /** Keptimagecount */
+            keptImageCount: number;
+            /** Rejectedimagecount */
+            rejectedImageCount: number;
+            /**
+             * Response Profile
+             * @constant
+             */
+            response_profile: "desktop-gallery-review-operation-v1";
+            /** Review Id */
+            review_id: string;
+            /** Selectedimagecount */
+            selectedImageCount: number;
+            /** Status */
+            status: string;
+            /** Totalgroupcount */
+            totalGroupCount: number;
+            /** Totalimagecount */
+            totalImageCount: number;
+            /** Unreadableimagecount */
+            unreadableImageCount: number;
+            /** Updated At */
+            updated_at: number;
+            /** Version */
+            version: number;
+        } & {
+            [key: string]: unknown;
+        };
         /** DesktopProxyInlineNode */
         DesktopProxyInlineNode: {
             /** Host */
@@ -4059,6 +4235,79 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** DesktopReviewGroup */
+        DesktopReviewGroup: {
+            /** Decided */
+            decided: boolean;
+            /** Id */
+            id: string;
+            /** Images */
+            images: components["schemas"]["DesktopReviewImage"][];
+            /** Kind */
+            kind: string;
+            /** Ordinal */
+            ordinal: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /** DesktopReviewGroupPage */
+        DesktopReviewGroupPage: {
+            /** Byte Truncated */
+            byte_truncated: boolean;
+            /** Items */
+            items: components["schemas"]["DesktopReviewGroup"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /** DesktopReviewImage */
+        DesktopReviewImage: {
+            /** Asset Id */
+            asset_id?: string | null;
+            /** Directory Id */
+            directory_id?: string | null;
+            /** Disposition */
+            disposition?: string | null;
+            /** Haserror */
+            hasError?: boolean | null;
+            /** Id */
+            id: string;
+            metadata: components["schemas"]["DesktopReviewImageMetadata"];
+            /** Ordinal */
+            ordinal: number;
+            /** Readable */
+            readable: boolean;
+            /** Recommended */
+            recommended: boolean;
+            /** Relative Path */
+            relative_path?: string | null;
+            /** Selected */
+            selected: boolean;
+            /** Source Display Name */
+            source_display_name?: string | null;
+            /** Source Id */
+            source_id?: string | null;
+            /** Url */
+            url?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** DesktopReviewImageMetadata */
+        DesktopReviewImageMetadata: {
+            /** Classification */
+            classification?: ("rough" | "monochrome") | null;
+            /** H */
+            h: number;
+            /** W */
+            w: number;
+        } & {
+            [key: string]: unknown;
+        };
         /** DesktopSearchAuthResponse */
         DesktopSearchAuthResponse: {
             /** Authorized */
@@ -4188,6 +4437,27 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** DiagnosticsBackgroundLoop */
+        DiagnosticsBackgroundLoop: {
+            /** Consecutive Failures */
+            consecutive_failures: number;
+            /** Last Error At */
+            last_error_at: number | null;
+            /** Last Error Category */
+            last_error_category: string | null;
+            /** Last Recovery At */
+            last_recovery_at: number | null;
+            /** Last Success At */
+            last_success_at: number | null;
+            /** Operational */
+            operational: boolean;
+            /** Running */
+            running: boolean;
+            /** State */
+            state: string;
+        } & {
+            [key: string]: unknown;
+        };
         /**
          * DiagnosticsConfigResponse
          * @description diagnostics 视图：不含主机路径与秘密的最小能力投影。
@@ -4228,6 +4498,25 @@ export interface components {
             /** Managed Auth Cache */
             managed_auth_cache: boolean;
         };
+        /** DiagnosticsOrderedCrawls */
+        DiagnosticsOrderedCrawls: {
+            /** Active Batches */
+            active_batches: number;
+            /**
+             * Address Parallelism
+             * @enum {string}
+             */
+            address_parallelism: "media_tasks" | "unknown";
+            /**
+             * Execution Order
+             * @enum {string}
+             */
+            execution_order: "source_then_address" | "unknown";
+            /** Running */
+            running: boolean;
+        } & {
+            [key: string]: unknown;
+        };
         /** DiagnosticsProxyConfig */
         DiagnosticsProxyConfig: {
             /** Auto Start */
@@ -4241,6 +4530,34 @@ export interface components {
         DiagnosticsSchedulerConfig: {
             /** Max Concurrent Tasks */
             max_concurrent_tasks: number;
+        };
+        /** DiagnosticsSchedulerStatus */
+        DiagnosticsSchedulerStatus: {
+            ordered_crawls: components["schemas"]["DiagnosticsOrderedCrawls"];
+            /**
+             * Response Profile
+             * @constant
+             */
+            response_profile: "diagnostics";
+            /** Secrets Exposed */
+            secrets_exposed: boolean;
+            tasks: components["schemas"]["DiagnosticsSchedulerTasks"];
+        } & {
+            [key: string]: unknown;
+        };
+        /** DiagnosticsSchedulerTasks */
+        DiagnosticsSchedulerTasks: {
+            /** Active */
+            active: number;
+            /** Active Site Count */
+            active_site_count: number;
+            dispatch_loop: components["schemas"]["DiagnosticsBackgroundLoop"];
+            /** Max Concurrent */
+            max_concurrent: number;
+            /** Running */
+            running: boolean;
+        } & {
+            [key: string]: unknown;
         };
         /** DiagnosticsServerConfig */
         DiagnosticsServerConfig: {
@@ -4622,6 +4939,21 @@ export interface components {
             directory_ids?: string[];
             filter_config?: components["schemas"]["FilterConfig"] | null;
         };
+        /** GalleryReviewDirectory */
+        GalleryReviewDirectory: {
+            /** Directory Id */
+            directory_id?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Relative Path */
+            relative_path?: string | null;
+            /** Source Display Name */
+            source_display_name?: string | null;
+            /** Source Id */
+            source_id?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
         /** GalleryScanOperationResponse */
         GalleryScanOperationResponse: {
             /**
@@ -4998,6 +5330,138 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** LegacyCrawlReview */
+        LegacyCrawlReview: {
+            /** Applied At */
+            applied_at?: number | null;
+            /** Automatic Group Count */
+            automatic_group_count?: number | null;
+            /** Automatic Rejected Image Count */
+            automatic_rejected_image_count?: number | null;
+            /** Batch Id */
+            batch_id?: string | null;
+            /** Created At */
+            created_at?: number | null;
+            /** Decided Group Count */
+            decided_group_count?: number | null;
+            /** Duplicate Group Count */
+            duplicate_group_count?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Failed Image Count */
+            failed_image_count?: number | null;
+            groups?: components["schemas"]["LegacyCrawlReviewGroupPage"] | null;
+            /** Kept Image Count */
+            kept_image_count?: number | null;
+            /** Ready At */
+            ready_at?: number | null;
+            /** Rejected Image Count */
+            rejected_image_count?: number | null;
+            /** Selected Image Count */
+            selected_image_count?: number | null;
+            /** Started At */
+            started_at?: number | null;
+            /** Status */
+            status?: string | null;
+            /** Total Group Count */
+            total_group_count?: number | null;
+            /** Total Image Count */
+            total_image_count?: number | null;
+            /** Unreadable Image Count */
+            unreadable_image_count?: number | null;
+            /** Updated At */
+            updated_at?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** LegacyCrawlReviewGroup */
+        LegacyCrawlReviewGroup: {
+            /** Decided */
+            decided?: boolean | null;
+            /** Id */
+            id?: string | null;
+            /** Image Count */
+            image_count?: number | null;
+            /** Images */
+            images?: components["schemas"]["LegacyCrawlReviewImage"][] | null;
+            /** Kind */
+            kind?: string | null;
+            /** Match Levels */
+            match_levels?: unknown[] | null;
+            /** Ordinal */
+            ordinal?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /** Selected Image Count */
+            selected_image_count?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** LegacyCrawlReviewGroupPage */
+        LegacyCrawlReviewGroupPage: {
+            /** Items */
+            items?: components["schemas"]["LegacyCrawlReviewGroup"][] | null;
+            /** Limit */
+            limit?: number | null;
+            /** Offset */
+            offset?: number | null;
+            /** Total */
+            total?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** LegacyCrawlReviewImage */
+        LegacyCrawlReviewImage: {
+            /** Disposition */
+            disposition?: string | null;
+            /** Error */
+            error?: string | null;
+            /** File Hash */
+            file_hash?: string | null;
+            /** Final Relative Path */
+            final_relative_path?: string | null;
+            /** Group Id */
+            group_id?: string | null;
+            /** Id */
+            id?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Ordinal */
+            ordinal?: number | null;
+            /** Readable */
+            readable?: boolean | null;
+            /** Recommended */
+            recommended?: boolean | null;
+            /** Relative Path */
+            relative_path?: string | null;
+            /** Selected */
+            selected?: boolean | null;
+            /** Url */
+            url?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** LegacyOrderedCrawls */
+        LegacyOrderedCrawls: {
+            /** Active Batches */
+            active_batches?: number | null;
+            /** Address Parallelism */
+            address_parallelism?: string | null;
+            /** Execution Order */
+            execution_order?: string | null;
+            /** Max Concurrent Batches */
+            max_concurrent_batches?: number | null;
+            /** Running */
+            running?: boolean | null;
+            /** Running Batch Loops */
+            running_batch_loops?: number | null;
+            /** Site Planning Locked */
+            site_planning_locked?: string[] | null;
+        } & {
+            [key: string]: unknown;
+        };
         /** LegacyPixivSession */
         LegacyPixivSession: {
             /** Authorization Url */
@@ -5122,6 +5586,32 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** LegacySchedulerStatus */
+        LegacySchedulerStatus: {
+            ordered_crawls?: components["schemas"]["LegacyOrderedCrawls"] | null;
+            tasks?: components["schemas"]["LegacySchedulerTasks"] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** LegacySchedulerTasks */
+        LegacySchedulerTasks: {
+            /** Active */
+            active?: number | null;
+            /** Dispatch Loop */
+            dispatch_loop?: {
+                [key: string]: unknown;
+            } | null;
+            /** Max Concurrent */
+            max_concurrent?: number | null;
+            /** Running */
+            running?: boolean | null;
+            /** Sites */
+            sites?: {
+                [key: string]: number;
+            } | null;
+        } & {
+            [key: string]: unknown;
+        };
         /** LegacySitePolicies */
         LegacySitePolicies: {
             default?: components["schemas"]["PolicyFields"] | null;
@@ -5186,6 +5676,17 @@ export interface components {
              */
             proxy_source: "none" | "pool" | "custom";
         };
+        /** ModelInstallState */
+        ModelInstallState: {
+            /** Downloaded Bytes */
+            downloaded_bytes?: number | null;
+            /** Expected Bytes */
+            expected_bytes?: number | null;
+            /** Installed */
+            installed?: boolean | null;
+        } & {
+            [key: string]: unknown;
+        };
         /** ModelItem */
         ModelItem: {
             /** Display Name */
@@ -5245,6 +5746,35 @@ export interface components {
             current: number;
             /** Total */
             total: number;
+        };
+        /** ModelSetupStatus */
+        ModelSetupStatus: {
+            /** Downloaded Bytes */
+            downloaded_bytes?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Expected Bytes */
+            expected_bytes?: number | null;
+            /** Installed */
+            installed?: boolean | null;
+            /** Message */
+            message?: string | null;
+            /** Models */
+            models?: {
+                [key: string]: components["schemas"]["ModelInstallState"];
+            } | null;
+            /** Phase */
+            phase?: string | null;
+            /** Requested Models */
+            requested_models?: string[] | null;
+            /** Review Filters */
+            review_filters?: {
+                [key: string]: components["schemas"]["ReviewFilterCapability"];
+            } | null;
+            /** Using Proxy */
+            using_proxy?: boolean | null;
+        } & {
+            [key: string]: unknown;
         };
         /** PolicyFields */
         PolicyFields: {
@@ -5583,12 +6113,65 @@ export interface components {
             /** Groups */
             groups: components["schemas"]["ReviewGroupSelection"][];
         };
+        /** ReviewFilterCapability */
+        ReviewFilterCapability: {
+            /** Available */
+            available?: boolean | null;
+            /** Reason */
+            reason?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** ReviewFilterConfig */
+        ReviewFilterConfig: {
+            options: components["schemas"]["ReviewFilterOptions"];
+            /** Preset Name */
+            preset_name: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** ReviewFilterOptions */
+        ReviewFilterOptions: {
+            /** Basic Dedup */
+            basic_dedup: boolean;
+            /** Filter Character */
+            filter_character: boolean;
+            /** Filter Monochrome */
+            filter_monochrome: boolean;
+            /** Filter Sketch */
+            filter_sketch: boolean;
+            /** Reference Asset Ids */
+            reference_asset_ids: string[];
+            /** Similarity Groups */
+            similarity_groups: boolean;
+        } & {
+            [key: string]: unknown;
+        };
         /** ReviewGroupSelection */
         ReviewGroupSelection: {
             /** Group Id */
             group_id: string;
             /** Selected Image Ids */
             selected_image_ids?: string[];
+        };
+        /** ReviewPreset */
+        ReviewPreset: {
+            /** Builtin */
+            builtin: boolean;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            options: components["schemas"]["ReviewFilterOptions"];
+        } & {
+            [key: string]: unknown;
+        };
+        /** ReviewPresetList */
+        ReviewPresetList: {
+            /** Items */
+            items: components["schemas"]["ReviewPreset"][];
+        } & {
+            [key: string]: unknown;
         };
         /** SearchAutocompleteResponse */
         SearchAutocompleteResponse: {
@@ -7186,7 +7769,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DesktopCrawlReview"] | components["schemas"]["LegacyCrawlReview"];
                 };
             };
             /** @description Validation Error */
@@ -7219,7 +7802,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DesktopCrawlReviewOperation"] | components["schemas"]["LegacyCrawlReview"];
                 };
             };
             /** @description Validation Error */
@@ -7256,7 +7839,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DesktopCrawlReviewOperation"] | components["schemas"]["LegacyCrawlReview"];
                 };
             };
             /** @description Validation Error */
@@ -7282,13 +7865,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description 审核图片原文件 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "image/*": unknown;
                 };
             };
             /** @description Validation Error */
@@ -7321,7 +7904,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DesktopCrawlReviewOperation"] | components["schemas"]["LegacyCrawlReview"];
                 };
             };
             /** @description Validation Error */
@@ -7354,7 +7937,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DesktopCrawlReviewOperation"] | components["schemas"]["LegacyCrawlReview"];
                 };
             };
             /** @description Validation Error */
@@ -8923,13 +9506,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description 图片原文件 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/octet-stream": unknown;
+                    "image/jpeg": unknown;
+                    "image/png": unknown;
+                    "image/webp": unknown;
                 };
             };
             /** @description Validation Error */
@@ -8993,13 +9579,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description JPEG 缩略图 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "image/jpeg": unknown;
                 };
             };
             /** @description Validation Error */
@@ -9308,7 +9894,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ReviewPresetList"];
                 };
             };
         };
@@ -9332,7 +9918,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ReviewPreset"];
                 };
             };
             /** @description Validation Error */
@@ -9367,7 +9953,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ReviewPreset"];
                 };
             };
             /** @description Validation Error */
@@ -9429,7 +10015,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DesktopGalleryReviewOperation"];
                 };
             };
             /** @description Validation Error */
@@ -9465,7 +10051,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DesktopGalleryReview"];
                 };
             };
             /** @description Validation Error */
@@ -9530,7 +10116,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DesktopGalleryReviewOperation"];
                 };
             };
             /** @description Validation Error */
@@ -9556,13 +10142,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description 审核图片原文件 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/octet-stream": unknown;
+                    "image/*": unknown;
                 };
             };
             /** @description Validation Error */
@@ -9593,7 +10180,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DesktopGalleryReviewOperation"];
                 };
             };
             /** @description Validation Error */
@@ -10647,7 +11234,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DiagnosticsSchedulerStatus"] | components["schemas"]["LegacySchedulerStatus"];
                 };
             };
             /** @description Validation Error */
@@ -10816,7 +11403,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelSetupStatus"];
                 };
             };
         };
@@ -10840,7 +11427,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelSetupStatus"];
                 };
             };
             /** @description Validation Error */
@@ -11332,13 +11919,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description 任务输出文件 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/octet-stream": unknown;
                 };
             };
             /** @description Validation Error */
