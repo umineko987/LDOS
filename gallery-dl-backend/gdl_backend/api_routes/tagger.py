@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ..download_settings import normalize_hf_mirror
 from ..gallery_safe_paths import SafeSourceRoot, UnsafeSourcePathError
 from ..model_setup import normalize_download_proxy
+from ..models_service import ModelsError
 from .dependencies import get_service
 from .errors import ApiError
 
@@ -31,14 +32,7 @@ class TaggerPrepareRequest(BaseModel):
     @field_validator("proxy_url")
     @classmethod
     def validate_mirror(cls, value: str | None) -> str | None:
-        if value is None or not value.strip():
-            return None
-        value = value.strip().rstrip("/")
-        parsed = urlsplit(value)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("镜像地址必须是 HTTP(S) URL，不能包含凭据、查询参数或片段")
-        _ = parsed.port
-        return value
+        return normalize_hf_mirror(value)
 
 
 class TaggerRunRequest(BaseModel):
@@ -128,15 +122,19 @@ def create_tagger_router() -> APIRouter:
                 422, "tagger_license_required",
                 f"模型受自定义许可约束，需 accept_license=true：{', '.join(wanted_gated)}",
             )
+        # 请求里显式给出的字段原样使用；没给的取统一下载设置（/settings/downloads）。
+        provided = payload.model_fields_set
+        overrides = {
+            target: getattr(payload, field)
+            for field, target in (("token", "token"), ("proxy_url", "hf_mirror"), ("download_proxy", "proxy"))
+            if field in provided
+        }
         try:
-            return await service.tagger.prepare(
-                payload.models, payload.token, accept_license=payload.accept_license,
-                proxy_url=payload.proxy_url, download_proxy=payload.download_proxy,
+            return await service.models.prepare_tagger(
+                payload.models, accept_license=payload.accept_license, overrides=overrides,
             )
-        except OSError as error:
-            raise ApiError(503, "tagger_start_failed", str(error)) from error
-        except RuntimeError as error:
-            raise ApiError(409, "tagger_busy", str(error)) from error
+        except ModelsError as error:
+            raise ApiError(error.status_code, error.code, error.message) from error
 
     @router.post("/run", status_code=status.HTTP_202_ACCEPTED)
     async def run(payload: TaggerRunRequest, service=Depends(get_service)) -> dict[str, Any]:

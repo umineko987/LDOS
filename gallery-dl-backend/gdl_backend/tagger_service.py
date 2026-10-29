@@ -44,6 +44,18 @@ class TaggerService:
         self._jobs = jobs
         self._job_id: str | None = None
         self._cancelling = False
+        # 最近一次 prepare 涉及的模型（统一模型表用它判断「安装中/失败」）。
+        self.prepare_models: tuple[str, ...] = ()
+
+    @property
+    def current_job_id(self) -> str | None:
+        return self._job_id
+
+    @property
+    def running_task(self) -> asyncio.Task[None] | None:
+        """当前子进程的收尾任务；为 None 或已完成表示空闲。"""
+
+        return self._task if self._process is not None else None
 
     def _job_start(self, kind: str, title: str, *, total: int | None, ref: Mapping[str, Any]) -> None:
         self._job_id = None
@@ -90,6 +102,23 @@ class TaggerService:
                 "installed": installed(spec, self._settings.tagger.model_dir),
             })
         return result
+
+    def installed_bytes(self, key: str) -> int:
+        """已安装 bundle 的文件总大小；未安装或不可读返回 0。"""
+
+        spec = self._import_tagger("specs").SPECS.get(key)
+        if spec is None:
+            return 0
+        path = self._import_tagger("bundle").bundle_path(self._settings.tagger.model_dir, key)
+        total = 0
+        for remote in spec.files:
+            try:
+                candidate = path / remote.name
+                if candidate.is_file() and not candidate.is_symlink():
+                    total += candidate.stat().st_size
+            except OSError:
+                continue
+        return total
 
     def status(self) -> dict[str, Any]:
         state = self.state
@@ -226,6 +255,7 @@ class TaggerService:
             if self._process is not None:
                 raise RuntimeError("已有打标任务在运行")
             self.state = TaggerTaskState(phase="preparing", message="准备下载")
+            self.prepare_models = tuple(models)
             self._job_start(
                 "tagger.prepare", "下载打标模型", total=None,
                 ref={"models": ",".join(models), **(job_ref or {})},
@@ -261,6 +291,7 @@ class TaggerService:
             if self._process is not None:
                 raise RuntimeError("已有打标任务在运行")
             self.state = TaggerTaskState(phase="tagging", message="")
+            self.prepare_models = ()
             self._job_start(
                 "tagger.tag", f"打标 {len(inputs)} 张", total=len(inputs),
                 ref={"models": ",".join(models), **(job_ref or {})},

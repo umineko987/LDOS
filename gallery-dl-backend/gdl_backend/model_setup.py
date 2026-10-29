@@ -155,7 +155,16 @@ class ModelSetupManager:
             },
         }
 
-    async def install(self, proxy: str | None = None, models: list[str] | None = None) -> dict[str, Any]:
+    @property
+    def running_task(self) -> asyncio.Task[None] | None:
+        """当前安装任务；为 None 或已完成表示空闲。"""
+
+        task = self._task
+        return task if task is not None and not task.done() else None
+
+    async def install(
+        self, proxy: str | None = None, models: list[str] | None = None, *, hf_endpoint: str | None = None,
+    ) -> dict[str, Any]:
         normalized_proxy = normalize_download_proxy(proxy)
         selected = list(dict.fromkeys(models if models is not None else ["dedup"]))
         if not selected or any(name not in {"dedup", *MODEL_FILES} for name in selected):
@@ -167,11 +176,14 @@ class ModelSetupManager:
             self._phase = "installing"
             self._message = "正在准备模型"
             self._using_proxy = normalized_proxy is not None
-            self._task = asyncio.create_task(self._run_install(normalized_proxy))
+            self._task = asyncio.create_task(self._run_install(normalized_proxy, hf_endpoint))
         return await asyncio.to_thread(self.status)
 
-    async def _run_install(self, proxy: str | None) -> None:
+    async def _run_install(self, proxy: str | None, hf_endpoint: str | None = None) -> None:
         environment = os.environ.copy()
+        if hf_endpoint:
+            # 只影响 HF 直链（completeness/ccip）；SSCD/DINOv2 不走 HF。
+            environment["HF_ENDPOINT"] = hf_endpoint
         if proxy:
             environment.update({"HTTP_PROXY": proxy, "HTTPS_PROXY": proxy, "http_proxy": proxy, "https_proxy": proxy})
         commands = []

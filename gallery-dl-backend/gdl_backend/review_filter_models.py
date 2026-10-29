@@ -152,6 +152,18 @@ def check_models(root: Path, names: list[str]) -> dict[str, dict[str, Any]]:
     return result
 
 
+HF_OFFICIAL = "https://huggingface.co"
+
+
+def mirrored_url(url: str, endpoint: str | None = None) -> str:
+    """HF 直链换成镜像地址；文件仍按登记的 sha256 校验，镜像不可信也无妨。"""
+
+    endpoint = (endpoint if endpoint is not None else os.environ.get("HF_ENDPOINT", "")).strip().rstrip("/")
+    if endpoint and url.startswith(HF_OFFICIAL + "/"):
+        return endpoint + url[len(HF_OFFICIAL):]
+    return url
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="准备或离线验证 LDOS 过滤模型")
     parser.add_argument("--model-dir", required=True, type=Path)
@@ -169,7 +181,7 @@ def main() -> int:
         from dedup_models import download_file
         for name in names:
             for path, (_filename, _size, sha256, url) in zip(model_paths(args.model_dir, name), MODEL_FILES[name]):
-                download_file(url, path, sha256)
+                download_file(mirrored_url(url), path, sha256)
     result = check_models(args.model_dir, names)
     print(json.dumps(result, ensure_ascii=False))
     return 0 if all(item["available"] for item in result.values()) else 1

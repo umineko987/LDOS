@@ -39,6 +39,7 @@ from .api_routes import (
 # live outside the composition root.
 from .api_routes.atlas import create_atlas_router
 from .api_routes.datasets import create_datasets_router
+from .api_routes.models import create_models_router
 from .api_routes.settings import create_settings_router
 from .api_routes.errors import ApiError
 from .gallery_service import GalleryCatalogService
@@ -63,6 +64,7 @@ from .gallery import GalleryRunner
 from .job_sampler import JobSampler, default_job_sources
 from .log_writer import TaskLogWriter
 from .model_setup import ModelSetupManager
+from .models_service import ModelsService
 from .tagger_service import TaggerService
 from .ordered_crawl import OrderedCrawlManager
 from .proxy import ProxyPoolAdapter
@@ -185,8 +187,9 @@ class ServiceContainer:
             settings, self.runtime_config, self.reviews.start
         )
         self.tagger = TaggerService(settings, jobs=self.jobs)
-        # 统一下载设置（镜像/代理/HF token），模型下载共用。
+        # 统一下载设置（镜像/代理/HF token）和模型表，见 models_service。
         self.download_settings = DownloadSettingsStore(settings.runtime_dir, proxy=self.proxy)
+        self.models = ModelsService(settings, self.model_setup, self.tagger, self.download_settings)
         self.job_sampler = JobSampler(self.events, self.jobs, default_job_sources(self))
         # 数据集：扫描后补成员哈希、爬取批次结束后自动挂根（见 dataset_service）。
         self.datasets = DatasetService.for_container(self)
@@ -343,6 +346,7 @@ class ServiceContainer:
         await self.model_setup.close()
         await self.tagger.close()
         await self.atlas.stop()
+        await self.models.close()
         await self.reviews.stop()
         await self.ordered_crawls.stop()
         await self.scheduler.stop()
@@ -566,6 +570,7 @@ def create_app(
             source_path.startswith("/api/v1/proxy/sources")
             or source_path == "/api/v1/auth/proxy"
             or source_path == "/api/v1/settings/downloads"
+            or source_path == "/api/v1/tagger/models/prepare"
             or policy_request
         )
         if sensitive_request:
@@ -643,6 +648,7 @@ def create_app(
     app.include_router(create_datasets_router())
     app.include_router(create_atlas_router())
     app.include_router(create_settings_router())
+    app.include_router(create_models_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
     app.include_router(create_jobs_router())

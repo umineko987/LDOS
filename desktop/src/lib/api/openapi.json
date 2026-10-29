@@ -6081,6 +6081,32 @@
         "title": "JobResponse",
         "type": "object"
       },
+      "ModelInstallBody": {
+        "additionalProperties": false,
+        "properties": {
+          "accept_license": {
+            "default": false,
+            "title": "Accept License",
+            "type": "boolean"
+          },
+          "keys": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "keys"
+        ],
+        "title": "ModelInstallBody",
+        "type": "object"
+      },
       "ModelInstallRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6106,6 +6132,244 @@
           }
         },
         "title": "ModelInstallRequest",
+        "type": "object"
+      },
+      "ModelInstallResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ModelItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "started": {
+            "items": {
+              "$ref": "#/components/schemas/ModelInstallStarted"
+            },
+            "title": "Started",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "started"
+        ],
+        "title": "ModelInstallResponse",
+        "type": "object"
+      },
+      "ModelInstallStarted": {
+        "properties": {
+          "family": {
+            "enum": [
+              "dedup",
+              "tagger"
+            ],
+            "title": "Family",
+            "type": "string"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "proxy_source": {
+            "enum": [
+              "none",
+              "pool",
+              "custom"
+            ],
+            "title": "Proxy Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "family",
+          "keys",
+          "job_id",
+          "proxy_source"
+        ],
+        "title": "ModelInstallStarted",
+        "type": "object"
+      },
+      "ModelItem": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "family": {
+            "enum": [
+              "dedup",
+              "tagger"
+            ],
+            "title": "Family",
+            "type": "string"
+          },
+          "gated": {
+            "description": "需要同意自定义许可（安装时 accept_license=true）",
+            "title": "Gated",
+            "type": "boolean"
+          },
+          "installed_bytes": {
+            "title": "Installed Bytes",
+            "type": "integer"
+          },
+          "installs_with": {
+            "description": "会一起安装的其他模型 key（SSCD 与 DINOv2 同包）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Installs With",
+            "type": "array"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "安装中时对应的 Job id，进度也走 SSE job.updated",
+            "title": "Job Id"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "license": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "License"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "下载大小；打标模型未登记大小时为 null",
+            "title": "Size Bytes"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "installed",
+              "missing",
+              "installing",
+              "failed",
+              "needs_license",
+              "disabled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "used_by": {
+            "items": {
+              "enum": [
+                "dedup",
+                "atlas",
+                "clean",
+                "tag"
+              ],
+              "type": "string"
+            },
+            "title": "Used By",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "family",
+          "display_name",
+          "status",
+          "size_bytes",
+          "installed_bytes",
+          "license",
+          "gated",
+          "source_url",
+          "used_by",
+          "installs_with",
+          "message",
+          "progress",
+          "job_id"
+        ],
+        "title": "ModelItem",
+        "type": "object"
+      },
+      "ModelList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ModelItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ModelList",
+        "type": "object"
+      },
+      "ModelProgress": {
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "current",
+          "total"
+        ],
+        "title": "ModelProgress",
         "type": "object"
       },
       "ProxyInlineNodeUpdate": {
@@ -13150,6 +13414,62 @@
         "tags": [
           "jobs"
         ]
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "operationId": "list_models_api_v1_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Models"
+      }
+    },
+    "/api/v1/models/install": {
+      "post": {
+        "operationId": "install_models_api_v1_models_install_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelInstallBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelInstallResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Install Models"
       }
     },
     "/api/v1/proxy/probe": {
