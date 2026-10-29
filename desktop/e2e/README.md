@@ -27,7 +27,8 @@ Linux 上有 `/usr/bin/chromium` 时直接用它；别的路径用 `LDOS_CHROMIU
 - **runtimeErrors**：出现 `pageerror`、`console.error` 或静态资源 4xx/5xx 时用例失败。接口的 4xx/5xx 不算（错误路径是要测的）。
   只有旧版冒烟测试用 `test.use({ allowConsoleErrors: true })` 关掉它。
 - **cspViolations**：页面里任何 `securitypolicyviolation` 事件都会让用例失败。
-- **backend**：默认用 `mockHealthyBackend()` 模拟一个健康的后端（`/healthz`、`/readyz`、`/api/v1/config`），启动门直接放行。
+- **backend**：默认用 `mockHealthyBackend()` 模拟一个健康的后端（`/healthz`、`/readyz`、`/api/v1/config`），启动门直接放行；
+  再用 `mockQuietRealtime()` 给外壳一个空的任务快照和不发事件的 SSE 流。
   要测后端不可用的情况就 `test.use({ healthyBackend: false })`，或者在用例里用 `mockApi()` 覆盖单个接口。
 
 运行环境固定为 `zh-CN`、`Asia/Shanghai`、深色、`reducedMotion: "reduce"`，视口 1280×800。
@@ -44,6 +45,21 @@ await mockApi(page, "get", "/api/v1/config", () => ({ status: 403, body: errorEn
 - `{id}` 这类路径参数匹配任意一段。后注册的路由优先，所以用例里的 `mockApi()` 会盖过默认的健康后端。
 - `errorEnvelope(code, message)` 生成后端统一的错误正文；`HEALTHY`、`READY`、`DIAGNOSTICS_CONFIG` 是默认响应，可以展开后改字段。
 - 处理函数拿到 `Request`，可以计数或检查请求体（见 `diagnostics.spec.ts` 的刷新用例）。
+
+## 模拟实时任务（`fixtures/jobs.ts`）
+
+外壳挂载后先拉 `/api/v1/jobs` 快照，再用它的 `last_event_id` 连 `/api/v1/events`（SSE）。
+
+```ts
+await mockJobs(page, [CRAWL_JOB], "e1-0");                       // 快照
+const connections = await mockEvents(page, [                      // 第一次连接收到这些事件，之后重连拿到空流
+  { event: "job.updated", id: "e1-1", data: { job: CRAWL_JOB } },
+]);
+```
+
+- 模拟的流是有限的：发完就断开，客户端按退避（约 1s、2s、4s……）重连，并带上收到的最后一个事件 id。
+  `mockEvents()` 返回每次连接的 URL，可以检查 `last_event_id`。用例中途再调一次 `mockEvents()`，下一次重连就拿到新的事件。
+- `job()` 生成一条运行中的任务，按需覆盖字段；`CRAWL_BATCH`、`CRAWL_TASKS`、`DOWNLOAD_TASKS`、`TASK_LOGS` 等是批次页和任务页的样例响应。
 
 ## 模拟宿主和设备
 
