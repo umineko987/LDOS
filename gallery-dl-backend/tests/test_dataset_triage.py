@@ -77,6 +77,8 @@ class DatasetTriageTestBase(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.settings = make_settings(self.root)
         self.settings.dedup.enabled = True
+        # 模型目录放进临时目录：结果不受本机是否装了过滤模型影响。
+        self.settings.dedup.model_dir = self.root / "models"
         # 过滤模型不在测试环境里：能力探测放行（worker 由假 runner 代替）。
         self.capabilities = mock.patch("gdl_backend.gallery_review.require_filter_capabilities")
         self.capabilities.start()
