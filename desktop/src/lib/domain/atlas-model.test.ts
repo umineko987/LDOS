@@ -22,6 +22,7 @@ function response(overrides: Partial<AtlasResponse> = {}): AtlasResponse {
     dataset_id: "d1",
     status: "ready",
     availability: { available: true, reason: "" },
+    cached: false,
     stale: false,
     current_digest: "digest",
     delta: { added: 0, changed: 0, removed_asset_ids: ["a2"] },
@@ -106,7 +107,7 @@ describe("buildAtlasModel", () => {
     expect(empty.outlierThreshold).toBe(1);
     expect(empty.clusterList).toEqual([]);
 
-    const sprites = { format: "webp", sheet_size: 128, cell_size: 64, columns: 2, per_sheet: 4, urls: ["/s/0"] } as const;
+    const sprites = { format: "webp" as const, sheet_size: 128, cell_size: 64, columns: 2, per_sheet: 4, urls: ["/s/0"] };
     for (const broken of [
       { ...sprites, urls: [] },
       { ...sprites, columns: 3 },

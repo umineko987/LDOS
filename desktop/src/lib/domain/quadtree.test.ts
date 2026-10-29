@@ -34,7 +34,7 @@ describe("quadtree", () => {
       [-0.2, -0.3, 0.1, 0.4],
       [0.5, 0.5, 0.6, 0.55],
       [2, 2, 3, 3],
-    ] as const) {
+    ] as [number, number, number, number][]) {
       expect(tree.queryRect(...rect)).toEqual(bruteRect(positions, ...rect));
     }
   });
