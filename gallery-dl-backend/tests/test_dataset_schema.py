@@ -44,9 +44,9 @@ class DatasetSchemaMigrationTest(unittest.TestCase):
     def _version(conn: sqlite3.Connection) -> str:
         return str(conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0])
 
-    def test_current_version_is_v15(self) -> None:
-        self.assertEqual(CURRENT_SCHEMA_VERSION, DATASET_SCHEMA_VERSION)
-        self.assertEqual(CURRENT_SCHEMA_VERSION, 15)
+    def test_dataset_tables_arrive_in_v15(self) -> None:
+        self.assertEqual(DATASET_SCHEMA_VERSION, 15)
+        self.assertGreaterEqual(CURRENT_SCHEMA_VERSION, DATASET_SCHEMA_VERSION)
 
     def test_populated_v14_database_upgrades_and_keeps_gallery_rows(self) -> None:
         path = self.root / "legacy-v14.sqlite3"
@@ -77,7 +77,7 @@ class DatasetSchemaMigrationTest(unittest.TestCase):
 
         upgraded = Database(path)
         try:
-            self.assertEqual(self._version(upgraded._conn), "15")
+            self.assertEqual(self._version(upgraded._conn), str(CURRENT_SCHEMA_VERSION))
             self.assertTrue(DATASET_TABLES.issubset(self._tables(upgraded._conn)))
             self.assertIn("idx_gallery_assets_content_sha256", self._indexes(upgraded._conn))
             rows = upgraded._conn.execute(

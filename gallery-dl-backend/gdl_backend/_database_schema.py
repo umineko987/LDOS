@@ -5,12 +5,13 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 
-CURRENT_SCHEMA_VERSION = 15
+CURRENT_SCHEMA_VERSION = 16
 SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION = 8
 GALLERY_EXPORT_SCHEMA_VERSION = 9
 GALLERY_RECONCILIATION_SCHEMA_VERSION = 10
 GALLERY_DIRECTORY_TRASH_SCHEMA_VERSION = 11
 DATASET_SCHEMA_VERSION = 15
+CAPTION_BATCH_SCHEMA_VERSION = 16
 TransactionFactory = Callable[[], AbstractContextManager[sqlite3.Connection]]
 
 
@@ -116,6 +117,42 @@ def _ensure_dataset_schema(connection: sqlite3.Connection) -> None:
         """
     )
 
+
+
+def _ensure_caption_batch_schema(connection: sqlite3.Connection) -> None:
+    # v16：caption 批量写入的撤销记录。每次批量写入一行 caption_batches，
+    # 每张写过（或 from_tagger 记下打标基线）的图一行 caption_batch_items。
+    # 版本是写入前后的磁盘版本（gallery_safe_paths 的 disk_version），
+    # 撤销只在当前版本仍等于 after_version 时恢复。
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS caption_batches (
+            id TEXT PRIMARY KEY,
+            dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            params_json TEXT NOT NULL DEFAULT '{}',
+            stats_json TEXT NOT NULL DEFAULT '{}',
+            created_at REAL NOT NULL,
+            undone_at REAL,
+            undo_stats_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_caption_batches_dataset
+            ON caption_batches(dataset_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS caption_batch_items (
+            batch_id TEXT NOT NULL REFERENCES caption_batches(id) ON DELETE CASCADE,
+            asset_id TEXT NOT NULL,
+            before_text TEXT,
+            before_version TEXT NOT NULL,
+            after_text TEXT,
+            after_version TEXT NOT NULL,
+            tagger_tags_json TEXT,
+            PRIMARY KEY(batch_id, asset_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_caption_batch_items_asset
+            ON caption_batch_items(asset_id);
+        """
+    )
 
 def initialize_schema(
     connection: sqlite3.Connection,
@@ -670,6 +707,7 @@ def initialize_schema(
     )
     _ensure_gallery_search_index(connection)
     _ensure_dataset_schema(connection)
+    _ensure_caption_batch_schema(connection)
 
     address_columns = {
         str(row["name"])
@@ -816,4 +854,13 @@ def initialize_schema(
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(DATASET_SCHEMA_VERSION),),
+            )
+
+    if schema_version < CAPTION_BATCH_SCHEMA_VERSION:
+        # v16 迁移：caption 批次两张表都是新增对象，DDL 已由
+        # _ensure_caption_batch_schema 幂等建齐；本块只提交目标版本。
+        with transaction() as conn:
+            conn.execute(
+                "UPDATE meta SET value=? WHERE key='schema_version'",
+                (str(CAPTION_BATCH_SCHEMA_VERSION),),
             )

@@ -15,6 +15,7 @@ from ._database_crawl_repository import (
     CrawlRepository,
     refresh_crawl_batch_counts,
 )
+from ._database_caption_repository import CaptionBatchRepository
 from ._database_dataset_repository import DatasetRepository
 from ._database_gallery_repository import GalleryRepository
 from ._database_policy_repository import SitePolicyRepository
@@ -126,6 +127,11 @@ class Database:
             clock=lambda: time.time(),
         )
         self._dataset_repository = DatasetRepository(
+            read=self._read,
+            transaction=self._transaction,
+            clock=lambda: time.time(),
+        )
+        self._caption_repository = CaptionBatchRepository(
             read=self._read,
             transaction=self._transaction,
             clock=lambda: time.time(),
@@ -762,6 +768,11 @@ class Database:
     @property
     def datasets(self) -> DatasetRepository:
         return self._dataset_repository
+
+    # caption 批次（v16）。
+    @property
+    def captions(self) -> CaptionBatchRepository:
+        return self._caption_repository
 
     def incomplete_processes(self) -> list[dict[str, Any]]:
         return self._task_repository.incomplete_processes()
