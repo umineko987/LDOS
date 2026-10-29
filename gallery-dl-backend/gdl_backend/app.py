@@ -58,6 +58,7 @@ from .crawl import CrawlPlanner
 from .caption_service import CaptionService
 from .database import Database
 from .dataset_service import DatasetService
+from .dataset_tagging import DatasetTaggingService
 from .discovery import DiscoveryService
 from .download_settings import DownloadSettingsStore
 from .encrypted_dns import EncryptedDNSResolver, NetworkTargetValidator
@@ -198,6 +199,8 @@ class ServiceContainer:
         self.atlas = AtlasService.for_container(self)
         # caption 读写、批量操作和撤销（v16），写入都经过图库注解路径。
         self.captions = CaptionService.for_container(self)
+        # 数据集打标：tag 阶段运行、候选分数、从打标写 caption。
+        self.dataset_tagging = DatasetTaggingService.for_container(self)
         self._health_task: asyncio.Task | None = None
         self._started = False
         self._stopping = False

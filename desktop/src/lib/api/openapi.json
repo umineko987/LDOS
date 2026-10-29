@@ -1541,6 +1541,128 @@
         "title": "CaptionWriteStats",
         "type": "object"
       },
+      "CaptionsFromTaggerRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 50000,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Ids"
+          },
+          "categories": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "general",
+                    "character",
+                    "copyright",
+                    "quality",
+                    "meta",
+                    "rating",
+                    "style"
+                  ],
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categories"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "escape_parens": {
+            "default": false,
+            "title": "Escape Parens",
+            "type": "boolean"
+          },
+          "keep_underscores": {
+            "default": false,
+            "title": "Keep Underscores",
+            "type": "boolean"
+          },
+          "mode": {
+            "default": "merge",
+            "enum": [
+              "overwrite",
+              "merge",
+              "fill_empty"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Models",
+            "type": "array"
+          },
+          "sample_limit": {
+            "default": 20,
+            "maximum": 200.0,
+            "minimum": 0.0,
+            "title": "Sample Limit",
+            "type": "integer"
+          },
+          "thresholds": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "maximum": 0.99,
+                "minimum": 0.01,
+                "type": "number"
+              },
+              "propertyNames": {
+                "enum": [
+                  "general",
+                  "character",
+                  "copyright",
+                  "quality",
+                  "meta",
+                  "rating",
+                  "style"
+                ]
+              },
+              "type": "object"
+            },
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "title": "Thresholds",
+            "type": "object"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "CaptionsFromTaggerRequest",
+        "type": "object"
+      },
       "CrawlAddress": {
         "properties": {
           "address_type": {
@@ -10323,6 +10445,236 @@
         "title": "SitePolicyDeleted",
         "type": "object"
       },
+      "TagStageRunRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_size": {
+            "default": 8,
+            "maximum": 64.0,
+            "minimum": 1.0,
+            "title": "Batch Size",
+            "type": "integer"
+          },
+          "models": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "TagStageRunRequest",
+        "type": "object"
+      },
+      "TaggerCandidateItem": {
+        "properties": {
+          "missing_models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Models",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "scores": {
+            "additionalProperties": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "title": "Scores",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "missing_scores",
+              "decode_error",
+              "unreadable",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "missing_models",
+          "scores"
+        ],
+        "title": "TaggerCandidateItem",
+        "type": "object"
+      },
+      "TaggerCandidateModel": {
+        "properties": {
+          "adapter": {
+            "title": "Adapter",
+            "type": "string"
+          },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "default_thresholds": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Default Thresholds",
+            "type": "object"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "vocabulary_fingerprint": {
+            "title": "Vocabulary Fingerprint",
+            "type": "string"
+          },
+          "vocabulary_size": {
+            "title": "Vocabulary Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "adapter",
+          "revision",
+          "fingerprint",
+          "vocabulary_fingerprint",
+          "vocabulary_size",
+          "categories",
+          "default_thresholds",
+          "tags"
+        ],
+        "title": "TaggerCandidateModel",
+        "type": "object"
+      },
+      "TaggerCandidateStats": {
+        "properties": {
+          "decode_error": {
+            "title": "Decode Error",
+            "type": "integer"
+          },
+          "missing_scores": {
+            "title": "Missing Scores",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "unavailable": {
+            "title": "Unavailable",
+            "type": "integer"
+          },
+          "unreadable": {
+            "title": "Unreadable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "ok",
+          "missing_scores",
+          "decode_error",
+          "unreadable",
+          "unavailable"
+        ],
+        "title": "TaggerCandidateStats",
+        "type": "object"
+      },
+      "TaggerCandidatesResponse": {
+        "properties": {
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "floor": {
+            "title": "Floor",
+            "type": "number"
+          },
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TaggerCandidateItem"
+            },
+            "title": "Items",
+            "type": "object"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/TaggerCandidateModel"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/TaggerCandidateStats"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "floor",
+          "models",
+          "items",
+          "stats"
+        ],
+        "title": "TaggerCandidatesResponse",
+        "type": "object"
+      },
       "TaggerPrepareRequest": {
         "properties": {
           "accept_license": {
@@ -14156,6 +14508,55 @@
         "summary": "List Dataset Captions"
       }
     },
+    "/api/v1/datasets/{dataset_id}/captions/from-tagger": {
+      "post": {
+        "operationId": "captions_from_tagger_api_v1_datasets__dataset_id__captions_from_tagger_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptionsFromTaggerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptionBatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Captions From Tagger"
+      }
+    },
     "/api/v1/datasets/{dataset_id}/captions/ops": {
       "post": {
         "operationId": "run_dataset_caption_ops_api_v1_datasets__dataset_id__captions_ops_post",
@@ -14860,6 +15261,154 @@
           }
         },
         "summary": "List Dataset Stage Runs"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/stages/tag/run": {
+      "post": {
+        "operationId": "run_dataset_tag_stage_api_v1_datasets__dataset_id__stages_tag_run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagStageRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetStageRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Dataset Tag Stage"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/tagger/candidates": {
+      "get": {
+        "operationId": "get_dataset_tagger_candidates_api_v1_datasets__dataset_id__tagger_candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "逗号分隔的模型 key",
+            "in": "query",
+            "name": "models",
+            "required": true,
+            "schema": {
+              "description": "逗号分隔的模型 key",
+              "maxLength": 600,
+              "minLength": 1,
+              "title": "Models",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "floor",
+            "required": false,
+            "schema": {
+              "default": 0.01,
+              "maximum": 1.0,
+              "minimum": 0.01,
+              "title": "Floor",
+              "type": "number"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "accept-encoding",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Accept-Encoding"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaggerCandidatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "If-None-Match 与当前 ETag 相同，没有响应体"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Tagger Candidates"
       }
     },
     "/api/v1/events": {

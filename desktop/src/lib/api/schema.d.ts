@@ -592,6 +592,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/datasets/{dataset_id}/captions/from-tagger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Captions From Tagger */
+        post: operations["captions_from_tagger_api_v1_datasets__dataset_id__captions_from_tagger_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasets/{dataset_id}/captions/ops": {
         parameters: {
             query?: never;
@@ -760,6 +777,40 @@ export interface paths {
         };
         /** List Dataset Stage Runs */
         get: operations["list_dataset_stage_runs_api_v1_datasets__dataset_id__stage_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/stages/tag/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Dataset Tag Stage */
+        post: operations["run_dataset_tag_stage_api_v1_datasets__dataset_id__stages_tag_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/tagger/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Dataset Tagger Candidates */
+        get: operations["get_dataset_tagger_candidates_api_v1_datasets__dataset_id__tagger_candidates_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2501,6 +2552,47 @@ export interface components {
             unchanged: number;
             /** Written */
             written: number;
+        };
+        /** CaptionsFromTaggerRequest */
+        CaptionsFromTaggerRequest: {
+            /** Asset Ids */
+            asset_ids?: string[] | null;
+            /** Categories */
+            categories?: ("general" | "character" | "copyright" | "quality" | "meta" | "rating" | "style")[] | null;
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /**
+             * Escape Parens
+             * @default false
+             */
+            escape_parens: boolean;
+            /**
+             * Keep Underscores
+             * @default false
+             */
+            keep_underscores: boolean;
+            /**
+             * Mode
+             * @default merge
+             * @enum {string}
+             */
+            mode: "overwrite" | "merge" | "fill_empty";
+            /** Models */
+            models: string[];
+            /**
+             * Sample Limit
+             * @default 20
+             */
+            sample_limit: number;
+            /** Thresholds */
+            thresholds?: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
         };
         /** CrawlAddress */
         CrawlAddress: {
@@ -5131,6 +5223,90 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** TagStageRunRequest */
+        TagStageRunRequest: {
+            /**
+             * Batch Size
+             * @default 8
+             */
+            batch_size: number;
+            /** Models */
+            models: string[];
+        };
+        /** TaggerCandidateItem */
+        TaggerCandidateItem: {
+            /** Missing Models */
+            missing_models: string[];
+            /** Reason */
+            reason: string;
+            /** Scores */
+            scores: {
+                [key: string]: [
+                    number,
+                    number
+                ][];
+            };
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "missing_scores" | "decode_error" | "unreadable" | "unavailable";
+        };
+        /** TaggerCandidateModel */
+        TaggerCandidateModel: {
+            /** Adapter */
+            adapter: string;
+            /** Categories */
+            categories: string[];
+            /** Default Thresholds */
+            default_thresholds: {
+                [key: string]: number;
+            };
+            /** Fingerprint */
+            fingerprint: string;
+            /** Key */
+            key: string;
+            /** Revision */
+            revision: string;
+            /** Tags */
+            tags: [
+                string,
+                string
+            ][];
+            /** Vocabulary Fingerprint */
+            vocabulary_fingerprint: string;
+            /** Vocabulary Size */
+            vocabulary_size: number;
+        };
+        /** TaggerCandidateStats */
+        TaggerCandidateStats: {
+            /** Decode Error */
+            decode_error: number;
+            /** Missing Scores */
+            missing_scores: number;
+            /** Ok */
+            ok: number;
+            /** Total */
+            total: number;
+            /** Unavailable */
+            unavailable: number;
+            /** Unreadable */
+            unreadable: number;
+        };
+        /** TaggerCandidatesResponse */
+        TaggerCandidatesResponse: {
+            /** Dataset Id */
+            dataset_id: string;
+            /** Floor */
+            floor: number;
+            /** Items */
+            items: {
+                [key: string]: components["schemas"]["TaggerCandidateItem"];
+            };
+            /** Models */
+            models: components["schemas"]["TaggerCandidateModel"][];
+            stats: components["schemas"]["TaggerCandidateStats"];
+        };
         /** TaggerPrepareRequest */
         TaggerPrepareRequest: {
             /**
@@ -6975,6 +7151,41 @@ export interface operations {
             };
         };
     };
+    captions_from_tagger_api_v1_datasets__dataset_id__captions_from_tagger_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptionsFromTaggerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptionBatchResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     run_dataset_caption_ops_api_v1_datasets__dataset_id__captions_ops_post: {
         parameters: {
             query?: never;
@@ -7397,6 +7608,86 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DatasetStageRunListResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_dataset_tag_stage_api_v1_datasets__dataset_id__stages_tag_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagStageRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetStageRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dataset_tagger_candidates_api_v1_datasets__dataset_id__tagger_candidates_get: {
+        parameters: {
+            query: {
+                /** @description 逗号分隔的模型 key */
+                models: string;
+                floor?: number;
+            };
+            header?: {
+                "if-none-match"?: string | null;
+                "accept-encoding"?: string | null;
+            };
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaggerCandidatesResponse"];
+                };
+            };
+            /** @description If-None-Match 与当前 ETag 相同，没有响应体 */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

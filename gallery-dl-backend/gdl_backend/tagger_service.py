@@ -388,11 +388,12 @@ class TaggerService:
                 args += ["--no-captions"]
             if overwrite_captions:
                 args += ["--overwrite"]
+            job_id = self._job_id
             await self._spawn(
                 args, encode_input_lines(inputs), env=None,
                 on_finished=self._bump_cache_generation(on_finished),
             )
-            return {"phase": "tagging", "models": models, "inputs": inputs}
+            return {"phase": "tagging", "models": models, "inputs": inputs, "job_id": job_id}
 
     def _bump_cache_generation(self, on_finished: FinishedCallback | None) -> FinishedCallback:
         async def finished(summary: dict[str, Any]) -> None:

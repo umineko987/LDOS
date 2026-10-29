@@ -1,7 +1,9 @@
-"""数据集 caption API（schema v16）：全量读取、批量操作、单张编辑、批次历史与撤销。
+"""数据集 caption API（schema v16）：全量读取、批量操作、单张编辑、批次历史与撤销，
+以及 tag 阶段运行、候选分数和从打标结果写 caption。
 
 caption 的 version 是不透明的磁盘版本字符串；写入时带上它做乐观并发检查。
-大载荷（全量 caption）直接返回缓存的 JSON 字节，带 ETag，支持 If-None-Match → 304。
+大载荷（全量 caption、候选分数）直接返回缓存的 JSON 字节，带 ETag，
+支持 If-None-Match → 304；候选分数在客户端接受时 gzip 压缩。
 """
 
 from __future__ import annotations
@@ -15,6 +17,13 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from ..caption_service import CaptionService
 from ..dataset_service import DatasetError
+from ..dataset_tagging import (
+    CANDIDATE_FLOOR,
+    DatasetTaggingService,
+    accepts_gzip,
+    gzip_worthwhile,
+)
+from .datasets import DatasetStageRunResponse
 from .dependencies import get_service
 from .errors import ApiError
 
@@ -23,9 +32,15 @@ CaptionState = Literal[
     "normal", "blank", "missing", "invalid_encoding", "io_error", "pair_conflict", "unavailable"
 ]
 CaptionBatchKind = Literal["from_tagger", "ops", "edit"]
+CaptionMode = Literal["overwrite", "merge", "fill_empty"]
+TaggerCategory = Literal["general", "character", "copyright", "quality", "meta", "rating", "style"]
+TaggerCandidateStatus = Literal["ok", "missing_scores", "decode_error", "unreadable", "unavailable"]
 
 _Id = Annotated[str, Field(min_length=1, max_length=128)]
 _Version = Annotated[str, Field(min_length=1, max_length=128)]
+_ModelKey = Annotated[str, Field(min_length=1, max_length=64)]
+_Threshold = Annotated[float, Field(ge=0.01, le=0.99)]
+_MAX_MODELS = 8
 
 
 def _tag(value: str) -> str:
@@ -97,6 +112,38 @@ class CaptionEditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(max_length=1_000_000)
     expected_version: _Version
+
+
+def _unique_models(models: list[str]) -> list[str]:
+    return list(dict.fromkeys(models))
+
+
+_ModelList = Annotated[
+    list[_ModelKey], Field(min_length=1, max_length=_MAX_MODELS), AfterValidator(_unique_models)
+]
+
+
+class TagStageRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    models: _ModelList
+    batch_size: int = Field(default=8, ge=1, le=64)
+
+
+class CaptionsFromTaggerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # 按顺序合并去重：排在前面的模型先出标签。
+    models: _ModelList
+    mode: CaptionMode = "merge"
+    # 模型 → 类别 → 阈值；没给的类别用模型默认阈值。
+    thresholds: dict[_ModelKey, dict[TaggerCategory, _Threshold]] = Field(default_factory=dict)
+    # 只输出这些类别；省略时输出模型的全部类别。
+    categories: list[TaggerCategory] | None = Field(default=None, min_length=1)
+    keep_underscores: bool = False
+    escape_parens: bool = False
+    # 省略时处理 review 阶段的全部输入。
+    asset_ids: list[_Id] | None = Field(default=None, min_length=1, max_length=50_000)
+    dry_run: bool = False
+    sample_limit: int = Field(default=20, ge=0, le=200)
 
 
 # ---- 响应 ----
@@ -201,6 +248,45 @@ class CaptionUndoResponse(BaseModel):
     failed: list[CaptionReportItem]
 
 
+class TaggerCandidateModel(BaseModel):
+    key: str
+    adapter: str
+    revision: str
+    fingerprint: str
+    vocabulary_fingerprint: str
+    vocabulary_size: int
+    categories: list[str]
+    default_thresholds: dict[str, float]
+    # 出现在本次结果里的标签 [名字, 类别]；分数行用下标引用它。
+    tags: list[tuple[str, str]]
+
+
+class TaggerCandidateItem(BaseModel):
+    status: TaggerCandidateStatus
+    # unavailable 的原因（source_offline / file_missing / unsafe_source_path）；其余为空。
+    reason: str
+    missing_models: list[str]
+    # 模型 → [[tags 下标, 分数]]，只含分数 ≥ floor 的标签（rating 类全部给出），分数为完整精度。
+    scores: dict[str, list[tuple[int, float]]]
+
+
+class TaggerCandidateStats(BaseModel):
+    total: int
+    ok: int
+    missing_scores: int
+    decode_error: int
+    unreadable: int
+    unavailable: int
+
+
+class TaggerCandidatesResponse(BaseModel):
+    dataset_id: str
+    floor: float
+    models: list[TaggerCandidateModel]
+    items: dict[str, TaggerCandidateItem]
+    stats: TaggerCandidateStats
+
+
 # ---- 工具 ----
 
 
@@ -208,9 +294,17 @@ def _captions(container: Any) -> CaptionService:
     return container.captions
 
 
+def _tagging(container: Any) -> DatasetTaggingService:
+    return container.dataset_tagging
+
+
 async def _call(function, *args, **kwargs):
+    return await _await(asyncio.to_thread(function, *args, **kwargs))
+
+
+async def _await(awaitable):
     try:
-        return await asyncio.to_thread(function, *args, **kwargs)
+        return await awaitable
     except DatasetError as error:
         raise ApiError(error.status, error.code, error.message, details=error.details or None) from None
 
@@ -232,6 +326,13 @@ def cached_json(body: bytes, etag: str, if_none_match: str | None) -> Response:
 
 
 NOT_MODIFIED = {304: {"description": "If-None-Match 与当前 ETag 相同，没有响应体"}}
+
+
+def _model_list(value: str) -> list[str]:
+    models = list(dict.fromkeys(part.strip() for part in value.split(",") if part.strip()))
+    if not models or len(models) > _MAX_MODELS or any(len(model) > 64 for model in models):
+        raise ApiError(422, "invalid_tagger_models", f"models 需要 1 到 {_MAX_MODELS} 个逗号分隔的模型 key")
+    return models
 
 
 def create_captions_router() -> APIRouter:
@@ -304,5 +405,66 @@ def create_captions_router() -> APIRouter:
         container: Any = Depends(get_service),
     ) -> Any:
         return await _call(_captions(container).undo, batch_id)
+
+    @router.post(
+        "/datasets/{dataset_id}/captions/from-tagger",
+        response_model=CaptionBatchResult,
+    )
+    async def captions_from_tagger(
+        dataset_id: str,
+        payload: CaptionsFromTaggerRequest,
+        container: Any = Depends(get_service),
+    ) -> Any:
+        return await _await(_tagging(container).captions_from_tagger(
+            dataset_id,
+            models=payload.models,
+            mode=payload.mode,
+            thresholds=payload.thresholds,
+            categories=payload.categories,
+            keep_underscores=payload.keep_underscores,
+            escape_parens=payload.escape_parens,
+            asset_ids=payload.asset_ids,
+            dry_run=payload.dry_run,
+            sample_limit=payload.sample_limit,
+        ))
+
+    @router.post(
+        "/datasets/{dataset_id}/stages/tag/run",
+        status_code=202,
+        response_model=DatasetStageRunResponse,
+    )
+    async def run_dataset_tag_stage(
+        dataset_id: str,
+        payload: TagStageRunRequest,
+        container: Any = Depends(get_service),
+    ) -> Any:
+        return await _await(_tagging(container).run_tag_stage(
+            dataset_id, models=payload.models, batch_size=payload.batch_size,
+        ))
+
+    @router.get(
+        "/datasets/{dataset_id}/tagger/candidates",
+        response_model=TaggerCandidatesResponse,
+        responses=NOT_MODIFIED,
+    )
+    async def get_dataset_tagger_candidates(
+        dataset_id: str,
+        models: str = Query(min_length=1, max_length=600, description="逗号分隔的模型 key"),
+        floor: float = Query(default=CANDIDATE_FLOOR, ge=CANDIDATE_FLOOR, le=1.0),
+        if_none_match: str | None = Header(default=None),
+        accept_encoding: str | None = Header(default=None),
+        container: Any = Depends(get_service),
+    ) -> Any:
+        payload = await _await(_tagging(container).candidates(
+            dataset_id, models=_model_list(models), floor=floor,
+        ))
+        headers = {"ETag": payload.etag, "Cache-Control": "private, no-cache", "Vary": "Accept-Encoding"}
+        if etag_matches(if_none_match, payload.etag):
+            return Response(status_code=304, headers=headers)
+        if accepts_gzip(accept_encoding) and gzip_worthwhile(payload.body):
+            body = await asyncio.to_thread(payload.compressed)
+            headers["Content-Encoding"] = "gzip"
+            return Response(content=body, media_type="application/json", headers=headers)
+        return Response(content=payload.body, media_type="application/json", headers=headers)
 
     return router
