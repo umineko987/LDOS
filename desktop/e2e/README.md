@@ -67,6 +67,8 @@ const connections = await mockEvents(page, [                      // 第一次�
 
 - **Tauri 宿主**（`boot.spec.ts`）：给 `window` 设上 `isTauri: true` 和 `__TAURI_INTERNALS__.invoke`，按命令名返回结果。
   平台适配器只认这两个全局量，所以不用真的起 Tauri；宿主状态放在 `window` 上，用例里用 `page.evaluate()` 改。
+- **已就绪的桌面宿主**（`fixtures/exports.ts` 的 `fakeDesktopHost()`）：后端直接就绪，选目录返回给定路径，
+  其余命令（例如 `reveal_in_file_manager`）记在 `window.__hostCalls`，用 `hostCalls(page)` 读。
 - **GPU**（`gfx.spec.ts` 的 `stubGpu()`）：无头 Chromium 的 WebGL2 是 SwiftShader（软件实现）。
   改掉 `UNMASKED_RENDERER_WEBGL` 返回的设备名，模拟有硬件加速或只有 llvmpipe；或者让 `getContext("webgl2")` 返回 `null`，模拟没有 WebGL2。
 
