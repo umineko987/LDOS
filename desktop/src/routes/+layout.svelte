@@ -6,6 +6,7 @@
 
   import { createQueryClient } from "#lib/api/query-client.ts";
   import { INITIAL_BOOT, startBootGate, type BootGate, type BootSnapshot } from "#lib/boot/gate.ts";
+  import SettingsCommands from "#lib/components/settings/settings-commands.svelte";
   import BootScreen from "#lib/components/shell/boot-screen.svelte";
   import Shell from "#lib/components/shell/shell.svelte";
   import { i18n, syncDocumentLang } from "#lib/i18n/locale.svelte.ts";
@@ -41,7 +42,7 @@
     {#if boot.phase === "ready" && boot.api}
       <QueryClientProvider client={queryClient}>
         {#key boot.api}
-          <Shell api={boot.api}>{@render children()}</Shell>
+          <Shell api={boot.api}><SettingsCommands />{@render children()}</Shell>
         {/key}
       </QueryClientProvider>
     {:else}
