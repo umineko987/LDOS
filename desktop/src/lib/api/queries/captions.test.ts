@@ -5,6 +5,8 @@ import { createApi } from "../client.ts";
 import {
   applyCaptionEdit,
   APPROVAL_PAGE_SIZE,
+  assetContentPath,
+  assetThumbnailPath,
   captionBatchesQuery,
   captionKeys,
   captionOps,
@@ -64,6 +66,14 @@ const BATCH = {
   conflicts: [],
   failed: [],
 };
+
+describe("图片地址", () => {
+  it("缩略图和原图按 asset id 编码", () => {
+    expect(assetThumbnailPath("a/b")).toBe("/api/v1/gallery/assets/a%2Fb/thumbnail?size=256");
+    expect(assetThumbnailPath("a", 128)).toBe("/api/v1/gallery/assets/a/thumbnail?size=128");
+    expect(assetContentPath("a/b")).toBe("/api/v1/gallery/assets/a%2Fb/content");
+  });
+});
 
 describe("captionsQuery", () => {
   it("带上一次的 ETag；304 时沿用同一个缓存对象", async () => {

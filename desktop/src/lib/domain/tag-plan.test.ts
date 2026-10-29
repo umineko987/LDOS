@@ -4,11 +4,17 @@ import type { components } from "#lib/api/schema.d.ts";
 
 import { categoryIndex } from "./captions.ts";
 import {
+  activeCategories,
+  categoryOptions,
   composeTags,
+  fromTaggerRequest,
   indexCandidates,
+  latestTagBatch,
   planTagging,
   roundThreshold,
+  savedTagSettings,
   settingsPolicy,
+  sliderCategories,
   thresholdMin,
   thresholdOverrides,
   type CaptionEntry,
@@ -191,5 +197,79 @@ describe("thresholdOverrides / thresholdMin / roundThreshold", () => {
   it("对齐到 0.01", () => {
     expect(roundThreshold(0.35000000000000003)).toBe(0.35);
     expect(roundThreshold(0.416)).toBe(0.42);
+  });
+});
+
+describe("打标页的选项和请求", () => {
+  const PIXAI = {
+    key: "pixai",
+    categories: ["general", "character", "style", "copyright", "meta", "rating", "artist"],
+    default_thresholds: { general: 0.17, character: 0.27, style: 0.15, copyright: 0.24, meta: 0.17, rating: 0.41, artist: 0.3 },
+  };
+
+  it("类别选项取并集，按 caption 顺序；默认不勾评级、元信息、质量", () => {
+    const options = categoryOptions([MODEL, PIXAI]);
+    expect(options).toEqual(["character", "copyright", "style", "general", "meta", "rating"]);
+    expect(activeCategories(options, null)).toEqual(["character", "copyright", "style", "general"]);
+    expect(activeCategories(options, ["rating", "general", "quality"])).toEqual(["general", "rating"]);
+    expect(categoryOptions([])).toEqual([]);
+  });
+
+  it("滑块只给后端认得、有默认阈值的类别", () => {
+    expect(sliderCategories(MODEL)).toEqual(["character", "general", "rating"]);
+    expect(sliderCategories(PIXAI)).toEqual(["character", "copyright", "style", "general", "meta", "rating"]);
+  });
+
+  it("fromTaggerRequest 只带改过的阈值，格式取反成 keep_underscores", () => {
+    expect(
+      fromTaggerRequest({
+        models: [MODEL],
+        thresholds: { wd: { general: 0.4, character: 0.85 } },
+        categories: ["character", "general"],
+        format: { underscore_to_space: false, escape_parens: true },
+        mode: "overwrite",
+      }),
+    ).toEqual({
+      models: ["wd"],
+      mode: "overwrite",
+      thresholds: { wd: { general: 0.4 } },
+      categories: ["character", "general"],
+      keep_underscores: true,
+      escape_parens: true,
+    });
+  });
+
+  it("savedTagSettings 从批次参数还原设置，坏字段丢掉", () => {
+    expect(
+      savedTagSettings({
+        models: ["wd", 3, ""],
+        thresholds: { wd: { general: 0.4, bad: "x" }, empty: {}, junk: 1 },
+        categories: ["general"],
+        keep_underscores: true,
+        escape_parens: false,
+      }),
+    ).toEqual({
+      models: ["wd"],
+      thresholds: { wd: { general: 0.4 } },
+      categories: ["general"],
+      format: { underscore_to_space: false, escape_parens: false },
+    });
+    expect(savedTagSettings({ models: ["wd"], categories: [] })).toEqual({
+      models: ["wd"],
+      thresholds: {},
+      categories: null,
+      format: DEFAULT_TAG_FORMAT,
+    });
+    expect(savedTagSettings({ models: "wd" })).toBeNull();
+  });
+
+  it("latestTagBatch 取最近一次没撤销的打标写入", () => {
+    const batches = [
+      { batch_id: "e", kind: "edit" as const, undone_at: null },
+      { batch_id: "t2", kind: "from_tagger" as const, undone_at: 5 },
+      { batch_id: "t1", kind: "from_tagger" as const, undone_at: null },
+    ];
+    expect(latestTagBatch(batches)?.batch_id).toBe("t1");
+    expect(latestTagBatch(undefined)).toBeUndefined();
   });
 });

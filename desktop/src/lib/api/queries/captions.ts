@@ -48,6 +48,15 @@ export const captionKeys = {
 
 const path = (dataset_id: string) => ({ path: { dataset_id } });
 
+/** caption 列表不带图片地址：缩略图和原图按 asset id 走图库接口。 */
+export function assetThumbnailPath(assetId: string, size = 256): string {
+  return `/api/v1/gallery/assets/${encodeURIComponent(assetId)}/thumbnail?size=${size}`;
+}
+
+export function assetContentPath(assetId: string): string {
+  return `/api/v1/gallery/assets/${encodeURIComponent(assetId)}/content`;
+}
+
 export function captionsQuery(api: Api, datasetId: string) {
   const queryKey = captionKeys.list(datasetId);
   return queryOptions({

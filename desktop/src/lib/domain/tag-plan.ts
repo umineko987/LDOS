@@ -238,3 +238,95 @@ export const THRESHOLD_STEP = 0.01;
 export function roundThreshold(value: number): number {
   return Math.round(value * 100) / 100;
 }
+
+// ---- 打标页的选项和请求 ----
+
+type FromTaggerRequest = components["schemas"]["CaptionsFromTaggerRequest"];
+type BatchSummary = components["schemas"]["CaptionBatchSummary"];
+export type OutputCategory = NonNullable<FromTaggerRequest["categories"]>[number];
+
+/** from-tagger 认得的输出类别，按写进 caption 的顺序（角色、作品在前，评级在最后）。 */
+export const OUTPUT_CATEGORIES: readonly OutputCategory[] = ["character", "copyright", "style", "general", "meta", "quality", "rating"];
+
+/** 默认不写进 caption 的类别：评级、元信息、质量词通常不进训练 caption。 */
+export const DEFAULT_OFF_CATEGORIES: ReadonlySet<string> = new Set(["rating", "meta", "quality"]);
+
+/** 这些模型能输出的类别（并集），按 OUTPUT_CATEGORIES 排序。 */
+export function categoryOptions(models: readonly Pick<SelectionModel, "categories">[]): OutputCategory[] {
+  const present = new Set(models.flatMap((model) => model.categories));
+  return OUTPUT_CATEGORIES.filter((category) => present.has(category));
+}
+
+/** 用户勾的类别（null 时取默认）落到可选项上，保持 OUTPUT_CATEGORIES 的顺序。 */
+export function activeCategories(options: readonly OutputCategory[], chosen: readonly string[] | null): OutputCategory[] {
+  if (chosen === null) return options.filter((category) => !DEFAULT_OFF_CATEGORIES.has(category));
+  const picked = new Set(chosen);
+  return options.filter((category) => picked.has(category));
+}
+
+/** 一个模型可调阈值的类别：默认阈值里有、后端也认得的，按 OUTPUT_CATEGORIES 排序。 */
+export function sliderCategories(model: Pick<SelectionModel, "default_thresholds">): OutputCategory[] {
+  return OUTPUT_CATEGORIES.filter((category) => Object.hasOwn(model.default_thresholds, category));
+}
+
+export interface TagRequestOptions {
+  readonly models: readonly Pick<SelectionModel, "key" | "default_thresholds">[];
+  readonly thresholds: Readonly<Record<string, Thresholds>>;
+  readonly categories: readonly OutputCategory[];
+  readonly format: TagFormat;
+  readonly mode: CaptionMode;
+}
+
+/** 打标页的设置 → POST captions/from-tagger 的请求体（dry_run 由调用方加）。 */
+export function fromTaggerRequest({ models, thresholds, categories, format, mode }: TagRequestOptions): FromTaggerRequest {
+  return {
+    models: models.map((model) => model.key),
+    mode,
+    thresholds: thresholdOverrides(models, thresholds),
+    categories: [...categories],
+    keep_underscores: !format.underscore_to_space,
+    escape_parens: format.escape_parens,
+  };
+}
+
+export interface SavedTagSettings {
+  readonly models: readonly string[];
+  readonly thresholds: Readonly<Record<string, Thresholds>>;
+  /** null：批次里没记类别（按模型全部类别写的），界面用默认勾选。 */
+  readonly categories: readonly string[] | null;
+  readonly format: TagFormat;
+}
+
+function plainRecord(value: unknown): Readonly<Record<string, unknown>> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item !== "") : [];
+}
+
+/** 从一次 from_tagger 批次的 params 里还原打标设置；没有模型时返回 null。 */
+export function savedTagSettings(params: Readonly<Record<string, unknown>>): SavedTagSettings | null {
+  const models = stringList(params.models);
+  if (!models.length) return null;
+  const thresholds: Record<string, Record<string, number>> = {};
+  for (const [model, raw] of Object.entries(plainRecord(params.thresholds) ?? {})) {
+    const values: Record<string, number> = {};
+    for (const [category, value] of Object.entries(plainRecord(raw) ?? {})) {
+      if (typeof value === "number" && Number.isFinite(value)) values[category] = value;
+    }
+    if (Object.keys(values).length) thresholds[model] = values;
+  }
+  const categories = stringList(params.categories);
+  return {
+    models,
+    thresholds,
+    categories: categories.length ? categories : null,
+    format: { underscore_to_space: params.keep_underscores !== true, escape_parens: params.escape_parens === true },
+  };
+}
+
+/** 最近一次没撤销的从打标写入（批次历史是新→旧）。 */
+export function latestTagBatch<T extends Pick<BatchSummary, "kind" | "undone_at">>(batches: readonly T[] | undefined): T | undefined {
+  return batches?.find((batch) => batch.kind === "from_tagger" && batch.undone_at === null);
+}
