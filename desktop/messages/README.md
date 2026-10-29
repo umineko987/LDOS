@@ -20,14 +20,17 @@
 | `common` | 跨页面的通用词（重试、关闭、复制） |
 | `crawl` | 采集批次详情页（`/jobs/crawls/[batchId]`）和下载任务日志面板 |
 | `diag` | 设置 › 诊断 |
+| `downloads` | 设置 › 模型 › 下载（HF 镜像、下载代理、HF token） |
 | `gfx` | `/dev/gfx` 渲染基准 |
 | `jobs` | 任务页（`/jobs`），以及各处共用的任务类型、状态文案 |
 | `keys` | 按键注册表里的命令标签和分组 |
 | `locale` | 语言切换 |
+| `models` | 设置 › 模型，以及阶段页共用的模型安装组件（`#lib/components/model-install`） |
 | `nav` | 侧栏导航和面包屑 |
 | `page` | 各路由的标题和占位说明 |
 | `palette` | Ctrl+K 命令面板 |
 | `prefs` | 设置 › 偏好（语言、减少动效、密度、地图渲染器） |
+| `settings` | 设置各页共用的词（取消、确认） |
 | `shell` | 外壳：侧栏按钮、快捷键表 |
 | `stage` | 数据集阶段名（采集、清洗……） |
 
