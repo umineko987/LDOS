@@ -855,7 +855,7 @@ class GalleryCatalogService:
 
     def _run_scan(self, source_id: str, operation_id: str) -> None:
         try:
-            stats = self.scan_source(source_id)
+            stats = self.scan_source(source_id, progress=self._scan_job_progress(source_id))
             with self._scan_lock:
                 job = self._scan_jobs.get(source_id)
                 if job is not None and job["operation_id"] == operation_id:
@@ -903,10 +903,30 @@ class GalleryCatalogService:
                 else:
                     self._jobs.finish(f"scan:{source_id}", "failed", message=finished["error_code"])
 
+    def _scan_job_progress(self, source_id: str) -> Callable[[int, int | None], None] | None:
+        jobs = self._jobs
+        if jobs is None:
+            return None
+        job_id = f"scan:{source_id}"
+
+        def report(current: int, total: int | None) -> None:
+            # 任务登记处自带节流，逐张调用也只按间隔发事件。
+            jobs.update(job_id, current=current, total=total)
+
+        return report
+
     def scan_source(
-        self, source_id: str, *, _snapshot_retries: int = 1
+        self,
+        source_id: str,
+        *,
+        progress: Callable[[int, int | None], None] | None = None,
+        _snapshot_retries: int = 1,
     ) -> dict[str, Any]:
-        """同步全量扫描：walk + 有界解码 + 单事务提交。"""
+        """同步全量扫描：walk + 有界解码 + 单事务提交。
+
+        progress(current, total)：遍历中每读一张图报一次已读张数（总数未知，total=None）；
+        遍历结束、提交索引前报一次 total=张数。
+        """
         source = self._repo.get_source(source_id)
         if source is None:
             raise GallerySourceNotFound(source_id)
@@ -974,8 +994,12 @@ class GalleryCatalogService:
                                 pair_conflict=file_name in conflicts,
                             )
                         )
+                        if progress is not None:
+                            progress(len(assets), None)
             finally:
                 safe_root.close()
+            if progress is not None:
+                progress(len(assets), len(assets))
             directories = [
                 directory
                 for directory in directories
@@ -992,7 +1016,7 @@ class GalleryCatalogService:
                 if _snapshot_retries < 1:
                     raise
                 return self.scan_source(
-                    source_id, _snapshot_retries=_snapshot_retries - 1
+                    source_id, progress=progress, _snapshot_retries=_snapshot_retries - 1
                 )
             self._notify_scan_committed(source_id)
             return {

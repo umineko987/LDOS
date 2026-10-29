@@ -318,9 +318,19 @@ class GalleryScanTest(GalleryServiceTestBase):
         )
         events, complete = bus.events_after(0)
         self.assertTrue(complete)
+        # 遍历中只知道已读张数；遍历完、提交前补上总数。
         self.assertEqual(
-            [event.data["job"]["status"] for event in events],
-            ["running", "succeeded"],
+            [
+                (event.data["job"]["status"], event.data["job"]["current"], event.data["job"]["total"])
+                for event in events
+            ],
+            [
+                ("running", None, None),
+                ("running", 1, None),
+                ("running", 2, None),
+                ("running", 2, 2),
+                ("succeeded", 2, 2),
+            ],
         )
 
     def test_async_scan_failure_finishes_job_with_error_code(self) -> None:
