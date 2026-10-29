@@ -37,6 +37,7 @@ from .api_routes import (
 )
 # Keep these names importable from gdl_backend.app while their implementations
 # live outside the composition root.
+from .api_routes.atlas import create_atlas_router
 from .api_routes.datasets import create_datasets_router
 from .api_routes.errors import ApiError
 from .gallery_service import GalleryCatalogService
@@ -47,6 +48,7 @@ from .gallery_thumbnails import ThumbnailService
 from .api_routes.validation import (
     validate_network_target as _validate_network_target,
 )
+from .atlas_service import AtlasService
 from .auth import AuthManager
 from .config import AppSettings
 from .crawl import CrawlPlanner
@@ -184,6 +186,7 @@ class ServiceContainer:
         self.job_sampler = JobSampler(self.events, self.jobs, default_job_sources(self))
         # 数据集：扫描后补成员哈希、爬取批次结束后自动挂根（见 dataset_service）。
         self.datasets = DatasetService.for_container(self)
+        self.atlas = AtlasService.for_container(self)
         self._health_task: asyncio.Task | None = None
         self._started = False
         self._stopping = False
@@ -335,6 +338,7 @@ class ServiceContainer:
             self._health_task = None
         await self.model_setup.close()
         await self.tagger.close()
+        await self.atlas.stop()
         await self.reviews.stop()
         await self.ordered_crawls.stop()
         await self.scheduler.stop()
@@ -632,6 +636,7 @@ def create_app(
     app.include_router(create_policies_router())
     app.include_router(create_gallery_router())
     app.include_router(create_datasets_router())
+    app.include_router(create_atlas_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
     app.include_router(create_jobs_router())

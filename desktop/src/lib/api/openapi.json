@@ -1,6 +1,764 @@
 {
   "components": {
     "schemas": {
+      "AtlasAssetsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_ids": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Asset Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asset_ids"
+        ],
+        "title": "AtlasAssetsRequest",
+        "type": "object"
+      },
+      "AtlasAvailability": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "reason": {
+            "enum": [
+              "",
+              "dedup_disabled",
+              "python_missing",
+              "worker_missing"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "reason"
+        ],
+        "title": "AtlasAvailability",
+        "type": "object"
+      },
+      "AtlasCluster": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "live_share": {
+            "title": "Live Share",
+            "type": "number"
+          },
+          "live_size": {
+            "title": "Live Size",
+            "type": "integer"
+          },
+          "medoid_asset_id": {
+            "title": "Medoid Asset Id",
+            "type": "string"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "size",
+          "share",
+          "medoid_asset_id",
+          "x",
+          "y",
+          "live_size",
+          "live_share"
+        ],
+        "title": "AtlasCluster",
+        "type": "object"
+      },
+      "AtlasDelta": {
+        "description": "当前打标输入相对结果的变化；added/changed 任一大于 0 即 stale。",
+        "properties": {
+          "added": {
+            "minimum": 0.0,
+            "title": "Added",
+            "type": "integer"
+          },
+          "changed": {
+            "minimum": 0.0,
+            "title": "Changed",
+            "type": "integer"
+          },
+          "removed_asset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed Asset Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "added",
+          "changed",
+          "removed_asset_ids"
+        ],
+        "title": "AtlasDelta",
+        "type": "object"
+      },
+      "AtlasErrorInfo": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "number"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "at"
+        ],
+        "title": "AtlasErrorInfo",
+        "type": "object"
+      },
+      "AtlasHints": {
+        "properties": {
+          "outlier_threshold": {
+            "title": "Outlier Threshold",
+            "type": "number"
+          },
+          "outliers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Outliers",
+            "type": "array"
+          },
+          "over_represented": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasOverRepresented"
+            },
+            "title": "Over Represented",
+            "type": "array"
+          },
+          "share_threshold": {
+            "title": "Share Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "share_threshold",
+          "outlier_threshold",
+          "over_represented",
+          "outliers"
+        ],
+        "title": "AtlasHints",
+        "type": "object"
+      },
+      "AtlasItem": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "cluster": {
+            "title": "Cluster",
+            "type": "integer"
+          },
+          "outlier": {
+            "title": "Outlier",
+            "type": "number"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "sprite": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sprite"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "asset_id",
+          "x",
+          "y",
+          "cluster",
+          "outlier"
+        ],
+        "title": "AtlasItem",
+        "type": "object"
+      },
+      "AtlasOverRepresented": {
+        "properties": {
+          "cluster": {
+            "title": "Cluster",
+            "type": "integer"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cluster",
+          "share",
+          "size"
+        ],
+        "title": "AtlasOverRepresented",
+        "type": "object"
+      },
+      "AtlasProgress": {
+        "properties": {
+          "done": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "phase",
+          "label"
+        ],
+        "title": "AtlasProgress",
+        "type": "object"
+      },
+      "AtlasResponse": {
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/AtlasAvailability"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "clusters": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasCluster"
+            },
+            "title": "Clusters",
+            "type": "array"
+          },
+          "current_digest": {
+            "title": "Current Digest",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "delta": {
+            "$ref": "#/components/schemas/AtlasDelta"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasErrorInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hints": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasHints"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasRunInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "running_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running Run Id"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasSkipped"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "sprites": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasSprites"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "none",
+              "running",
+              "ready",
+              "stale",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "vectors": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasVectors"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "dataset_id",
+          "status",
+          "availability",
+          "stale",
+          "current_digest",
+          "delta"
+        ],
+        "title": "AtlasResponse",
+        "type": "object"
+      },
+      "AtlasRunInfo": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "input_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Digest"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          }
+        },
+        "required": [
+          "run_id",
+          "options",
+          "params",
+          "counts"
+        ],
+        "title": "AtlasRunInfo",
+        "type": "object"
+      },
+      "AtlasRunRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "clusters": {
+            "anyOf": [
+              {
+                "maximum": 256.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clusters"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "perplexity": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 2.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Perplexity"
+          }
+        },
+        "title": "AtlasRunRequest",
+        "type": "object"
+      },
+      "AtlasSkipped": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "missing",
+              "changed",
+              "unreadable"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "reason"
+        ],
+        "title": "AtlasSkipped",
+        "type": "object"
+      },
+      "AtlasSprites": {
+        "properties": {
+          "cell_size": {
+            "title": "Cell Size",
+            "type": "integer"
+          },
+          "columns": {
+            "title": "Columns",
+            "type": "integer"
+          },
+          "format": {
+            "enum": [
+              "webp",
+              "png"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "per_sheet": {
+            "title": "Per Sheet",
+            "type": "integer"
+          },
+          "sheet_size": {
+            "title": "Sheet Size",
+            "type": "integer"
+          },
+          "urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Urls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "format",
+          "sheet_size",
+          "cell_size",
+          "columns",
+          "per_sheet",
+          "urls"
+        ],
+        "title": "AtlasSprites",
+        "type": "object"
+      },
+      "AtlasStateResponse": {
+        "description": "地图状态（不含点位）。run 为 null 表示还没有结果；失败或运行中仍会带上一次的 run。",
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/AtlasAvailability"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "current_digest": {
+            "title": "Current Digest",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "delta": {
+            "$ref": "#/components/schemas/AtlasDelta"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasErrorInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtlasRunInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "running_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running Run Id"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "none",
+              "running",
+              "ready",
+              "stale",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "status",
+          "availability",
+          "stale",
+          "current_digest",
+          "delta"
+        ],
+        "title": "AtlasStateResponse",
+        "type": "object"
+      },
+      "AtlasVectors": {
+        "description": "PCA-32 int8 量化，data 为行主序 n×dims 字节的 base64，v ≈ q * scales[d]。",
+        "properties": {
+          "data": {
+            "title": "Data",
+            "type": "string"
+          },
+          "dims": {
+            "title": "Dims",
+            "type": "integer"
+          },
+          "dtype": {
+            "const": "int8",
+            "title": "Dtype",
+            "type": "string"
+          },
+          "encoding": {
+            "const": "base64",
+            "title": "Encoding",
+            "type": "string"
+          },
+          "order": {
+            "const": "items",
+            "title": "Order",
+            "type": "string"
+          },
+          "scales": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Scales",
+            "type": "array"
+          }
+        },
+        "required": [
+          "dims",
+          "dtype",
+          "encoding",
+          "order",
+          "scales",
+          "data"
+        ],
+        "title": "AtlasVectors",
+        "type": "object"
+      },
       "AuthProxyUpdate": {
         "additionalProperties": false,
         "description": "授权专用代理地址；空字符串表示直连。格式校验在 AuthManager 内完成。",
@@ -9126,6 +9884,340 @@
           }
         },
         "summary": "Patch Dataset"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/atlas": {
+      "get": {
+        "operationId": "get_dataset_atlas_api_v1_datasets__dataset_id__atlas_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "If-None-Match 命中"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Atlas"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/atlas/cancel": {
+      "post": {
+        "operationId": "cancel_dataset_atlas_api_v1_datasets__dataset_id__atlas_cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasStateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Dataset Atlas"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/atlas/remove": {
+      "post": {
+        "operationId": "remove_dataset_atlas_assets_api_v1_datasets__dataset_id__atlas_remove_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AtlasAssetsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Dataset Atlas Assets"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/atlas/restore": {
+      "post": {
+        "operationId": "restore_dataset_atlas_assets_api_v1_datasets__dataset_id__atlas_restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AtlasAssetsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Dataset Atlas Assets"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/atlas/run": {
+      "post": {
+        "operationId": "run_dataset_atlas_api_v1_datasets__dataset_id__atlas_run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AtlasRunRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasStateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Dataset Atlas"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/atlas/sprites/{index}": {
+      "get": {
+        "operationId": "get_dataset_atlas_sprite_api_v1_datasets__dataset_id__atlas_sprites__index__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "maximum": 9999,
+              "minimum": 0,
+              "title": "Index",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^\\d{13}-[0-9a-f]{8}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/png": {},
+              "image/webp": {}
+            },
+            "description": "雪碧图"
+          },
+          "304": {
+            "description": "If-None-Match 命中"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Atlas Sprite"
       }
     },
     "/api/v1/datasets/{dataset_id}/crawls": {

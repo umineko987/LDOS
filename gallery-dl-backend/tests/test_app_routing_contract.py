@@ -100,6 +100,12 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("POST", "/api/v1/datasets/{dataset_id}/hashing"): ("start_dataset_hashing_api_v1_datasets__dataset_id__hashing_post", ("202", "422")),
     ("GET", "/api/v1/datasets/{dataset_id}/crawls"): ("list_dataset_crawls_api_v1_datasets__dataset_id__crawls_get", ("200", "422")),
     ("POST", "/api/v1/datasets/{dataset_id}/crawls"): ("create_dataset_crawl_api_v1_datasets__dataset_id__crawls_post", ("202", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/atlas"): ("get_dataset_atlas_api_v1_datasets__dataset_id__atlas_get", ("200", "304", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/atlas/run"): ("run_dataset_atlas_api_v1_datasets__dataset_id__atlas_run_post", ("202", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/atlas/cancel"): ("cancel_dataset_atlas_api_v1_datasets__dataset_id__atlas_cancel_post", ("200", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/atlas/remove"): ("remove_dataset_atlas_assets_api_v1_datasets__dataset_id__atlas_remove_post", ("200", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/atlas/restore"): ("restore_dataset_atlas_assets_api_v1_datasets__dataset_id__atlas_restore_post", ("200", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/atlas/sprites/{index}"): ("get_dataset_atlas_sprite_api_v1_datasets__dataset_id__atlas_sprites__index__get", ("200", "304", "422")),
     ("POST", "/api/v1/tasks"):("create_task_api_v1_tasks_post", ("200", "422")),
     ("GET", "/api/v1/tasks"): ("list_tasks_api_v1_tasks_get", ("200", "422")),
     ("GET", "/api/v1/tasks/{task_id}"): ("get_task_api_v1_tasks__task_id__get", ("200", "422")),
@@ -249,6 +255,7 @@ class AppRoutingContractTests(unittest.TestCase):
             "gallery": "gdl_backend.api_routes.gallery",
             "gallery_review": "gdl_backend.api_routes.gallery_review",
             "datasets": "gdl_backend.api_routes.datasets",
+            "atlas": "gdl_backend.api_routes.atlas",
             "policies":"gdl_backend.api_routes.policies",
             "proxy": "gdl_backend.api_routes.proxy",
             "scheduler": "gdl_backend.api_routes.scheduler",
@@ -273,6 +280,8 @@ class AppRoutingContractTests(unittest.TestCase):
                 domain = "discovery"
             elif path.startswith(("/api/v1/gallery/reviews", "/api/v1/gallery/review-presets")):
                 domain = "gallery_review"
+            elif path.startswith("/api/v1/datasets/{dataset_id}/atlas"):
+                domain = "atlas"
             elif path.startswith("/api/v1/datasets"):
                 domain = "datasets"
             elif "/review" in path:
