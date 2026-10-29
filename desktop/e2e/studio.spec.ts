@@ -87,8 +87,15 @@ test("查询过滤，全选后删掉 hat，预览差异再写入，toast 撤销"
   await expect(count(page)).toHaveAttribute("data-count", String(WITH_HAT));
   await expect(page.getByTestId("studio-history").locator('[data-kind="ops"]')).toHaveAttribute("data-undone", "true");
 
-  // Esc：网格没有选择时清空查询。
+  // A：只对选中的图记为已校对（不落到全部结果上），再按一次撤回。
   await cell(page, 0).click();
+  await page.keyboard.press("a");
+  await expect(page.getByTestId("studio-reviewed")).toHaveAttribute("data-count", "1");
+  await expect.poll(() => captions.approved.has(assetId(0))).toBe(true);
+  await page.keyboard.press("a");
+  await expect(page.getByTestId("studio-reviewed")).toHaveAttribute("data-count", "0");
+
+  // Esc：先清选择，没有选择时清空查询。
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("studio-selection")).toBeHidden();
   await page.keyboard.press("Escape");

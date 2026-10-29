@@ -248,9 +248,13 @@
     }
   }
 
-  /** A：对象全都校对过就撤回，否则全部记为已校对。 */
+  /**
+   * A：选中的图（没选时是焦点那一格）全都校对过就撤回，否则全部记为已校对。
+   * 不像右栏那样落到全部结果上：误按一下不该改动整个查询结果。
+   */
   function toggleApproval() {
-    void decide(scopeIds, scopeApproved < scopeIds.length);
+    const ids = selection.targets(order, focus);
+    if (ids.length) void decide(ids, !ids.every((assetId) => approved.has(assetId)));
   }
 
   // ---- 批量操作 ----
@@ -382,7 +386,7 @@
       keys: "a",
       label: m.studio_key_approve,
       group,
-      when: () => !triage && scopeIds.length > 0,
+      when: () => !triage && (selection.size > 0 || focus >= 0),
       run: toggleApproval,
     },
     {
