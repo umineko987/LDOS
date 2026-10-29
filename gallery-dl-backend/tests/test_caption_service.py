@@ -31,6 +31,8 @@ class CaptionTestBase(DatasetTestBase):
         self.ids = {
             name: gallery_asset_id(self.source_id, f"set/{name}.png") for name in ("a", "b", "c")
         }
+        # 挂根会排队补哈希，进度事件由哈希线程异步发出；等它跑完再开始数事件。
+        self.assertTrue(self.service.hashing.wait_idle(10))
         self._seen = 0
         self.events()
 

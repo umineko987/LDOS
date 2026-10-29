@@ -45,6 +45,11 @@ class GalleryHashingService:
         self._stopping = False
         self._thread: threading.Thread | None = None
         self._hashed_total = 0
+        self._listeners: list[Callable[[str, HashOutcome], None]] = []
+
+    def add_listener(self, listener: Callable[[str, HashOutcome], None]) -> None:
+        """每处理完一张（不论结果）在工作线程里调用 listener(asset_id, outcome)。"""
+        self._listeners.append(listener)
 
     # ---- 队列 ----
 
@@ -119,6 +124,12 @@ class GalleryHashingService:
             except Exception:
                 logger.exception("gallery hashing failed; asset_id=%s", asset_id)
                 outcome = "unavailable"
+            # 监听者在出队计数之前调用，wait_idle 返回时它们都已执行完。
+            for listener in self._listeners:
+                try:
+                    listener(asset_id, outcome)
+                except Exception:
+                    logger.exception("gallery hashing listener failed; asset_id=%s", asset_id)
             with self._lock:
                 self._in_flight -= 1
                 if outcome == "hashed":

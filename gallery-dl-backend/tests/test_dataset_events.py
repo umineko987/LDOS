@@ -14,7 +14,7 @@ class DatasetUpdatedEventTest(DatasetTestBase):
         super().setUp()
         self._seen = 0
 
-    def updates(self) -> list[tuple[str, str]]:
+    def all_updates(self) -> list[tuple[str, str]]:
         events, _ = self.container.events.events_after(self._seen)
         if events:
             self._seen = events[-1].seq
@@ -23,6 +23,27 @@ class DatasetUpdatedEventTest(DatasetTestBase):
             for event in events
             if event.kind == "dataset.updated"
         ]
+
+    def updates(self) -> list[tuple[str, str]]:
+        # 补哈希的进度由哈希线程异步发出，时机不定；单独在下面的用例里测。
+        return [update for update in self.all_updates() if update[1] != "hashing"]
+
+    def test_hashing_pass_publishes_coarse_progress_and_completion(self) -> None:
+        source_id, _ = self.import_library({f"{index}.png": png_bytes() for index in range(8)})
+        dataset_id = self.new_dataset()
+        self.all_updates()
+        self.service.attach_source(dataset_id, source_id)
+        self.assertTrue(self.service.hashing.wait_idle(10))
+        updates = self.all_updates()
+        self.assertIn((dataset_id, "roots"), updates)
+        # 8 张图分 4 档：2、4、6 张时各一次，第 8 张（这一轮结束）一次。
+        self.assertEqual(updates.count((dataset_id, "hashing")), 4)
+        self.assertEqual(self.service.hashing_status(dataset_id)["hashed_count"], 8)
+
+        # 没有缺哈希的图就没有新一轮，也不发事件。
+        self.service.enqueue_hashing(dataset_id)
+        self.assertTrue(self.service.hashing.wait_idle(10))
+        self.assertEqual(self.all_updates(), [])
 
     def test_mutations_publish_dataset_updated(self) -> None:
         source_id, _ = self.import_library({"a/1.png": png_bytes(), "a/2.png": png_bytes("#000")})

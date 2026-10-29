@@ -14,7 +14,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import threading
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -42,6 +44,15 @@ logger = logging.getLogger(__name__)
 
 _TERMINAL_BATCH_STATUSES = frozenset({"succeeded", "completed_with_errors", "cancelled"})
 THUMBNAIL_SIZE = 256
+# 补哈希进度事件的档数：每完成 1/4 发一次，最后一档就是这一轮结束。
+_HASHING_STEPS = 4
+
+
+@dataclass
+class _HashingPass:
+    pending: set[str] = field(default_factory=set)
+    total: int = 0
+    step: int = 0
 
 
 class DatasetError(Exception):
@@ -114,6 +125,10 @@ class DatasetService:
         self._catalog = catalog
         self.hashing = hashing
         self._events = events
+        # 每个数据集这一轮补哈希还没处理完的图；处理完一档就发 dataset.updated。
+        self._hashing_guard = threading.Lock()
+        self._hashing_passes: dict[str, _HashingPass] = {}
+        hashing.add_listener(self._on_asset_hashed)
 
     @classmethod
     def for_container(cls, container: Any) -> "DatasetService":
@@ -555,8 +570,33 @@ class DatasetService:
             and not member["content_sha256"]
             and (source_id is None or member["source_id"] == source_id)
         ]
+        if missing:
+            with self._hashing_guard:
+                current = self._hashing_passes.setdefault(dataset_id, _HashingPass())
+                added = set(missing) - current.pending
+                current.pending |= added
+                current.total += len(added)
         self.hashing.enqueue(missing)
         return self._hashing_status(members)
+
+    def _on_asset_hashed(self, asset_id: str, _outcome: str) -> None:
+        """哈希线程回调：数据集这一轮每完成一档（1/4）发一次 `dataset.updated` reason=hashing。"""
+        updated: list[str] = []
+        with self._hashing_guard:
+            for dataset_id, current in list(self._hashing_passes.items()):
+                if asset_id not in current.pending:
+                    continue
+                current.pending.discard(asset_id)
+                if not current.pending:
+                    del self._hashing_passes[dataset_id]
+                    updated.append(dataset_id)
+                    continue
+                step = (current.total - len(current.pending)) * _HASHING_STEPS // current.total
+                if step > current.step:
+                    current.step = step
+                    updated.append(dataset_id)
+        for dataset_id in updated:
+            self.publish_updated(dataset_id, "hashing")
 
     def hashing_status(self, dataset_id: str) -> dict[str, int]:
         self._require(dataset_id)
