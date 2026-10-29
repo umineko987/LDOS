@@ -3,7 +3,9 @@
 
 import type { Page, Request, Route } from "@playwright/test";
 
-import type { paths } from "../../src/lib/api/schema";
+import type { components, paths } from "../../src/lib/api/schema";
+
+type Schemas = components["schemas"];
 
 type Method = "get" | "post" | "put" | "patch" | "delete";
 
@@ -73,13 +75,13 @@ export function errorEnvelope(code: string, message: string, details?: unknown):
   return { error: { code, message, details } };
 }
 
-export const HEALTHY = {
+export const HEALTHY: Schemas["HealthResponse"] = {
   ok: true,
   components: { process: { status: "ok" }, database: { status: "ok" } },
   time: 1_760_000_000,
 };
 
-export const READY = {
+export const READY: Schemas["ReadinessResponse"] = {
   ready: true,
   time: 1_760_000_000,
   components: {
@@ -90,10 +92,12 @@ export const READY = {
   },
 };
 
-export const DIAGNOSTICS_CONFIG = {
+export const DIAGNOSTICS_CONFIG: Schemas["DiagnosticsConfigResponse"] = {
   response_profile: "diagnostics",
+  secrets_exposed: false,
   server: { loopback_only: true, cors_enabled: false, private_targets_enabled: false },
   proxy: { enabled: true, auto_start: false, transport_core_enabled: true },
+  gallery: { managed_auth_cache: true },
   scheduler: { max_concurrent_tasks: 4 },
   dedup: { enabled: true, configured_device: "cuda", sscd_enabled: true, dino_enabled: false },
 };

@@ -1,5 +1,8 @@
+import type { components } from "../src/lib/api/schema";
 import { errorEnvelope, mockApi, READY } from "./fixtures/api";
 import { expect, test } from "./fixtures/test";
+
+type ReadinessResponse = components["schemas"]["ReadinessResponse"];
 
 test("诊断页按领域列出 /readyz 组件，并显示运行配置", async ({ page }) => {
   await page.goto("/#/settings/diagnostics");
@@ -34,7 +37,7 @@ test("未就绪时 503 的正文照常显示；刷新按钮重新请求", async 
         ready: false,
         time: READY.time,
         components: { database: { status: "error", required: true, summary: "SQLite 不可访问" } },
-      },
+      } satisfies ReadinessResponse,
     };
   });
   await page.goto("/#/settings/diagnostics");
