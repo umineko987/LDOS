@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -110,6 +111,11 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("POST", "/api/v1/datasets/{dataset_id}/atlas/remove"): ("remove_dataset_atlas_assets_api_v1_datasets__dataset_id__atlas_remove_post", ("200", "422")),
     ("POST", "/api/v1/datasets/{dataset_id}/atlas/restore"): ("restore_dataset_atlas_assets_api_v1_datasets__dataset_id__atlas_restore_post", ("200", "422")),
     ("GET", "/api/v1/datasets/{dataset_id}/atlas/sprites/{index}"): ("get_dataset_atlas_sprite_api_v1_datasets__dataset_id__atlas_sprites__index__get", ("200", "304", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/captions"): ("list_dataset_captions_api_v1_datasets__dataset_id__captions_get", ("200", "304", "422")),
+    ("PUT", "/api/v1/datasets/{dataset_id}/captions/{asset_id}"): ("edit_dataset_caption_api_v1_datasets__dataset_id__captions__asset_id__put", ("200", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/captions/ops"): ("run_dataset_caption_ops_api_v1_datasets__dataset_id__captions_ops_post", ("200", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/caption-batches"): ("list_dataset_caption_batches_api_v1_datasets__dataset_id__caption_batches_get", ("200", "422")),
+    ("POST", "/api/v1/caption-batches/{batch_id}/undo"): ("undo_caption_batch_api_v1_caption_batches__batch_id__undo_post", ("200", "422")),
     ("POST", "/api/v1/tasks"):("create_task_api_v1_tasks_post", ("200", "422")),
     ("GET", "/api/v1/tasks"): ("list_tasks_api_v1_tasks_get", ("200", "422")),
     ("GET", "/api/v1/tasks/{task_id}"): ("get_task_api_v1_tasks__task_id__get", ("200", "422")),
@@ -262,6 +268,7 @@ class AppRoutingContractTests(unittest.TestCase):
             "gallery_review": "gdl_backend.api_routes.gallery_review",
             "datasets": "gdl_backend.api_routes.datasets",
             "atlas": "gdl_backend.api_routes.atlas",
+            "captions": "gdl_backend.api_routes.captions",
             "policies":"gdl_backend.api_routes.policies",
             "proxy": "gdl_backend.api_routes.proxy",
             "scheduler": "gdl_backend.api_routes.scheduler",
@@ -292,6 +299,10 @@ class AppRoutingContractTests(unittest.TestCase):
                 domain = "gallery_review"
             elif path.startswith("/api/v1/datasets/{dataset_id}/atlas"):
                 domain = "atlas"
+            elif path.startswith("/api/v1/caption-batches") or re.match(
+                r"^/api/v1/datasets/\{dataset_id\}/(captions|caption-batches|tagger/|stages/tag/)", path
+            ):
+                domain = "captions"
             elif path.startswith("/api/v1/datasets"):
                 domain = "datasets"
             elif "/review" in path:

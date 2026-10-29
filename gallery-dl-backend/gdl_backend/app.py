@@ -38,6 +38,7 @@ from .api_routes import (
 # Keep these names importable from gdl_backend.app while their implementations
 # live outside the composition root.
 from .api_routes.atlas import create_atlas_router
+from .api_routes.captions import create_captions_router
 from .api_routes.datasets import create_datasets_router
 from .api_routes.models import create_models_router
 from .api_routes.settings import create_settings_router
@@ -54,6 +55,7 @@ from .atlas_service import AtlasService
 from .auth import AuthManager
 from .config import AppSettings
 from .crawl import CrawlPlanner
+from .caption_service import CaptionService
 from .database import Database
 from .dataset_service import DatasetService
 from .discovery import DiscoveryService
@@ -194,6 +196,8 @@ class ServiceContainer:
         # 数据集：扫描后补成员哈希、爬取批次结束后自动挂根（见 dataset_service）。
         self.datasets = DatasetService.for_container(self)
         self.atlas = AtlasService.for_container(self)
+        # caption 读写、批量操作和撤销（v16），写入都经过图库注解路径。
+        self.captions = CaptionService.for_container(self)
         self._health_task: asyncio.Task | None = None
         self._started = False
         self._stopping = False
@@ -485,9 +489,10 @@ def create_app(
                 "Accept",
                 "Content-Type",
                 "Idempotency-Key",
+                "If-None-Match",
                 "X-Request-ID",
             ],
-            expose_headers=["X-Request-ID"],
+            expose_headers=["ETag", "X-Request-ID"],
         )
 
     @app.middleware("http")
@@ -649,6 +654,7 @@ def create_app(
     app.include_router(create_atlas_router())
     app.include_router(create_settings_router())
     app.include_router(create_models_router())
+    app.include_router(create_captions_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
     app.include_router(create_jobs_router())

@@ -789,6 +789,758 @@
         "title": "BrowserExecutableUpdate",
         "type": "object"
       },
+      "CaptionAddOp": {
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "const": "add",
+            "title": "Op",
+            "type": "string"
+          },
+          "position": {
+            "default": "back",
+            "enum": [
+              "front",
+              "back"
+            ],
+            "title": "Position",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "op",
+          "tags"
+        ],
+        "title": "CaptionAddOp",
+        "type": "object"
+      },
+      "CaptionBatchListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CaptionBatchSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CaptionBatchListResponse",
+        "type": "object"
+      },
+      "CaptionBatchResult": {
+        "description": "批量写入（或 dry-run）的结果；batch_id 为 null 表示没有写任何文件。",
+        "properties": {
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/CaptionReportItem"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/CaptionReportItem"
+            },
+            "title": "Failed",
+            "type": "array"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/CaptionDiffSample"
+            },
+            "title": "Samples",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/CaptionReportItem"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/CaptionWriteStats"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "dry_run",
+          "batch_id",
+          "stats",
+          "samples",
+          "skipped",
+          "conflicts",
+          "failed"
+        ],
+        "title": "CaptionBatchResult",
+        "type": "object"
+      },
+      "CaptionBatchSummary": {
+        "properties": {
+          "batch_id": {
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "can_undo": {
+            "title": "Can Undo",
+            "type": "boolean"
+          },
+          "changed_count": {
+            "title": "Changed Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "from_tagger",
+              "ops",
+              "edit"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          },
+          "stats": {
+            "additionalProperties": true,
+            "title": "Stats",
+            "type": "object"
+          },
+          "undo_stats": {
+            "additionalProperties": true,
+            "title": "Undo Stats",
+            "type": "object"
+          },
+          "undone_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undone At"
+          }
+        },
+        "required": [
+          "batch_id",
+          "dataset_id",
+          "kind",
+          "params",
+          "stats",
+          "changed_count",
+          "created_at",
+          "undone_at",
+          "undo_stats",
+          "can_undo"
+        ],
+        "title": "CaptionBatchSummary",
+        "type": "object"
+      },
+      "CaptionDiffSample": {
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "after": {
+            "items": {
+              "type": "string"
+            },
+            "title": "After",
+            "type": "array"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "before": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Before",
+            "type": "array"
+          },
+          "change": {
+            "enum": [
+              "changed",
+              "new"
+            ],
+            "title": "Change",
+            "type": "string"
+          },
+          "removed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asset_id",
+          "change",
+          "before",
+          "after",
+          "added",
+          "removed"
+        ],
+        "title": "CaptionDiffSample",
+        "type": "object"
+      },
+      "CaptionEditRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Expected Version",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 1000000,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "expected_version"
+        ],
+        "title": "CaptionEditRequest",
+        "type": "object"
+      },
+      "CaptionEditResponse": {
+        "properties": {
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "caption": {
+            "$ref": "#/components/schemas/CaptionEntry"
+          }
+        },
+        "required": [
+          "batch_id",
+          "caption"
+        ],
+        "title": "CaptionEditResponse",
+        "type": "object"
+      },
+      "CaptionEntry": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "normal",
+              "blank",
+              "missing",
+              "invalid_encoding",
+              "io_error",
+              "pair_conflict",
+              "unavailable"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "state",
+          "text",
+          "tags",
+          "version"
+        ],
+        "title": "CaptionEntry",
+        "type": "object"
+      },
+      "CaptionItem": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "normal",
+              "blank",
+              "missing",
+              "invalid_encoding",
+              "io_error",
+              "pair_conflict",
+              "unavailable"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "name",
+          "state",
+          "text",
+          "tags",
+          "version"
+        ],
+        "title": "CaptionItem",
+        "type": "object"
+      },
+      "CaptionListResponse": {
+        "properties": {
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "etag": {
+            "title": "Etag",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CaptionItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "trigger_word": {
+            "title": "Trigger Word",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "trigger_word",
+          "etag",
+          "items"
+        ],
+        "title": "CaptionListResponse",
+        "type": "object"
+      },
+      "CaptionMergeOp": {
+        "additionalProperties": false,
+        "properties": {
+          "into": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Into",
+            "type": "string"
+          },
+          "op": {
+            "const": "merge",
+            "title": "Op",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "op",
+          "tags",
+          "into"
+        ],
+        "title": "CaptionMergeOp",
+        "type": "object"
+      },
+      "CaptionOpsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_ids": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50000,
+            "minItems": 1,
+            "title": "Asset Ids",
+            "type": "array"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "expected_versions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Versions"
+          },
+          "ops": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "add": "#/components/schemas/CaptionAddOp",
+                  "merge": "#/components/schemas/CaptionMergeOp",
+                  "pin": "#/components/schemas/CaptionPinOp",
+                  "remove": "#/components/schemas/CaptionRemoveOp",
+                  "replace": "#/components/schemas/CaptionReplaceOp"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CaptionAddOp"
+                },
+                {
+                  "$ref": "#/components/schemas/CaptionRemoveOp"
+                },
+                {
+                  "$ref": "#/components/schemas/CaptionReplaceOp"
+                },
+                {
+                  "$ref": "#/components/schemas/CaptionMergeOp"
+                },
+                {
+                  "$ref": "#/components/schemas/CaptionPinOp"
+                }
+              ]
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Ops",
+            "type": "array"
+          },
+          "sample_limit": {
+            "default": 20,
+            "maximum": 200.0,
+            "minimum": 0.0,
+            "title": "Sample Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asset_ids",
+          "ops"
+        ],
+        "title": "CaptionOpsRequest",
+        "type": "object"
+      },
+      "CaptionPinOp": {
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "const": "pin",
+            "title": "Op",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "op",
+          "tags"
+        ],
+        "title": "CaptionPinOp",
+        "type": "object"
+      },
+      "CaptionRemoveOp": {
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "const": "remove",
+            "title": "Op",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "op",
+          "tags"
+        ],
+        "title": "CaptionRemoveOp",
+        "type": "object"
+      },
+      "CaptionReplaceOp": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "From",
+            "type": "string"
+          },
+          "op": {
+            "const": "replace",
+            "title": "Op",
+            "type": "string"
+          },
+          "to": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "from",
+          "to"
+        ],
+        "title": "CaptionReplaceOp",
+        "type": "object"
+      },
+      "CaptionReportItem": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "reason"
+        ],
+        "title": "CaptionReportItem",
+        "type": "object"
+      },
+      "CaptionUndoResponse": {
+        "properties": {
+          "batch_id": {
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/CaptionReportItem"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/CaptionReportItem"
+            },
+            "title": "Failed",
+            "type": "array"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/CaptionUndoStats"
+          }
+        },
+        "required": [
+          "batch_id",
+          "dataset_id",
+          "stats",
+          "conflicts",
+          "failed"
+        ],
+        "title": "CaptionUndoResponse",
+        "type": "object"
+      },
+      "CaptionUndoStats": {
+        "properties": {
+          "conflicts": {
+            "title": "Conflicts",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "restored": {
+            "title": "Restored",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "restored",
+          "conflicts",
+          "failed"
+        ],
+        "title": "CaptionUndoStats",
+        "type": "object"
+      },
+      "CaptionWriteStats": {
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "integer"
+          },
+          "conflicts": {
+            "title": "Conflicts",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "new": {
+            "title": "New",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "written": {
+            "title": "Written",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "changed",
+          "new",
+          "unchanged",
+          "skipped",
+          "conflicts",
+          "written",
+          "failed"
+        ],
+        "title": "CaptionWriteStats",
+        "type": "object"
+      },
       "CrawlAddress": {
         "properties": {
           "address_type": {
@@ -11860,6 +12612,45 @@
         "summary": "Auth Browser Login Session"
       }
     },
+    "/api/v1/caption-batches/{batch_id}/undo": {
+      "post": {
+        "operationId": "undo_caption_batch_api_v1_caption_batches__batch_id__undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptionUndoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Undo Caption Batch"
+      }
+    },
     "/api/v1/config": {
       "get": {
         "operationId": "public_config_api_v1_config_get",
@@ -13254,6 +14045,222 @@
           }
         },
         "summary": "Get Dataset Atlas Sprite"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/caption-batches": {
+      "get": {
+        "operationId": "list_dataset_caption_batches_api_v1_datasets__dataset_id__caption_batches_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptionBatchListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Dataset Caption Batches"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/captions": {
+      "get": {
+        "operationId": "list_dataset_captions_api_v1_datasets__dataset_id__captions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "If-None-Match 与当前 ETag 相同，没有响应体"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Dataset Captions"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/captions/ops": {
+      "post": {
+        "operationId": "run_dataset_caption_ops_api_v1_datasets__dataset_id__captions_ops_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptionOpsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptionBatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Dataset Caption Ops"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/captions/{asset_id}": {
+      "put": {
+        "operationId": "edit_dataset_caption_api_v1_datasets__dataset_id__captions__asset_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptionEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptionEditResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Dataset Caption"
       }
     },
     "/api/v1/datasets/{dataset_id}/crawls": {

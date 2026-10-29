@@ -180,6 +180,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/caption-batches/{batch_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo Caption Batch */
+        post: operations["undo_caption_batch_api_v1_caption_batches__batch_id__undo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/config": {
         parameters: {
             query?: never;
@@ -534,6 +551,74 @@ export interface paths {
         /** Get Dataset Atlas Sprite */
         get: operations["get_dataset_atlas_sprite_api_v1_datasets__dataset_id__atlas_sprites__index__get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/caption-batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Dataset Caption Batches */
+        get: operations["list_dataset_caption_batches_api_v1_datasets__dataset_id__caption_batches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/captions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Dataset Captions */
+        get: operations["list_dataset_captions_api_v1_datasets__dataset_id__captions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/captions/ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Dataset Caption Ops */
+        post: operations["run_dataset_caption_ops_api_v1_datasets__dataset_id__captions_ops_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/captions/{asset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Edit Dataset Caption */
+        put: operations["edit_dataset_caption_api_v1_datasets__dataset_id__captions__asset_id__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2152,6 +2237,270 @@ export interface components {
         BrowserExecutableUpdate: {
             /** Path */
             path: string;
+        };
+        /** CaptionAddOp */
+        CaptionAddOp: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "add";
+            /**
+             * Position
+             * @default back
+             * @enum {string}
+             */
+            position: "front" | "back";
+            /** Tags */
+            tags: string[];
+        };
+        /** CaptionBatchListResponse */
+        CaptionBatchListResponse: {
+            /** Items */
+            items: components["schemas"]["CaptionBatchSummary"][];
+        };
+        /**
+         * CaptionBatchResult
+         * @description 批量写入（或 dry-run）的结果；batch_id 为 null 表示没有写任何文件。
+         */
+        CaptionBatchResult: {
+            /** Batch Id */
+            batch_id: string | null;
+            /** Conflicts */
+            conflicts: components["schemas"]["CaptionReportItem"][];
+            /** Dataset Id */
+            dataset_id: string;
+            /** Dry Run */
+            dry_run: boolean;
+            /** Failed */
+            failed: components["schemas"]["CaptionReportItem"][];
+            /** Samples */
+            samples: components["schemas"]["CaptionDiffSample"][];
+            /** Skipped */
+            skipped: components["schemas"]["CaptionReportItem"][];
+            stats: components["schemas"]["CaptionWriteStats"];
+        };
+        /** CaptionBatchSummary */
+        CaptionBatchSummary: {
+            /** Batch Id */
+            batch_id: string;
+            /** Can Undo */
+            can_undo: boolean;
+            /** Changed Count */
+            changed_count: number;
+            /** Created At */
+            created_at: number;
+            /** Dataset Id */
+            dataset_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "from_tagger" | "ops" | "edit";
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Stats */
+            stats: {
+                [key: string]: unknown;
+            };
+            /** Undo Stats */
+            undo_stats: {
+                [key: string]: unknown;
+            };
+            /** Undone At */
+            undone_at: number | null;
+        };
+        /** CaptionDiffSample */
+        CaptionDiffSample: {
+            /** Added */
+            added: string[];
+            /** After */
+            after: string[];
+            /** Asset Id */
+            asset_id: string;
+            /** Before */
+            before: string[];
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "changed" | "new";
+            /** Removed */
+            removed: string[];
+        };
+        /** CaptionEditRequest */
+        CaptionEditRequest: {
+            /** Expected Version */
+            expected_version: string;
+            /** Text */
+            text: string;
+        };
+        /** CaptionEditResponse */
+        CaptionEditResponse: {
+            /** Batch Id */
+            batch_id: string | null;
+            caption: components["schemas"]["CaptionEntry"];
+        };
+        /** CaptionEntry */
+        CaptionEntry: {
+            /** Asset Id */
+            asset_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "normal" | "blank" | "missing" | "invalid_encoding" | "io_error" | "pair_conflict" | "unavailable";
+            /** Tags */
+            tags: string[];
+            /** Text */
+            text: string;
+            /** Version */
+            version: string;
+        };
+        /** CaptionItem */
+        CaptionItem: {
+            /** Asset Id */
+            asset_id: string;
+            /** Name */
+            name: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "normal" | "blank" | "missing" | "invalid_encoding" | "io_error" | "pair_conflict" | "unavailable";
+            /** Tags */
+            tags: string[];
+            /** Text */
+            text: string;
+            /** Version */
+            version: string;
+        };
+        /** CaptionListResponse */
+        CaptionListResponse: {
+            /** Dataset Id */
+            dataset_id: string;
+            /** Etag */
+            etag: string;
+            /** Items */
+            items: components["schemas"]["CaptionItem"][];
+            /** Trigger Word */
+            trigger_word: string;
+        };
+        /** CaptionMergeOp */
+        CaptionMergeOp: {
+            /** Into */
+            into: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "merge";
+            /** Tags */
+            tags: string[];
+        };
+        /** CaptionOpsRequest */
+        CaptionOpsRequest: {
+            /** Asset Ids */
+            asset_ids: string[];
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Expected Versions */
+            expected_versions?: {
+                [key: string]: string;
+            } | null;
+            /** Ops */
+            ops: (components["schemas"]["CaptionAddOp"] | components["schemas"]["CaptionRemoveOp"] | components["schemas"]["CaptionReplaceOp"] | components["schemas"]["CaptionMergeOp"] | components["schemas"]["CaptionPinOp"])[];
+            /**
+             * Sample Limit
+             * @default 20
+             */
+            sample_limit: number;
+        };
+        /** CaptionPinOp */
+        CaptionPinOp: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "pin";
+            /** Tags */
+            tags: string[];
+        };
+        /** CaptionRemoveOp */
+        CaptionRemoveOp: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "remove";
+            /** Tags */
+            tags: string[];
+        };
+        /** CaptionReplaceOp */
+        CaptionReplaceOp: {
+            /** From */
+            from: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "replace";
+            /** To */
+            to: string;
+        };
+        /** CaptionReportItem */
+        CaptionReportItem: {
+            /** Asset Id */
+            asset_id: string;
+            /** Reason */
+            reason: string;
+        };
+        /** CaptionUndoResponse */
+        CaptionUndoResponse: {
+            /** Batch Id */
+            batch_id: string;
+            /** Conflicts */
+            conflicts: components["schemas"]["CaptionReportItem"][];
+            /** Dataset Id */
+            dataset_id: string;
+            /** Failed */
+            failed: components["schemas"]["CaptionReportItem"][];
+            stats: components["schemas"]["CaptionUndoStats"];
+        };
+        /** CaptionUndoStats */
+        CaptionUndoStats: {
+            /** Conflicts */
+            conflicts: number;
+            /** Failed */
+            failed: number;
+            /** Restored */
+            restored: number;
+            /** Total */
+            total: number;
+        };
+        /** CaptionWriteStats */
+        CaptionWriteStats: {
+            /** Changed */
+            changed: number;
+            /** Conflicts */
+            conflicts: number;
+            /** Failed */
+            failed: number;
+            /** New */
+            new: number;
+            /** Skipped */
+            skipped: number;
+            /** Total */
+            total: number;
+            /** Unchanged */
+            unchanged: number;
+            /** Written */
+            written: number;
         };
         /** CrawlAddress */
         CrawlAddress: {
@@ -5671,6 +6020,37 @@ export interface operations {
             };
         };
     };
+    undo_caption_batch_api_v1_caption_batches__batch_id__undo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptionUndoResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     public_config_api_v1_config_get: {
         parameters: {
             query?: {
@@ -6510,6 +6890,150 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_dataset_caption_batches_api_v1_datasets__dataset_id__caption_batches_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptionBatchListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_dataset_captions_api_v1_datasets__dataset_id__captions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-none-match"?: string | null;
+            };
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptionListResponse"];
+                };
+            };
+            /** @description If-None-Match 与当前 ETag 相同，没有响应体 */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_dataset_caption_ops_api_v1_datasets__dataset_id__captions_ops_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptionOpsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptionBatchResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_dataset_caption_api_v1_datasets__dataset_id__captions__asset_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptionEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptionEditResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

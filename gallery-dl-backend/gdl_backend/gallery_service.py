@@ -577,7 +577,7 @@ class GalleryCatalogService:
                     return _read_annotation(safe_root, asset)
             except UnsafeSourcePathError as error:
                 raise GalleryAnnotationError(
-                    "unsafe_source_path", _annotation_relative_path(asset)
+                    "unsafe_source_path", annotation_relative_path(asset)
                 ) from error
 
     def read_annotations(self, asset_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
@@ -1094,13 +1094,13 @@ def _txt_relative_for_image(image_relative_path: str) -> str:
     return f"{directory}{txt_name_for_image(parts[-1])}"
 
 
-def _annotation_relative_path(asset: Mapping[str, Any]) -> str:
+def annotation_relative_path(asset: Mapping[str, Any]) -> str:
     return str(asset["txt_relative_path"] or _txt_relative_for_image(asset["relative_path"]))
 
 
 def _read_annotation(safe_root: SafeSourceRoot, asset: Mapping[str, Any]) -> dict[str, Any]:
     """在已打开的来源根下读一张图的 TXT；调用方持有来源锁。"""
-    txt_relative = _annotation_relative_path(asset)
+    txt_relative = annotation_relative_path(asset)
     try:
         payload, disk_version = safe_root.read_with_disk_version(
             txt_relative,
