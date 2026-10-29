@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from ._database_repository import (
@@ -1013,6 +1013,37 @@ class CrawlRepository:
                     (batch_id,),
                 ).fetchone()[0]
             )
+
+    def crawl_batch_task_counts(self, batch_ids: Sequence[str]) -> dict[str, dict[str, int]]:
+        """按任务当前状态现算的批次计数（一次分组查询）；没有任务的批次不在结果里。
+
+        批次行上的计数只在地址收尾时刷新，运行中会落后；列表要实时进度时用这里。
+        """
+        unique = list(dict.fromkeys(str(batch_id) for batch_id in batch_ids))
+        if not unique:
+            return {}
+        with self._read() as conn:
+            rows = conn.execute(
+                """
+                SELECT ca.batch_id AS batch_id, COUNT(*) AS total,
+                    SUM(CASE WHEN t.status='succeeded' THEN 1 ELSE 0 END) AS succeeded,
+                    SUM(CASE WHEN t.status='failed' THEN 1 ELSE 0 END) AS failed
+                FROM crawl_address_tasks cat
+                JOIN crawl_addresses ca ON ca.id=cat.address_id
+                JOIN tasks t ON t.id=cat.task_id
+                WHERE ca.batch_id IN (SELECT value FROM json_each(?))
+                GROUP BY ca.batch_id
+                """,
+                (json.dumps(unique),),
+            ).fetchall()
+        return {
+            str(row["batch_id"]): {
+                "task_count": int(row["total"] or 0),
+                "succeeded_task_count": int(row["succeeded"] or 0),
+                "failed_task_count": int(row["failed"] or 0),
+            }
+            for row in rows
+        }
 
     def crawl_address_task_count(self, address_id: str) -> int:
         with self._read() as conn:

@@ -127,11 +127,17 @@ def _list_desktop_crawls(
     return items[:limit]
 
 
-def _desktop_recent_crawl(batch: dict[str, Any]) -> dict[str, Any]:
+def _desktop_recent_crawl(
+    batch: dict[str, Any], counts: dict[str, int] | None = None
+) -> dict[str, Any]:
+    counts = counts or {}
     return {
         "id": str(batch.get("id") or "")[:200],
         "status": str(batch.get("status") or "")[:32],
         "created_at": batch.get("created_at"),
+        "task_count": counts.get("task_count", 0),
+        "succeeded_task_count": counts.get("succeeded_task_count", 0),
+        "failed_task_count": counts.get("failed_task_count", 0),
     }
 
 
@@ -435,7 +441,13 @@ def create_crawls_router() -> APIRouter:
             items = _list_desktop_crawls(
                 container.db, limit=limit, offset=offset
             )
-            items = [_desktop_recent_crawl(batch) for batch in items]
+            counts = container.db.crawl_batch_task_counts(
+                [str(batch.get("id") or "") for batch in items]
+            )
+            items = [
+                _desktop_recent_crawl(batch, counts.get(str(batch.get("id") or "")))
+                for batch in items
+            ]
         else:
             items = container.db.list_crawl_batches(limit=limit, offset=offset)
         return {

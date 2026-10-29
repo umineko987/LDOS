@@ -6,7 +6,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -703,6 +703,9 @@ class Database:
 
     def crawl_batch_task_count(self, batch_id: str) -> int:
         return self._crawl_repository.crawl_batch_task_count(batch_id)
+
+    def crawl_batch_task_counts(self, batch_ids: Sequence[str]) -> dict[str, dict[str, int]]:
+        return self._crawl_repository.crawl_batch_task_counts(batch_ids)
 
     def crawl_address_task_count(self, address_id: str) -> int:
         return self._crawl_repository.crawl_address_task_count(address_id)

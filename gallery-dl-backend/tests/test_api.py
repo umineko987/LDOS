@@ -2950,7 +2950,10 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn(private, detail.text)
         self.assertEqual(
             recent.json()["items"],
-            [{"id": batch_id, "status": "running", "created_at": 1.0}],
+            [{
+                "id": batch_id, "status": "running", "created_at": 1.0,
+                "task_count": 0, "succeeded_task_count": 0, "failed_task_count": 0,
+            }],
         )
         from gdl_backend.api_routes.crawls import _desktop_batch_crawl
         large_address = {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.encoders import jsonable_encoder
 from pydantic import TypeAdapter
@@ -115,7 +116,10 @@ class PassthroughRouteTest(unittest.TestCase):
             {"items": jsonable_encoder(self.db.list_crawl_batches(limit=50)), "limit": 50, "offset": 0},
         )
         recent = self.client.get("/api/v1/crawls", params={"view": "desktop"}).json()["items"]
-        self.assertEqual(set(recent[0]), {"id", "status", "created_at"})
+        self.assertEqual(
+            set(recent[0]),
+            {"id", "status", "created_at", "task_count", "succeeded_task_count", "failed_task_count"},
+        )
 
         cancelled = self.client.post("/api/v1/crawls/batch-1/cancel", params={"view": "desktop"})
         self.assertEqual(cancelled.status_code, 200, cancelled.text)
@@ -124,6 +128,45 @@ class PassthroughRouteTest(unittest.TestCase):
         )
         tasks = self.client.get("/api/v1/crawls/batch-1/tasks", params={"view": "tasks"})
         self.assertEqual(tasks.json(), {"items": [], "limit": 100, "offset": 0})
+
+    def test_desktop_crawl_list_counts_tasks_live_with_one_query(self) -> None:
+        self.db.create_crawl_batch(
+            {"id": "batch-empty", "output_dir": str(self.root / "empty"), "concurrency": 1, "max_tasks": 5},
+            [{
+                "id": "address-empty", "site": "danbooru", "source_order": 0, "address_order": 0,
+                "url": "https://danbooru.donmai.us/posts?tags=empty", "proxy_mode": "direct", "max_attempts": 1,
+            }],
+        )
+        self.assertTrue(self.db.begin_crawl_address_planning("address-1"))
+        for sequence, (task_id, status) in enumerate(
+            (("task-ok", "succeeded"), ("task-bad", "failed"), ("task-wait", None)), start=1
+        ):
+            self.db.create_task({
+                "id": task_id, "url": f"https://danbooru.donmai.us/posts/{sequence}", "site": "danbooru",
+                "subcategory": "post", "extractor": "DanbooruPostExtractor",
+                "output_dir": str(self.root / "out"), "proxy_mode": "direct", "max_attempts": 1,
+                "policy": {"max_concurrency": 1}, "extra_args": [],
+            })
+            self.db.link_crawl_task("address-1", task_id, sequence)
+            if status is not None:
+                self.db.complete_task(task_id, status)
+
+        calls = []
+        grouped = self.db.crawl_batch_task_counts
+
+        def counting(batch_ids):
+            calls.append(list(batch_ids))
+            return grouped(batch_ids)
+
+        with patch.object(self.db, "crawl_batch_task_counts", side_effect=counting):
+            response = self.client.get("/api/v1/crawls", params={"view": "desktop"})
+        self.assertEqual(response.status_code, 200, response.text)
+        items = {item["id"]: item for item in response.json()["items"]}
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(sorted(calls[0]), ["batch-1", "batch-empty"])
+        counts = ("task_count", "succeeded_task_count", "failed_task_count")
+        self.assertEqual([items["batch-1"][key] for key in counts], [3, 1, 1])
+        self.assertEqual([items["batch-empty"][key] for key in counts], [0, 0, 0])
 
     def test_task_and_search_site_routes_return_the_same_payload_as_before(self) -> None:
         self.assertEqual(self.client.get("/api/v1/tasks").json(), {"items": [], "limit": 50, "offset": 0})
