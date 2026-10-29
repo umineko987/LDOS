@@ -72,19 +72,12 @@ export interface InstallReply {
   readonly body: Schemas["ModelInstallResponse"] | ErrorEnvelope;
 }
 
-/**
- * POST /api/v1/models/install 成功时是 202，api.ts 的 mockApi 只按 200/201 推断正文类型，
- * 所以这里单独模拟，正文仍按 ModelInstallResponse 检查。
- */
+/** POST /api/v1/models/install 成功时回 202；`reply.status` 可以改成错误码。 */
 export async function mockInstall(page: Page, handler: (body: Schemas["ModelInstallBody"], request: Request) => InstallReply): Promise<void> {
-  await page.route(
-    (url) => url.pathname === "/api/v1/models/install",
-    async (route, request) => {
-      if (request.method() !== "POST") return route.fallback();
-      const reply = handler(request.postDataJSON() as Schemas["ModelInstallBody"], request);
-      await route.fulfill({ status: reply.status ?? 202, contentType: "application/json", body: JSON.stringify(reply.body) });
-    },
-  );
+  await mockApi(page, "post", "/api/v1/models/install", (request) => {
+    const reply = handler(request.postDataJSON() as Schemas["ModelInstallBody"], request);
+    return { status: reply.status ?? 202, body: reply.body };
+  });
 }
 
 /** 模型页的两个只读接口；`models` 每次请求时调用，测试可以随时改它返回的表。 */
@@ -305,13 +298,7 @@ export function recorded(request: Request): RecordedRequest {
   return { method: request.method(), path: url.pathname, view: url.searchParams.get("view"), body: text ? JSON.parse(text) : undefined };
 }
 
-/** POST /auth/{site}/login/start 成功时是 202（mockApi 不推断 202 的正文），单独模拟。 */
+/** POST /auth/{site}/login/start 成功时回 202。 */
 export async function mockLoginStart(page: Page, handler: (request: Request) => Schemas["VaultBrowserResult"]): Promise<void> {
-  await page.route(
-    (url) => /^\/api\/v1\/auth\/[^/]+\/login\/start$/.test(url.pathname),
-    async (route, request) => {
-      if (request.method() !== "POST") return route.fallback();
-      await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify(handler(request)) });
-    },
-  );
+  await mockApi(page, "post", "/api/v1/auth/{site}/login/start", (request) => ({ status: 202, body: handler(request) }));
 }

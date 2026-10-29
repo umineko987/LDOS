@@ -15,7 +15,10 @@ type MethodsOf<P extends keyof paths> = {
 
 type JsonOf<R> = R extends { content: { "application/json": infer Body } } ? Body : never;
 
-/** 成功响应（200/201）的 JSON 正文类型；schema 里没有模型的接口是 unknown。 */
+/**
+ * 成功响应（200/201/202，取第一个声明的）的 JSON 正文类型；schema 里没有模型的接口是 unknown。
+ * 运行时默认回 200，只声明了 201/202 的接口用处理函数返回 `{ status, body }`。
+ */
 export type ResponseBody<P extends keyof paths, M extends MethodsOf<P>> = paths[P][M] extends {
   responses: infer Responses;
 }
@@ -23,7 +26,9 @@ export type ResponseBody<P extends keyof paths, M extends MethodsOf<P>> = paths[
     ? JsonOf<Ok>
     : Responses extends { 201: infer Created }
       ? JsonOf<Created>
-      : never
+      : Responses extends { 202: infer Accepted }
+        ? JsonOf<Accepted>
+        : never
   : never;
 
 export interface MockReply<Body> {

@@ -5,6 +5,7 @@ import { deflateSync } from "node:zlib";
 import type { Page, Request } from "@playwright/test";
 
 import type { components } from "../../src/lib/api/schema";
+import { mockApi } from "./api";
 
 type AtlasResponse = components["schemas"]["AtlasResponse"];
 type AtlasItem = components["schemas"]["AtlasItem"];
@@ -201,17 +202,9 @@ export async function mockAtlasImages(page: Page): Promise<void> {
   );
 }
 
-/**
- * POST atlas/run 成功时是 202，api.ts 的 mockApi 只按 200/201 推正文类型，所以这里单独模拟。
- */
+/** POST atlas/run 成功时回 202 和运行状态。 */
 export async function mockAtlasRun(page: Page, reply: (request: Request) => AtlasStateResponse): Promise<void> {
-  await page.route(
-    (url) => /^\/api\/v1\/datasets\/[^/]+\/atlas\/run$/.test(url.pathname),
-    (route, request) =>
-      request.method() === "POST"
-        ? route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify(reply(request)) })
-        : route.fallback(),
-  );
+  await mockApi(page, "post", "/api/v1/datasets/{dataset_id}/atlas/run", (request) => ({ status: 202, body: reply(request) }));
 }
 
 /** 页面脚本运行前指定渲染器（和设置里的“渲染器”同一个本机存储键）。 */
