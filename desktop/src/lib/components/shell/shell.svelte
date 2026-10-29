@@ -6,6 +6,8 @@
   import type { Api } from "#lib/api/client.ts";
   import { setApi } from "#lib/api/context.ts";
   import { Toaster } from "#lib/components/ui/sonner/index.ts";
+  import { createEventBus } from "#lib/events/bus.ts";
+  import { setEvents } from "#lib/events/context.svelte.ts";
   import { useBindings, useEscape, useOverlay } from "#lib/keys/bindings.svelte.ts";
   import { parentPath } from "#lib/nav/routes.ts";
   import { m } from "#lib/paraglide/messages.js";
@@ -23,6 +25,7 @@
   // 启动门每次重连都会给出新的 Api，根布局用 {#key} 重建外壳，这里只需在初始化时取一次。
   // svelte-ignore state_referenced_locally
   setApi(api);
+  setEvents(createEventBus());
   const shell = setShell(new ShellState());
 
   function go(link: NavLink) {
