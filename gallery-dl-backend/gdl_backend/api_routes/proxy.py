@@ -31,6 +31,13 @@ from ..schemas import (
 from .body_limits import enforce_proxy_source_body_limit
 from .dependencies import get_service
 from .errors import ApiError
+from .network_models import (
+    ProxyLifecycleResponse,
+    ProxyProbeResponse,
+    ProxySourceChangeResponse,
+    ProxySourcesResponse,
+    ProxyStatusResponse,
+)
 from .validation import validate_network_target, validate_site_name
 
 
@@ -275,7 +282,7 @@ async def proxy_action(call: Callable[[], Any]) -> Any:
 def create_proxy_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
-    @router.get("/proxy/sources")
+    @router.get("/proxy/sources", response_model=ProxySourcesResponse, response_model_exclude_unset=True)
     async def proxy_sources(
         view: ProxyResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -283,7 +290,7 @@ def create_proxy_router() -> APIRouter:
         snapshot = await proxy_sources_response(container)
         return _desktop_proxy_sources(snapshot) if view == "desktop" else snapshot
 
-    @router.post("/proxy/sources/subscriptions")
+    @router.post("/proxy/sources/subscriptions", response_model=ProxySourceChangeResponse, response_model_exclude_unset=True)
     async def add_proxy_subscription(
         body: ProxySubscriptionUpdate,
         view: ProxyResponseView = Query("legacy"),
@@ -296,7 +303,7 @@ def create_proxy_router() -> APIRouter:
             view=view,
         )
 
-    @router.put("/proxy/sources/subscriptions/{source_id}")
+    @router.put("/proxy/sources/subscriptions/{source_id}", response_model=ProxySourceChangeResponse, response_model_exclude_unset=True)
     async def replace_proxy_subscription(
         source_id: str,
         body: ProxySubscriptionUpdate,
@@ -310,7 +317,7 @@ def create_proxy_router() -> APIRouter:
             view=view,
         )
 
-    @router.delete("/proxy/sources/subscriptions/{source_id}")
+    @router.delete("/proxy/sources/subscriptions/{source_id}", response_model=ProxySourceChangeResponse, response_model_exclude_unset=True)
     async def delete_proxy_subscription(
         source_id: str,
         view: ProxyResponseView = Query("legacy"),
@@ -322,7 +329,7 @@ def create_proxy_router() -> APIRouter:
             view=view,
         )
 
-    @router.put("/proxy/sources/node-file")
+    @router.put("/proxy/sources/node-file", response_model=ProxySourceChangeResponse, response_model_exclude_unset=True)
     async def set_proxy_node_file(
         body: ProxyNodeFileUpdate,
         view: ProxyResponseView = Query("legacy"),
@@ -335,7 +342,7 @@ def create_proxy_router() -> APIRouter:
             view=view,
         )
 
-    @router.delete("/proxy/sources/node-file")
+    @router.delete("/proxy/sources/node-file", response_model=ProxySourceChangeResponse, response_model_exclude_unset=True)
     async def clear_proxy_node_file(
         view: ProxyResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -346,7 +353,7 @@ def create_proxy_router() -> APIRouter:
             view=view,
         )
 
-    @router.post("/proxy/sources/inline-nodes")
+    @router.post("/proxy/sources/inline-nodes", response_model=ProxySourceChangeResponse, response_model_exclude_unset=True)
     async def add_proxy_inline_nodes(
         body: ProxyInlineNodesCreate,
         view: ProxyResponseView = Query("legacy"),
@@ -359,7 +366,7 @@ def create_proxy_router() -> APIRouter:
             view=view,
         )
 
-    @router.put("/proxy/sources/inline-nodes/{source_id}")
+    @router.put("/proxy/sources/inline-nodes/{source_id}", response_model=ProxySourceChangeResponse, response_model_exclude_unset=True)
     async def replace_proxy_inline_node(
         source_id: str,
         body: ProxyInlineNodeUpdate,
@@ -373,7 +380,7 @@ def create_proxy_router() -> APIRouter:
             view=view,
         )
 
-    @router.delete("/proxy/sources/inline-nodes/{source_id}")
+    @router.delete("/proxy/sources/inline-nodes/{source_id}", response_model=ProxySourceChangeResponse, response_model_exclude_unset=True)
     async def delete_proxy_inline_node(
         source_id: str,
         view: ProxyResponseView = Query("legacy"),
@@ -385,7 +392,7 @@ def create_proxy_router() -> APIRouter:
             view=view,
         )
 
-    @router.delete("/proxy/sources/override")
+    @router.delete("/proxy/sources/override", response_model=ProxySourceChangeResponse, response_model_exclude_unset=True)
     async def reset_proxy_sources_override(
         view: ProxyResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -396,7 +403,7 @@ def create_proxy_router() -> APIRouter:
             view=view,
         )
 
-    @router.get("/proxy/status")
+    @router.get("/proxy/status", response_model=ProxyStatusResponse, response_model_exclude_unset=True)
     async def proxy_status(
         view: ProxyResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -408,7 +415,7 @@ def create_proxy_router() -> APIRouter:
         response = {**status, "health_loop": health_loop}
         return _desktop_proxy_status(response) if view == "desktop" else response
 
-    @router.post("/proxy/start")
+    @router.post("/proxy/start", response_model=ProxyLifecycleResponse, response_model_exclude_unset=True)
     async def proxy_start(
         body: ProxyStartRequest,
         view: ProxyResponseView = Query("legacy"),
@@ -422,7 +429,7 @@ def create_proxy_router() -> APIRouter:
         )
         return _desktop_proxy_operation() if view == "desktop" else response
 
-    @router.post("/proxy/reload")
+    @router.post("/proxy/reload", response_model=ProxyLifecycleResponse, response_model_exclude_unset=True)
     async def proxy_reload(
         body: ProxyStartRequest,
         view: ProxyResponseView = Query("legacy"),
@@ -436,7 +443,7 @@ def create_proxy_router() -> APIRouter:
         )
         return _desktop_proxy_operation() if view == "desktop" else response
 
-    @router.post("/proxy/stop")
+    @router.post("/proxy/stop", response_model=ProxyLifecycleResponse, response_model_exclude_unset=True)
     async def proxy_stop(
         body: ProxyStopRequest,
         view: ProxyResponseView = Query("legacy"),
@@ -445,7 +452,7 @@ def create_proxy_router() -> APIRouter:
         response = await proxy_action(lambda: container.proxy.stop(force=body.force))
         return _desktop_proxy_operation() if view == "desktop" else response
 
-    @router.post("/proxy/probe")
+    @router.post("/proxy/probe", response_model=ProxyProbeResponse, response_model_exclude_unset=True)
     async def proxy_probe(
         body: ProxyProbeRequest,
         view: ProxyResponseView = Query("legacy"),

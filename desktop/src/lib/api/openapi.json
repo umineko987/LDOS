@@ -3526,6 +3526,734 @@
         "title": "DatasetSummaryResponse",
         "type": "object"
       },
+      "DesktopProxyInlineNode": {
+        "additionalProperties": true,
+        "properties": {
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "requires_transport_core": {
+            "title": "Requires Transport Core",
+            "type": "boolean"
+          },
+          "scheme": {
+            "title": "Scheme",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "scheme",
+          "name",
+          "host",
+          "port",
+          "requires_transport_core"
+        ],
+        "title": "DesktopProxyInlineNode",
+        "type": "object"
+      },
+      "DesktopProxyNode": {
+        "additionalProperties": true,
+        "properties": {
+          "cooldown_until": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cooldown Until"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "fail_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fail Count"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_error": {
+            "title": "Last Error",
+            "type": "string"
+          },
+          "last_latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Latency Ms"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "protocol": {
+            "title": "Protocol",
+            "type": "string"
+          },
+          "ref_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Count"
+          },
+          "retry_eligible": {
+            "title": "Retry Eligible",
+            "type": "boolean"
+          },
+          "success_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Success Count"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "protocol",
+          "endpoint",
+          "tags",
+          "healthy",
+          "retry_eligible",
+          "ref_count",
+          "success_count",
+          "fail_count",
+          "last_latency_ms",
+          "cooldown_until",
+          "last_error"
+        ],
+        "title": "DesktopProxyNode",
+        "type": "object"
+      },
+      "DesktopProxyNodeFile": {
+        "additionalProperties": true,
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "display_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Path"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured",
+          "source",
+          "display_path"
+        ],
+        "title": "DesktopProxyNodeFile",
+        "type": "object"
+      },
+      "DesktopProxyOperation": {
+        "additionalProperties": true,
+        "description": "desktop 视图下的写操作只回执；调用方随后重拉状态。",
+        "properties": {
+          "response_profile": {
+            "const": "desktop-proxy-operation-v1",
+            "title": "Response Profile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "response_profile"
+        ],
+        "title": "DesktopProxyOperation",
+        "type": "object"
+      },
+      "DesktopProxySourceCounts": {
+        "additionalProperties": true,
+        "properties": {
+          "inline_nodes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inline Nodes"
+          },
+          "node_file": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node File"
+          },
+          "subscriptions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscriptions"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "title": "DesktopProxySourceCounts",
+        "type": "object"
+      },
+      "DesktopProxySourceSummary": {
+        "additionalProperties": true,
+        "properties": {
+          "core_candidates": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Candidates"
+          },
+          "core_nodes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Nodes"
+          },
+          "pool_nodes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pool Nodes"
+          },
+          "skipped_nodes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped Nodes"
+          },
+          "source_nodes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Nodes"
+          },
+          "subscriptions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscriptions"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "warnings"
+        ],
+        "title": "DesktopProxySourceSummary",
+        "type": "object"
+      },
+      "DesktopProxySources": {
+        "additionalProperties": true,
+        "properties": {
+          "active_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Revision"
+          },
+          "configured_revision": {
+            "title": "Configured Revision",
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DesktopProxySourceCounts"
+          },
+          "has_runtime_override": {
+            "title": "Has Runtime Override",
+            "type": "boolean"
+          },
+          "inline_node_rows_truncated": {
+            "title": "Inline Node Rows Truncated",
+            "type": "boolean"
+          },
+          "inline_nodes": {
+            "items": {
+              "$ref": "#/components/schemas/DesktopProxyInlineNode"
+            },
+            "title": "Inline Nodes",
+            "type": "array"
+          },
+          "node_file": {
+            "$ref": "#/components/schemas/DesktopProxyNodeFile"
+          },
+          "reload_required": {
+            "title": "Reload Required",
+            "type": "boolean"
+          },
+          "response_profile": {
+            "const": "desktop-proxy-sources-v1",
+            "title": "Response Profile",
+            "type": "string"
+          },
+          "runtime_override_valid": {
+            "title": "Runtime Override Valid",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "subscription_rows_truncated": {
+            "title": "Subscription Rows Truncated",
+            "type": "boolean"
+          },
+          "subscriptions": {
+            "items": {
+              "$ref": "#/components/schemas/DesktopProxySubscription"
+            },
+            "title": "Subscriptions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "response_profile",
+          "source",
+          "has_runtime_override",
+          "runtime_override_valid",
+          "configured_revision",
+          "active_revision",
+          "reload_required",
+          "subscriptions",
+          "node_file",
+          "inline_nodes",
+          "counts",
+          "subscription_rows_truncated",
+          "inline_node_rows_truncated"
+        ],
+        "title": "DesktopProxySources",
+        "type": "object"
+      },
+      "DesktopProxyStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "active_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Revision"
+          },
+          "auto_start": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Start"
+          },
+          "configured_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configured Revision"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine"
+          },
+          "healthy": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Healthy"
+          },
+          "last_error": {
+            "title": "Last Error",
+            "type": "string"
+          },
+          "leases": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leases"
+          },
+          "managed_by_backend": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed By Backend"
+          },
+          "node_rows_total": {
+            "title": "Node Rows Total",
+            "type": "integer"
+          },
+          "node_rows_truncated": {
+            "title": "Node Rows Truncated",
+            "type": "boolean"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/DesktopProxyNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "reload_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload Required"
+          },
+          "response_profile": {
+            "const": "desktop-proxy-v1",
+            "title": "Response Profile",
+            "type": "string"
+          },
+          "retry_eligible": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Eligible"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          },
+          "sources": {
+            "$ref": "#/components/schemas/DesktopProxySourceSummary"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "transport_core": {
+            "$ref": "#/components/schemas/DesktopProxyTransportCore"
+          }
+        },
+        "required": [
+          "response_profile",
+          "enabled",
+          "engine",
+          "managed_by_backend",
+          "auto_start",
+          "running",
+          "total",
+          "healthy",
+          "retry_eligible",
+          "leases",
+          "configured_revision",
+          "active_revision",
+          "reload_required",
+          "last_error",
+          "transport_core",
+          "sources",
+          "nodes",
+          "node_rows_total",
+          "node_rows_truncated"
+        ],
+        "title": "DesktopProxyStatus",
+        "type": "object"
+      },
+      "DesktopProxySubscription": {
+        "additionalProperties": true,
+        "properties": {
+          "credentials_redacted": {
+            "title": "Credentials Redacted",
+            "type": "boolean"
+          },
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "scheme": {
+            "title": "Scheme",
+            "type": "string"
+          },
+          "sensitive_parts_redacted": {
+            "title": "Sensitive Parts Redacted",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "scheme",
+          "host",
+          "port",
+          "credentials_redacted",
+          "sensitive_parts_redacted"
+        ],
+        "title": "DesktopProxySubscription",
+        "type": "object"
+      },
+      "DesktopProxyTransportCore": {
+        "additionalProperties": true,
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "listeners": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listeners"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          }
+        },
+        "title": "DesktopProxyTransportCore",
+        "type": "object"
+      },
       "DesktopSearchAuthResponse": {
         "additionalProperties": true,
         "properties": {
@@ -6081,6 +6809,1021 @@
         "title": "JobResponse",
         "type": "object"
       },
+      "LegacyAuthProxyStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "browser_proxy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser Proxy Url"
+          },
+          "browser_running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser Running"
+          },
+          "config_proxy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Proxy Url"
+          },
+          "credentials_redacted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credentials Redacted"
+          },
+          "proxy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Url"
+          },
+          "restart_pending": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restart Pending"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "title": "LegacyAuthProxyStatus",
+        "type": "object"
+      },
+      "LegacyAuthStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "actions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actions"
+          },
+          "authorized": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorized"
+          },
+          "browser": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser"
+          },
+          "cookies": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cookies"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "login": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Login"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "oauth": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oauth"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
+          },
+          "site": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "title": "LegacyAuthStatus",
+        "type": "object"
+      },
+      "LegacyAuthStatuses": {
+        "additionalProperties": true,
+        "properties": {
+          "authorization_proxy": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorization Proxy"
+          },
+          "browser_profile": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser Profile"
+          },
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "managed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed"
+          },
+          "secrets_exposed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secrets Exposed"
+          }
+        },
+        "title": "LegacyAuthStatuses",
+        "type": "object"
+      },
+      "LegacyBrowserLoginResult": {
+        "additionalProperties": true,
+        "properties": {
+          "session": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "title": "LegacyBrowserLoginResult",
+        "type": "object"
+      },
+      "LegacyBrowserProfileReset": {
+        "additionalProperties": true,
+        "properties": {
+          "auth": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth"
+          },
+          "browser_profile": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser Profile"
+          }
+        },
+        "title": "LegacyBrowserProfileReset",
+        "type": "object"
+      },
+      "LegacyBrowserRuntime": {
+        "additionalProperties": true,
+        "properties": {
+          "available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "title": "LegacyBrowserRuntime",
+        "type": "object"
+      },
+      "LegacyPixivSession": {
+        "additionalProperties": true,
+        "properties": {
+          "authorization_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorization Url"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "title": "LegacyPixivSession",
+        "type": "object"
+      },
+      "LegacyProxyProbe": {
+        "additionalProperties": true,
+        "properties": {
+          "age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Seconds"
+          },
+          "cached": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached"
+          },
+          "healthy": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Healthy"
+          },
+          "results": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "title": "LegacyProxyProbe",
+        "type": "object"
+      },
+      "LegacyProxySources": {
+        "additionalProperties": true,
+        "properties": {
+          "active_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Revision"
+          },
+          "configured_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configured Revision"
+          },
+          "counts": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Counts"
+          },
+          "has_runtime_override": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Runtime Override"
+          },
+          "inline_nodes": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inline Nodes"
+          },
+          "node_file": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node File"
+          },
+          "reload_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload Required"
+          },
+          "runtime_override_valid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Override Valid"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "subscriptions": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscriptions"
+          }
+        },
+        "title": "LegacyProxySources",
+        "type": "object"
+      },
+      "LegacyProxyStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "active_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Revision"
+          },
+          "auto_start": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Start"
+          },
+          "configured_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configured Revision"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine"
+          },
+          "executable_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executable Required"
+          },
+          "health_loop": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health Loop"
+          },
+          "healthy": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Healthy"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "leases": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leases"
+          },
+          "managed_by_backend": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed By Backend"
+          },
+          "nodes": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nodes"
+          },
+          "probe_cache": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probe Cache"
+          },
+          "reload_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload Required"
+          },
+          "retry_eligible": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Eligible"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          },
+          "sources": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sources"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "transport_core": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport Core"
+          }
+        },
+        "title": "LegacyProxyStatus",
+        "type": "object"
+      },
+      "LegacySitePolicies": {
+        "additionalProperties": true,
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyFields"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LegacySitePolicy"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          }
+        },
+        "title": "LegacySitePolicies",
+        "type": "object"
+      },
+      "LegacySitePolicy": {
+        "additionalProperties": true,
+        "properties": {
+          "inherited": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inherited"
+          },
+          "policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyFields"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "site": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "title": "LegacySitePolicy",
+        "type": "object"
+      },
       "ModelInstallBody": {
         "additionalProperties": false,
         "properties": {
@@ -6370,6 +8113,219 @@
           "total"
         ],
         "title": "ModelProgress",
+        "type": "object"
+      },
+      "PolicyFields": {
+        "additionalProperties": true,
+        "properties": {
+          "backoff_base_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Backoff Base Seconds"
+          },
+          "max_concurrency": {
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "proxy_mode": {
+            "enum": [
+              "direct",
+              "prefer",
+              "required"
+            ],
+            "title": "Proxy Mode",
+            "type": "string"
+          },
+          "retry_limit": {
+            "title": "Retry Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_concurrency",
+          "retry_limit",
+          "backoff_base_seconds",
+          "proxy_mode"
+        ],
+        "title": "PolicyFields",
+        "type": "object"
+      },
+      "PolicyState": {
+        "additionalProperties": true,
+        "properties": {
+          "editable": {
+            "title": "Editable",
+            "type": "boolean"
+          },
+          "policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyFields"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "editable",
+          "reason",
+          "policy"
+        ],
+        "title": "PolicyState",
+        "type": "object"
+      },
+      "PolicyViewItem": {
+        "additionalProperties": true,
+        "properties": {
+          "authorization": {
+            "title": "Authorization",
+            "type": "string"
+          },
+          "availability": {
+            "title": "Availability",
+            "type": "string"
+          },
+          "editable": {
+            "title": "Editable",
+            "type": "boolean"
+          },
+          "has_override": {
+            "title": "Has Override",
+            "type": "boolean"
+          },
+          "inherited": {
+            "title": "Inherited",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyFields"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "selection_mode": {
+            "title": "Selection Mode",
+            "type": "string"
+          },
+          "site": {
+            "title": "Site",
+            "type": "string"
+          },
+          "supported": {
+            "title": "Supported",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "site",
+          "label",
+          "supported",
+          "authorization",
+          "selection_mode",
+          "availability",
+          "inherited",
+          "has_override",
+          "editable",
+          "reason",
+          "updated_at",
+          "policy"
+        ],
+        "title": "PolicyViewItem",
+        "type": "object"
+      },
+      "PolicyViewSnapshot": {
+        "additionalProperties": true,
+        "properties": {
+          "concurrency_protection": {
+            "title": "Concurrency Protection",
+            "type": "string"
+          },
+          "default": {
+            "$ref": "#/components/schemas/PolicyState"
+          },
+          "default_source": {
+            "title": "Default Source",
+            "type": "string"
+          },
+          "effect_scope": {
+            "title": "Effect Scope",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyViewItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "persistence": {
+            "title": "Persistence",
+            "type": "string"
+          },
+          "response_profile": {
+            "const": "policy",
+            "title": "Response Profile",
+            "type": "string"
+          },
+          "secrets_exposed": {
+            "title": "Secrets Exposed",
+            "type": "boolean"
+          },
+          "unknown_override_count": {
+            "title": "Unknown Override Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "response_profile",
+          "secrets_exposed",
+          "effect_scope",
+          "concurrency_protection",
+          "default_source",
+          "persistence",
+          "default",
+          "items",
+          "unknown_override_count"
+        ],
+        "title": "PolicyViewSnapshot",
         "type": "object"
       },
       "ProxyInlineNodeUpdate": {
@@ -7584,6 +9540,37 @@
         "title": "ServiceInfoResponse",
         "type": "object"
       },
+      "SitePolicyDeleted": {
+        "additionalProperties": true,
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "response_profile": {
+            "anyOf": [
+              {
+                "const": "policy",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Profile"
+          },
+          "site": {
+            "title": "Site",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deleted",
+          "site"
+        ],
+        "title": "SitePolicyDeleted",
+        "type": "object"
+      },
       "TaggerPrepareRequest": {
         "properties": {
           "accept_license": {
@@ -8493,6 +10480,504 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "VaultBrowserProfile": {
+        "additionalProperties": true,
+        "properties": {
+          "present": {
+            "title": "Present",
+            "type": "boolean"
+          },
+          "resetting": {
+            "title": "Resetting",
+            "type": "boolean"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "shared": {
+            "title": "Shared",
+            "type": "boolean"
+          },
+          "sites": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sites",
+            "type": "array"
+          }
+        },
+        "required": [
+          "shared",
+          "present",
+          "running",
+          "resetting",
+          "sites"
+        ],
+        "title": "VaultBrowserProfile",
+        "type": "object"
+      },
+      "VaultBrowserProfileReset": {
+        "additionalProperties": true,
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/VaultStatuses"
+          },
+          "browser_profile": {
+            "$ref": "#/components/schemas/VaultBrowserProfile"
+          }
+        },
+        "required": [
+          "browser_profile",
+          "auth"
+        ],
+        "title": "VaultBrowserProfileReset",
+        "type": "object"
+      },
+      "VaultBrowserResult": {
+        "additionalProperties": true,
+        "properties": {
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VaultSession"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/VaultSiteStatus"
+          }
+        },
+        "required": [
+          "session",
+          "status"
+        ],
+        "title": "VaultBrowserResult",
+        "type": "object"
+      },
+      "VaultBrowserRuntime": {
+        "additionalProperties": true,
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "source": {
+            "enum": [
+              "auto",
+              "configured",
+              "none"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "name",
+          "source",
+          "message"
+        ],
+        "title": "VaultBrowserRuntime",
+        "type": "object"
+      },
+      "VaultCookies": {
+        "additionalProperties": true,
+        "properties": {
+          "cookie_count": {
+            "title": "Cookie Count",
+            "type": "integer"
+          },
+          "present": {
+            "title": "Present",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "present",
+          "valid",
+          "cookie_count",
+          "updated_at"
+        ],
+        "title": "VaultCookies",
+        "type": "object"
+      },
+      "VaultProxyStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "browser_running": {
+            "title": "Browser Running",
+            "type": "boolean"
+          },
+          "credentials_redacted": {
+            "title": "Credentials Redacted",
+            "type": "boolean"
+          },
+          "proxy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Url"
+          },
+          "restart_pending": {
+            "title": "Restart Pending",
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "runtime",
+              "config",
+              "none"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "source",
+          "credentials_redacted",
+          "browser_running",
+          "restart_pending",
+          "updated_at"
+        ],
+        "title": "VaultProxyStatus",
+        "type": "object"
+      },
+      "VaultSession": {
+        "additionalProperties": true,
+        "properties": {
+          "cookie_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cookie Count"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "site": {
+            "anyOf": [
+              {
+                "enum": [
+                  "danbooru",
+                  "twitter",
+                  "pixiv",
+                  "exhentai",
+                  "pawchive"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site"
+          },
+          "state": {
+            "enum": [
+              "starting",
+              "starting_browser",
+              "awaiting_login",
+              "awaiting_code",
+              "exchanging",
+              "authorized",
+              "cancelled",
+              "timed_out",
+              "failed",
+              "token_ready"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "state",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "VaultSession",
+        "type": "object"
+      },
+      "VaultSiteStatus": {
+        "additionalProperties": true,
+        "properties": {
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "authorized": {
+            "title": "Authorized",
+            "type": "boolean"
+          },
+          "browser": {
+            "anyOf": [
+              {
+                "const": "project_chrome",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser"
+          },
+          "cookies": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VaultCookies"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "invalidated_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalidated At"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "login": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VaultSession"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "method": {
+            "enum": [
+              "anonymous",
+              "managed_browser",
+              "oauth"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "oauth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VaultSession"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "const": "shared",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
+          },
+          "site": {
+            "enum": [
+              "danbooru",
+              "twitter",
+              "pixiv",
+              "exhentai",
+              "pawchive"
+            ],
+            "title": "Site",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "authorized",
+              "authorizing",
+              "required"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "site",
+          "label",
+          "method",
+          "state",
+          "authorized",
+          "summary",
+          "updated_at",
+          "invalidated_at",
+          "actions"
+        ],
+        "title": "VaultSiteStatus",
+        "type": "object"
+      },
+      "VaultStatuses": {
+        "additionalProperties": true,
+        "properties": {
+          "authorization_proxy": {
+            "$ref": "#/components/schemas/VaultProxyStatus"
+          },
+          "browser_profile": {
+            "$ref": "#/components/schemas/VaultBrowserProfile"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VaultSiteStatus"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "managed": {
+            "title": "Managed",
+            "type": "boolean"
+          },
+          "response_profile": {
+            "const": "vault",
+            "title": "Response Profile",
+            "type": "string"
+          },
+          "secrets_exposed": {
+            "title": "Secrets Exposed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "browser_profile",
+          "authorization_proxy",
+          "managed",
+          "secrets_exposed",
+          "response_profile"
+        ],
+        "title": "VaultStatuses",
+        "type": "object"
       }
     }
   },
@@ -8544,7 +11029,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultStatuses"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyAuthStatuses"
+                    }
+                  ],
+                  "title": "Response Auth Statuses Api V1 Auth Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -8586,7 +11081,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultBrowserRuntime"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyBrowserRuntime"
+                    }
+                  ],
+                  "title": "Response Auth Clear Browser Api V1 Auth Browser Delete"
+                }
               }
             },
             "description": "Successful Response"
@@ -8626,7 +11131,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultBrowserRuntime"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyBrowserRuntime"
+                    }
+                  ],
+                  "title": "Response Auth Browser Runtime Api V1 Auth Browser Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -8676,7 +11191,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultBrowserRuntime"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyBrowserRuntime"
+                    }
+                  ],
+                  "title": "Response Auth Select Browser Api V1 Auth Browser Put"
+                }
               }
             },
             "description": "Successful Response"
@@ -8718,7 +11243,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultBrowserProfileReset"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyBrowserProfileReset"
+                    }
+                  ],
+                  "title": "Response Auth Clear Browser Profile Api V1 Auth Browser Profile Delete"
+                }
               }
             },
             "description": "Successful Response"
@@ -8760,7 +11295,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultSiteStatus"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyAuthStatus"
+                    }
+                  ],
+                  "title": "Response Auth Cancel Pixiv Api V1 Auth Pixiv Oauth Session Delete"
+                }
               }
             },
             "description": "Successful Response"
@@ -8802,7 +11347,20 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultSession"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyPixivSession"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Auth Start Pixiv Api V1 Auth Pixiv Oauth Start Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -8844,7 +11402,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultProxyStatus"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyAuthProxyStatus"
+                    }
+                  ],
+                  "title": "Response Auth Reset Proxy Api V1 Auth Proxy Delete"
+                }
               }
             },
             "description": "Successful Response"
@@ -8884,7 +11452,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultProxyStatus"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyAuthProxyStatus"
+                    }
+                  ],
+                  "title": "Response Auth Proxy Status Api V1 Auth Proxy Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -8934,7 +11512,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultProxyStatus"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyAuthProxyStatus"
+                    }
+                  ],
+                  "title": "Response Auth Set Proxy Api V1 Auth Proxy Put"
+                }
               }
             },
             "description": "Successful Response"
@@ -8985,7 +11573,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultSiteStatus"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyAuthStatus"
+                    }
+                  ],
+                  "title": "Response Auth Clear Api V1 Auth  Site  Delete"
+                }
               }
             },
             "description": "Successful Response"
@@ -9034,7 +11632,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultSiteStatus"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyAuthStatus"
+                    }
+                  ],
+                  "title": "Response Auth Status Api V1 Auth  Site  Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -9085,7 +11693,17 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultBrowserResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyBrowserLoginResult"
+                    }
+                  ],
+                  "title": "Response Auth Start Browser Login Api V1 Auth  Site  Login Start Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -9145,7 +11763,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultBrowserResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyBrowserLoginResult"
+                    }
+                  ],
+                  "title": "Response Auth Cancel Browser Login Api V1 Auth  Site  Login  Session Id  Delete"
+                }
               }
             },
             "description": "Successful Response"
@@ -9203,7 +11831,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VaultBrowserResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyBrowserLoginResult"
+                    }
+                  ],
+                  "title": "Response Auth Browser Login Session Api V1 Auth  Site  Login  Session Id  Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -13505,7 +16143,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxyProbe"
+                    }
+                  ],
+                  "title": "Response Proxy Probe Api V1 Proxy Probe Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -13557,7 +16205,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxyStatus"
+                    }
+                  ],
+                  "title": "Response Proxy Reload Api V1 Proxy Reload Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -13599,7 +16257,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxySources"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxySources"
+                    }
+                  ],
+                  "title": "Response Proxy Sources Api V1 Proxy Sources Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -13651,7 +16319,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxySources"
+                    }
+                  ],
+                  "title": "Response Add Proxy Inline Nodes Api V1 Proxy Sources Inline Nodes Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -13702,7 +16380,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxySources"
+                    }
+                  ],
+                  "title": "Response Delete Proxy Inline Node Api V1 Proxy Sources Inline Nodes  Source Id  Delete"
+                }
               }
             },
             "description": "Successful Response"
@@ -13761,7 +16449,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxySources"
+                    }
+                  ],
+                  "title": "Response Replace Proxy Inline Node Api V1 Proxy Sources Inline Nodes  Source Id  Put"
+                }
               }
             },
             "description": "Successful Response"
@@ -13803,7 +16501,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxySources"
+                    }
+                  ],
+                  "title": "Response Clear Proxy Node File Api V1 Proxy Sources Node File Delete"
+                }
               }
             },
             "description": "Successful Response"
@@ -13853,7 +16561,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxySources"
+                    }
+                  ],
+                  "title": "Response Set Proxy Node File Api V1 Proxy Sources Node File Put"
+                }
               }
             },
             "description": "Successful Response"
@@ -13895,7 +16613,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxySources"
+                    }
+                  ],
+                  "title": "Response Reset Proxy Sources Override Api V1 Proxy Sources Override Delete"
+                }
               }
             },
             "description": "Successful Response"
@@ -13947,7 +16675,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxySources"
+                    }
+                  ],
+                  "title": "Response Add Proxy Subscription Api V1 Proxy Sources Subscriptions Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -13998,7 +16736,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxySources"
+                    }
+                  ],
+                  "title": "Response Delete Proxy Subscription Api V1 Proxy Sources Subscriptions  Source Id  Delete"
+                }
               }
             },
             "description": "Successful Response"
@@ -14057,7 +16805,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxySources"
+                    }
+                  ],
+                  "title": "Response Replace Proxy Subscription Api V1 Proxy Sources Subscriptions  Source Id  Put"
+                }
               }
             },
             "description": "Successful Response"
@@ -14109,7 +16867,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxyStatus"
+                    }
+                  ],
+                  "title": "Response Proxy Start Api V1 Proxy Start Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -14151,7 +16919,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyStatus"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxyStatus"
+                    }
+                  ],
+                  "title": "Response Proxy Status Api V1 Proxy Status Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -14203,7 +16981,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopProxyOperation"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacyProxyStatus"
+                    }
+                  ],
+                  "title": "Response Proxy Stop Api V1 Proxy Stop Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -14522,7 +17310,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PolicyViewSnapshot"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacySitePolicies"
+                    }
+                  ],
+                  "title": "Response Site Policies Api V1 Sites Policies Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -14573,7 +17371,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SitePolicyDeleted"
+                }
               }
             },
             "description": "Successful Response"
@@ -14622,7 +17422,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PolicyViewItem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacySitePolicy"
+                    }
+                  ],
+                  "title": "Response Get Site Policy Api V1 Sites Policies  Site  Get"
+                }
               }
             },
             "description": "Successful Response"
@@ -14681,7 +17491,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PolicyViewItem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LegacySitePolicy"
+                    }
+                  ],
+                  "title": "Response Put Site Policy Api V1 Sites Policies  Site  Put"
+                }
               }
             },
             "description": "Successful Response"

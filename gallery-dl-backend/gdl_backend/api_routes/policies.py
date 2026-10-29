@@ -17,6 +17,7 @@ from ..site_policy import EditableSitePolicy
 from .body_limits import enforce_policy_body_limit
 from .dependencies import get_service
 from .errors import ApiError
+from .network_models import SitePoliciesResponse, SitePolicyDeleted, SitePolicyResponse
 from .validation import validate_site_name
 
 PolicyResponseView = Literal["legacy", "policy"]
@@ -58,7 +59,7 @@ def _legacy_policy_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def create_policies_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
-    @router.get("/sites/policies")
+    @router.get("/sites/policies", response_model=SitePoliciesResponse, response_model_exclude_unset=True)
     async def site_policies(
         view: PolicyResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -79,7 +80,7 @@ def create_policies_router() -> APIRouter:
         except (sqlite3.Error, TypeError, ValueError) as exc:
             _raise_policy_store_error(exc)
 
-    @router.get("/sites/policies/{site}")
+    @router.get("/sites/policies/{site}", response_model=SitePolicyResponse, response_model_exclude_unset=True)
     async def get_site_policy(
         site: str,
         view: PolicyResponseView = Query("legacy"),
@@ -118,7 +119,7 @@ def create_policies_router() -> APIRouter:
         except (sqlite3.Error, TypeError, ValueError) as exc:
             _raise_policy_store_error(exc)
 
-    @router.put("/sites/policies/{site}")
+    @router.put("/sites/policies/{site}", response_model=SitePolicyResponse, response_model_exclude_unset=True)
     async def put_site_policy(
         site: str,
         body: EditableSitePolicy,
@@ -150,7 +151,7 @@ def create_policies_router() -> APIRouter:
             updated_at=stored.get("updated_at"),
         )
 
-    @router.delete("/sites/policies/{site}")
+    @router.delete("/sites/policies/{site}", response_model=SitePolicyDeleted, response_model_exclude_unset=True)
     async def delete_site_policy(
         site: str,
         view: PolicyResponseView = Query("legacy"),

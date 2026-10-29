@@ -17,6 +17,15 @@ from ..schemas import AuthProxyUpdate, BrowserExecutableUpdate
 from .body_limits import enforce_auth_proxy_body_limit
 from .dependencies import get_service
 from .errors import ApiError
+from .network_models import (
+    AuthBrowserLoginResponse,
+    AuthBrowserProfileResetResponse,
+    AuthBrowserRuntimeResponse,
+    AuthPixivStartResponse,
+    AuthProxyResponse,
+    AuthSiteResponse,
+    AuthStatusesResponse,
+)
 
 AuthResponseView = Literal["legacy", "vault"]
 
@@ -94,7 +103,7 @@ def auth_browser_result(
 def create_auth_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1")
 
-    @router.get("/auth")
+    @router.get("/auth", response_model=AuthStatusesResponse, response_model_exclude_unset=True)
     async def auth_statuses(
         view: AuthResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -104,7 +113,7 @@ def create_auth_router() -> APIRouter:
 
     # Fixed /auth/proxy and /auth/browser routes must be registered before
     # /auth/{site}, otherwise FastAPI can treat their names as site parameters.
-    @router.get("/auth/proxy")
+    @router.get("/auth/proxy", response_model=AuthProxyResponse, response_model_exclude_unset=True)
     async def auth_proxy_status(
         view: AuthResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -112,7 +121,7 @@ def create_auth_router() -> APIRouter:
         result = container.auth.proxy_status()
         return vault_safe_proxy_status(result) if view == "vault" else result
 
-    @router.put("/auth/proxy")
+    @router.put("/auth/proxy", response_model=AuthProxyResponse, response_model_exclude_unset=True)
     async def auth_set_proxy(
         payload: AuthProxyUpdate,
         view: AuthResponseView = Query("legacy"),
@@ -125,7 +134,7 @@ def create_auth_router() -> APIRouter:
         except AuthError as exc:
             raise_auth_error(exc, view)
 
-    @router.delete("/auth/proxy")
+    @router.delete("/auth/proxy", response_model=AuthProxyResponse, response_model_exclude_unset=True)
     async def auth_reset_proxy(
         view: AuthResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -136,7 +145,7 @@ def create_auth_router() -> APIRouter:
         except AuthError as exc:
             raise_auth_error(exc, view)
 
-    @router.get("/auth/browser")
+    @router.get("/auth/browser", response_model=AuthBrowserRuntimeResponse, response_model_exclude_unset=True)
     async def auth_browser_runtime(
         view: AuthResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -144,7 +153,7 @@ def create_auth_router() -> APIRouter:
         result = container.auth.browser_runtime_status()
         return vault_safe_browser_runtime(result) if view == "vault" else result
 
-    @router.put("/auth/browser")
+    @router.put("/auth/browser", response_model=AuthBrowserRuntimeResponse, response_model_exclude_unset=True)
     async def auth_select_browser(
         payload: BrowserExecutableUpdate,
         view: AuthResponseView = Query("legacy"),
@@ -156,7 +165,7 @@ def create_auth_router() -> APIRouter:
         except AuthError as exc:
             raise_auth_error(exc, view)
 
-    @router.delete("/auth/browser")
+    @router.delete("/auth/browser", response_model=AuthBrowserRuntimeResponse, response_model_exclude_unset=True)
     async def auth_clear_browser(
         view: AuthResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -167,7 +176,7 @@ def create_auth_router() -> APIRouter:
         except AuthError as exc:
             raise_auth_error(exc, view)
 
-    @router.get("/auth/{site}")
+    @router.get("/auth/{site}", response_model=AuthSiteResponse, response_model_exclude_unset=True)
     async def auth_status(
         site: str,
         view: AuthResponseView = Query("legacy"),
@@ -179,7 +188,7 @@ def create_auth_router() -> APIRouter:
         except AuthError as exc:
             raise_auth_error(exc, view)
 
-    @router.post("/auth/{site}/login/start", status_code=202)
+    @router.post("/auth/{site}/login/start", status_code=202, response_model=AuthBrowserLoginResponse, response_model_exclude_unset=True)
     async def auth_start_browser_login(
         site: str,
         view: AuthResponseView = Query("legacy"),
@@ -191,7 +200,7 @@ def create_auth_router() -> APIRouter:
         except AuthError as exc:
             raise_auth_error(exc, view)
 
-    @router.get("/auth/{site}/login/{session_id}")
+    @router.get("/auth/{site}/login/{session_id}", response_model=AuthBrowserLoginResponse, response_model_exclude_unset=True)
     async def auth_browser_login_session(
         site: str,
         session_id: str,
@@ -204,7 +213,7 @@ def create_auth_router() -> APIRouter:
         except AuthError as exc:
             raise_auth_error(exc, view)
 
-    @router.delete("/auth/{site}/login/{session_id}")
+    @router.delete("/auth/{site}/login/{session_id}", response_model=AuthBrowserLoginResponse, response_model_exclude_unset=True)
     async def auth_cancel_browser_login(
         site: str,
         session_id: str,
@@ -217,7 +226,7 @@ def create_auth_router() -> APIRouter:
         except AuthError as exc:
             raise_auth_error(exc, view)
 
-    @router.post("/auth/pixiv/oauth/start")
+    @router.post("/auth/pixiv/oauth/start", response_model=AuthPixivStartResponse, response_model_exclude_unset=True)
     async def auth_start_pixiv(
         view: AuthResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -228,7 +237,7 @@ def create_auth_router() -> APIRouter:
         except AuthError as exc:
             raise_auth_error(exc, view)
 
-    @router.delete("/auth/pixiv/oauth/session")
+    @router.delete("/auth/pixiv/oauth/session", response_model=AuthSiteResponse, response_model_exclude_unset=True)
     async def auth_cancel_pixiv(
         view: AuthResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -239,7 +248,7 @@ def create_auth_router() -> APIRouter:
         except AuthError as exc:
             raise_auth_error(exc, view)
 
-    @router.delete("/auth/browser-profile")
+    @router.delete("/auth/browser-profile", response_model=AuthBrowserProfileResetResponse, response_model_exclude_unset=True)
     async def auth_clear_browser_profile(
         view: AuthResponseView = Query("legacy"),
         container: Any = Depends(get_service),
@@ -255,7 +264,7 @@ def create_auth_router() -> APIRouter:
         except AuthError as exc:
             raise_auth_error(exc, view)
 
-    @router.delete("/auth/{site}")
+    @router.delete("/auth/{site}", response_model=AuthSiteResponse, response_model_exclude_unset=True)
     async def auth_clear(
         site: str,
         view: AuthResponseView = Query("legacy"),
