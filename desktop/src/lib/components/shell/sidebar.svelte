@@ -4,6 +4,7 @@
 
   import { page } from "$app/state";
   import { Kbd, KbdGroup } from "#lib/components/ui/kbd/index.ts";
+  import { useJobs } from "#lib/events/jobs.svelte.ts";
   import { useKeymap } from "#lib/keys/context.ts";
   import { formatChord } from "#lib/keys/keymap.ts";
   import { sectionOf } from "#lib/nav/routes.ts";
@@ -17,10 +18,22 @@
 
   const shell = useShell();
   const keymap = useKeymap();
+  const jobs = useJobs();
   const section = $derived(sectionOf(page.route.id));
   const primary = primaryNav();
   const system = systemNav();
+  const running = $derived(jobs.active.length);
 </script>
+
+<!-- 进行中任务数：灰色小角标（金色只给导航点、焦点环和主操作）。 -->
+{#snippet runningBadge()}
+  {#if running}
+    <span class="ml-auto flex-none rounded-full bg-bg3 px-1.5 text-2xs text-fg2 tabular-nums" data-testid="running-count">
+      <span aria-hidden="true">{running}</span>
+      <span class="sr-only">{m.activity_running_badge({ count: running })}</span>
+    </span>
+  {/if}
+{/snippet}
 
 <aside class="flex min-h-0 flex-col border-r border-line bg-bg1 pt-3.5 pb-2.5" data-testid="sidebar">
   <div class="flex items-baseline gap-2 px-[18px] pb-4">
@@ -30,7 +43,12 @@
 
   <nav aria-label={m.nav_main()} class="relative flex flex-col px-2">
     {#each primary as link (link.id)}
-      <NavItem href={link.href} active={section === link.section} data-nav={link.id}>{link.label()}</NavItem>
+      <NavItem
+        href={link.href}
+        active={section === link.section}
+        data-nav={link.id}
+        trailing={link.id === "jobs" ? runningBadge : undefined}>{link.label()}</NavItem
+      >
     {/each}
     <div class="mt-3.5 px-2.5 pb-1 text-2xs tracking-[0.04em] text-fg3">{m.nav_group_system()}</div>
     {#each system as link (link.id)}
@@ -55,7 +73,8 @@
     >
       <ActivityIcon class="size-3.5" />
       <span>{m.shell_activity()}</span>
-      <KbdGroup class="ml-auto">{#each formatChord("mod+j", keymap.isMac) as part}<Kbd>{part}</Kbd>{/each}</KbdGroup>
+      {@render runningBadge()}
+      <KbdGroup class={running ? "" : "ml-auto"}>{#each formatChord("mod+j", keymap.isMac) as part}<Kbd>{part}</Kbd>{/each}</KbdGroup>
     </button>
     <button
       type="button"

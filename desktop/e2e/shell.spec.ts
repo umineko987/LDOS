@@ -109,7 +109,7 @@ test("? 打开快捷键表，内容来自按键注册表", async ({ page }) => {
 
 test("Ctrl+J 打开活动抽屉，Esc 依次关闭浮层、回到上一级", async ({ page }) => {
   await page.goto("/#/jobs/crawls/batch-7");
-  await expect(page.getByRole("heading", { name: "抓取批次 batch-7" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "采集批次 batch-7" })).toBeVisible();
 
   await page.keyboard.press("Control+j");
   const drawer = page.getByTestId("activity-drawer");

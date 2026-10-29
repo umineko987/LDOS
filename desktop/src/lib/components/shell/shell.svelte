@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
+  import { useQueryClient } from "@tanstack/svelte-query";
+  import { onMount, type Snippet } from "svelte";
 
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
@@ -8,12 +9,15 @@
   import { Toaster } from "#lib/components/ui/sonner/index.ts";
   import { createEventBus } from "#lib/events/bus.ts";
   import { setEvents } from "#lib/events/context.svelte.ts";
+  import { LiveJobs, setJobs } from "#lib/events/jobs.svelte.ts";
+  import { snapshotLoader, startRealtime } from "#lib/events/sse.ts";
   import { useBindings, useEscape, useOverlay } from "#lib/keys/bindings.svelte.ts";
   import { parentPath } from "#lib/nav/routes.ts";
   import { m } from "#lib/paraglide/messages.js";
 
   import ActivityDrawer from "./activity-drawer.svelte";
   import CommandPalette from "./command-palette.svelte";
+  import { createJobToasts } from "./job-toasts.ts";
   import { navCommands, type NavLink } from "./nav.ts";
   import ShortcutSheet from "./shortcut-sheet.svelte";
   import { setShell, ShellState } from "./shell-state.svelte.ts";
@@ -25,8 +29,36 @@
   // 启动门每次重连都会给出新的 Api，根布局用 {#key} 重建外壳，这里只需在初始化时取一次。
   // svelte-ignore state_referenced_locally
   setApi(api);
-  setEvents(createEventBus());
+  const bus = setEvents(createEventBus());
+  const jobs = setJobs(new LiveJobs());
   const shell = setShell(new ShellState());
+  const queryClient = useQueryClient();
+
+  // 实时连接：快照 + SSE 填任务表；任务结束弹 toast；补发断档时所有查询重拉。
+  onMount(() => {
+    const toasts = createJobToasts({
+      isSilenced: (jobId) => jobs.isSilenced(jobId),
+      openActivity: () => (shell.activityOpen = true),
+    });
+    const offJob = bus.subscribe("job.updated", ({ job }) => {
+      const transition = jobs.apply(job);
+      if (transition) toasts.notify(transition.job);
+    });
+    const offResync = bus.subscribe("resync", () => void queryClient.invalidateQueries());
+    const realtime = startRealtime({
+      origin: api.origin,
+      bus,
+      loadSnapshot: snapshotLoader(api),
+      onSnapshot: (items) => jobs.replace(items),
+      onState: (state) => (jobs.connection = state),
+    });
+    return () => {
+      realtime.stop();
+      offResync();
+      offJob();
+      toasts.dispose();
+    };
+  });
 
   function go(link: NavLink) {
     if (link.reload) window.location.assign(link.href);
