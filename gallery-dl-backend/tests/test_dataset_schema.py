@@ -45,6 +45,7 @@ class DatasetSchemaMigrationTest(unittest.TestCase):
         return str(conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0])
 
     def test_dataset_tables_arrive_in_v15(self) -> None:
+        # 之后的版本（v16 caption 批次、v17 导出）在 v15 之上继续迁移。
         self.assertEqual(DATASET_SCHEMA_VERSION, 15)
         self.assertGreaterEqual(CURRENT_SCHEMA_VERSION, DATASET_SCHEMA_VERSION)
 

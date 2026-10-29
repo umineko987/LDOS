@@ -5,13 +5,14 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 
-CURRENT_SCHEMA_VERSION = 16
+CURRENT_SCHEMA_VERSION = 17
 SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION = 8
 GALLERY_EXPORT_SCHEMA_VERSION = 9
 GALLERY_RECONCILIATION_SCHEMA_VERSION = 10
 GALLERY_DIRECTORY_TRASH_SCHEMA_VERSION = 11
 DATASET_SCHEMA_VERSION = 15
 CAPTION_BATCH_SCHEMA_VERSION = 16
+DATASET_EXPORT_SCHEMA_VERSION = 17
 TransactionFactory = Callable[[], AbstractContextManager[sqlite3.Connection]]
 
 
@@ -643,6 +644,8 @@ def initialize_schema(
         CREATE TABLE IF NOT EXISTS dataset_export_jobs (
             id TEXT PRIMARY KEY,
             idempotency_key TEXT UNIQUE,
+            dataset_id TEXT NOT NULL DEFAULT '',
+            options_json TEXT NOT NULL DEFAULT '{}',
             status TEXT NOT NULL,
             target_path TEXT NOT NULL,
             sample_count INTEGER NOT NULL DEFAULT 0,
@@ -863,4 +866,22 @@ def initialize_schema(
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(CAPTION_BATCH_SCHEMA_VERSION),),
+            )
+
+    if schema_version < DATASET_EXPORT_SCHEMA_VERSION:
+        # v17 迁移：数据集导出任务记下所属数据集与导出选项（v9 起的旧表一直没有写入方）。
+        # 补列与索引和版本标记同一事务；按列探测，不依赖中间版本的迁移是否存在。
+        with transaction() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(dataset_export_jobs)")}
+            if "dataset_id" not in columns:
+                conn.execute("ALTER TABLE dataset_export_jobs ADD COLUMN dataset_id TEXT NOT NULL DEFAULT ''")
+            if "options_json" not in columns:
+                conn.execute("ALTER TABLE dataset_export_jobs ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_dataset_export_jobs_dataset"
+                " ON dataset_export_jobs(dataset_id, created_at)"
+            )
+            conn.execute(
+                "UPDATE meta SET value=? WHERE key='schema_version'",
+                (str(DATASET_EXPORT_SCHEMA_VERSION),),
             )
