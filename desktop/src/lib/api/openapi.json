@@ -72,6 +72,13 @@
             "title": "Size",
             "type": "integer"
           },
+          "top_tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Top Tags",
+            "type": "array"
+          },
           "x": {
             "title": "X",
             "type": "number"
@@ -189,6 +196,17 @@
           "cluster": {
             "title": "Cluster",
             "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           },
           "outlier": {
             "title": "Outlier",

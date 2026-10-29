@@ -2229,6 +2229,8 @@ export interface components {
             share: number;
             /** Size */
             size: number;
+            /** Top Tags */
+            top_tags?: string[];
             /** X */
             x: number;
             /** Y */
@@ -2272,6 +2274,8 @@ export interface components {
             asset_id: string;
             /** Cluster */
             cluster: number;
+            /** Name */
+            name?: string | null;
             /** Outlier */
             outlier: number;
             /** Sha256 */

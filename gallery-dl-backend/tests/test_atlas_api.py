@@ -439,6 +439,47 @@ class AtlasStaleTest(AtlasTestBase):
         self.assertNotEqual(atlas_digest({"a": "1"}, {}), atlas_digest({"a": "1"}, {"clusters": 2}))
 
 
+class AtlasLabelTest(AtlasTestBase):
+    def test_items_carry_names_and_clusters_carry_top_tags(self) -> None:
+        self.service.update(self.dataset_id, {"trigger_word": "sks"})
+        # 假 worker 把前两张分进簇 0、第三张进簇 1；第三张没有 caption。
+        (self.library / "set/1.txt").write_text("sks, 1girl, smile, hat", encoding="utf-8")
+        (self.library / "set/2.txt").write_text("sks, smile, 1girl, outdoors", encoding="utf-8")
+        self.catalog.scan_source(self.source_id)
+        self.wait_scan(self.source_id)
+        body = self.run_ready()
+        self.assertEqual([item["name"] for item in body["items"]], ["1.png", "2.png", "3.png"])
+        self.assertEqual(
+            [(cluster["id"], cluster["top_tags"]) for cluster in body["clusters"]],
+            [(0, ["1girl", "smile", "hat"]), (1, [])],
+        )
+
+        # 改 caption 换 ETag，重新统计。
+        etag = self.client.get(self.base).headers["etag"]
+        response = self.client.post(
+            f"/api/v1/datasets/{self.dataset_id}/captions/ops",
+            json={"asset_ids": [self.ids[1]], "ops": [{"op": "add", "tags": ["hat", "solo"]}]},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        changed = self.client.get(self.base, headers={"If-None-Match": etag})
+        self.assertEqual(changed.status_code, 200)
+        self.assertNotEqual(changed.headers["etag"], etag)
+        self.assertEqual(changed.json()["clusters"][0]["top_tags"], ["1girl", "hat", "smile"])
+
+        # 触发词改了也换 ETag：旧触发词变回普通标签参与统计。
+        etag = changed.headers["etag"]
+        self.service.update(self.dataset_id, {"trigger_word": "zzz"})
+        changed = self.client.get(self.base, headers={"If-None-Match": etag})
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(changed.json()["clusters"][0]["top_tags"], ["1girl", "hat", "sks"])
+
+        # 被移出输入的图不计票、没有名字。
+        self.service.decide(self.dataset_id, stage="clean", asset_ids=[self.ids[0]], decision="exclude")
+        body = self.atlas()
+        self.assertEqual(body["clusters"][0]["top_tags"], ["1girl", "hat", "outdoors"])
+        self.assertEqual([item["name"] for item in body["items"]], [None, "2.png", "3.png"])
+
+
 class AtlasHttpTest(AtlasTestBase):
     def test_atlas_etag_and_not_modified(self) -> None:
         empty = self.client.get(self.base)

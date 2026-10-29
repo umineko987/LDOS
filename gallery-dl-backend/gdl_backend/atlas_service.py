@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .caption_tags import parse_caption
 from .file_security import ensure_private_directory, open_private_binary, write_private_text
 from .gallery_safe_paths import SafeSourceRoot, UnsafeSourcePathError
 from .process_control import terminate_process
@@ -63,6 +64,9 @@ THUMBNAIL_SOURCE_SIZE = 256
 KEEP_PREVIOUS_RUNS = 1
 RUN_SCHEMA_VERSION = 1
 PAYLOAD_CACHE_SIZE = 4
+TOP_TAG_COUNT = 3
+# 成员上影响文件名和 caption 的字段；任一变化都换地图的 ETag。
+_CAPTION_KEYS = ("asset_id", "name", "txt_version", "txt_state", "txt_size_bytes", "txt_modified_ns")
 
 _DATASET_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _RUN_ID = re.compile(r"^\d{13}-[0-9a-f]{8}$")
@@ -139,6 +143,36 @@ def atlas_digest(inputs: Mapping[str, str], options: Mapping[str, Any]) -> str:
     return digest.hexdigest()
 
 
+def caption_signature(trigger_word: str, members: Iterable[Mapping[str, Any]]) -> str:
+    digest = hashlib.sha1(f"{trigger_word}\n".encode("utf-8"))
+    for member in members:
+        line = "\0".join(str(member[key]) for key in _CAPTION_KEYS)
+        digest.update(line.encode("utf-8", "surrogateescape") + b"\n")
+    return digest.hexdigest()
+
+
+def cluster_top_tags(
+    items: Iterable[Mapping[str, Any]],
+    captions: Mapping[str, str],
+    trigger_word: str,
+    limit: int = TOP_TAG_COUNT,
+) -> dict[int, list[str]]:
+    """每个簇里出现在最多张图上的标签（不含触发词），同票按标签排序。"""
+    counts: dict[int, dict[str, int]] = {}
+    for item in items:
+        tags = parse_caption(captions.get(str(item.get("asset_id"))))
+        if not tags:
+            continue
+        counter = counts.setdefault(int(item.get("cluster", 0)), {})
+        for tag in tags:
+            if tag != trigger_word:
+                counter[tag] = counter.get(tag, 0) + 1
+    return {
+        cluster: [tag for tag, _ in sorted(counter.items(), key=lambda entry: (-entry[1], entry[0]))[:limit]]
+        for cluster, counter in counts.items()
+    }
+
+
 def etag_matches(if_none_match: str | None, etag: str) -> bool:
     if not if_none_match:
         return False
@@ -178,6 +212,8 @@ class AtlasService:
         self._failures: dict[str, dict[str, Any]] = {}
         self._gate: asyncio.Lock | None = None
         self._cache: OrderedDict[tuple[str, str], tuple[dict[str, Any], dict[str, Any]]] = OrderedDict()
+        # dataset_id → ((run_id, 输入摘要, caption 指纹), {簇: top_tags})
+        self._tag_cache: OrderedDict[str, tuple[tuple[str, ...], dict[int, list[str]]]] = OrderedDict()
         self._cache_lock = threading.Lock()
         self._stopping = False
         self._orphans_checked = False
@@ -769,9 +805,13 @@ class AtlasService:
         else:
             status = "stale" if stale else "ready"
         progress = snapshot["progress"]
-        # 运行完成后内容不变，removed/stale 都由 run_id + 当前输入摘要决定，ETag 不必序列化整张地图。
+        dataset = self._db.datasets.get_dataset(dataset_id) or {}
+        trigger_word = str(dataset.get("trigger_word") or "").strip()
+        captions_digest = caption_signature(trigger_word, members)
+        # 运行完成后内容不变，removed/stale 都由 run_id + 当前输入摘要决定，文件名和 top_tags 由
+        # caption 指纹决定，ETag 不必序列化整张地图。
         etag_source = json.dumps(
-            [run_id, status, progress, snapshot["error"], current_digest, snapshot["availability"]],
+            [run_id, status, progress, snapshot["error"], current_digest, snapshot["availability"], captions_digest],
             sort_keys=True,
             default=str,
         )
@@ -811,13 +851,23 @@ class AtlasService:
             if item.get("asset_id") not in removed_set:
                 live_sizes[int(item.get("cluster", 0))] = live_sizes.get(int(item.get("cluster", 0)), 0) + 1
         live_total = sum(live_sizes.values())
+        top_tags = self._top_tags(
+            dataset_id,
+            (str(run_id), current_digest, captions_digest),
+            [item for item in atlas_items if item.get("asset_id") not in removed_set],
+            trigger_word,
+        )
         for cluster in atlas.get("clusters") or []:
             live_size = live_sizes.get(int(cluster["id"]), 0)
             clusters.append({
                 **cluster,
                 "live_size": live_size,
                 "live_share": round(live_size / live_total, 6) if live_total else 0.0,
+                "top_tags": top_tags.get(int(cluster["id"]), []),
             })
+        # 缓存里的 atlas_items 不能改，复制一份带上文件名；已移出输入的图没有名字（前端本就隐藏）。
+        names = {member["asset_id"]: member["name"] for member in members}
+        items = [{**item, "name": names.get(item.get("asset_id"))} for item in atlas_items]
         params = atlas.get("params") or {}
         threshold = float(params.get("outlier_threshold", 1.0))
         outliers = sorted(
@@ -836,7 +886,7 @@ class AtlasService:
                 ]
             }
         result.update({
-            "items": atlas_items,
+            "items": items,
             "clusters": clusters,
             "vectors": atlas.get("vectors"),
             "sprites": sprite_payload,
@@ -852,6 +902,28 @@ class AtlasService:
             },
         })
         return result, etag
+
+    def _top_tags(
+        self,
+        dataset_id: str,
+        key: tuple[str, ...],
+        live_items: Sequence[Mapping[str, Any]],
+        trigger_word: str,
+    ) -> dict[int, list[str]]:
+        """按簇统计 caption 标签；caption 文本取自图库搜索索引，结果按 (运行, 输入, caption 指纹) 缓存。"""
+        with self._cache_lock:
+            cached = self._tag_cache.get(dataset_id)
+            if cached is not None and cached[0] == key:
+                self._tag_cache.move_to_end(dataset_id)
+                return cached[1]
+        captions = self._db.gallery.caption_texts(str(item.get("asset_id")) for item in live_items)
+        top_tags = cluster_top_tags(live_items, captions, trigger_word)
+        with self._cache_lock:
+            self._tag_cache[dataset_id] = (key, top_tags)
+            self._tag_cache.move_to_end(dataset_id)
+            while len(self._tag_cache) > PAYLOAD_CACHE_SIZE:
+                self._tag_cache.popitem(last=False)
+        return top_tags
 
     def sprite(self, dataset_id: str, index: int, run_id: str | None) -> dict[str, Any]:
         """雪碧图文件定位：只接受 atlas.json 列出的 sprites/sheet-NNNN.* 普通文件。"""

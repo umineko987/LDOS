@@ -1554,6 +1554,19 @@ class GalleryRepository:
         by_id = {row["id"]: self._project_asset_row(row) for row in rows}
         return [by_id[asset_id] for asset_id in ids if asset_id in by_id]
 
+    def caption_texts(self, asset_ids: Iterable[str]) -> dict[str, str]:
+        """搜索索引里的 caption 文本：只有 txt_state=normal 的图有，写 caption 和扫描时同步。"""
+        ids = list(dict.fromkeys(asset_ids))
+        if not ids:
+            return {}
+        with self._read() as conn:
+            rows = conn.execute(
+                "SELECT asset_id, txt_content FROM gallery_search_index "
+                "WHERE asset_id IN (SELECT value FROM json_each(?))",
+                (json.dumps(ids),),
+            ).fetchall()
+        return {row["asset_id"]: row["txt_content"] for row in rows if row["txt_content"]}
+
     @staticmethod
     def _project_asset_row(row: Any) -> dict[str, Any]:
         return {

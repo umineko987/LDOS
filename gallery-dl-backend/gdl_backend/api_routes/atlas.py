@@ -113,6 +113,8 @@ class AtlasItem(BaseModel):
     outlier: float
     # [sheet, cell]；cell 位于 ((cell % columns) * cell_size, (cell // columns) * cell_size)
     sprite: list[int] | None = None
+    # 文件名；已不在输入里的图（removed_asset_ids）为 null。
+    name: str | None = None
 
 
 class AtlasCluster(BaseModel):
@@ -125,6 +127,8 @@ class AtlasCluster(BaseModel):
     # 去掉 removed_asset_ids 之后的大小与占比。
     live_size: int
     live_share: float
+    # 簇内出现在最多张图上的 caption 标签（最多 3 个，不含触发词）；没有 caption 时为空。
+    top_tags: list[str] = Field(default_factory=list)
 
 
 class AtlasVectors(BaseModel):
