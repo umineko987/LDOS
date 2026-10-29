@@ -23,8 +23,7 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
     "tauri": "tauri",
-    "api:gen": "openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts",
-    "api:snapshot": "node scripts/openapi-snapshot.mjs"
+    "api:gen": "openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",
