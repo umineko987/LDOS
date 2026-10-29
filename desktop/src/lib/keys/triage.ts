@@ -28,6 +28,7 @@
 //   当前组已定夺且没改过时只前进，不记历史。
 // - undo：撤销最近一步；给了 `entry` 时只在它是最近一步时撤销（异步撤销回来后确认没被别的操作抢先）。
 // - revert：服务器拒绝了某次定夺：把那一组恢复成定夺前的状态（保留集合不动），删掉那一步，焦点不动。
+// - forget：只删掉某一步，状态不动（服务器那边已经撤不了这一批，例如后端重启过）。
 // - mark：压一个外部操作的历史条目。
 //
 // 选择器：currentGroup、keepOf、decidedOf、groupStatus、canToggle、adoptPlan、lastEntry、progress、isFinished。
@@ -94,6 +95,7 @@ export type TriageAction =
   | { readonly type: "adopt" }
   | { readonly type: "undo"; readonly entry?: number }
   | { readonly type: "revert"; readonly entry: number }
+  | { readonly type: "forget"; readonly entry: number }
   | { readonly type: "mark"; readonly label?: string };
 
 export type TriageGroupStatus = "pending" | "decided" | "changed";
@@ -327,6 +329,10 @@ export function triageReducer(state: TriageState, action: TriageAction): TriageS
       const history = state.history.filter((candidate) => candidate !== entry);
       // 只撤回定夺本身；之后对这一组的修改保留。
       return restore(state, { ...entry, keep: entry.group === null ? null : keepOf(state, entry.group) }, history, false);
+    }
+    case "forget": {
+      const history = state.history.filter((candidate) => candidate.id !== action.entry);
+      return history.length === state.history.length ? state : { ...state, history };
     }
     case "mark":
       return {

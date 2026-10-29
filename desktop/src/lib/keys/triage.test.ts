@@ -259,6 +259,14 @@ describe("undo / revert / mark", () => {
     expect(reverted.history).toHaveLength(1);
   });
 
+  it("forget 只删历史条目，状态不动", () => {
+    const state = run(createTriage(GROUPS), { type: "adopt" });
+    const forgotten = run(state, { type: "forget", entry: lastEntry(state)!.id });
+    expect(forgotten.history).toHaveLength(0);
+    expect(groupStatus(forgotten, "g1")).toBe("decided");
+    expect(run(forgotten, { type: "forget", entry: 99 })).toBe(forgotten);
+  });
+
   it("历史超过上限时丢最早的", () => {
     let state = createTriage(GROUPS, { historyLimit: 3 });
     for (let index = 0; index < 5; index += 1) state = run(state, { type: "mark" });
