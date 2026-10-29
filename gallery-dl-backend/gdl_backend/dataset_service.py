@@ -105,12 +105,15 @@ class DatasetService:
         database: Any,
         catalog: GalleryCatalogService,
         hashing: GalleryHashingService,
+        *,
+        events: Any | None = None,
     ) -> None:
         self._db = database
         self._repo: DatasetRepository = database.datasets
         self._gallery = database.gallery
         self._catalog = catalog
         self.hashing = hashing
+        self._events = events
 
     @classmethod
     def for_container(cls, container: Any) -> "DatasetService":
@@ -119,6 +122,7 @@ class DatasetService:
             container.db,
             container.gallery_catalog,
             GalleryHashingService(container.db.gallery),
+            events=container.events,
         )
         container.gallery_catalog.add_scan_listener(service.on_scan_committed)
         previous = container.db.gallery_batch_registrar
@@ -136,6 +140,15 @@ class DatasetService:
 
     def stop(self) -> None:
         self.hashing.stop()
+
+    def publish_updated(self, dataset_id: str, reason: str) -> None:
+        """SSE `dataset.updated`：前端据此重拉数据集详情和漏斗。总线出错不影响写入本身。"""
+        if self._events is None:
+            return
+        try:
+            self._events.publish("dataset.updated", {"dataset_id": dataset_id, "reason": reason})
+        except Exception:
+            logger.exception("dataset.updated publish failed; dataset_id=%s", dataset_id)
 
     # ---- 数据集 ----
 
@@ -163,6 +176,7 @@ class DatasetService:
         dataset = self._repo.create_dataset(
             name=name.strip(), kind=kind, trigger_word=trigger_word.strip(), config=config
         )
+        self.publish_updated(dataset["dataset_id"], "created")
         return self.detail(dataset["dataset_id"])
 
     def detail(self, dataset_id: str) -> dict[str, Any]:
@@ -181,11 +195,13 @@ class DatasetService:
             self._repo.update_dataset(dataset_id, normalized)
         except DatasetNotFound:
             raise DatasetError(404, "dataset_not_found", "数据集不存在") from None
+        self.publish_updated(dataset_id, "updated")
         return self.detail(dataset_id)
 
     def delete(self, dataset_id: str) -> None:
         if not self._repo.delete_dataset(dataset_id):
             raise DatasetError(404, "dataset_not_found", "数据集不存在")
+        self.publish_updated(dataset_id, "deleted")
 
     def _summary(
         self,
@@ -377,6 +393,8 @@ class DatasetService:
             updated = self._repo.set_decisions(dataset_id, stage, asset_ids, decision, reason=reason)
         else:
             raise DatasetError(422, "invalid_dataset_decision", f"未知决定: {decision}")
+        if updated:
+            self.publish_updated(dataset_id, "decisions")
         return {"updated": updated, "funnel": self.funnel(dataset_id)}
 
     # ---- 阶段运行（Wave 2 的各阶段服务调用） ----
@@ -390,9 +408,11 @@ class DatasetService:
         stats: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         digest = self.stage_input_digest(dataset_id, stage)
-        return self._repo.create_stage_run(
+        run = self._repo.create_stage_run(
             dataset_id, stage, input_digest=digest, ref_id=ref_id, stats=stats
         )
+        self.publish_updated(dataset_id, "stage_run")
+        return run
 
     def finish_stage_run(
         self,
@@ -405,9 +425,12 @@ class DatasetService:
     ) -> dict[str, Any] | None:
         if status == "running":
             raise ValueError("finish_stage_run_requires_terminal_status")
-        return self._repo.update_stage_run(
+        run = self._repo.update_stage_run(
             run_id, status=status, stats=stats, error_code=error_code, ref_id=ref_id
         )
+        if run is not None:
+            self.publish_updated(run["dataset_id"], "stage_run")
+        return run
 
     def list_stage_runs(
         self, dataset_id: str, *, stage: str | None = None, limit: int = 50
@@ -472,6 +495,7 @@ class DatasetService:
         self._require(dataset_id)
         if not self._repo.delete_root(dataset_id, root_id):
             raise DatasetError(404, "dataset_root_not_found", "数据集根目录不存在")
+        self.publish_updated(dataset_id, "roots")
 
     def _resolve_conflict(
         self, root: Path, conflict: GallerySourceConflictError
@@ -510,6 +534,8 @@ class DatasetService:
             origin=origin,
         )
         self.enqueue_hashing(dataset_id)
+        if created:
+            self.publish_updated(dataset_id, "roots")
         return root, created
 
     def _start_scan_if_idle(self, source_id: str) -> None:
@@ -545,14 +571,17 @@ class DatasetService:
         }
 
     def on_scan_committed(self, source_id: str) -> None:
+        # 扫描可能增删了根目录下的图，成员和各段输入随之变化。
         for dataset_id in self._repo.dataset_ids_for_source(source_id):
             self.enqueue_hashing(dataset_id, source_id=source_id)
+            self.publish_updated(dataset_id, "members")
 
     # ---- 在线采集 ----
 
     def register_crawl(self, dataset_id: str, batch_id: str) -> dict[str, Any]:
         self._require(dataset_id)
         self._repo.add_crawl(dataset_id, batch_id)
+        self.publish_updated(dataset_id, "crawls")
         # 幂等重放到一个已经结束的批次时，直接挂根。
         self.on_batch_finished(batch_id)
         for crawl in self._repo.list_crawls(dataset_id):
