@@ -35,7 +35,8 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/lib/{domain,keys,events,api,boot,platform}/**/*.ts"],
-      exclude: ["src/**/*.test.ts", "src/lib/api/schema.d.ts"],
+      // .svelte.ts 只是把注册表接到组件生命周期上，由 e2e 覆盖。
+      exclude: ["src/**/*.test.ts", "src/**/*.svelte.ts", "src/lib/api/schema.d.ts"],
       reporter: ["text", "json-summary"],
       thresholds: { lines: 95 },
     },
