@@ -42,6 +42,7 @@ export default defineConfig({
         "src/lib/api/schema.d.ts",
         "src/lib/gfx/gl.ts",
         "src/lib/gfx/bench/{webgl2,canvas2d}.ts",
+        "src/lib/gfx/atlas/{webgl2,canvas2d}.ts",
       ],
       reporter: ["text", "json-summary"],
       thresholds: { lines: 95 },
