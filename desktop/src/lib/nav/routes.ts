@@ -39,6 +39,8 @@ export function parentPath(routeId: string | null, params: Params): string | nul
       return "/";
     case "/library/[sourceId]/[[directoryId]]":
       return params.directoryId ? `/library/${segment(params.sourceId)}` : "/library";
+    case "/library/trash":
+      return "/library";
     case "/jobs/crawls/[batchId]":
       return "/jobs";
   }

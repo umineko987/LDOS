@@ -8,6 +8,7 @@ describe("nav routes", () => {
     expect(sectionOf("/datasets/[id]/tag")).toBe("datasets");
     expect(sectionOf("/library")).toBe("library");
     expect(sectionOf("/library/[sourceId]/[[directoryId]]")).toBe("library");
+    expect(sectionOf("/library/trash")).toBe("library");
     expect(sectionOf("/jobs/crawls/[batchId]")).toBe("jobs");
     expect(sectionOf("/settings/diagnostics")).toBe("settings");
     expect(sectionOf("/dev/gfx")).toBe("dev");
@@ -28,6 +29,7 @@ describe("nav routes", () => {
       "/library/s%201",
     );
     expect(parentPath("/library/[sourceId]/[[directoryId]]", { sourceId: "s1" })).toBe("/library");
+    expect(parentPath("/library/trash", {})).toBe("/library");
     expect(parentPath("/jobs/crawls/[batchId]", { batchId: "b1" })).toBe("/jobs");
     expect(parentPath(null, {})).toBe("/");
     for (const top of ["/", "/library", "/jobs", "/settings/network", "/dev/gfx"]) {
