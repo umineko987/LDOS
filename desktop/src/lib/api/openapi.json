@@ -4227,6 +4227,140 @@
         "title": "DiagnosticsServerConfig",
         "type": "object"
       },
+      "DownloadSettingsUpdate": {
+        "additionalProperties": false,
+        "description": "只更新请求里出现的字段。",
+        "properties": {
+          "clear_hf_token": {
+            "default": false,
+            "title": "Clear Hf Token",
+            "type": "boolean"
+          },
+          "custom_proxy": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Proxy"
+          },
+          "hf_mirror": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hf Mirror"
+          },
+          "hf_token": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "只写；保存后不再返回",
+            "title": "Hf Token"
+          },
+          "proxy_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "none",
+                  "pool",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Mode"
+          }
+        },
+        "title": "DownloadSettingsUpdate",
+        "type": "object"
+      },
+      "DownloadSettingsView": {
+        "properties": {
+          "custom_proxy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "自定义下载代理，凭据已打码",
+            "title": "Custom Proxy"
+          },
+          "custom_proxy_has_credentials": {
+            "title": "Custom Proxy Has Credentials",
+            "type": "boolean"
+          },
+          "hf_mirror": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "HF 镜像根地址；null 表示官方 huggingface.co",
+            "title": "Hf Mirror"
+          },
+          "proxy_mode": {
+            "enum": [
+              "none",
+              "pool",
+              "custom"
+            ],
+            "title": "Proxy Mode",
+            "type": "string"
+          },
+          "token_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "token 末四位提示，形如 …abcd",
+            "title": "Token Hint"
+          },
+          "token_set": {
+            "description": "是否已保存 HF token；token 本身从不返回",
+            "title": "Token Set",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hf_mirror",
+          "proxy_mode",
+          "custom_proxy",
+          "custom_proxy_has_credentials",
+          "token_set",
+          "token_hint"
+        ],
+        "title": "DownloadSettingsView",
+        "type": "object"
+      },
       "EHDownloadOptions": {
         "additionalProperties": false,
         "properties": {
@@ -13937,6 +14071,60 @@
           }
         },
         "summary": "Supported Search Sites"
+      }
+    },
+    "/api/v1/settings/downloads": {
+      "get": {
+        "operationId": "get_download_settings_api_v1_settings_downloads_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Download Settings"
+      },
+      "put": {
+        "operationId": "update_download_settings_api_v1_settings_downloads_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Download Settings"
       }
     },
     "/api/v1/setup/models": {

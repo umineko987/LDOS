@@ -47,6 +47,8 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("POST", "/api/v1/tagger/cancel"): ("cancel_api_v1_tagger_cancel_post", ("200",)),
     ("GET", "/api/v1/setup/models"): ("model_status_api_v1_setup_models_get", ("200",)),
     ("POST", "/api/v1/setup/models/install"): ("install_models_api_v1_setup_models_install_post", ("202", "422")),
+    ("GET", "/api/v1/settings/downloads"): ("get_download_settings_api_v1_settings_downloads_get", ("200",)),
+    ("PUT", "/api/v1/settings/downloads"): ("update_download_settings_api_v1_settings_downloads_put", ("200", "422")),
     ("GET", "/api/v1/gallery/review-presets"): ("list_presets_api_v1_gallery_review_presets_get", ("200",)),
     ("POST", "/api/v1/gallery/review-presets"): ("create_preset_api_v1_gallery_review_presets_post", ("201", "422")),
     ("PUT", "/api/v1/gallery/review-presets/{preset_id}"): ("update_preset_api_v1_gallery_review_presets__preset_id__put", ("200", "422")),
@@ -247,6 +249,7 @@ class AppRoutingContractTests(unittest.TestCase):
             "diagnostics": "gdl_backend.api_routes.diagnostics",
             "auth": "gdl_backend.api_routes.auth",
             "setup": "gdl_backend.api_routes.setup",
+            "settings": "gdl_backend.api_routes.settings",
         "tagger": "gdl_backend.api_routes.tagger",
             "tasks": "gdl_backend.api_routes.tasks",
             "discovery": "gdl_backend.api_routes.discovery",
@@ -272,6 +275,8 @@ class AppRoutingContractTests(unittest.TestCase):
                 domain = "auth"
             elif path.startswith("/api/v1/setup"):
                 domain = "setup"
+            elif path.startswith("/api/v1/settings"):
+                domain = "settings"
             elif path.startswith("/api/v1/tagger"):
                 domain = "tagger"
             elif path.startswith("/api/v1/tasks"):
