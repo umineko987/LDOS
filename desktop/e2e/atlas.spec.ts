@@ -13,6 +13,7 @@ import {
   runningAtlas,
   SPRITE_RGB,
 } from "./fixtures/atlas";
+import { FakeDatasets } from "./fixtures/datasets";
 import { expect, test } from "./fixtures/test";
 
 // 语义地图页。除了最后一条，都强制 Canvas2D：像素断言用 getImageData，不受 GPU 和 SwiftShader 影响。
@@ -23,6 +24,13 @@ const TOTAL = 23;
 function stage(page: Page) {
   return page.getByTestId("atlas-stage");
 }
+
+// 地图页渲染在数据集布局里，布局要先拿到数据集详情和漏斗。
+test.beforeEach(async ({ page }) => {
+  const datasets = new FakeDatasets();
+  datasets.add({ name: "atlas", members: TOTAL });
+  await datasets.install(page);
+});
 
 async function openAtlas(page: Page) {
   await page.goto(`/#/datasets/${ATLAS_DATASET}/atlas`);

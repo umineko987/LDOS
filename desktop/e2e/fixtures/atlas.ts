@@ -10,7 +10,8 @@ type AtlasResponse = components["schemas"]["AtlasResponse"];
 type AtlasItem = components["schemas"]["AtlasItem"];
 type AtlasStateResponse = components["schemas"]["AtlasStateResponse"];
 
-export const ATLAS_DATASET = "d1";
+/** FakeDatasets 给第一个数据集的 id（见 atlas.spec 的 beforeEach）。 */
+export const ATLAS_DATASET = "ds1";
 export const ATLAS_RUN = "1760000000000-0123abcd";
 /** 雪碧图的颜色：和簇调色板、金色、红色都差得很远。 */
 export const SPRITE_RGB = [20, 200, 120] as const;
