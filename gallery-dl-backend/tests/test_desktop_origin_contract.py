@@ -129,7 +129,7 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
                 self.assertEqual(response.headers["Access-Control-Allow-Origin"], origin)
                 self.assertEqual(
                     response.headers["Access-Control-Expose-Headers"],
-                    "X-Request-ID",
+                    "ETag, X-Request-ID",
                 )
                 self.assertTrue(response.headers["X-Request-ID"])
 
@@ -168,7 +168,7 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
                 **self.cross_origin_headers(VITE_ORIGIN),
                 "Access-Control-Request-Method": "PUT",
                 "Access-Control-Request-Headers": (
-                    "accept,content-type,idempotency-key,x-request-id"
+                    "accept,content-type,idempotency-key,if-none-match,x-request-id"
                 ),
             },
         )
@@ -183,7 +183,7 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
             for value in response.headers["Access-Control-Allow-Headers"].split(",")
         }
         self.assertTrue(
-            {"accept", "content-type", "idempotency-key", "x-request-id"}
+            {"accept", "content-type", "idempotency-key", "if-none-match", "x-request-id"}
             <= allowed_headers
         )
         self.assertNotIn("authorization", allowed_headers)
