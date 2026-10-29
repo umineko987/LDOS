@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { expect, test as base } from "@playwright/test";
 
+import { mockHealthyBackend } from "./api";
+
 const tauriConfig = JSON.parse(
   readFileSync(new URL("../../src-tauri/tauri.conf.json", import.meta.url), "utf8"),
 ) as { app: { security: { csp: string; devCsp: string } } };
@@ -18,12 +20,21 @@ declare global {
 type Fixtures = {
   /** 置为 true 时不因 console.error 失败（只给旧版冒烟测试用，它的接口没有全部模拟）。 */
   allowConsoleErrors: boolean;
+  /** 默认模拟一个健康的后端（见 api.ts）；测试里再调 mockApi() 可以覆盖单个接口。 */
+  healthyBackend: boolean;
+  backend: void;
   runtimeErrors: string[];
   cspViolations: void;
 };
 
 export const test = base.extend<Fixtures>({
   allowConsoleErrors: [false, { option: true }],
+  healthyBackend: [true, { option: true }],
+
+  backend: [async ({ page, healthyBackend }, use) => {
+    if (healthyBackend) await mockHealthyBackend(page);
+    await use();
+  }, { auto: true }],
 
   cspViolations: [async ({ page }, use) => {
     await page.addInitScript(() => {

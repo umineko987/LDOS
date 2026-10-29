@@ -237,3 +237,17 @@
 #ldos-root {
   display: contents;
 }
+
+/* 启动门的不定进度条：只动 transform。 */
+@keyframes boot-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+.boot-progress {
+  animation: boot-progress 1.4s var(--ease) infinite;
+}
