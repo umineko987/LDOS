@@ -87,11 +87,16 @@ function responseEnvelope(): Middleware {
       const body = parseBody(text);
       if (!response.ok) throw apiErrorFromPayload(response.status, body.value, requestId);
       if (body.kind === "invalid") throw new ApiError({ status: response.status, code: "invalid_response", requestId });
-      if (backendErrorEnvelope(body.value)) throw apiErrorFromPayload(response.status, body.value, requestId);
+      // 后端的错误信封只有 `error` 一个键；atlas、分诊等正常响应里也有 `error` 字段（上次运行的失败原因），不能当成错误。
+      if (isBareErrorEnvelope(body.value)) throw apiErrorFromPayload(response.status, body.value, requestId);
 
       return new Response(text, { status: response.status, statusText: response.statusText, headers: response.headers });
     },
   };
+}
+
+function isBareErrorEnvelope(value: unknown): boolean {
+  return backendErrorEnvelope(value) !== null && Object.keys(value as object).length === 1;
 }
 
 function resourceUrlFor(origin: string, path: string): string {

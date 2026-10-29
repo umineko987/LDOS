@@ -128,6 +128,7 @@ describe("createApi", () => {
       }),
       new Response("{}", { status: 200, headers: { "Content-Length": String(API_MAX_RESPONSE_CHARS * 3 + 1) } }),
       json({ error: "not an envelope", ok: true }),
+      json({ status: "failed", error: { code: "atlas_model_unavailable", message: "上次运行失败" } }),
     );
     await expect(api.client.GET("/healthz")).rejects.toMatchObject({ code: "unexpected_success_error", message: "拒绝" });
     await expect(api.client.GET("/healthz")).rejects.toMatchObject({
@@ -138,6 +139,11 @@ describe("createApi", () => {
     await expect(api.client.GET("/healthz")).rejects.toMatchObject({ code: "response_too_large", requestId: "large-id" });
     await expect(api.client.GET("/healthz")).rejects.toMatchObject({ code: "response_too_large" });
     await expect(data(api.client.GET("/healthz"))).resolves.toEqual({ error: "not an envelope", ok: true });
+    // 只有 `error` 一个键才是错误信封；正常响应里带失败原因的 `error` 字段照常返回。
+    await expect(data(api.client.GET("/healthz"))).resolves.toEqual({
+      status: "failed",
+      error: { code: "atlas_model_unavailable", message: "上次运行失败" },
+    });
   });
 
   it("空响应返回 undefined", async () => {
