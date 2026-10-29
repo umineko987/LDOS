@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
 from gdl_backend.events import EventBus, JobRegistry
-from gdl_backend.tagger_service import TaggerService
+from gdl_backend.tagger_service import TaggerQueryError, TaggerService
 from tests.helpers import make_settings
 
 
@@ -45,14 +45,20 @@ import json, sys
 sys.path.insert(0, {str(tagger_root)!r})
 from cli import build_parser
 args = build_parser().parse_args()
-print(json.dumps({{'type': 'done', 'inputs': args.inputs, 'categories': args.categories,
+lines = sys.stdin.buffer.read().decode('utf-8').split('\\n')
+print(json.dumps({{'type': 'done', 'inputs': args.inputs, 'inputs_file': args.inputs_file,
+    'stdin': lines, 'no_captions': args.no_captions, 'categories': args.categories,
     'thresholds': args.model_threshold}}), flush=True)
 """)
         thresholds = {"wd-vit-v3": {"general": 0.4}, "pixai-tagger-v1": {"general": 0.2, "style": 0.15}}
         await self.service.tag(list(thresholds), ["/first path", "/second"], thresholds=thresholds)
         await self.finish()
         self.assertEqual(self.service.state.phase, "idle")
-        self.assertEqual(self.service.state.last_result["inputs"], ["/first path", "/second"])
+        # 图片列表只走 stdin（--inputs-file -），不再出现在命令行上
+        self.assertIsNone(self.service.state.last_result["inputs"])
+        self.assertEqual(self.service.state.last_result["inputs_file"], "-")
+        self.assertEqual(self.service.state.last_result["stdin"], ["/first path", "/second", ""])
+        self.assertFalse(self.service.state.last_result["no_captions"])
         self.assertEqual(self.service.state.last_result["thresholds"], [
             ["wd-vit-v3", "general", "0.4"], ["pixai-tagger-v1", "general", "0.2"], ["pixai-tagger-v1", "style", "0.15"],
         ])
@@ -72,6 +78,70 @@ raise SystemExit(7)
         self.assertEqual(self.service.state.done, 1)
         self.assertIn("final-error", self.service.state.message)
         self.assertLessEqual(len(self.service.state.message), 500)
+
+    async def test_large_input_list_streams_through_stdin(self) -> None:
+        # 远超管道缓冲（64 KiB）也不会和 stdout 读取互相卡死
+        self.script("""
+import json, sys
+lines = [line for line in sys.stdin.buffer.read().decode('utf-8').split('\\n') if line]
+print(json.dumps({'type': 'done', 'count': len(lines), 'last': lines[-1]}), flush=True)
+""")
+        inputs = [f"/library/图片 {index:05d}.png" for index in range(20_000)]
+        await self.service.tag(["wd-vit-v3"], inputs, write_captions=False)
+        await self.finish()
+        self.assertEqual(self.service.state.phase, "idle")
+        self.assertEqual(self.service.state.last_result, {"type": "done", "count": 20_000, "last": inputs[-1]})
+
+    async def test_on_finished_receives_status_and_bumps_cache_generation(self) -> None:
+        summaries: list[dict] = []
+        self.script("print('{\"type\": \"done\", \"total\": 1}', flush=True)")
+        await self.service.tag(["wd-vit-v3"], ["/a"], on_finished=summaries.append)
+        await self.finish()
+        self.script("import sys; sys.stderr.write('boom\\\\n'); raise SystemExit(4)")
+
+        async def record(summary: dict) -> None:
+            summaries.append(summary)
+
+        await self.service.tag(["wd-vit-v3"], ["/a"], on_finished=record)
+        await self.finish()
+        self.assertEqual(summaries[0], {"status": "succeeded", "message": "", "last_result": {"type": "done", "total": 1}})
+        self.assertEqual((summaries[1]["status"], summaries[1]["last_result"]), ("failed", {}))
+        self.assertIn("boom", summaries[1]["message"])
+        self.assertEqual(self.service.cache_generation, 2)
+
+    async def test_query_collects_data_lines_and_reports_failures(self) -> None:
+        self.script("""
+import json, sys
+lines = sys.stdin.buffer.read().decode('utf-8').split('\\n')
+print('warming up')
+print(json.dumps({'type': 'progress', 'stage': 'hashing', 'done': 0, 'total': 1}))
+print(json.dumps({'type': 'models', 'args': sys.argv[1:]}))
+print(json.dumps({'type': 'candidates', 'path': lines[0]}))
+print(json.dumps({'type': 'done', 'total': 1}))
+""")
+        lines = await self.service.query("candidates", ["wd-vit-v3"], ["a" * 64 + "\t/x/1.png"], ["--floor", "0.01"])
+        self.assertEqual([line["type"] for line in lines], ["models", "candidates", "done"])
+        self.assertEqual(lines[1]["path"], "a" * 64 + "\t/x/1.png")
+        args = lines[0]["args"]
+        self.assertEqual(args[args.index("candidates"):], [
+            "candidates", "--models", "wd-vit-v3", "--cache", str(self.settings.tagger.cache_path),
+            "--inputs-file", "-", "--floor", "0.01",
+        ])
+        self.assertIsNone(self.service._process)
+
+        self.script("import sys; sys.stderr.write('model missing\\\\n'); raise SystemExit(4)")
+        with self.assertRaises(TaggerQueryError) as caught:
+            await self.service.query("compose", ["wd-vit-v3"], ["/x/1.png"])
+        self.assertEqual(caught.exception.exit_code, 4)
+        self.assertIn("model missing", str(caught.exception))
+        with self.assertRaises(ValueError):
+            await self.service.query("tag", ["wd-vit-v3"], [])
+
+    async def test_query_timeout_kills_child(self) -> None:
+        self.script("import time; time.sleep(30)")
+        with self.assertRaises(TaggerQueryError) as caught:
+            await self.service.query("compose", ["wd-vit-v3"], ["/x"], timeout=0.2)
+        self.assertEqual(caught.exception.exit_code, -1)
 
     async def test_missing_cli_and_python_fail_cleanly_and_allow_retry(self) -> None:
         with self.assertRaises(FileNotFoundError):

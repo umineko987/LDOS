@@ -312,7 +312,9 @@ import json, sys
 sys.path.insert(0, {str(tagger_root)!r})
 from cli import build_parser
 args = build_parser().parse_args()
-print(json.dumps({{'type': 'done', 'total': len(args.inputs), 'inputs': args.inputs}}), flush=True)
+assert args.inputs is None and args.inputs_file == '-'
+inputs = [line for line in sys.stdin.buffer.read().decode('utf-8').split('\\n') if line]
+print(json.dumps({{'type': 'done', 'total': len(inputs), 'inputs': inputs}}), flush=True)
 """, encoding="utf-8")
         self.settings.tagger.cli_script = script
         self.settings.tagger.python_executable = Path(sys.executable)
