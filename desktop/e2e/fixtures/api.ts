@@ -85,7 +85,7 @@ export const READY = {
   components: {
     database: { status: "ok", required: true, summary: "SQLite 可读写" },
     scheduler: { status: "ok", required: true, summary: "调度器运行中" },
-    proxy: { status: "optional_missing", required: false, summary: "未配置代理节点" },
+    project_proxy: { status: "optional_missing", required: false, summary: "未配置代理节点" },
     dedup: { status: "disabled", required: false, summary: "去重模型未启用" },
   },
 };
