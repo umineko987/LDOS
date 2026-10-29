@@ -9,6 +9,7 @@ import {
   atlasJobId,
   atlasKeys,
   atlasQuery,
+  atlasThumbnailPath,
   cancelAtlas,
   chunk,
   invalidateAtlas,
@@ -84,6 +85,7 @@ describe("atlasQuery", () => {
     expect(interval({ state: {} })).toBe(false);
     expect(atlasKeys.detail("d1")).toEqual(["atlas", "d1"]);
     expect(atlasJobId("d1")).toBe("atlas:d1");
+    expect(atlasThumbnailPath("a/1")).toBe("/api/v1/gallery/assets/a%2F1/thumbnail?size=256");
   });
 });
 

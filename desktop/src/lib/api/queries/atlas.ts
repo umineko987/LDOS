@@ -37,6 +37,11 @@ export function atlasJobId(datasetId: string): string {
   return `atlas:${datasetId}`;
 }
 
+/** 悬停提示里的缩略图（图库缩略图接口，按 asset id 取）。 */
+export function atlasThumbnailPath(assetId: string, size = 256): string {
+  return `/api/v1/gallery/assets/${encodeURIComponent(assetId)}/thumbnail?size=${size}`;
+}
+
 export function atlasQuery(api: Api, datasetId: string) {
   return queryOptions({
     queryKey: atlasKeys.detail(datasetId),
