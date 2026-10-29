@@ -14,6 +14,7 @@ import {
   SPRITE_RGB,
 } from "./fixtures/atlas";
 import { FakeDatasets } from "./fixtures/datasets";
+import { installing, mockInstall, mockModelsBackend, MODELS, type ModelItem } from "./fixtures/settings";
 import { expect, test } from "./fixtures/test";
 
 // 语义地图页。除了最后一条，都强制 Canvas2D：像素断言用 getImageData，不受 GPU 和 SwiftShader 影响。
@@ -247,21 +248,46 @@ test.describe("Canvas2D", () => {
     await expect(page.getByTestId("atlas-run")).toBeVisible();
   });
 
-  test("DINOv2 模型不可用时提示去模型设置", async ({ page }) => {
+  test("DINOv2 模型不可用时就地安装，装好后可以重新生成", async ({ page }) => {
+    let table: ModelItem[] = MODELS;
+    const bodies: { readonly keys: readonly string[] }[] = [];
+    let runs = 0;
+    await mockModelsBackend(page, { models: () => table });
+    await mockInstall(page, (body) => {
+      bodies.push(body);
+      table = installing(table, body.keys, "models:dedup");
+      return { body: { items: table, started: [{ family: "dedup", keys: body.keys, job_id: "models:dedup", proxy_source: "none" }] } };
+    });
     await mockApi(page, "get", ATLAS_PATH, noAtlas());
-    await mockApi(page, "post", "/api/v1/datasets/{dataset_id}/atlas/run", () => ({
-      status: 422,
-      body: errorEnvelope("atlas_model_unavailable", "DINOv2 模型未安装"),
-    }));
+    await mockApi(page, "post", "/api/v1/datasets/{dataset_id}/atlas/run", () => {
+      runs += 1;
+      return { status: 422, body: errorEnvelope("atlas_model_unavailable", "DINOv2 模型未安装") };
+    });
     await openAtlas(page);
 
     await page.getByTestId("atlas-run").click();
     await expect(page.getByTestId("atlas-page")).toHaveAttribute("data-state", "gate");
-    await expect(page.getByTestId("atlas-gate")).toContainText("需要 DINOv2 模型");
-    await expect(page.getByTestId("atlas-gate-settings")).toHaveAttribute("href", /\/settings\/models$/);
+    const gate = page.getByTestId("atlas-gate").getByTestId("model-gate");
+    await expect(gate).toContainText("需要 DINOv2 模型");
+    await expect(gate.locator('[data-gate-model="dino"]')).toContainText("DINOv2 ViT-S/14");
+    await expect(page.getByTestId("atlas-gate-retry")).toHaveCount(0);
+
+    await gate.getByRole("button", { name: "安装缺失模型" }).click();
+    await expect.poll(() => bodies.length).toBe(1);
+    expect(bodies[0]!.keys).toContain("dino");
+    await expect(gate.getByRole("button", { name: "安装中…" })).toBeDisabled();
+
+    // 没有 SSE 时靠兜底轮询拿到装好的表，提示条换成「重新生成」。
+    table = table.map((item) => (item.status === "installing" ? { ...item, status: "installed", job_id: null, progress: null } : item));
+    const retry = page.getByTestId("atlas-gate-retry");
+    await expect(retry).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("atlas-gate")).toContainText("DINOv2 已经装好");
+    await retry.click();
+    await expect.poll(() => runs).toBe(2);
   });
 
   test("上次运行因为模型失败时直接显示模型提示", async ({ page }) => {
+    await mockModelsBackend(page);
     await mockApi(
       page,
       "get",
@@ -270,7 +296,8 @@ test.describe("Canvas2D", () => {
     );
     await openAtlas(page);
     await expect(page.getByTestId("atlas-page")).toHaveAttribute("data-state", "gate");
-    await expect(page.getByTestId("atlas-gate-settings")).toBeVisible();
+    await expect(page.getByTestId("atlas-gate").getByTestId("model-gate")).toBeVisible();
+    await expect(page.getByTestId("atlas-gate").getByRole("button", { name: "安装缺失模型" })).toBeEnabled();
   });
 });
 

@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { resolve } from "$app/paths";
-
   import { apiErrorMessage } from "#lib/api/messages.ts";
+  import { ModelGate } from "#lib/components/model-install/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Progress } from "#lib/components/ui/progress/index.ts";
   import type { AtlasResponse } from "#lib/domain/atlas-model.ts";
@@ -53,17 +52,13 @@
 </script>
 
 {#snippet gate()}
-  <!-- TODO(settings): 设置分支的模型安装组件合并后，在这里直接放 DINOv2 的安装按钮和进度。 -->
-  <div class="flex flex-col gap-1">
-    <span class="text-sm text-fg">{m.atlas_gate_title()}</span>
-    <span class="text-xs text-fg2">{m.atlas_gate_body()}</span>
-  </div>
-  <div class="flex items-center gap-2">
-    <Button variant="outline" size="sm" href={resolve("/settings/models")} data-testid="atlas-gate-settings">
-      {m.atlas_gate_open_settings()}
-    </Button>
-    <Button variant="ghost" size="sm" onclick={() => onrun(true)} disabled={busy}>{m.atlas_retry()}</Button>
-  </div>
+  <!-- 缺 DINOv2 时就地安装（含许可确认和进度）；装好后显示重新生成。 -->
+  <ModelGate keys={["dino"]} title={m.atlas_gate_title()} class="w-full">
+    <div class="flex items-center gap-3">
+      <span class="text-xs text-fg2">{m.atlas_gate_ready()}</span>
+      <Button variant="outline" size="sm" onclick={() => onrun(true)} disabled={busy} data-testid="atlas-gate-retry">{m.atlas_retry()}</Button>
+    </div>
+  </ModelGate>
 {/snippet}
 
 {#if state === "ready"}
@@ -94,7 +89,7 @@
       <span class="grow"></span>
       <Button variant="outline" size="sm" onclick={() => onrun(true)} disabled={busy} data-testid="atlas-rerun">{m.atlas_retry()}</Button>
     {:else if state === "gate"}
-      <div class="flex grow flex-wrap items-center justify-between gap-3" data-testid="atlas-gate">{@render gate()}</div>
+      <div class="flex grow py-1" data-testid="atlas-gate">{@render gate()}</div>
     {:else if state === "unavailable"}
       <span class="text-fg2">{unavailableText}</span>
     {/if}
@@ -111,7 +106,7 @@
         <span class="text-sm text-fg">{m.atlas_title()}</span>
         <span class="text-xs text-fg2">{unavailableText}</span>
       {:else if state === "gate"}
-        <div class="flex flex-col items-start gap-3" data-testid="atlas-gate">{@render gate()}</div>
+        <div class="flex w-full flex-col items-start gap-3" data-testid="atlas-gate">{@render gate()}</div>
       {:else if state === "running"}
         <span class="text-sm text-fg">{m.atlas_running()}</span>
         <span class="text-xs text-fg2" data-testid="atlas-progress" data-phase={progress?.phase} data-done={progress?.done} data-total={progress?.total}>
