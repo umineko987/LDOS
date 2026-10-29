@@ -56,7 +56,7 @@ def _included_api_routes(router):
 
 
 _DESKTOP_GALLERY_MODEL = (
-    Path(__file__).resolve().parents[2] / "desktop/src/apps/gallery/model.ts"
+    Path(__file__).resolve().parents[2] / "desktop/legacy-src/apps/gallery/model.ts"
 )
 
 
