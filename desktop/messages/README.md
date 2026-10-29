@@ -15,6 +15,7 @@
 | `activity` | Ctrl+J 活动抽屉、侧栏的进行中角标、任务结束的 Toast |
 | `api` | API 错误说明（`#lib/api/messages.ts`） |
 | `app` | 应用名、标语 |
+| `atlas` | 数据集 › 图谱（语义地图） |
 | `boot` | 启动门（等待后端、失败、重试） |
 | `common` | 跨页面的通用词（重试、关闭、复制） |
 | `crawl` | 采集批次详情页（`/jobs/crawls/[batchId]`）和下载任务日志面板 |
