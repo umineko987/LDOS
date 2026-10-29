@@ -185,6 +185,64 @@ class TargetRoot:
     def owned_directory_identity(self, name: str) -> tuple[int, int]:
         return self._require_owned_directory(name)
 
+    def entry_identity(self, name: str) -> tuple[int, int] | None:
+        """目标根下某个条目的身份（不跟随符号链接）；不存在返回 None。
+
+        续传据此认出「临时目录已改名成最终名字、但任务还没来得及记成功」。
+        """
+        validate_leaf_name(name)
+        self.verify_identity()
+        try:
+            if _HAS_DIR_FD:
+                metadata = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
+            else:
+                _validate_absolute_directory_components(self.path)
+                metadata = (self.path / name).lstat()
+        except FileNotFoundError:
+            return None
+        return int(metadata.st_dev), int(metadata.st_ino)
+
+    def remove_output_file(self, temporary_name: str, relative_path: str) -> bool:
+        """续传：删掉自有临时目录里上次没写完的文件；不存在返回 False，只删普通文件。"""
+        _validate_owned_temp_name(temporary_name)
+        expected_temporary_identity = self._require_owned_directory(temporary_name)
+        parts = validate_relative_path(relative_path)
+        self.verify_identity()
+        if not _HAS_DIR_FD:
+            target = self.path / temporary_name
+            for component in parts:
+                target = target / component
+            try:
+                metadata = target.lstat()
+            except FileNotFoundError:
+                return False
+            if not stat.S_ISREG(metadata.st_mode) or is_reparse_path(target):
+                raise SafeCopyError("target_path_unsafe")
+            target.unlink()
+            return True
+        descriptor = os.dup(self.fd)
+        try:
+            try:
+                descriptor = _open_child_directory(descriptor, temporary_name, create=False)
+                temporary_metadata = os.fstat(descriptor)
+                if (
+                    int(temporary_metadata.st_dev),
+                    int(temporary_metadata.st_ino),
+                ) != expected_temporary_identity:
+                    raise SafeCopyError("target_path_changed")
+                for component in parts[:-1]:
+                    descriptor = _open_child_directory(descriptor, component, create=False)
+                metadata = os.stat(parts[-1], dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                return False
+            if not stat.S_ISREG(metadata.st_mode):
+                raise SafeCopyError("target_path_unsafe")
+            os.unlink(parts[-1], dir_fd=descriptor)
+            os.fsync(descriptor)
+            return True
+        finally:
+            os.close(descriptor)
+
     @contextlib.contextmanager
     def open_output_file(self, temporary_name: str, relative_path: str) -> Any:
         _validate_owned_temp_name(temporary_name)

@@ -39,6 +39,7 @@ from .api_routes import (
 # live outside the composition root.
 from .api_routes.atlas import create_atlas_router
 from .api_routes.captions import create_captions_router
+from .api_routes.dataset_exports import create_dataset_exports_router
 from .api_routes.dataset_stages import create_dataset_stages_router
 from .api_routes.datasets import create_datasets_router
 from .api_routes.models import create_models_router
@@ -58,6 +59,7 @@ from .config import AppSettings
 from .crawl import CrawlPlanner
 from .caption_service import CaptionService
 from .database import Database
+from .dataset_export import DatasetExportService
 from .dataset_service import DatasetService
 from .dataset_tagging import DatasetTaggingService
 from .dataset_triage import DatasetTriageService
@@ -205,6 +207,8 @@ class ServiceContainer:
         self.dataset_tagging = DatasetTaggingService.for_container(self)
         # 数据集清洗 / 去重：在图库审核上跑阶段、逐组定夺（见 dataset_triage）。
         self.dataset_triage = DatasetTriageService.for_container(self)
+        # 数据集导出：export 阶段输出 → 训练目录，逐文件日志可续传（见 dataset_export）。
+        self.dataset_exports = DatasetExportService.for_container(self)
         self._health_task: asyncio.Task | None = None
         self._started = False
         self._stopping = False
@@ -344,6 +348,7 @@ class ServiceContainer:
                 self.gallery_catalog.retry_pending_review_reconciliations
             )
             await asyncio.to_thread(self.datasets.reconcile)
+            await asyncio.to_thread(self.dataset_exports.recover)
             self._health_task = asyncio.create_task(self._proxy_health_loop(), name="proxy-health-monitor")
             self.job_sampler.start()
 
@@ -366,6 +371,7 @@ class ServiceContainer:
         await self.auth.stop()
         await asyncio.to_thread(self.gallery_directory_exports.stop)
         await asyncio.to_thread(self.gallery_catalog.stop)
+        await asyncio.to_thread(self.dataset_exports.stop)
         await asyncio.to_thread(self.datasets.stop)
         try:
             await asyncio.to_thread(self.proxy.stop, force=True)
@@ -665,6 +671,7 @@ def create_app(
     app.include_router(create_models_router())
     app.include_router(create_captions_router())
     app.include_router(create_dataset_stages_router())
+    app.include_router(create_dataset_exports_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
     app.include_router(create_jobs_router())

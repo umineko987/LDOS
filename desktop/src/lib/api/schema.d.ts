@@ -681,6 +681,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/datasets/{dataset_id}/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Dataset Exports */
+        get: operations["list_dataset_exports_api_v1_datasets__dataset_id__exports_get"];
+        put?: never;
+        /**
+         * Create Dataset Export
+         * @description 导出 export 阶段的输出。dry_run=true 时只算计划（目标路径、数量、冲突、总字节）。
+         */
+        post: operations["create_dataset_export_api_v1_datasets__dataset_id__exports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasets/{dataset_id}/funnel": {
         parameters: {
             query?: never;
@@ -944,6 +965,60 @@ export interface paths {
         get: operations["stream_events_api_v1_events_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/exports/{export_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Dataset Export */
+        get: operations["get_dataset_export_api_v1_exports__export_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/exports/{export_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Dataset Export */
+        post: operations["cancel_dataset_export_api_v1_exports__export_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/exports/{export_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Dataset Export
+         * @description 续传中断的导出（或目标名字被占用而失败、腾出名字后的导出）。
+         */
+        post: operations["resume_dataset_export_api_v1_exports__export_id__resume_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3252,6 +3327,219 @@ export interface components {
             trigger_word: string;
             /** Updated At */
             updated_at: number;
+        };
+        /** DatasetExportBlockerResponse */
+        DatasetExportBlockerResponse: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "source_offline" | "caption_unreadable";
+            /** Count */
+            count: number;
+            /** Ids */
+            ids: string[];
+        };
+        /** DatasetExportCollisionResponse */
+        DatasetExportCollisionResponse: {
+            /** Asset Id */
+            asset_id: string;
+            /** Name */
+            name: string;
+            /** Output Name */
+            output_name: string;
+        };
+        /** DatasetExportJobResponse */
+        DatasetExportJobResponse: {
+            /** Copied Bytes */
+            copied_bytes: number;
+            /** Created At */
+            created_at: number;
+            /** Dataset Id */
+            dataset_id: string;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Details */
+            error_details: {
+                [key: string]: unknown;
+            } | null;
+            /** Export Id */
+            export_id: string;
+            /** Finished At */
+            finished_at: number | null;
+            /** Folder Name */
+            folder_name: string;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Job Id */
+            job_id: string;
+            options: components["schemas"]["DatasetExportOptionsResponse"];
+            /** Output Path */
+            output_path: string;
+            /** Resumable */
+            resumable: boolean;
+            /** Staged Items */
+            staged_items: number;
+            /** Started At */
+            started_at: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+            /** Target Path */
+            target_path: string;
+            /** Total Bytes */
+            total_bytes: number;
+            /** Total Items */
+            total_items: number;
+            /** Txt Bytes */
+            txt_bytes: number;
+            /** Updated At */
+            updated_at: number;
+        };
+        /** DatasetExportListResponse */
+        DatasetExportListResponse: {
+            /** Items */
+            items: components["schemas"]["DatasetExportJobResponse"][];
+        };
+        /** DatasetExportOptionsResponse */
+        DatasetExportOptionsResponse: {
+            /** Folder Name */
+            folder_name: string;
+            /** Include Captions */
+            include_captions: boolean;
+            /**
+             * Layout
+             * @enum {string}
+             */
+            layout: "kohya" | "flat";
+            /** Pin Trigger */
+            pin_trigger: boolean;
+            /**
+             * Rename
+             * @enum {string}
+             */
+            rename: "none" | "sequential";
+            /** Repeats */
+            repeats: number;
+            /** Tag Blacklist */
+            tag_blacklist: string[];
+            /** Target Path */
+            target_path: string;
+            /** Trigger Word */
+            trigger_word: string;
+            /** Underscore To Space */
+            underscore_to_space: boolean;
+        };
+        /** DatasetExportPlanItemResponse */
+        DatasetExportPlanItemResponse: {
+            /** Asset Id */
+            asset_id: string;
+            /** Caption Output Relative Path */
+            caption_output_relative_path: string | null;
+            /** Caption Preview */
+            caption_preview: string;
+            /** Name */
+            name: string;
+            /** Output Relative Path */
+            output_relative_path: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Source Relative Path */
+            source_relative_path: string;
+        };
+        /** DatasetExportPlanResponse */
+        DatasetExportPlanResponse: {
+            /** Blockers */
+            blockers: components["schemas"]["DatasetExportBlockerResponse"][];
+            /** Caption Count */
+            caption_count: number;
+            /** Collision Count */
+            collision_count: number;
+            /** Collisions */
+            collisions: components["schemas"]["DatasetExportCollisionResponse"][];
+            /** Dataset Id */
+            dataset_id: string;
+            /** Folder Name */
+            folder_name: string;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Count */
+            image_count: number;
+            /** Items */
+            items: components["schemas"]["DatasetExportPlanItemResponse"][];
+            /**
+             * Layout
+             * @enum {string}
+             */
+            layout: "kohya" | "flat";
+            options: components["schemas"]["DatasetExportOptionsResponse"];
+            /** Output Path */
+            output_path: string;
+            /** Target Exists */
+            target_exists: boolean;
+            /** Target Path */
+            target_path: string;
+            /** Total Bytes */
+            total_bytes: number;
+            /** Txt Bytes */
+            txt_bytes: number;
+        };
+        /** DatasetExportRequest */
+        DatasetExportRequest: {
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Folder Name */
+            folder_name?: string | null;
+            /**
+             * Include Captions
+             * @default true
+             */
+            include_captions: boolean;
+            /**
+             * Layout
+             * @default kohya
+             * @enum {string}
+             */
+            layout: "kohya" | "flat";
+            /**
+             * Pin Trigger
+             * @default true
+             */
+            pin_trigger: boolean;
+            /**
+             * Rename
+             * @default none
+             * @enum {string}
+             */
+            rename: "none" | "sequential";
+            /**
+             * Repeats
+             * @default 10
+             */
+            repeats: number;
+            /** Tag Blacklist */
+            tag_blacklist?: string[];
+            /** Target Path */
+            target_path: string;
+            /** Trigger Word */
+            trigger_word?: string | null;
+            /**
+             * Underscore To Space
+             * @default false
+             */
+            underscore_to_space: boolean;
+        };
+        /** DatasetExportStartResponse */
+        DatasetExportStartResponse: {
+            /** Dry Run */
+            dry_run: boolean;
+            job: components["schemas"]["DatasetExportJobResponse"] | null;
+            plan: components["schemas"]["DatasetExportPlanResponse"] | null;
         };
         /** DatasetFunnelResponse */
         DatasetFunnelResponse: {
@@ -7766,6 +8054,83 @@ export interface operations {
             };
         };
     };
+    list_dataset_exports_api_v1_datasets__dataset_id__exports_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetExportListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_dataset_export_api_v1_datasets__dataset_id__exports_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasetExportRequest"];
+            };
+        };
+        responses: {
+            /** @description dry_run：只返回计划预览 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetExportStartResponse"];
+                };
+            };
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetExportStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_dataset_funnel_api_v1_datasets__dataset_id__funnel_get: {
         parameters: {
             query?: never;
@@ -8338,6 +8703,99 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dataset_export_api_v1_exports__export_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetExportJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_dataset_export_api_v1_exports__export_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetExportJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_dataset_export_api_v1_exports__export_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetExportJobResponse"];
                 };
             };
             /** @description Validation Error */

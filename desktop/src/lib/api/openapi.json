@@ -3841,6 +3841,587 @@
         "title": "DatasetDetailResponse",
         "type": "object"
       },
+      "DatasetExportBlockerResponse": {
+        "properties": {
+          "code": {
+            "enum": [
+              "source_offline",
+              "caption_unreadable"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "count",
+          "ids"
+        ],
+        "title": "DatasetExportBlockerResponse",
+        "type": "object"
+      },
+      "DatasetExportCollisionResponse": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "output_name": {
+            "title": "Output Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "name",
+          "output_name"
+        ],
+        "title": "DatasetExportCollisionResponse",
+        "type": "object"
+      },
+      "DatasetExportJobResponse": {
+        "properties": {
+          "copied_bytes": {
+            "minimum": 0.0,
+            "title": "Copied Bytes",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Details"
+          },
+          "export_id": {
+            "title": "Export Id",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "folder_name": {
+            "title": "Folder Name",
+            "type": "string"
+          },
+          "image_bytes": {
+            "minimum": 0.0,
+            "title": "Image Bytes",
+            "type": "integer"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/DatasetExportOptionsResponse"
+          },
+          "output_path": {
+            "title": "Output Path",
+            "type": "string"
+          },
+          "resumable": {
+            "title": "Resumable",
+            "type": "boolean"
+          },
+          "staged_items": {
+            "minimum": 0.0,
+            "title": "Staged Items",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "interrupted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target_path": {
+            "title": "Target Path",
+            "type": "string"
+          },
+          "total_bytes": {
+            "minimum": 0.0,
+            "title": "Total Bytes",
+            "type": "integer"
+          },
+          "total_items": {
+            "minimum": 0.0,
+            "title": "Total Items",
+            "type": "integer"
+          },
+          "txt_bytes": {
+            "minimum": 0.0,
+            "title": "Txt Bytes",
+            "type": "integer"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "export_id",
+          "dataset_id",
+          "status",
+          "target_path",
+          "folder_name",
+          "output_path",
+          "options",
+          "total_items",
+          "staged_items",
+          "image_bytes",
+          "txt_bytes",
+          "total_bytes",
+          "copied_bytes",
+          "error_code",
+          "error_details",
+          "resumable",
+          "job_id",
+          "created_at",
+          "updated_at",
+          "started_at",
+          "finished_at"
+        ],
+        "title": "DatasetExportJobResponse",
+        "type": "object"
+      },
+      "DatasetExportListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetExportJobResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "DatasetExportListResponse",
+        "type": "object"
+      },
+      "DatasetExportOptionsResponse": {
+        "properties": {
+          "folder_name": {
+            "title": "Folder Name",
+            "type": "string"
+          },
+          "include_captions": {
+            "title": "Include Captions",
+            "type": "boolean"
+          },
+          "layout": {
+            "enum": [
+              "kohya",
+              "flat"
+            ],
+            "title": "Layout",
+            "type": "string"
+          },
+          "pin_trigger": {
+            "title": "Pin Trigger",
+            "type": "boolean"
+          },
+          "rename": {
+            "enum": [
+              "none",
+              "sequential"
+            ],
+            "title": "Rename",
+            "type": "string"
+          },
+          "repeats": {
+            "title": "Repeats",
+            "type": "integer"
+          },
+          "tag_blacklist": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tag Blacklist",
+            "type": "array"
+          },
+          "target_path": {
+            "title": "Target Path",
+            "type": "string"
+          },
+          "trigger_word": {
+            "title": "Trigger Word",
+            "type": "string"
+          },
+          "underscore_to_space": {
+            "title": "Underscore To Space",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_path",
+          "layout",
+          "repeats",
+          "trigger_word",
+          "folder_name",
+          "rename",
+          "include_captions",
+          "pin_trigger",
+          "tag_blacklist",
+          "underscore_to_space"
+        ],
+        "title": "DatasetExportOptionsResponse",
+        "type": "object"
+      },
+      "DatasetExportPlanItemResponse": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "caption_output_relative_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caption Output Relative Path"
+          },
+          "caption_preview": {
+            "title": "Caption Preview",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "output_relative_path": {
+            "title": "Output Relative Path",
+            "type": "string"
+          },
+          "size_bytes": {
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "source_relative_path": {
+            "title": "Source Relative Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "name",
+          "source_relative_path",
+          "output_relative_path",
+          "caption_output_relative_path",
+          "caption_preview",
+          "size_bytes"
+        ],
+        "title": "DatasetExportPlanItemResponse",
+        "type": "object"
+      },
+      "DatasetExportPlanResponse": {
+        "properties": {
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetExportBlockerResponse"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "caption_count": {
+            "minimum": 0.0,
+            "title": "Caption Count",
+            "type": "integer"
+          },
+          "collision_count": {
+            "minimum": 0.0,
+            "title": "Collision Count",
+            "type": "integer"
+          },
+          "collisions": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetExportCollisionResponse"
+            },
+            "title": "Collisions",
+            "type": "array"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "folder_name": {
+            "title": "Folder Name",
+            "type": "string"
+          },
+          "image_bytes": {
+            "minimum": 0.0,
+            "title": "Image Bytes",
+            "type": "integer"
+          },
+          "image_count": {
+            "minimum": 0.0,
+            "title": "Image Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetExportPlanItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "layout": {
+            "enum": [
+              "kohya",
+              "flat"
+            ],
+            "title": "Layout",
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/DatasetExportOptionsResponse"
+          },
+          "output_path": {
+            "title": "Output Path",
+            "type": "string"
+          },
+          "target_exists": {
+            "title": "Target Exists",
+            "type": "boolean"
+          },
+          "target_path": {
+            "title": "Target Path",
+            "type": "string"
+          },
+          "total_bytes": {
+            "minimum": 0.0,
+            "title": "Total Bytes",
+            "type": "integer"
+          },
+          "txt_bytes": {
+            "minimum": 0.0,
+            "title": "Txt Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "layout",
+          "folder_name",
+          "target_path",
+          "output_path",
+          "target_exists",
+          "options",
+          "image_count",
+          "caption_count",
+          "image_bytes",
+          "txt_bytes",
+          "total_bytes",
+          "collision_count",
+          "collisions",
+          "blockers",
+          "items"
+        ],
+        "title": "DatasetExportPlanResponse",
+        "type": "object"
+      },
+      "DatasetExportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "folder_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Name"
+          },
+          "include_captions": {
+            "default": true,
+            "title": "Include Captions",
+            "type": "boolean"
+          },
+          "layout": {
+            "default": "kohya",
+            "enum": [
+              "kohya",
+              "flat"
+            ],
+            "title": "Layout",
+            "type": "string"
+          },
+          "pin_trigger": {
+            "default": true,
+            "title": "Pin Trigger",
+            "type": "boolean"
+          },
+          "rename": {
+            "default": "none",
+            "enum": [
+              "none",
+              "sequential"
+            ],
+            "title": "Rename",
+            "type": "string"
+          },
+          "repeats": {
+            "default": 10,
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Repeats",
+            "type": "integer"
+          },
+          "tag_blacklist": {
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Tag Blacklist",
+            "type": "array"
+          },
+          "target_path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Target Path",
+            "type": "string"
+          },
+          "trigger_word": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger Word"
+          },
+          "underscore_to_space": {
+            "default": false,
+            "title": "Underscore To Space",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_path"
+        ],
+        "title": "DatasetExportRequest",
+        "type": "object"
+      },
+      "DatasetExportStartResponse": {
+        "properties": {
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetExportJobResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetExportPlanResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "dry_run",
+          "plan",
+          "job"
+        ],
+        "title": "DatasetExportStartResponse",
+        "type": "object"
+      },
       "DatasetFunnelResponse": {
         "properties": {
           "dataset_id": {
@@ -15831,6 +16412,115 @@
         "summary": "Record Dataset Decisions"
       }
     },
+    "/api/v1/datasets/{dataset_id}/exports": {
+      "get": {
+        "operationId": "list_dataset_exports_api_v1_datasets__dataset_id__exports_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetExportListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Dataset Exports"
+      },
+      "post": {
+        "description": "导出 export 阶段的输出。dry_run=true 时只算计划（目标路径、数量、冲突、总字节）。",
+        "operationId": "create_dataset_export_api_v1_datasets__dataset_id__exports_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetExportStartResponse"
+                }
+              }
+            },
+            "description": "dry_run：只返回计划预览"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetExportStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Dataset Export"
+      }
+    },
     "/api/v1/datasets/{dataset_id}/funnel": {
       "get": {
         "operationId": "get_dataset_funnel_api_v1_datasets__dataset_id__funnel_get",
@@ -16948,6 +17638,124 @@
         "tags": [
           "jobs"
         ]
+      }
+    },
+    "/api/v1/exports/{export_id}": {
+      "get": {
+        "operationId": "get_dataset_export_api_v1_exports__export_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_id",
+            "required": true,
+            "schema": {
+              "title": "Export Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetExportJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Export"
+      }
+    },
+    "/api/v1/exports/{export_id}/cancel": {
+      "post": {
+        "operationId": "cancel_dataset_export_api_v1_exports__export_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_id",
+            "required": true,
+            "schema": {
+              "title": "Export Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetExportJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Dataset Export"
+      }
+    },
+    "/api/v1/exports/{export_id}/resume": {
+      "post": {
+        "description": "续传中断的导出（或目标名字被占用而失败、腾出名字后的导出）。",
+        "operationId": "resume_dataset_export_api_v1_exports__export_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_id",
+            "required": true,
+            "schema": {
+              "title": "Export Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetExportJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume Dataset Export"
       }
     },
     "/api/v1/gallery/assets/{asset_id}": {

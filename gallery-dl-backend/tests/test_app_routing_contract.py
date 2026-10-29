@@ -125,6 +125,11 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("GET", "/api/v1/datasets/{dataset_id}/stages/clean/items"): ("list_dataset_clean_items_api_v1_datasets__dataset_id__stages_clean_items_get", ("200", "422")),
     ("POST", "/api/v1/datasets/{dataset_id}/stages/{stage}/apply"): ("apply_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__apply_post", ("200", "422")),
     ("POST", "/api/v1/datasets/{dataset_id}/stages/{stage}/undo"): ("undo_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__undo_post", ("200", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/exports"): ("create_dataset_export_api_v1_datasets__dataset_id__exports_post", ("202", "200", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/exports"): ("list_dataset_exports_api_v1_datasets__dataset_id__exports_get", ("200", "422")),
+    ("GET", "/api/v1/exports/{export_id}"): ("get_dataset_export_api_v1_exports__export_id__get", ("200", "422")),
+    ("POST", "/api/v1/exports/{export_id}/cancel"): ("cancel_dataset_export_api_v1_exports__export_id__cancel_post", ("200", "422")),
+    ("POST", "/api/v1/exports/{export_id}/resume"): ("resume_dataset_export_api_v1_exports__export_id__resume_post", ("202", "422")),
     ("POST", "/api/v1/tasks"):("create_task_api_v1_tasks_post", ("200", "422")),
     ("GET", "/api/v1/tasks"): ("list_tasks_api_v1_tasks_get", ("200", "422")),
     ("GET", "/api/v1/tasks/{task_id}"): ("get_task_api_v1_tasks__task_id__get", ("200", "422")),
@@ -279,6 +284,7 @@ class AppRoutingContractTests(unittest.TestCase):
             "atlas": "gdl_backend.api_routes.atlas",
             "captions": "gdl_backend.api_routes.captions",
             "dataset_stages": "gdl_backend.api_routes.dataset_stages",
+            "dataset_exports": "gdl_backend.api_routes.dataset_exports",
             "policies":"gdl_backend.api_routes.policies",
             "proxy": "gdl_backend.api_routes.proxy",
             "scheduler": "gdl_backend.api_routes.scheduler",
@@ -315,6 +321,10 @@ class AppRoutingContractTests(unittest.TestCase):
                 domain = "captions"
             elif path.startswith("/api/v1/datasets/") and "/stages/" in path:
                 domain = "dataset_stages"
+            elif path.startswith("/api/v1/exports") or (
+                path.startswith("/api/v1/datasets/") and path.endswith("/exports")
+            ):
+                domain = "dataset_exports"
             elif path.startswith("/api/v1/datasets"):
                 domain = "datasets"
             elif "/review" in path:
