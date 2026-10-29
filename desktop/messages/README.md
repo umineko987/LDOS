@@ -27,6 +27,7 @@
 | `locale` | 语言切换 |
 | `models` | 设置 › 模型，以及阶段页共用的模型安装组件（`#lib/components/model-install`） |
 | `nav` | 侧栏导航和面包屑 |
+| `network` | 设置 › 网络（代理池、站点账号、站点策略） |
 | `page` | 各路由的标题和占位说明 |
 | `palette` | Ctrl+K 命令面板 |
 | `prefs` | 设置 › 偏好（语言、减少动效、密度、地图渲染器） |
