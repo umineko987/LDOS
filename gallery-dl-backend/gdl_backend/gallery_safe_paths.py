@@ -86,6 +86,8 @@ class GalleryFilesystemLocks:
                         self._entries[key] = (lock, count - 1)
 
 _MISSING_DISK_VERSION = hashlib.sha256(b"ldos:missing:v1").hexdigest()
+# 文件不存在时的磁盘版本：调用方用它表达「期望这里还没有文件」。
+MISSING_DISK_VERSION = _MISSING_DISK_VERSION
 _OPEN_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NO_FOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _CLOSE_ON_EXEC = getattr(os, "O_CLOEXEC", 0)
@@ -1130,6 +1132,7 @@ class SafeSourceRoot:
 
 
 __all__ = [
+    "MISSING_DISK_VERSION",
     "SafeDirectoryEntry",
     "SafeFileStat",
     "SafeSourceRoot",

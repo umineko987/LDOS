@@ -33,6 +33,7 @@ from .gallery_catalog import (
     txt_name_for_image,
 )
 from .gallery_safe_paths import (
+    MISSING_DISK_VERSION,
     GalleryFilesystemLocks,
     SafeSourceRoot,
     UnsafeSourcePathError,
@@ -569,46 +570,60 @@ class GalleryCatalogService:
             raise GallerySourceNotFound(asset["source_id"])
         if source["availability"] != "available":
             raise GallerySourceOffline(asset["source_id"])
-        txt_relative = (
-            asset["txt_relative_path"]
-            if asset["txt_relative_path"]
-            else _txt_relative_for_image(asset["relative_path"])
-        )
         lock_keys = (f"source:{asset['source_id']}", f"asset:{asset_id}")
         with self._filesystem_locks.hold(*lock_keys):
             try:
                 with SafeSourceRoot(source["root_path"]) as safe_root:
-                    try:
-                        payload, disk_version = safe_root.read_with_disk_version(
-                            txt_relative,
-                            allow_missing=True,
-                            max_bytes=_TXT_READ_MAX_BYTES,
-                        )
-                    except UnsafeSourcePathError as error:
-                        if error.reason != "file_too_large":
-                            raise
-                        payload = None
-                        disk_version = safe_root.disk_version(txt_relative)
-                        txt_state = "io_error"
-                    else:
-                        txt_state = classify_txt_state(
-                            exists=payload is not None,
-                            data=payload,
-                            pair_conflict=asset["txt_state"] == "pair_conflict",
-                        )
+                    return _read_annotation(safe_root, asset)
             except UnsafeSourcePathError as error:
-                raise GalleryAnnotationError("unsafe_source_path", txt_relative) from error
-        content: str | None = None
-        if payload is not None and txt_state not in {"invalid_encoding", "io_error", "pair_conflict"}:
-            decoded, text = decode_txt_bytes(payload)
-            content = text if decoded else None
-        return {
-            "asset_id": asset_id,
-            "txt_state": txt_state,
-            "txt_version": int(asset["txt_version"]),
-            "disk_version": disk_version,
-            "content": content,
-        }
+                raise GalleryAnnotationError(
+                    "unsafe_source_path", _annotation_relative_path(asset)
+                ) from error
+
+    def read_annotations(self, asset_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
+        """批量读注解（数据集 caption 用）：每个来源只打开一次根目录、持一次来源锁。
+
+        每项与 get_annotation 同构；读不了的项 content 为 None，并带 error：
+        asset_not_found / source_offline / unsafe_source_path。
+        """
+        wanted = list(dict.fromkeys(asset_ids))
+        assets: dict[str, dict[str, Any]] = {}
+        for start in range(0, len(wanted), 500):
+            for asset in self._repo.get_assets_by_ids(wanted[start : start + 500]):
+                assets[asset["asset_id"]] = asset
+        results: dict[str, dict[str, Any]] = {}
+        by_source: dict[str, list[dict[str, Any]]] = {}
+        for asset_id in wanted:
+            asset = assets.get(asset_id)
+            if asset is None:
+                results[asset_id] = _annotation_error(asset_id, "asset_not_found")
+            else:
+                by_source.setdefault(str(asset["source_id"]), []).append(asset)
+        for source_id, group in by_source.items():
+            source = self._repo.get_source(source_id)
+            if source is None or source["availability"] != "available":
+                for asset in group:
+                    results[asset["asset_id"]] = _annotation_error(
+                        asset["asset_id"], "source_offline", asset
+                    )
+                continue
+            with self._filesystem_locks.hold(f"source:{source_id}"):
+                try:
+                    with SafeSourceRoot(source["root_path"]) as safe_root:
+                        for asset in group:
+                            try:
+                                results[asset["asset_id"]] = _read_annotation(safe_root, asset)
+                            except UnsafeSourcePathError:
+                                results[asset["asset_id"]] = _annotation_error(
+                                    asset["asset_id"], "unsafe_source_path", asset
+                                )
+                except UnsafeSourcePathError:
+                    for asset in group:
+                        results.setdefault(
+                            asset["asset_id"],
+                            _annotation_error(asset["asset_id"], "unsafe_source_path", asset),
+                        )
+        return {asset_id: results[asset_id] for asset_id in wanted}
 
     def save_annotation(
         self,
@@ -625,6 +640,36 @@ class GalleryCatalogService:
         before replacement.  If the SQLite update fails, the prior bytes are
         restored only while the just-written version still owns the path.
         """
+        return self._write_annotation(
+            asset_id,
+            content,
+            expected_txt_version=expected_txt_version,
+            expected_disk_version=expected_disk_version,
+        )
+
+    def remove_annotation(
+        self,
+        asset_id: str,
+        *,
+        expected_txt_version: int,
+        expected_disk_version: str,
+    ) -> dict[str, Any]:
+        """删除 TXT（撤销「写入前没有 caption」的写入时用），版本检查与 save_annotation 相同。"""
+        return self._write_annotation(
+            asset_id,
+            None,
+            expected_txt_version=expected_txt_version,
+            expected_disk_version=expected_disk_version,
+        )
+
+    def _write_annotation(
+        self,
+        asset_id: str,
+        content: str | None,
+        *,
+        expected_txt_version: int,
+        expected_disk_version: str,
+    ) -> dict[str, Any]:
         initial = self._repo.get_asset(asset_id)
         if initial is None:
             raise GalleryAssetNotFound(asset_id)
@@ -660,7 +705,7 @@ class GalleryCatalogService:
                 if asset["txt_relative_path"]
                 else _txt_relative_for_image(asset["relative_path"])
             )
-            data = content.encode("utf-8", errors="strict")
+            data = None if content is None else content.encode("utf-8", errors="strict")
             try:
                 with SafeSourceRoot(source["root_path"]) as safe_root:
                     previous_payload, actual_disk_version = safe_root.read_with_disk_version(
@@ -675,32 +720,43 @@ class GalleryCatalogService:
                                 "actual": actual_disk_version,
                             },
                         )
-                    metadata, written_disk_version = safe_root.atomic_write_bytes(
-                        txt_relative,
-                        data,
-                        expected_disk_version=actual_disk_version,
-                    )
-                    new_state = classify_txt_state(
-                        exists=True, read_ok=True, data=data
-                    )
+                    if data is None:
+                        if previous_payload is not None:
+                            safe_root.unlink_if_version(
+                                txt_relative, expected_disk_version=actual_disk_version
+                            )
+                        written_disk_version = MISSING_DISK_VERSION
+                        size_bytes, modified_ns = 0, 0
+                        new_state = classify_txt_state(exists=False)
+                    else:
+                        metadata, written_disk_version = safe_root.atomic_write_bytes(
+                            txt_relative,
+                            data,
+                            expected_disk_version=actual_disk_version,
+                        )
+                        size_bytes, modified_ns = metadata.size, metadata.modified_ns
+                        new_state = classify_txt_state(
+                            exists=True, read_ok=True, data=data
+                        )
                     try:
                         updated = self._repo.update_annotation(
                             asset_id,
                             expected_txt_version=expected_txt_version,
                             txt_state=new_state,
-                            txt_size_bytes=metadata.size,
-                            txt_modified_ns=metadata.modified_ns,
+                            txt_size_bytes=size_bytes,
+                            txt_modified_ns=modified_ns,
                             txt_sha256="",
                             txt_relative_path=txt_relative,
-                            txt_content=content,
+                            txt_content=content or "",
                         )
                     except Exception:
                         try:
                             if previous_payload is None:
-                                safe_root.unlink_if_version(
-                                    txt_relative,
-                                    expected_disk_version=written_disk_version,
-                                )
+                                if data is not None:
+                                    safe_root.unlink_if_version(
+                                        txt_relative,
+                                        expected_disk_version=written_disk_version,
+                                    )
                             else:
                                 safe_root.atomic_write_bytes(
                                     txt_relative,
@@ -1036,6 +1092,58 @@ def _txt_relative_for_image(image_relative_path: str) -> str:
     parts = image_relative_path.rsplit("/", 1)
     directory = parts[0] + "/" if len(parts) == 2 else ""
     return f"{directory}{txt_name_for_image(parts[-1])}"
+
+
+def _annotation_relative_path(asset: Mapping[str, Any]) -> str:
+    return str(asset["txt_relative_path"] or _txt_relative_for_image(asset["relative_path"]))
+
+
+def _read_annotation(safe_root: SafeSourceRoot, asset: Mapping[str, Any]) -> dict[str, Any]:
+    """在已打开的来源根下读一张图的 TXT；调用方持有来源锁。"""
+    txt_relative = _annotation_relative_path(asset)
+    try:
+        payload, disk_version = safe_root.read_with_disk_version(
+            txt_relative,
+            allow_missing=True,
+            max_bytes=_TXT_READ_MAX_BYTES,
+        )
+    except UnsafeSourcePathError as error:
+        if error.reason != "file_too_large":
+            raise
+        payload = None
+        disk_version = safe_root.disk_version(txt_relative)
+        txt_state = "io_error"
+    else:
+        txt_state = classify_txt_state(
+            exists=payload is not None,
+            data=payload,
+            pair_conflict=asset["txt_state"] == "pair_conflict",
+        )
+    content: str | None = None
+    if payload is not None and txt_state not in {"invalid_encoding", "io_error", "pair_conflict"}:
+        decoded, text = decode_txt_bytes(payload)
+        content = text if decoded else None
+    return {
+        "asset_id": asset["asset_id"],
+        "txt_state": txt_state,
+        "txt_version": int(asset["txt_version"]),
+        "disk_version": disk_version,
+        "content": content,
+    }
+
+
+def _annotation_error(
+    asset_id: str, code: str, asset: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    return {
+        "asset_id": asset_id,
+        "txt_state": "io_error",
+        "txt_version": int(asset["txt_version"]) if asset is not None else 0,
+        "disk_version": "",
+        "content": None,
+        "error": code,
+    }
+
 
 def _decode_txt(data: bytes) -> tuple[bool, str]:
     return decode_txt_bytes(data)
