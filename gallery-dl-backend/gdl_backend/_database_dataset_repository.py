@@ -496,7 +496,7 @@ class DatasetRepository:
         """成员分页。
 
         excluded_before：在这些阶段被排除的图不算本阶段输入；
-        decision：相对 stage 的过滤（excluded / approved / undecided）。
+        decision：相对 stage 的过滤（excluded / approved / undecided / kept，kept = 未决定 + 通过）。
         """
         page_limit = max(1, min(int(limit or MEMBER_PAGE_DEFAULT_LIMIT), MEMBER_PAGE_MAX_LIMIT))
         params: dict[str, Any] = {"dataset_id": dataset_id}
@@ -533,6 +533,15 @@ class DatasetRepository:
                         SELECT 1 FROM dataset_decisions AS f
                         WHERE f.dataset_id = :dataset_id AND f.asset_id = a.id
                           AND f.stage = :stage
+                    )"""
+                )
+            elif decision == "kept":
+                # 未决定 + 通过：本阶段没被排除、会流向下一阶段的图。
+                restrictions.append(
+                    """NOT EXISTS (
+                        SELECT 1 FROM dataset_decisions AS f
+                        WHERE f.dataset_id = :dataset_id AND f.asset_id = a.id
+                          AND f.stage = :stage AND f.decision = 'exclude'
                     )"""
                 )
             else:

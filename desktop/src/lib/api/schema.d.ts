@@ -8811,7 +8811,7 @@ export interface operations {
         parameters: {
             query?: {
                 stage?: ("collect" | "clean" | "dedup" | "tag" | "review" | "export") | null;
-                decision?: ("excluded" | "approved" | "undecided") | null;
+                decision?: ("excluded" | "approved" | "undecided" | "kept") | null;
                 query?: string | null;
                 cursor?: string | null;
                 limit?: number;

@@ -207,6 +207,30 @@ class DatasetMemberRoutesTest(DatasetApiTestBase):
         )
         self.assertEqual(empty.status_code, 422)
 
+    def test_kept_filter_is_undecided_plus_approved(self) -> None:
+        names = {index: gallery_asset_id(self.source_id, f"{index}.png") for index in range(1, 4)}
+        for asset_id, decision in ((names[1], "exclude"), (names[2], "approve")):
+            response = self.client.post(
+                f"{self.base}/decisions",
+                json={"stage": "clean", "asset_ids": [asset_id], "decision": decision},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+        # 别的阶段的排除不影响 clean 阶段的 kept。
+        self.service.decide(self.dataset_id, stage="dedup", asset_ids=[names[3]], decision="exclude")
+
+        def member_names(decision: str) -> list[str]:
+            response = self.client.get(f"{self.base}/members", params={"stage": "clean", "decision": decision})
+            self.assertEqual(response.status_code, 200, response.text)
+            body = response.json()
+            self.assertEqual(body["total"], len(body["items"]))
+            return [item["name"] for item in body["items"]]
+
+        self.assertEqual(member_names("kept"), ["2.png", "3.png"])
+        self.assertEqual(member_names("excluded"), ["1.png"])
+        self.assertEqual(sorted(member_names("approved") + member_names("undecided")), member_names("kept"))
+        bad = self.client.get(f"{self.base}/members", params={"decision": "kept"})
+        self.assertEqual((bad.status_code, self.error_code(bad)), (422, "invalid_dataset_member_filter"))
+
     def test_stage_runs_and_hashing(self) -> None:
         run = self.service.start_stage_run(self.dataset_id, "tag", ref_id="tagger-job")
         self.service.finish_stage_run(run["run_id"], status="succeeded", stats={"tagged": 3})

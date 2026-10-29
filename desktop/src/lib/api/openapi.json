@@ -18701,7 +18701,8 @@
                   "enum": [
                     "excluded",
                     "approved",
-                    "undecided"
+                    "undecided",
+                    "kept"
                   ],
                   "type": "string"
                 },

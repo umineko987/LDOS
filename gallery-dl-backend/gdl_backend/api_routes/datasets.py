@@ -30,7 +30,8 @@ DatasetStageRunStatus = Literal["running", "succeeded", "failed", "cancelled"]
 DatasetStageStatus = Literal["idle", "running", "succeeded", "failed", "cancelled"]
 DatasetRootOrigin = Literal["import", "library", "crawl"]
 DatasetDecision = Literal["exclude", "approve"]
-DatasetMemberDecisionFilter = Literal["excluded", "approved", "undecided"]
+# kept = undecided + approved：本阶段没被排除的图。
+DatasetMemberDecisionFilter = Literal["excluded", "approved", "undecided", "kept"]
 DatasetCrawlState = Literal["pending", "attached", "failed"]
 
 _Id = Annotated[str, Field(min_length=1, max_length=128)]
