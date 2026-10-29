@@ -2310,7 +2310,7 @@ export interface components {
              * Cached
              * @default false
              */
-            cached: boolean;
+            cached?: boolean;
             /** Clusters */
             clusters?: components["schemas"]["AtlasCluster"][];
             /** Current Digest */
@@ -2371,7 +2371,7 @@ export interface components {
              * Force
              * @default false
              */
-            force: boolean;
+            force?: boolean;
             /** Perplexity */
             perplexity?: number | null;
         };
@@ -2413,7 +2413,7 @@ export interface components {
              * Cached
              * @default false
              */
-            cached: boolean;
+            cached?: boolean;
             /** Current Digest */
             current_digest: string;
             /** Dataset Id */
@@ -2468,7 +2468,7 @@ export interface components {
              * Proxy Url
              * @default
              */
-            proxy_url: string;
+            proxy_url?: string;
         };
         /** BrowserExecutableUpdate */
         BrowserExecutableUpdate: {
@@ -2487,7 +2487,7 @@ export interface components {
              * @default back
              * @enum {string}
              */
-            position: "front" | "back";
+            position?: "front" | "back";
             /** Tags */
             tags: string[];
         };
@@ -2645,7 +2645,7 @@ export interface components {
              * Dry Run
              * @default false
              */
-            dry_run: boolean;
+            dry_run?: boolean;
             /** Expected Versions */
             expected_versions?: {
                 [key: string]: string;
@@ -2656,7 +2656,7 @@ export interface components {
              * Sample Limit
              * @default 20
              */
-            sample_limit: number;
+            sample_limit?: number;
         };
         /** CaptionPinOp */
         CaptionPinOp: {
@@ -2749,30 +2749,30 @@ export interface components {
              * Dry Run
              * @default false
              */
-            dry_run: boolean;
+            dry_run?: boolean;
             /**
              * Escape Parens
              * @default false
              */
-            escape_parens: boolean;
+            escape_parens?: boolean;
             /**
              * Keep Underscores
              * @default false
              */
-            keep_underscores: boolean;
+            keep_underscores?: boolean;
             /**
              * Mode
              * @default merge
              * @enum {string}
              */
-            mode: "overwrite" | "merge" | "fill_empty";
+            mode?: "overwrite" | "merge" | "fill_empty";
             /** Models */
             models: string[];
             /**
              * Sample Limit
              * @default 20
              */
-            sample_limit: number;
+            sample_limit?: number;
             /** Thresholds */
             thresholds?: {
                 [key: string]: {
@@ -3031,7 +3031,7 @@ export interface components {
              * Concurrency
              * @default 20
              */
-            concurrency: number;
+            concurrency?: number;
             /** Config File */
             config_file?: string | null;
             /** Cookies File */
@@ -3048,14 +3048,14 @@ export interface components {
              * Max Tasks
              * @default 10000
              */
-            max_tasks: number;
+            max_tasks?: number;
             /** Output Dir */
             output_dir?: string | null;
             /**
              * Priority
              * @default 0
              */
-            priority: number;
+            priority?: number;
             /** Proxy Mode */
             proxy_mode?: ("direct" | "prefer" | "required") | null;
             /** Sources */
@@ -3064,7 +3064,7 @@ export interface components {
              * Timeout Seconds
              * @default 180
              */
-            timeout_seconds: number;
+            timeout_seconds?: number;
         };
         /** CrawlRerunRequest */
         CrawlRerunRequest: {
@@ -3072,12 +3072,12 @@ export interface components {
              * Additional Attempts
              * @default 1
              */
-            additional_attempts: number;
+            additional_attempts?: number;
             /**
              * Requeue Succeeded
              * @default false
              */
-            requeue_succeeded: boolean;
+            requeue_succeeded?: boolean;
         };
         /** CrawlReviewSummaryResponse */
         CrawlReviewSummaryResponse: {
@@ -3117,7 +3117,7 @@ export interface components {
              * Priority
              * @default 0
              */
-            priority: number;
+            priority?: number;
             /** Proxy Mode */
             proxy_mode?: ("direct" | "prefer" | "required") | null;
             /** Site */
@@ -3126,7 +3126,7 @@ export interface components {
              * Timeout Seconds
              * @default 180
              */
-            timeout_seconds: number;
+            timeout_seconds?: number;
         };
         /** CrawlSourceGroupResponse */
         CrawlSourceGroupResponse: {
@@ -3257,14 +3257,14 @@ export interface components {
              * @default character
              * @enum {string}
              */
-            kind: "character" | "style" | "concept";
+            kind?: "character" | "style" | "concept";
             /** Name */
             name: string;
             /**
              * Trigger Word
              * @default
              */
-            trigger_word: string;
+            trigger_word?: string;
         };
         /** DatasetDecisionRequest */
         DatasetDecisionRequest: {
@@ -3279,7 +3279,7 @@ export interface components {
              * Reason
              * @default
              */
-            reason: string;
+            reason?: string;
             /**
              * Stage
              * @enum {string}
@@ -3492,36 +3492,36 @@ export interface components {
              * Dry Run
              * @default false
              */
-            dry_run: boolean;
+            dry_run?: boolean;
             /** Folder Name */
             folder_name?: string | null;
             /**
              * Include Captions
              * @default true
              */
-            include_captions: boolean;
+            include_captions?: boolean;
             /**
              * Layout
              * @default kohya
              * @enum {string}
              */
-            layout: "kohya" | "flat";
+            layout?: "kohya" | "flat";
             /**
              * Pin Trigger
              * @default true
              */
-            pin_trigger: boolean;
+            pin_trigger?: boolean;
             /**
              * Rename
              * @default none
              * @enum {string}
              */
-            rename: "none" | "sequential";
+            rename?: "none" | "sequential";
             /**
              * Repeats
              * @default 10
              */
-            repeats: number;
+            repeats?: number;
             /** Tag Blacklist */
             tag_blacklist?: string[];
             /** Target Path */
@@ -3532,7 +3532,7 @@ export interface components {
              * Underscore To Space
              * @default false
              */
-            underscore_to_space: boolean;
+            underscore_to_space?: boolean;
         };
         /** DatasetExportStartResponse */
         DatasetExportStartResponse: {
@@ -4260,7 +4260,7 @@ export interface components {
              * Clear Hf Token
              * @default false
              */
-            clear_hf_token: boolean;
+            clear_hf_token?: boolean;
             /** Custom Proxy */
             custom_proxy?: string | null;
             /** Hf Mirror */
@@ -4310,13 +4310,13 @@ export interface components {
              * @default stop
              * @enum {string}
              */
-            gp_policy: "stop" | "resized";
+            gp_policy?: "stop" | "resized";
             /**
              * Image Mode
              * @default original
              * @enum {string}
              */
-            image_mode: "original" | "resample";
+            image_mode?: "original" | "resample";
         };
         /**
          * EditableSitePolicy
@@ -4327,23 +4327,23 @@ export interface components {
              * Backoff Base Seconds
              * @default 2
              */
-            backoff_base_seconds: number;
+            backoff_base_seconds?: number;
             /**
              * Max Concurrency
              * @default 20
              */
-            max_concurrency: number;
+            max_concurrency?: number;
             /**
              * Proxy Mode
              * @default prefer
              * @enum {string}
              */
-            proxy_mode: "direct" | "prefer" | "required";
+            proxy_mode?: "direct" | "prefer" | "required";
             /**
              * Retry Limit
              * @default 2
              */
-            retry_limit: number;
+            retry_limit?: number;
         };
         /** FilterConfig */
         FilterConfig: {
@@ -5148,7 +5148,7 @@ export interface components {
              * Accept License
              * @default false
              */
-            accept_license: boolean;
+            accept_license?: boolean;
             /** Keys */
             keys: string[];
         };
@@ -5160,7 +5160,7 @@ export interface components {
              * Proxy Url
              * @default
              */
-            proxy_url: string;
+            proxy_url?: string;
         };
         /** ModelInstallResponse */
         ModelInstallResponse: {
@@ -5355,7 +5355,7 @@ export interface components {
              * Force Refresh
              * @default true
              */
-            force_refresh: boolean;
+            force_refresh?: boolean;
             /** Probe Url */
             probe_url?: string | null;
         };
@@ -5365,7 +5365,7 @@ export interface components {
              * Force
              * @default false
              */
-            force: boolean;
+            force?: boolean;
         };
         /** ProxySubscriptionUpdate */
         ProxySubscriptionUpdate: {
@@ -5576,7 +5576,7 @@ export interface components {
              * Additional Attempts
              * @default 1
              */
-            additional_attempts: number;
+            additional_attempts?: number;
         };
         /** ReviewDecisions */
         ReviewDecisions: {
@@ -5615,7 +5615,7 @@ export interface components {
              * Limit
              * @default 20
              */
-            limit: number;
+            limit?: number;
             /** Proxy Mode */
             proxy_mode?: ("direct" | "prefer" | "required") | null;
             /** Search Extra Args */
@@ -5630,7 +5630,7 @@ export interface components {
              * Timeout Seconds
              * @default 180
              */
-            timeout_seconds: number;
+            timeout_seconds?: number;
         };
         /**
          * SearchResponse
@@ -5700,7 +5700,7 @@ export interface components {
              * Timeout Seconds
              * @default 180
              */
-            timeout_seconds: number;
+            timeout_seconds?: number;
         };
         /** SearchTagNamespaceResponse */
         SearchTagNamespaceResponse: {
@@ -5806,7 +5806,7 @@ export interface components {
              * Batch Size
              * @default 8
              */
-            batch_size: number;
+            batch_size?: number;
             /** Models */
             models: string[];
         };
@@ -5890,7 +5890,7 @@ export interface components {
              * Accept License
              * @default false
              */
-            accept_license: boolean;
+            accept_license?: boolean;
             /** Download Proxy */
             download_proxy?: string | null;
             /** Models */
@@ -5908,7 +5908,7 @@ export interface components {
              * Batch Size
              * @default 8
              */
-            batch_size: number;
+            batch_size?: number;
             /** Categories */
             categories?: string[] | null;
             /** Directory Ids */
@@ -5919,7 +5919,7 @@ export interface components {
              * Overwrite Captions
              * @default false
              */
-            overwrite_captions: boolean;
+            overwrite_captions?: boolean;
             /** Thresholds */
             thresholds?: {
                 [key: string]: {
@@ -5930,7 +5930,7 @@ export interface components {
              * Write Captions
              * @default true
              */
-            write_captions: boolean;
+            write_captions?: boolean;
         };
         /** TaskCreate */
         TaskCreate: {
@@ -5951,7 +5951,7 @@ export interface components {
              * Priority
              * @default 0
              */
-            priority: number;
+            priority?: number;
             /** Proxy Mode */
             proxy_mode?: ("direct" | "prefer" | "required") | null;
             /** Site */
