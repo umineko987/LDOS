@@ -41,6 +41,14 @@ class ThumbnailService:
         ).hexdigest()
         return f'W/"{digest[:24]}"'
 
+    def _cache_path(self, asset_id: str, modified_ns: int, size: int) -> Path:
+        return self._cache_dir / f"{asset_id}.{int(modified_ns)}.{size}.jpg"
+
+    def cached_path(self, asset_id: str, modified_ns: int, size: int) -> Path | None:
+        """已缓存的缩略图路径（不生成）；语义地图用它当雪碧图素材，省掉解码原图。"""
+        cached = self._cache_path(asset_id, modified_ns, size)
+        return cached if cached.is_file() and not cached.is_symlink() else None
+
     def thumbnail_response(
         self,
         *,
@@ -62,7 +70,7 @@ class ThumbnailService:
         try:
             actual_modified_ns = int(os.fstat(source_handle.fileno()).st_mtime_ns)
             etag = self._etag(asset_id, actual_modified_ns, size)
-            cached = self._cache_dir / f"{asset_id}.{actual_modified_ns}.{size}.jpg"
+            cached = self._cache_path(asset_id, actual_modified_ns, size)
             if cached.is_file():
                 return {"path": cached, "etag": etag}
             with Image.open(source_handle) as image:

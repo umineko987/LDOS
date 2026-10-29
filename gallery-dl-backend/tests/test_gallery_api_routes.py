@@ -504,10 +504,17 @@ class GalleryAssetRoutesTest(GalleryApiTestBase):
 
     def test_thumbnail_generates_and_caches(self) -> None:
         asset_id = self.assets["pic.jpg"]["asset_id"]
+        modified_ns = int(self.assets["pic.jpg"]["modified_ns"])
+        thumbnails = self.container.gallery_thumbnails
+        self.assertIsNone(thumbnails.cached_path(asset_id, modified_ns, 256))
         response = self.client.get(
             f"/api/v1/gallery/assets/{asset_id}/thumbnail", params={"size": 256}
         )
         self.assertEqual(response.status_code, 200)
+        cached = thumbnails.cached_path(asset_id, modified_ns, 256)
+        self.assertIsNotNone(cached)
+        self.assertEqual(cached.read_bytes(), response.content)
+        self.assertIsNone(thumbnails.cached_path(asset_id, modified_ns, 512))
         self.assertEqual(response.headers["content-type"], "image/jpeg")
         with Image.open(io.BytesIO(response.content)) as thumb:
             self.assertLessEqual(max(thumb.size), 256)
