@@ -16,6 +16,7 @@ from typing import Any, Callable
 from gdl_backend._database_gallery_repository import gallery_directory_id
 from gdl_backend.app import ServiceContainer
 from gdl_backend import gallery_safe_paths as safe_paths
+from gdl_backend import safe_copy
 from gdl_backend.gallery_safe_paths import SafeSourceRoot, UnsafeSourcePathError
 from tests.helpers import make_settings
 
@@ -459,7 +460,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         linked_parent = self.root / "linked-target-parent"
         linked_parent.symlink_to(real_parent, target_is_directory=True)
         manager = self._manager()
-        with mock.patch.object(self._module(), "_HAS_DIR_FD", False):
+        with mock.patch.object(safe_copy, "_HAS_DIR_FD", False):
             self._assert_error(
                 "target_path_unsafe",
                 lambda: manager.start(
@@ -513,10 +514,10 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
 
         manager = self._manager()
         with (
-            mock.patch.object(module, "_HAS_DIR_FD", False),
+            mock.patch.object(safe_copy, "_HAS_DIR_FD", False),
             mock.patch("gdl_backend.gallery_safe_paths._HAS_DIR_FD", False),
             mock.patch.object(
-                module, "_rename_directory_noreplace", fallback_rename
+                safe_copy, "_rename_directory_noreplace", fallback_rename
             ),
         ):
             record = self._wait(
@@ -553,7 +554,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
             copied.symlink_to(outside)
 
         manager = self._manager(before_commit=inject_link)
-        with mock.patch.object(self._module(), "_HAS_DIR_FD", False):
+        with mock.patch.object(safe_copy, "_HAS_DIR_FD", False):
             record = self._wait(
                 manager,
                 manager.start(
@@ -570,7 +571,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
 
     def test_descriptor_target_rejects_an_injected_link_before_commit(self) -> None:
         module = self._module()
-        if not getattr(module, "_HAS_DIR_FD", False) or not hasattr(os, "symlink"):
+        if not getattr(safe_copy, "_HAS_DIR_FD", False) or not hasattr(os, "symlink"):
             self.skipTest("descriptor-relative symlink checks unavailable")
         _source, _source_root, directory_id = self._source(
             "sources", "alpha", {"one.jpg": b"source"}
@@ -636,7 +637,7 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
 
     def test_descriptor_output_replacement_during_write_is_rejected(self) -> None:
         module = self._module()
-        if not getattr(module, "_HAS_DIR_FD", False) or not hasattr(os, "symlink"):
+        if not getattr(safe_copy, "_HAS_DIR_FD", False) or not hasattr(os, "symlink"):
             self.skipTest("descriptor-relative symlink checks unavailable")
         _source, _source_root, directory_id = self._source(
             "sources", "alpha", {"one.jpg": b"source" * 1024}

@@ -3,20 +3,15 @@
 The service deliberately owns no SQLite job/item state.  Gallery directory IDs
 are resolved server-side, allow-listed files are copied byte-for-byte, and each
 selected directory is committed independently with no-clobber semantics.
+The descriptor-anchored copy primitives live in ``safe_copy``.
 """
 
 from __future__ import annotations
 
-import contextlib
-import ctypes
-import errno
 import logging
 import os
 import secrets
-import stat
-import sys
 import threading
-import unicodedata
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,10 +28,22 @@ from .gallery_safe_paths import (
     GalleryFilesystemLocks,
     SafeSourceRoot,
     UnsafeSourcePathError,
-    is_reparse_path,
     validate_relative_path,
 )
 from .redaction import safe_exception_category
+from .safe_copy import (
+    TEMPORARY_PREFIX as _TEMPORARY_PREFIX,
+    CopyCancelled as _CopyCancelled,
+    SafeCopyError,
+    TargetFileSnapshot as _TargetFileSnapshot,
+    TargetRoot as _TargetRoot,
+    copy_stream,
+    file_version as _file_version,
+    file_versions_match as _file_versions_match,
+    portable_name_key as _portable_name_key,
+    validate_leaf_name as _validate_leaf_name,
+    validate_staged_tree,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -50,28 +57,11 @@ _DIRECTORY_EXPORT_STATES: frozenset[str] = frozenset(
     {"copying", "completed", "failed", "cancelled"}
 )
 _EXCLUDED_DIRECTORY_NAMES = frozenset({LDOS_RESERVED_DIR})
-_TEMPORARY_PREFIX = LDOS_TEMP_DIRECTORY_PREFIXES[0]
-_OPEN_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
-_NO_FOLLOW = getattr(os, "O_NOFOLLOW", 0)
-_CLOSE_ON_EXEC = getattr(os, "O_CLOEXEC", 0)
-_BINARY = getattr(os, "O_BINARY", 0)
-_HAS_DIR_FD = os.open in os.supports_dir_fd and os.stat in os.supports_dir_fd
 _MAX_OPERATIONS = 128
 _MAX_ACTIVE_OPERATIONS = 4
-_NO_CLOBBER_UNSUPPORTED_ERRNOS = frozenset(
-    {errno.ENOSYS, errno.EINVAL, getattr(errno, "EOPNOTSUPP", errno.ENOTSUP)}
-)
 
-
-class GalleryDirectoryExportError(Exception):
-    def __init__(self, code: str, details: Mapping[str, Any] | None = None) -> None:
-        super().__init__(code)
-        self.code = code
-        self.details = dict(details or {})
-
-
-class _CopyCancelled(Exception):
-    pass
+# 与 safe_copy 共用同一个错误类：复制原语抛出的错误码在这里照常捕获。
+GalleryDirectoryExportError = SafeCopyError
 
 
 @dataclass(frozen=True)
@@ -84,613 +74,6 @@ class _Selection:
     source_root_key: str
     directory_key: str
     source_root_identity: tuple[int, int]
-
-
-class _TargetRoot:
-    """Descriptor-anchored target root used only for service-owned temp trees."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self._fd: int | None = None
-        self._identity: tuple[int, int] | None = None
-        self._owned_directory_identities: dict[str, tuple[int, int]] = {}
-
-    def __enter__(self) -> "_TargetRoot":
-        self.open()
-        return self
-
-    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
-        self.close()
-
-    @property
-    def fd(self) -> int:
-        self.open()
-        assert self._fd is not None
-        return self._fd
-
-    @property
-    def identity(self) -> tuple[int, int]:
-        self.open()
-        assert self._identity is not None
-        return self._identity
-
-    def open(self) -> None:
-        if self._fd is not None or self._identity is not None:
-            return
-        if not _HAS_DIR_FD:
-            # Windows CRT 无法以描述符锚定目录（os.open 打开目录直接
-            # PermissionError）：走组件级 lstat 校验，身份取根 lstat。
-            metadata = _validate_absolute_directory_components(self.path)
-            self._identity = (int(metadata.st_dev), int(metadata.st_ino))
-            return
-        descriptor = _open_absolute_directory(self.path)
-        metadata = os.fstat(descriptor)
-        self._fd = descriptor
-        self._identity = (int(metadata.st_dev), int(metadata.st_ino))
-
-    def close(self) -> None:
-        descriptor, self._fd = self._fd, None
-        self._identity = None
-        self._owned_directory_identities.clear()
-        if descriptor is not None:
-            os.close(descriptor)
-
-    def verify_identity(self) -> None:
-        assert self._identity is not None
-        if not _HAS_DIR_FD:
-            metadata = _validate_absolute_directory_components(self.path)
-            if (int(metadata.st_dev), int(metadata.st_ino)) != self._identity:
-                raise GalleryDirectoryExportError("target_root_changed")
-            return
-        descriptor = _open_absolute_directory(self.path)
-        try:
-            metadata = os.fstat(descriptor)
-            if (int(metadata.st_dev), int(metadata.st_ino)) != self._identity:
-                raise GalleryDirectoryExportError("target_root_changed")
-        finally:
-            os.close(descriptor)
-
-    def _directory_identity(self, name: str) -> tuple[int, int] | None:
-        _validate_owned_temp_name(name)
-        self.verify_identity()
-        try:
-            if _HAS_DIR_FD:
-                metadata = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
-            else:
-                path = self.path / name
-                metadata = path.lstat()
-                if is_reparse_path(path):
-                    raise GalleryDirectoryExportError("target_path_changed")
-        except FileNotFoundError:
-            return None
-        if not stat.S_ISDIR(metadata.st_mode):
-            raise GalleryDirectoryExportError("target_path_changed")
-        return int(metadata.st_dev), int(metadata.st_ino)
-
-    def _require_owned_directory(self, name: str) -> tuple[int, int]:
-        expected = self._owned_directory_identities.get(name)
-        if expected is None or self._directory_identity(name) != expected:
-            raise GalleryDirectoryExportError("target_path_changed")
-        return expected
-    def entry_exists(self, name: str) -> bool:
-        _validate_leaf_name(name)
-        self.verify_identity()
-        if _HAS_DIR_FD:
-            try:
-                os.stat(name, dir_fd=self.fd, follow_symlinks=False)
-            except FileNotFoundError:
-                return False
-            return True
-        _validate_absolute_directory_components(self.path)
-        try:
-            (self.path / name).lstat()
-        except FileNotFoundError:
-            return False
-        return True
-
-    def create_owned_directory(self, name: str) -> None:
-        _validate_owned_temp_name(name)
-        self.verify_identity()
-        if _HAS_DIR_FD:
-            os.mkdir(name, mode=0o700, dir_fd=self.fd)
-            os.fsync(self.fd)
-        else:
-            (self.path / name).mkdir(mode=0o700)
-            _validate_absolute_directory_components(self.path / name)
-        identity = self._directory_identity(name)
-        if identity is None:
-            raise GalleryDirectoryExportError("target_path_changed")
-        self._owned_directory_identities[name] = identity
-
-    @contextlib.contextmanager
-    def open_output_file(self, temporary_name: str, relative_path: str) -> Any:
-        _validate_owned_temp_name(temporary_name)
-        expected_temporary_identity = self._require_owned_directory(temporary_name)
-        parts = validate_relative_path(relative_path)
-        self.verify_identity()
-        if not _HAS_DIR_FD:
-            root = _ensure_fallback_directory(
-                self.path / temporary_name, ()
-            )
-            if self._directory_identity(temporary_name) != expected_temporary_identity:
-                raise GalleryDirectoryExportError("target_path_changed")
-            parent = _ensure_fallback_directory(root, parts[:-1])
-            target = parent / parts[-1]
-            flags = (
-                os.O_WRONLY
-                | os.O_CREAT
-                | os.O_EXCL
-                | _CLOSE_ON_EXEC
-                | _BINARY
-            )
-            try:
-                descriptor = os.open(target, flags, 0o600)
-            except FileExistsError as error:
-                raise GalleryDirectoryExportError("target_path_unsafe") from error
-            try:
-                metadata = os.fstat(descriptor)
-                if not stat.S_ISREG(metadata.st_mode):
-                    raise GalleryDirectoryExportError("target_path_unsafe")
-                expected_identity = (int(metadata.st_dev), int(metadata.st_ino))
-                _verify_fallback_regular_file(target, expected_identity)
-                with os.fdopen(descriptor, "wb", closefd=True) as handle:
-                    descriptor = -1
-                    yield handle
-                    _verify_fallback_regular_file(target, expected_identity)
-            finally:
-                if descriptor >= 0:
-                    os.close(descriptor)
-            return
-
-        descriptor = os.dup(self.fd)
-        try:
-            descriptor = _open_child_directory(descriptor, temporary_name, create=False)
-            temporary_metadata = os.fstat(descriptor)
-            if (
-                int(temporary_metadata.st_dev),
-                int(temporary_metadata.st_ino),
-            ) != expected_temporary_identity:
-                raise GalleryDirectoryExportError("target_path_changed")
-            for component in parts[:-1]:
-                descriptor = _open_child_directory(descriptor, component, create=True)
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _CLOSE_ON_EXEC | _NO_FOLLOW
-            file_descriptor = -1
-            try:
-                file_descriptor = os.open(
-                    parts[-1], flags, 0o600, dir_fd=descriptor
-                )
-                metadata = os.fstat(file_descriptor)
-                if not stat.S_ISREG(metadata.st_mode):
-                    raise GalleryDirectoryExportError("target_path_unsafe")
-                expected_identity = (int(metadata.st_dev), int(metadata.st_ino))
-                raw_handle = os.fdopen(file_descriptor, "wb", closefd=True)
-                file_descriptor = -1
-                with raw_handle as handle:
-                    yield handle
-                    try:
-                        current = os.stat(
-                            parts[-1], dir_fd=descriptor, follow_symlinks=False
-                        )
-                    except OSError as error:
-                        raise GalleryDirectoryExportError(
-                            "target_path_changed"
-                        ) from error
-                    if (
-                        not stat.S_ISREG(current.st_mode)
-                        or (int(current.st_dev), int(current.st_ino))
-                        != expected_identity
-                    ):
-                        raise GalleryDirectoryExportError("target_path_changed")
-            finally:
-                if file_descriptor >= 0:
-                    os.close(file_descriptor)
-        finally:
-            os.close(descriptor)
-
-    def validate_owned_directory(self, name: str) -> None:
-        _validate_owned_temp_name(name)
-        self._require_owned_directory(name)
-        self.verify_identity()
-        if _HAS_DIR_FD:
-            _validate_tree_at(self.fd, name)
-        else:
-            _validate_fallback_tree(self.path / name)
-
-
-    def commit_owned_directory(self, temporary_name: str, final_name: str) -> None:
-        self.validate_owned_directory(temporary_name)
-        _validate_leaf_name(final_name)
-        try:
-            if self.entry_exists(final_name):
-                raise FileExistsError(final_name)
-            _rename_directory_noreplace(
-                parent_fd=self._fd if _HAS_DIR_FD else -1,
-                parent_path=self.path,
-                source_name=temporary_name,
-                target_name=final_name,
-            )
-            self._owned_directory_identities.pop(temporary_name, None)
-        except FileExistsError as error:
-            raise GalleryDirectoryExportError(
-                "target_name_conflict", {"names": [final_name]}
-            ) from error
-        if _HAS_DIR_FD:
-            os.fsync(self.fd)
-
-    def remove_owned_directory(self, name: str) -> bool:
-        _validate_owned_temp_name(name)
-        try:
-            self._require_owned_directory(name)
-        except (GalleryDirectoryExportError, OSError):
-            return False
-        if _HAS_DIR_FD:
-            try:
-                _remove_tree_at(self.fd, name)
-                removed = not self.entry_exists(name)
-                if removed:
-                    self._owned_directory_identities.pop(name, None)
-                return removed
-            except (GalleryDirectoryExportError, OSError):
-                return False
-        try:
-            _remove_fallback_tree(self.path / name)
-            removed = not self.entry_exists(name)
-            if removed:
-                self._owned_directory_identities.pop(name, None)
-            return removed
-        except (GalleryDirectoryExportError, OSError):
-            return False
-
-
-
-def _file_version(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (
-        int(metadata.st_dev),
-        int(metadata.st_ino),
-        int(metadata.st_size),
-        int(
-            getattr(metadata, "st_mtime_ns", metadata.st_mtime * 1_000_000_000)
-        ),
-        int(
-            getattr(metadata, "st_ctime_ns", metadata.st_ctime * 1_000_000_000)
-        ),
-    )
-
-_TargetFileSnapshot = tuple[int, int, int, int, int]
-
-
-def _file_versions_match(
-    observed: _TargetFileSnapshot, expected: _TargetFileSnapshot
-) -> bool:
-    """Compare an enumerated file with its safely opened handle."""
-    # Python 3.14 Windows uses different st_ctime meanings for DirEntry.stat
-    # (WIN32_FIND_DATA) and fstat (handle metadata).  Size and mtime remain
-    # comparable; the full handle-to-handle version check below still includes
-    # ctime for detecting changes during the copy.
-    if observed[2:4] != expected[2:4]:
-        return False
-    return expected[:2] == (0, 0) or observed[:2] == expected[:2]
-
-def _portable_name_key(name: str) -> str:
-    return unicodedata.normalize("NFC", name).casefold()
-
-
-def _validate_leaf_name(name: str) -> None:
-    if (
-        not isinstance(name, str)
-        or not name
-        or name in {".", ".."}
-        or "/" in name
-        or "\\" in name
-        or "\x00" in name
-    ):
-        raise GalleryDirectoryExportError("directory_name_invalid")
-
-
-def _validate_owned_temp_name(name: str) -> None:
-    _validate_leaf_name(name)
-    if not name.startswith(_TEMPORARY_PREFIX):
-        raise GalleryDirectoryExportError("temporary_name_invalid")
-
-
-def _validate_absolute_directory_components(path: Path) -> os.stat_result:
-    current = Path(path.anchor)
-    try:
-        metadata = current.lstat()
-    except OSError as error:
-        raise GalleryDirectoryExportError("target_unavailable") from error
-    if is_reparse_path(current):
-        raise GalleryDirectoryExportError("target_path_unsafe")
-    if not stat.S_ISDIR(metadata.st_mode):
-        raise GalleryDirectoryExportError("target_not_directory")
-    anchor_parts = len(current.parts)
-    for component in path.parts[anchor_parts:]:
-        current = current / component
-        try:
-            metadata = current.lstat()
-        except OSError as error:
-            raise GalleryDirectoryExportError("target_unavailable") from error
-        if is_reparse_path(current):
-            raise GalleryDirectoryExportError("target_path_unsafe")
-        if not stat.S_ISDIR(metadata.st_mode):
-            raise GalleryDirectoryExportError("target_not_directory")
-    return metadata
-
-
-def _ensure_fallback_directory(root: Path, components: Sequence[str]) -> Path:
-    current = root
-    _validate_absolute_directory_components(current)
-    for component in components:
-        current = current / component
-        try:
-            current.mkdir(mode=0o700)
-        except FileExistsError:
-            pass
-        _validate_absolute_directory_components(current)
-    return current
-
-
-def _verify_fallback_regular_file(
-    path: Path, expected_identity: tuple[int, int]
-) -> None:
-    try:
-        metadata = path.lstat()
-    except OSError as error:
-        raise GalleryDirectoryExportError("target_path_changed") from error
-    if is_reparse_path(path) or not stat.S_ISREG(metadata.st_mode):
-        raise GalleryDirectoryExportError("target_path_unsafe")
-    if (int(metadata.st_dev), int(metadata.st_ino)) != expected_identity:
-        raise GalleryDirectoryExportError("target_path_changed")
-
-
-def _validate_fallback_tree(root: Path) -> None:
-    stack = [root]
-    while stack:
-        current = stack.pop()
-        _validate_absolute_directory_components(current)
-        with os.scandir(current) as entries:
-            for entry in entries:
-                child = current / entry.name
-                if is_reparse_path(child):
-                    raise GalleryDirectoryExportError("target_path_unsafe")
-                metadata = entry.stat(follow_symlinks=False)
-                if stat.S_ISDIR(metadata.st_mode):
-                    stack.append(child)
-                elif not stat.S_ISREG(metadata.st_mode):
-                    raise GalleryDirectoryExportError("target_path_unsafe")
-
-
-def _remove_fallback_tree(path: Path) -> None:
-    try:
-        metadata = path.lstat()
-    except OSError:
-        return
-    if is_reparse_path(path):
-        try:
-            if stat.S_ISDIR(metadata.st_mode):
-                path.rmdir()
-            else:
-                path.unlink()
-        except OSError:
-            pass
-        return
-    if stat.S_ISDIR(metadata.st_mode):
-        try:
-            with os.scandir(path) as entries:
-                children = [path / entry.name for entry in entries]
-        except OSError:
-            return
-        for child in children:
-            _remove_fallback_tree(child)
-        try:
-            path.rmdir()
-        except OSError:
-            pass
-        return
-    try:
-        path.unlink()
-    except OSError:
-        pass
-
-
-def _open_absolute_directory(path: Path) -> int:
-    if not path.is_absolute():
-        raise GalleryDirectoryExportError("target_path_not_absolute")
-    if not _HAS_DIR_FD:
-        expected = _validate_absolute_directory_components(path)
-        try:
-            descriptor = os.open(path, os.O_RDONLY | _OPEN_DIRECTORY | _CLOSE_ON_EXEC)
-        except OSError as error:
-            raise GalleryDirectoryExportError("target_unavailable") from error
-        try:
-            actual = os.fstat(descriptor)
-            observed = _validate_absolute_directory_components(path)
-            expected_identity = (expected.st_dev, expected.st_ino)
-            if (actual.st_dev, actual.st_ino) != expected_identity or (
-                observed.st_dev,
-                observed.st_ino,
-            ) != expected_identity:
-                raise GalleryDirectoryExportError("target_path_changed")
-            return descriptor
-        except Exception:
-            os.close(descriptor)
-            raise
-
-    anchor = Path(path.anchor)
-    try:
-        descriptor = os.open(
-            anchor,
-            os.O_RDONLY | _OPEN_DIRECTORY | _CLOSE_ON_EXEC | _NO_FOLLOW,
-        )
-    except OSError as error:
-        raise GalleryDirectoryExportError("target_unavailable") from error
-    try:
-        anchor_parts = len(anchor.parts)
-        for component in path.parts[anchor_parts:]:
-            try:
-                child = os.open(
-                    component,
-                    os.O_RDONLY | _OPEN_DIRECTORY | _CLOSE_ON_EXEC | _NO_FOLLOW,
-                    dir_fd=descriptor,
-                )
-            except FileNotFoundError as error:
-                raise GalleryDirectoryExportError("target_unavailable") from error
-            except OSError as error:
-                raise GalleryDirectoryExportError("target_path_unsafe") from error
-            metadata = os.fstat(child)
-            if not stat.S_ISDIR(metadata.st_mode):
-                os.close(child)
-                raise GalleryDirectoryExportError("target_not_directory")
-            os.close(descriptor)
-            descriptor = child
-        return descriptor
-    except Exception:
-        os.close(descriptor)
-        raise
-
-
-def _open_child_directory(parent_fd: int, name: str, *, create: bool) -> int:
-    if create:
-        try:
-            os.mkdir(name, mode=0o700, dir_fd=parent_fd)
-        except FileExistsError:
-            pass
-    try:
-        child = os.open(
-            name,
-            os.O_RDONLY | _OPEN_DIRECTORY | _CLOSE_ON_EXEC | _NO_FOLLOW,
-            dir_fd=parent_fd,
-        )
-    except OSError:
-        raise
-    metadata = os.fstat(child)
-    if not stat.S_ISDIR(metadata.st_mode):
-        os.close(child)
-        raise GalleryDirectoryExportError("target_path_unsafe")
-    os.close(parent_fd)
-    return child
-
-
-def _validate_tree_at(parent_fd: int, name: str) -> None:
-    try:
-        metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-    except OSError as error:
-        raise GalleryDirectoryExportError("target_path_changed") from error
-    if not stat.S_ISDIR(metadata.st_mode):
-        raise GalleryDirectoryExportError("target_path_unsafe")
-    try:
-        child_fd = os.open(
-            name,
-            os.O_RDONLY | _OPEN_DIRECTORY | _CLOSE_ON_EXEC | _NO_FOLLOW,
-            dir_fd=parent_fd,
-        )
-    except OSError as error:
-        raise GalleryDirectoryExportError("target_path_unsafe") from error
-    try:
-        with os.scandir(child_fd) as entries:
-            names = [entry.name for entry in entries]
-        for child_name in names:
-            try:
-                child_metadata = os.stat(
-                    child_name, dir_fd=child_fd, follow_symlinks=False
-                )
-            except OSError as error:
-                raise GalleryDirectoryExportError("target_path_changed") from error
-            if stat.S_ISDIR(child_metadata.st_mode):
-                _validate_tree_at(child_fd, child_name)
-            elif not stat.S_ISREG(child_metadata.st_mode):
-                raise GalleryDirectoryExportError("target_path_unsafe")
-    finally:
-        os.close(child_fd)
-
-def _remove_tree_at(parent_fd: int, name: str) -> None:
-    try:
-        metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-    except FileNotFoundError:
-        return
-    if not stat.S_ISDIR(metadata.st_mode):
-        os.unlink(name, dir_fd=parent_fd)
-        return
-    child_fd = os.open(
-        name,
-        os.O_RDONLY | _OPEN_DIRECTORY | _CLOSE_ON_EXEC | _NO_FOLLOW,
-        dir_fd=parent_fd,
-    )
-    try:
-        with os.scandir(child_fd) as entries:
-            names = [entry.name for entry in entries]
-        for child_name in names:
-            _remove_tree_at(child_fd, child_name)
-    finally:
-        os.close(child_fd)
-    os.rmdir(name, dir_fd=parent_fd)
-
-
-def _rename_directory_noreplace(
-    *, parent_fd: int, parent_path: Path, source_name: str, target_name: str
-) -> None:
-    if sys.platform.startswith("linux") and _HAS_DIR_FD:
-        libc = ctypes.CDLL(None, use_errno=True)
-        renameat2 = getattr(libc, "renameat2", None)
-        if renameat2 is None:
-            raise GalleryDirectoryExportError("no_clobber_unsupported")
-        renameat2.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        renameat2.restype = ctypes.c_int
-        result = renameat2(
-            parent_fd,
-            os.fsencode(source_name),
-            parent_fd,
-            os.fsencode(target_name),
-            1,  # RENAME_NOREPLACE
-        )
-        if result != 0:
-            code = ctypes.get_errno()
-            if code in {errno.EEXIST, errno.ENOTEMPTY}:
-                raise FileExistsError(target_name)
-            if code in _NO_CLOBBER_UNSUPPORTED_ERRNOS:
-                raise GalleryDirectoryExportError("no_clobber_unsupported")
-            raise OSError(code, os.strerror(code), target_name)
-        return
-
-    if sys.platform == "darwin" and _HAS_DIR_FD:
-        libc = ctypes.CDLL(None, use_errno=True)
-        renameatx_np = getattr(libc, "renameatx_np", None)
-        if renameatx_np is None:
-            raise GalleryDirectoryExportError("no_clobber_unsupported")
-        renameatx_np.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        renameatx_np.restype = ctypes.c_int
-        result = renameatx_np(
-            parent_fd,
-            os.fsencode(source_name),
-            parent_fd,
-            os.fsencode(target_name),
-            0x00000004,  # RENAME_EXCL
-        )
-        if result != 0:
-            code = ctypes.get_errno()
-            if code in {errno.EEXIST, errno.ENOTEMPTY}:
-                raise FileExistsError(target_name)
-            if code in _NO_CLOBBER_UNSUPPORTED_ERRNOS:
-                raise GalleryDirectoryExportError("no_clobber_unsupported")
-            raise OSError(code, os.strerror(code), target_name)
-        return
-
-    if os.name == "nt":
-        os.rename(parent_path / source_name, parent_path / target_name)
-        return
-    raise GalleryDirectoryExportError("no_clobber_unsupported")
 
 
 class GalleryDirectoryExportService:
@@ -1295,28 +678,23 @@ class GalleryDirectoryExportService:
         if not _file_versions_match(source_version, expected_version):
             source_handle.close()
             raise GalleryDirectoryExportError("source_changed")
-        copied = 0
+        def on_chunk(chunk: bytes, copied: int) -> None:
+            self._increment(operation_id, copied_byte_count=len(chunk))
+            if self._copy_chunk_hook is not None:
+                self._copy_chunk_hook(operation_id, output_relative, copied)
+
         target_version: _TargetFileSnapshot | None = None
         try:
             with target_root.open_output_file(
                 temporary_name, output_relative
             ) as target_handle:
-                while True:
-                    if cancel_event.is_set():
-                        raise _CopyCancelled()
-                    chunk = source_handle.read(self._copy_chunk_size)
-                    if not chunk:
-                        break
-                    target_handle.write(chunk)
-                    copied += len(chunk)
-                    self._increment(
-                        operation_id,
-                        copied_byte_count=len(chunk),
-                    )
-                    if self._copy_chunk_hook is not None:
-                        self._copy_chunk_hook(operation_id, output_relative, copied)
-                target_handle.flush()
-                os.fsync(target_handle.fileno())
+                copied = copy_stream(
+                    source_handle,
+                    target_handle,
+                    chunk_size=self._copy_chunk_size,
+                    cancel_event=cancel_event,
+                    on_chunk=on_chunk,
+                )
                 if (
                     _file_version(os.fstat(source_handle.fileno())) != source_version
                     or copied != source_version[2]
@@ -1337,55 +715,13 @@ class GalleryDirectoryExportService:
         expected_files: Mapping[str, _TargetFileSnapshot],
         cancel_event: threading.Event,
     ) -> None:
-        target_root.validate_owned_directory(temporary_name)
-        expected_root_identity = target_root._require_owned_directory(temporary_name)
-        seen_directories: set[str] = set()
-        seen_files: set[str] = set()
-        try:
-            with SafeSourceRoot(target_root.path / temporary_name) as staged_root:
-                if staged_root.root_identity() != (
-                    expected_root_identity
-                ):
-                    raise GalleryDirectoryExportError("target_path_changed")
-                for directory in staged_root.iter_subtree(
-                    "",
-                    excluded_directories=frozenset(),
-                    excluded_directory_prefixes=(),
-                ):
-                    if cancel_event.is_set():
-                        raise _CopyCancelled()
-                    relative_directory = directory.relative_path
-                    if relative_directory not in expected_directories:
-                        raise GalleryDirectoryExportError("target_path_changed")
-                    seen_directories.add(relative_directory)
-                    for file_name, _metadata in directory.files:
-                        relative_file = (
-                            f"{relative_directory}/{file_name}"
-                            if relative_directory
-                            else file_name
-                        )
-                        expected = expected_files.get(relative_file)
-                        if expected is None:
-                            raise GalleryDirectoryExportError("target_path_changed")
-                        handle = staged_root.open_binary(relative_file)
-                        try:
-                            actual = _file_version(os.fstat(handle.fileno()))
-                        finally:
-                            handle.close()
-                        if actual != expected:
-                            raise GalleryDirectoryExportError("target_path_changed")
-                        seen_files.add(relative_file)
-        except _CopyCancelled:
-            raise
-        except GalleryDirectoryExportError:
-            raise
-        except (OSError, UnsafeSourcePathError) as error:
-            raise GalleryDirectoryExportError("target_path_changed") from error
-        if (
-            seen_directories != expected_directories
-            or seen_files != set(expected_files)
-        ):
-            raise GalleryDirectoryExportError("target_path_changed")
+        validate_staged_tree(
+            target_root,
+            temporary_name,
+            expected_directories,
+            expected_files,
+            cancel_event,
+        )
 
     def _revalidate_selection(self, selection: _Selection) -> None:
         directory = self._repo.get_directory(selection.directory_id)
