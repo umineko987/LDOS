@@ -105,7 +105,7 @@
   {/snippet}
 </PageHeader>
 
-<div class="flex max-w-[980px] flex-col gap-6 px-8 py-5" data-testid="diagnostics">
+<div class="flex max-w-[980px] flex-col gap-6 px-7 py-5" data-testid="diagnostics">
   {#if readiness.error}
     <p class="text-sm text-danger" role="alert" data-testid="diag-error">
       {m.diag_load_failed({ reason: apiErrorMessage(readiness.error) })}
