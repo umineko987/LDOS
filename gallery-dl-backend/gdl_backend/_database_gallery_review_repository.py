@@ -169,6 +169,13 @@ class GalleryReviewRepository(ReviewRepository):
             conn.execute("DELETE FROM gallery_reviews")
             return int(removed)
 
+    def reset_group_decided(self, review_id: str, group_id: str) -> None:
+        """撤销定夺时把组恢复成「待定」；文件状态由调用方先对账好。"""
+        with self._transaction() as conn:
+            conn.execute("UPDATE gallery_review_groups SET decided=0, updated_at=? WHERE review_id=? AND id=?",
+                         (self._clock(), review_id, group_id))
+            conn.execute("UPDATE gallery_reviews SET version=version+1 WHERE review_id=?", (review_id,))
+
     def bump_version(self, review_id: str) -> None:
         with self._transaction() as conn:
             conn.execute("UPDATE gallery_reviews SET version=version+1 WHERE review_id=?", (review_id,))

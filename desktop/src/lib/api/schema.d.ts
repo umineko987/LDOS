@@ -785,6 +785,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/datasets/{dataset_id}/stages/clean/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Dataset Clean Items */
+        get: operations["list_dataset_clean_items_api_v1_datasets__dataset_id__stages_clean_items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/stages/dedup/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Dataset Dedup Groups */
+        get: operations["list_dataset_dedup_groups_api_v1_datasets__dataset_id__stages_dedup_groups_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasets/{dataset_id}/stages/tag/run": {
         parameters: {
             query?: never;
@@ -796,6 +830,83 @@ export interface paths {
         put?: never;
         /** Run Dataset Tag Stage */
         post: operations["run_dataset_tag_stage_api_v1_datasets__dataset_id__stages_tag_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/stages/{stage}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply Dataset Stage Triage
+         * @description 逐组定夺：keep 保留并记「通过」，其余移入回收区并记「排除」。
+         */
+        post: operations["apply_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/stages/{stage}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Dataset Stage
+         * @description 对这一段的全部输入建一次图库审核（清洗：只过滤；去重：基础去重 + 相似分组）。
+         */
+        post: operations["run_dataset_stage_api_v1_datasets__dataset_id__stages__stage__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/stages/{stage}/triage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Dataset Stage Triage */
+        get: operations["get_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__triage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/stages/{stage}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo Dataset Stage Triage
+         * @description 撤销最近一批定夺。
+         */
+        post: operations["undo_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__undo_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2594,6 +2705,78 @@ export interface components {
                 };
             };
         };
+        /** CleanItemPageResponse */
+        CleanItemPageResponse: {
+            /** Items */
+            items: components["schemas"]["CleanItemResponse"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Review Id */
+            review_id: string;
+            /** Run Id */
+            run_id: string;
+            /** Total */
+            total: number;
+        };
+        /** CleanItemResponse */
+        CleanItemResponse: {
+            /** Asset Id */
+            asset_id: string;
+            /** Automatic */
+            automatic: boolean;
+            /** Classification */
+            classification: ("rough" | "monochrome") | null;
+            /** Decided */
+            decided: boolean;
+            /** Decision */
+            decision: ("exclude" | "approve") | null;
+            /**
+             * Disposition
+             * @enum {string}
+             */
+            disposition: "pending" | "kept" | "rejected" | "failed";
+            /** Error */
+            error: string;
+            /** Format */
+            format: string;
+            /** Group Id */
+            group_id: string;
+            /** Group Kind */
+            group_kind: string;
+            /** Height */
+            height: number;
+            /** Image Url */
+            image_url: string;
+            /** Name */
+            name: string;
+            quality: components["schemas"]["TriageQualityResponse"];
+            /** Readable */
+            readable: boolean;
+            /** Reasons */
+            reasons: ("monochrome" | "rough" | "filter_character" | "unreadable")[];
+            /** Recommended */
+            recommended: boolean;
+            /** Relative Path */
+            relative_path: string;
+            /** Review Metrics */
+            review_metrics: {
+                [key: string]: unknown;
+            } | null;
+            /** Selected */
+            selected: boolean;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Source Id */
+            source_id: string;
+            /** Thumbnail Url */
+            thumbnail_url: string;
+            /** Trashed */
+            trashed: boolean;
+            /** Width */
+            width: number;
+        };
         /** CrawlAddress */
         CrawlAddress: {
             /** Address Type */
@@ -3334,6 +3517,45 @@ export interface components {
             trigger_word: string;
             /** Updated At */
             updated_at: number;
+        };
+        /** DedupGroupPageResponse */
+        DedupGroupPageResponse: {
+            /** Items */
+            items: components["schemas"]["DedupGroupResponse"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Review Id */
+            review_id: string;
+            /** Run Id */
+            run_id: string;
+            /** Total */
+            total: number;
+        };
+        /** DedupGroupResponse */
+        DedupGroupResponse: {
+            /** Automatic */
+            automatic: boolean;
+            /** Decided */
+            decided: boolean;
+            /** Group Id */
+            group_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "duplicate" | "unreadable" | "auto_exact" | "auto_compression";
+            /** Match Levels */
+            match_levels: string[];
+            /** Members */
+            members: components["schemas"]["TriageMemberResponse"][];
+            /** Reason */
+            reason: string;
+            /** Suggested Keep */
+            suggested_keep: string[];
+            /** Winner Asset Id */
+            winner_asset_id: string | null;
         };
         /** DesktopProxyInlineNode */
         DesktopProxyInlineNode: {
@@ -5223,6 +5445,73 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * StageRunOptions
+         * @description 覆盖预设里的单项；没给的沿用预设。清洗会强制关掉去重和分组，去重会强制关掉过滤器。
+         */
+        StageRunOptions: {
+            /** Basic Dedup */
+            basic_dedup?: boolean | null;
+            /** Filter Character */
+            filter_character?: boolean | null;
+            /** Filter Monochrome */
+            filter_monochrome?: boolean | null;
+            /** Filter Sketch */
+            filter_sketch?: boolean | null;
+            /** Reference Asset Ids */
+            reference_asset_ids?: string[] | null;
+            /** Similarity Groups */
+            similarity_groups?: boolean | null;
+        };
+        /** StageRunRequest */
+        StageRunRequest: {
+            options?: components["schemas"]["StageRunOptions"] | null;
+            /** Preset Id */
+            preset_id?: string | null;
+        };
+        /** StageTriageCountsResponse */
+        StageTriageCountsResponse: {
+            /** Automatic Excluded */
+            automatic_excluded: number;
+            /** Decided Groups */
+            decided_groups: number;
+            /** Failed */
+            failed: number;
+            /** Flagged */
+            flagged: number;
+            /** Groups */
+            groups: number;
+            /** Input */
+            input: number;
+            /** Kept */
+            kept: number;
+            /** Pending Groups */
+            pending_groups: number;
+            /** Rejected */
+            rejected: number;
+        };
+        /** StageTriageSummaryResponse */
+        StageTriageSummaryResponse: {
+            counts: components["schemas"]["StageTriageCountsResponse"];
+            /** Dataset Id */
+            dataset_id: string;
+            /** Last Batch Id */
+            last_batch_id: string | null;
+            /** Review Error */
+            review_error: string;
+            /** Review Id */
+            review_id: string | null;
+            /** Review Status */
+            review_status: ("pending" | "analyzing" | "auto_applying" | "ready" | "failed" | "expired") | null;
+            run: components["schemas"]["DatasetStageRunResponse"] | null;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "clean" | "dedup";
+            /** Undo Depth */
+            undo_depth: number;
+        };
         /** TagStageRunRequest */
         TagStageRunRequest: {
             /**
@@ -5513,6 +5802,123 @@ export interface components {
             url?: string | null;
         } & {
             [key: string]: unknown;
+        };
+        /** TriageApplyRequest */
+        TriageApplyRequest: {
+            /** Groups */
+            groups: components["schemas"]["TriageGroupDecision"][];
+            /** Run Id */
+            run_id: string;
+        };
+        /** TriageApplyResponse */
+        TriageApplyResponse: {
+            /** Applied Groups */
+            applied_groups: number;
+            /** Batch Id */
+            batch_id: string | null;
+            error: components["schemas"]["TriageBatchErrorResponse"] | null;
+            /** Failed */
+            failed: components["schemas"]["TriageFailedAssetResponse"][];
+            /** Kept */
+            kept: string[];
+            /** Rejected */
+            rejected: string[];
+            summary: components["schemas"]["StageTriageSummaryResponse"];
+        };
+        /** TriageBatchErrorResponse */
+        TriageBatchErrorResponse: {
+            /** Code */
+            code: string;
+            /** Group Id */
+            group_id: string;
+            /** Message */
+            message: string;
+        };
+        /** TriageFailedAssetResponse */
+        TriageFailedAssetResponse: {
+            /** Asset Id */
+            asset_id: string;
+            /** Error */
+            error: string;
+        };
+        /** TriageGroupDecision */
+        TriageGroupDecision: {
+            /** Group Id */
+            group_id: string;
+            /** Keep */
+            keep?: string[];
+        };
+        /** TriageMemberResponse */
+        TriageMemberResponse: {
+            /** Asset Id */
+            asset_id: string;
+            /** Classification */
+            classification: ("rough" | "monochrome") | null;
+            /** Decision */
+            decision: ("exclude" | "approve") | null;
+            /**
+             * Disposition
+             * @enum {string}
+             */
+            disposition: "pending" | "kept" | "rejected" | "failed";
+            /** Error */
+            error: string;
+            /** Format */
+            format: string;
+            /** Height */
+            height: number;
+            /** Image Url */
+            image_url: string;
+            /** Name */
+            name: string;
+            quality: components["schemas"]["TriageQualityResponse"];
+            /** Readable */
+            readable: boolean;
+            /** Recommended */
+            recommended: boolean;
+            /** Relative Path */
+            relative_path: string;
+            /** Review Metrics */
+            review_metrics: {
+                [key: string]: unknown;
+            } | null;
+            /** Selected */
+            selected: boolean;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Source Id */
+            source_id: string;
+            /** Thumbnail Url */
+            thumbnail_url: string;
+            /** Trashed */
+            trashed: boolean;
+            /** Width */
+            width: number;
+        };
+        /** TriageQualityResponse */
+        TriageQualityResponse: {
+            /** Blockiness */
+            blockiness?: number | null;
+            /** Jpeg Quality */
+            jpeg_quality?: number | null;
+            /** Noise Sigma */
+            noise_sigma?: number | null;
+            /** Sharpness */
+            sharpness?: number | null;
+        };
+        /** TriageUndoRequest */
+        TriageUndoRequest: {
+            /** Batch Id */
+            batch_id?: string | null;
+        };
+        /** TriageUndoResponse */
+        TriageUndoResponse: {
+            /** Batch Id */
+            batch_id: string;
+            error: components["schemas"]["TriageBatchErrorResponse"] | null;
+            summary: components["schemas"]["StageTriageSummaryResponse"];
+            /** Undone Groups */
+            undone_groups: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -7620,6 +8026,78 @@ export interface operations {
             };
         };
     };
+    list_dataset_clean_items_api_v1_datasets__dataset_id__stages_clean_items_get: {
+        parameters: {
+            query?: {
+                state?: "all" | "pending" | "decided";
+                reason?: ("monochrome" | "rough" | "filter_character" | "unreadable") | null;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CleanItemPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_dataset_dedup_groups_api_v1_datasets__dataset_id__stages_dedup_groups_get: {
+        parameters: {
+            query?: {
+                state?: "all" | "pending" | "decided";
+                include_automatic?: boolean;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DedupGroupPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     run_dataset_tag_stage_api_v1_datasets__dataset_id__stages_tag_run_post: {
         parameters: {
             query?: never;
@@ -7642,6 +8120,146 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DatasetStageRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+                stage: "clean" | "dedup";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriageApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriageApplyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_dataset_stage_api_v1_datasets__dataset_id__stages__stage__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+                stage: "clean" | "dedup";
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StageRunRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StageTriageSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__triage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+                stage: "clean" | "dedup";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StageTriageSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    undo_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__undo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+                stage: "clean" | "dedup";
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TriageUndoRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriageUndoResponse"];
                 };
             };
             /** @description Validation Error */

@@ -39,6 +39,7 @@ from .api_routes import (
 # live outside the composition root.
 from .api_routes.atlas import create_atlas_router
 from .api_routes.captions import create_captions_router
+from .api_routes.dataset_stages import create_dataset_stages_router
 from .api_routes.datasets import create_datasets_router
 from .api_routes.models import create_models_router
 from .api_routes.settings import create_settings_router
@@ -59,6 +60,7 @@ from .caption_service import CaptionService
 from .database import Database
 from .dataset_service import DatasetService
 from .dataset_tagging import DatasetTaggingService
+from .dataset_triage import DatasetTriageService
 from .discovery import DiscoveryService
 from .download_settings import DownloadSettingsStore
 from .encrypted_dns import EncryptedDNSResolver, NetworkTargetValidator
@@ -201,6 +203,8 @@ class ServiceContainer:
         self.captions = CaptionService.for_container(self)
         # 数据集打标：tag 阶段运行、候选分数、从打标写 caption。
         self.dataset_tagging = DatasetTaggingService.for_container(self)
+        # 数据集清洗 / 去重：在图库审核上跑阶段、逐组定夺（见 dataset_triage）。
+        self.dataset_triage = DatasetTriageService.for_container(self)
         self._health_task: asyncio.Task | None = None
         self._started = False
         self._stopping = False
@@ -332,6 +336,8 @@ class ServiceContainer:
             await self.scheduler.start()
             await self.ordered_crawls.start()
             await self.reviews.start()
+            # 图库审核刚被清空：还挂着 running 的清洗 / 去重运行标为中断。
+            await asyncio.to_thread(self.dataset_triage.recover)
             await asyncio.to_thread(self.reconcile_gallery_batch_sources)
             await asyncio.to_thread(self.reconcile_applied_gallery_reviews)
             await asyncio.to_thread(
@@ -658,6 +664,7 @@ def create_app(
     app.include_router(create_settings_router())
     app.include_router(create_models_router())
     app.include_router(create_captions_router())
+    app.include_router(create_dataset_stages_router())
     app.include_router(create_proxy_router())
     app.include_router(create_scheduler_router())
     app.include_router(create_jobs_router())

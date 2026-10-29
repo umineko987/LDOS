@@ -123,7 +123,8 @@ class DedupReviewManager:
             return await self.gallery_reviews.run_once()
         automatic = self.repository.next_crawl_review_automatic()
         if automatic is not None:
-            self._current_batch_id = str(automatic.get("review_id") or automatic["batch_id"])
+            automatic_id = str(automatic.get("review_id") or automatic["batch_id"])
+            self._current_batch_id = automatic_id
             try:
                 # Off-loop: this does per-image shutil.move + DB writes; running it
                 # inline would freeze the whole backend (HTTP + scheduler) for the
@@ -131,6 +132,7 @@ class DedupReviewManager:
                 await asyncio.to_thread(self._apply_automatic_rejections, automatic)
             finally:
                 self._current_batch_id = ""
+                self._review_changed(automatic_id)
             return True
         claimed = self.repository.claim_next_crawl_review()
         if claimed is None:
@@ -162,7 +164,11 @@ class DedupReviewManager:
             self.repository.fail_crawl_review(batch_id, str(exc), log_path=log_path)
         finally:
             self._current_batch_id = ""
+            self._review_changed(batch_id)
         return True
+
+    def _review_changed(self, review_id: str) -> None:
+        """一轮分析 / 自动回收结束（成功、失败或被取消重排）；子类据此通知监听者。"""
 
     async def _run_worker(self, claimed: dict[str, Any]) -> tuple[dict[str, Any], str]:
         batch_id = str(claimed.get("review_id") or claimed["batch_id"])

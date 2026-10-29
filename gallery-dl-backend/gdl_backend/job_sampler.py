@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Protocol
 
 from .events import EventBus, JobRegistry, JobStatus
@@ -158,10 +158,17 @@ class ReviewSource(_TrackedSource):
     name = "reviews"
     kind = "dedup.review"
 
-    def __init__(self, managers: Iterable[Any], fallback_repository: Any) -> None:
+    def __init__(
+        self,
+        managers: Iterable[Any],
+        fallback_repository: Any,
+        describe: Callable[[str], Mapping[str, Any] | None] | None = None,
+    ) -> None:
         super().__init__()
         self._managers = [manager for manager in managers if manager is not None]
         self._fallback = fallback_repository
+        # 数据集清洗 / 去重建的审核：补上标题和数据集归属（{"title", "ref"}）。
+        self._describe = describe
 
     def _current_ids(self) -> list[tuple[str, Any]]:
         result = []
@@ -206,15 +213,28 @@ class ReviewSource(_TrackedSource):
                     status = "queued"
             total = int((review or {}).get("total_image_count") or 0) or None
             message = str((review or {}).get("error") or "")[:200] if status == "failed" else ""
+            title, ref = "去重审核", {"review_id": review_id}
+            described = self._described(review_id)
+            if described is not None:
+                title = str(described.get("title") or title)
+                ref = {**dict(described.get("ref") or {}), "review_id": review_id}
             self._report(
                 jobs,
                 job_id,
-                title="去重审核",
+                title=title,
                 status=status,
                 total=total,
                 message=message,
-                ref={"review_id": review_id},
+                ref=ref,
             )
+
+    def _described(self, review_id: str) -> Mapping[str, Any] | None:
+        if self._describe is None:
+            return None
+        try:
+            return self._describe(review_id)
+        except Exception:
+            return None
 
 
 _EXPORT_STATUS: dict[str, JobStatus] = {
@@ -365,11 +385,18 @@ class JobSampler:
 
 def default_job_sources(container: Any) -> list[JobSource]:
     reviews = getattr(container, "reviews", None)
+
+    def describe_review(review_id: str) -> Mapping[str, Any] | None:
+        # 采样器先于数据集服务构造，按需取。
+        triage = getattr(container, "dataset_triage", None)
+        return None if triage is None else triage.describe_review(review_id)
+
     return [
         CrawlBatchSource(container.db, container.scheduler, container.ordered_crawls),
         ReviewSource(
             [reviews, getattr(reviews, "gallery_reviews", None)],
             container.db,
+            describe=describe_review,
         ),
         DirectoryExportSource(container.gallery_directory_exports),
         ModelInstallSource(container.model_setup),

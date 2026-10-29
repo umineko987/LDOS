@@ -119,6 +119,12 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("POST", "/api/v1/datasets/{dataset_id}/captions/from-tagger"): ("captions_from_tagger_api_v1_datasets__dataset_id__captions_from_tagger_post", ("200", "422")),
     ("POST", "/api/v1/datasets/{dataset_id}/stages/tag/run"): ("run_dataset_tag_stage_api_v1_datasets__dataset_id__stages_tag_run_post", ("202", "422")),
     ("GET", "/api/v1/datasets/{dataset_id}/tagger/candidates"): ("get_dataset_tagger_candidates_api_v1_datasets__dataset_id__tagger_candidates_get", ("200", "304", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/stages/{stage}/run"): ("run_dataset_stage_api_v1_datasets__dataset_id__stages__stage__run_post", ("202", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/stages/{stage}/triage"): ("get_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__triage_get", ("200", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/stages/dedup/groups"): ("list_dataset_dedup_groups_api_v1_datasets__dataset_id__stages_dedup_groups_get", ("200", "422")),
+    ("GET", "/api/v1/datasets/{dataset_id}/stages/clean/items"): ("list_dataset_clean_items_api_v1_datasets__dataset_id__stages_clean_items_get", ("200", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/stages/{stage}/apply"): ("apply_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__apply_post", ("200", "422")),
+    ("POST", "/api/v1/datasets/{dataset_id}/stages/{stage}/undo"): ("undo_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__undo_post", ("200", "422")),
     ("POST", "/api/v1/tasks"):("create_task_api_v1_tasks_post", ("200", "422")),
     ("GET", "/api/v1/tasks"): ("list_tasks_api_v1_tasks_get", ("200", "422")),
     ("GET", "/api/v1/tasks/{task_id}"): ("get_task_api_v1_tasks__task_id__get", ("200", "422")),
@@ -272,6 +278,7 @@ class AppRoutingContractTests(unittest.TestCase):
             "datasets": "gdl_backend.api_routes.datasets",
             "atlas": "gdl_backend.api_routes.atlas",
             "captions": "gdl_backend.api_routes.captions",
+            "dataset_stages": "gdl_backend.api_routes.dataset_stages",
             "policies":"gdl_backend.api_routes.policies",
             "proxy": "gdl_backend.api_routes.proxy",
             "scheduler": "gdl_backend.api_routes.scheduler",
@@ -306,6 +313,8 @@ class AppRoutingContractTests(unittest.TestCase):
                 r"^/api/v1/datasets/\{dataset_id\}/(captions|caption-batches|tagger/|stages/tag/)", path
             ):
                 domain = "captions"
+            elif path.startswith("/api/v1/datasets/") and "/stages/" in path:
+                domain = "dataset_stages"
             elif path.startswith("/api/v1/datasets"):
                 domain = "datasets"
             elif "/review" in path:

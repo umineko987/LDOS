@@ -1663,6 +1663,230 @@
         "title": "CaptionsFromTaggerRequest",
         "type": "object"
       },
+      "CleanItemPageResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CleanItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "review_id": {
+            "title": "Review Id",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "review_id",
+          "total",
+          "offset",
+          "limit",
+          "items"
+        ],
+        "title": "CleanItemPageResponse",
+        "type": "object"
+      },
+      "CleanItemResponse": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "automatic": {
+            "title": "Automatic",
+            "type": "boolean"
+          },
+          "classification": {
+            "anyOf": [
+              {
+                "enum": [
+                  "rough",
+                  "monochrome"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classification"
+          },
+          "decided": {
+            "title": "Decided",
+            "type": "boolean"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "enum": [
+                  "exclude",
+                  "approve"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "disposition": {
+            "enum": [
+              "pending",
+              "kept",
+              "rejected",
+              "failed"
+            ],
+            "title": "Disposition",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "group_id": {
+            "title": "Group Id",
+            "type": "string"
+          },
+          "group_kind": {
+            "title": "Group Kind",
+            "type": "string"
+          },
+          "height": {
+            "minimum": 0.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "image_url": {
+            "title": "Image Url",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/TriageQualityResponse"
+          },
+          "readable": {
+            "title": "Readable",
+            "type": "boolean"
+          },
+          "reasons": {
+            "items": {
+              "enum": [
+                "monochrome",
+                "rough",
+                "filter_character",
+                "unreadable"
+              ],
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "recommended": {
+            "title": "Recommended",
+            "type": "boolean"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "review_metrics": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Metrics"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "thumbnail_url": {
+            "title": "Thumbnail Url",
+            "type": "string"
+          },
+          "trashed": {
+            "title": "Trashed",
+            "type": "boolean"
+          },
+          "width": {
+            "minimum": 0.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asset_id",
+          "source_id",
+          "name",
+          "relative_path",
+          "thumbnail_url",
+          "image_url",
+          "width",
+          "height",
+          "size_bytes",
+          "format",
+          "readable",
+          "recommended",
+          "selected",
+          "disposition",
+          "trashed",
+          "classification",
+          "quality",
+          "review_metrics",
+          "decision",
+          "error",
+          "group_id",
+          "group_kind",
+          "automatic",
+          "decided",
+          "reasons"
+        ],
+        "title": "CleanItemResponse",
+        "type": "object"
+      },
       "CrawlAddress": {
         "properties": {
           "address_type": {
@@ -4398,6 +4622,125 @@
           "updated_at"
         ],
         "title": "DatasetSummaryResponse",
+        "type": "object"
+      },
+      "DedupGroupPageResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DedupGroupResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "review_id": {
+            "title": "Review Id",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "review_id",
+          "total",
+          "offset",
+          "limit",
+          "items"
+        ],
+        "title": "DedupGroupPageResponse",
+        "type": "object"
+      },
+      "DedupGroupResponse": {
+        "properties": {
+          "automatic": {
+            "title": "Automatic",
+            "type": "boolean"
+          },
+          "decided": {
+            "title": "Decided",
+            "type": "boolean"
+          },
+          "group_id": {
+            "title": "Group Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "duplicate",
+              "unreadable",
+              "auto_exact",
+              "auto_compression"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "match_levels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Match Levels",
+            "type": "array"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/TriageMemberResponse"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "suggested_keep": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested Keep",
+            "type": "array"
+          },
+          "winner_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winner Asset Id"
+          }
+        },
+        "required": [
+          "group_id",
+          "kind",
+          "automatic",
+          "decided",
+          "match_levels",
+          "reason",
+          "suggested_keep",
+          "winner_asset_id",
+          "members"
+        ],
+        "title": "DedupGroupResponse",
         "type": "object"
       },
       "DesktopProxyInlineNode": {
@@ -10445,6 +10788,270 @@
         "title": "SitePolicyDeleted",
         "type": "object"
       },
+      "StageRunOptions": {
+        "additionalProperties": false,
+        "description": "覆盖预设里的单项；没给的沿用预设。清洗会强制关掉去重和分组，去重会强制关掉过滤器。",
+        "properties": {
+          "basic_dedup": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basic Dedup"
+          },
+          "filter_character": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Character"
+          },
+          "filter_monochrome": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Monochrome"
+          },
+          "filter_sketch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Sketch"
+          },
+          "reference_asset_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Asset Ids"
+          },
+          "similarity_groups": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Similarity Groups"
+          }
+        },
+        "title": "StageRunOptions",
+        "type": "object"
+      },
+      "StageRunRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StageRunOptions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Id"
+          }
+        },
+        "title": "StageRunRequest",
+        "type": "object"
+      },
+      "StageTriageCountsResponse": {
+        "properties": {
+          "automatic_excluded": {
+            "minimum": 0.0,
+            "title": "Automatic Excluded",
+            "type": "integer"
+          },
+          "decided_groups": {
+            "minimum": 0.0,
+            "title": "Decided Groups",
+            "type": "integer"
+          },
+          "failed": {
+            "minimum": 0.0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "flagged": {
+            "minimum": 0.0,
+            "title": "Flagged",
+            "type": "integer"
+          },
+          "groups": {
+            "minimum": 0.0,
+            "title": "Groups",
+            "type": "integer"
+          },
+          "input": {
+            "minimum": 0.0,
+            "title": "Input",
+            "type": "integer"
+          },
+          "kept": {
+            "minimum": 0.0,
+            "title": "Kept",
+            "type": "integer"
+          },
+          "pending_groups": {
+            "minimum": 0.0,
+            "title": "Pending Groups",
+            "type": "integer"
+          },
+          "rejected": {
+            "minimum": 0.0,
+            "title": "Rejected",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input",
+          "groups",
+          "pending_groups",
+          "decided_groups",
+          "flagged",
+          "automatic_excluded",
+          "kept",
+          "rejected",
+          "failed"
+        ],
+        "title": "StageTriageCountsResponse",
+        "type": "object"
+      },
+      "StageTriageSummaryResponse": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/StageTriageCountsResponse"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "last_batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Batch Id"
+          },
+          "review_error": {
+            "title": "Review Error",
+            "type": "string"
+          },
+          "review_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Id"
+          },
+          "review_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pending",
+                  "analyzing",
+                  "auto_applying",
+                  "ready",
+                  "failed",
+                  "expired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Status"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetStageRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stage": {
+            "enum": [
+              "clean",
+              "dedup"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "undo_depth": {
+            "minimum": 0.0,
+            "title": "Undo Depth",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "stage",
+          "run",
+          "review_id",
+          "review_status",
+          "review_error",
+          "counts",
+          "undo_depth",
+          "last_batch_id"
+        ],
+        "title": "StageTriageSummaryResponse",
+        "type": "object"
+      },
       "TagStageRunRequest": {
         "additionalProperties": false,
         "properties": {
@@ -11543,6 +12150,414 @@
           }
         },
         "title": "TaskResponse",
+        "type": "object"
+      },
+      "TriageApplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/TriageGroupDecision"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Groups",
+            "type": "array"
+          },
+          "run_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "groups"
+        ],
+        "title": "TriageApplyRequest",
+        "type": "object"
+      },
+      "TriageApplyResponse": {
+        "properties": {
+          "applied_groups": {
+            "minimum": 0.0,
+            "title": "Applied Groups",
+            "type": "integer"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageBatchErrorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/TriageFailedAssetResponse"
+            },
+            "title": "Failed",
+            "type": "array"
+          },
+          "kept": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kept",
+            "type": "array"
+          },
+          "rejected": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rejected",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/StageTriageSummaryResponse"
+          }
+        },
+        "required": [
+          "batch_id",
+          "applied_groups",
+          "kept",
+          "rejected",
+          "failed",
+          "error",
+          "summary"
+        ],
+        "title": "TriageApplyResponse",
+        "type": "object"
+      },
+      "TriageBatchErrorResponse": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "group_id": {
+            "title": "Group Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group_id",
+          "code",
+          "message"
+        ],
+        "title": "TriageBatchErrorResponse",
+        "type": "object"
+      },
+      "TriageFailedAssetResponse": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "error"
+        ],
+        "title": "TriageFailedAssetResponse",
+        "type": "object"
+      },
+      "TriageGroupDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "group_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Group Id",
+            "type": "string"
+          },
+          "keep": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Keep",
+            "type": "array"
+          }
+        },
+        "required": [
+          "group_id"
+        ],
+        "title": "TriageGroupDecision",
+        "type": "object"
+      },
+      "TriageMemberResponse": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "classification": {
+            "anyOf": [
+              {
+                "enum": [
+                  "rough",
+                  "monochrome"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classification"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "enum": [
+                  "exclude",
+                  "approve"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "disposition": {
+            "enum": [
+              "pending",
+              "kept",
+              "rejected",
+              "failed"
+            ],
+            "title": "Disposition",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "height": {
+            "minimum": 0.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "image_url": {
+            "title": "Image Url",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/TriageQualityResponse"
+          },
+          "readable": {
+            "title": "Readable",
+            "type": "boolean"
+          },
+          "recommended": {
+            "title": "Recommended",
+            "type": "boolean"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "review_metrics": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Metrics"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "thumbnail_url": {
+            "title": "Thumbnail Url",
+            "type": "string"
+          },
+          "trashed": {
+            "title": "Trashed",
+            "type": "boolean"
+          },
+          "width": {
+            "minimum": 0.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asset_id",
+          "source_id",
+          "name",
+          "relative_path",
+          "thumbnail_url",
+          "image_url",
+          "width",
+          "height",
+          "size_bytes",
+          "format",
+          "readable",
+          "recommended",
+          "selected",
+          "disposition",
+          "trashed",
+          "classification",
+          "quality",
+          "review_metrics",
+          "decision",
+          "error"
+        ],
+        "title": "TriageMemberResponse",
+        "type": "object"
+      },
+      "TriageQualityResponse": {
+        "properties": {
+          "blockiness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockiness"
+          },
+          "jpeg_quality": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jpeg Quality"
+          },
+          "noise_sigma": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise Sigma"
+          },
+          "sharpness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpness"
+          }
+        },
+        "title": "TriageQualityResponse",
+        "type": "object"
+      },
+      "TriageUndoRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          }
+        },
+        "title": "TriageUndoRequest",
+        "type": "object"
+      },
+      "TriageUndoResponse": {
+        "properties": {
+          "batch_id": {
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageBatchErrorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "summary": {
+            "$ref": "#/components/schemas/StageTriageSummaryResponse"
+          },
+          "undone_groups": {
+            "minimum": 0.0,
+            "title": "Undone Groups",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "batch_id",
+          "undone_groups",
+          "error",
+          "summary"
+        ],
+        "title": "TriageUndoResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -15263,6 +16278,192 @@
         "summary": "List Dataset Stage Runs"
       }
     },
+    "/api/v1/datasets/{dataset_id}/stages/clean/items": {
+      "get": {
+        "operationId": "list_dataset_clean_items_api_v1_datasets__dataset_id__stages_clean_items_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "pending",
+                "decided"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "monochrome",
+                    "rough",
+                    "filter_character",
+                    "unreadable"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanItemPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Dataset Clean Items"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/stages/dedup/groups": {
+      "get": {
+        "operationId": "list_dataset_dedup_groups_api_v1_datasets__dataset_id__stages_dedup_groups_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "pending",
+                "decided"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_automatic",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Automatic",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DedupGroupPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Dataset Dedup Groups"
+      }
+    },
     "/api/v1/datasets/{dataset_id}/stages/tag/run": {
       "post": {
         "operationId": "run_dataset_tag_stage_api_v1_datasets__dataset_id__stages_tag_run_post",
@@ -15310,6 +16511,261 @@
           }
         },
         "summary": "Run Dataset Tag Stage"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/stages/{stage}/apply": {
+      "post": {
+        "description": "逐组定夺：keep 保留并记「通过」，其余移入回收区并记「排除」。",
+        "operationId": "apply_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stage",
+            "required": true,
+            "schema": {
+              "enum": [
+                "clean",
+                "dedup"
+              ],
+              "title": "Stage",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriageApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriageApplyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Dataset Stage Triage"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/stages/{stage}/run": {
+      "post": {
+        "description": "对这一段的全部输入建一次图库审核（清洗：只过滤；去重：基础去重 + 相似分组）。",
+        "operationId": "run_dataset_stage_api_v1_datasets__dataset_id__stages__stage__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stage",
+            "required": true,
+            "schema": {
+              "enum": [
+                "clean",
+                "dedup"
+              ],
+              "title": "Stage",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/StageRunRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StageTriageSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Dataset Stage"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/stages/{stage}/triage": {
+      "get": {
+        "operationId": "get_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__triage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stage",
+            "required": true,
+            "schema": {
+              "enum": [
+                "clean",
+                "dedup"
+              ],
+              "title": "Stage",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StageTriageSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Stage Triage"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/stages/{stage}/undo": {
+      "post": {
+        "description": "撤销最近一批定夺。",
+        "operationId": "undo_dataset_stage_triage_api_v1_datasets__dataset_id__stages__stage__undo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stage",
+            "required": true,
+            "schema": {
+              "enum": [
+                "clean",
+                "dedup"
+              ],
+              "title": "Stage",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TriageUndoRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriageUndoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Undo Dataset Stage Triage"
       }
     },
     "/api/v1/datasets/{dataset_id}/tagger/candidates": {

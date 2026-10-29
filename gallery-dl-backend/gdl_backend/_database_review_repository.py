@@ -647,6 +647,7 @@ class ReviewRepository:
         batch_id: str,
         decisions: list[dict[str, Any]],
         *, version: int | None = None,
+        allow_automatic: bool = False,
     ) -> None:
         now = self._clock()
         with self._transaction() as conn:
@@ -672,7 +673,7 @@ class ReviewRepository:
                 ).fetchone()
                 if group_row is None:
                     raise KeyError(group_id)
-                if str(group_row["kind"] or "").startswith("auto_"):
+                if str(group_row["kind"] or "").startswith("auto_") and not allow_automatic:
                     # Auto-dedup groups are applied by the worker, not the user. Flipping a
                     # rejected auto-image back to selected would make apply look for a file
                     # the worker already moved away -> apply_failed + skewed auto counts.

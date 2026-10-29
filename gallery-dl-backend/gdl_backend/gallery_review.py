@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from .gallery_review_selection import select_review_assets, validate_snapshot
 from .gallery_safe_paths import SafeSourceRoot
+from .redaction import safe_exception_category
 from .review import DedupReviewManager, ensure_private_directory
 from .review_filters import FilterConfigurationError, require_filter_capabilities
 from .schemas import FilterConfig
+
+
+logger = logging.getLogger(__name__)
 
 
 def review_trash_operation_id(review_id: str, image_id: str, attempt: int = 0) -> str:
@@ -21,6 +27,18 @@ class GalleryDedupReviewManager(DedupReviewManager):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.repository = self.db.gallery_reviews
+        self._listeners: list[Callable[[str], None]] = []
+
+    def add_listener(self, callback: Callable[[str], None]) -> None:
+        """分析完成 / 自动回收落地 / 失败后回调 callback(review_id)（在审核循环里调用）。"""
+        self._listeners.append(callback)
+
+    def _review_changed(self, review_id: str) -> None:
+        for callback in list(self._listeners):
+            try:
+                callback(review_id)
+            except Exception as exc:
+                logger.warning("gallery review listener failed; category=%s", safe_exception_category(exc))
 
     def create(self, directory_ids: list[str], asset_ids: list[str] | None = None,
                filter_config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -137,10 +155,16 @@ class GalleryDedupReviewManager(DedupReviewManager):
         self.repository.bump_version(review_id)
         return self.repository.get_crawl_review(review_id)
 
-    def adopt_group(self, review_id: str, group_id: str, selected_image_ids: list[str], *, version: int) -> dict[str, Any]:
-        """采纳单组：先写决策（版本与归属校验，fail-closed），再逐图实时对账物理状态。"""
+    def adopt_group(self, review_id: str, group_id: str, selected_image_ids: list[str], *, version: int,
+                    allow_automatic: bool = False) -> dict[str, Any]:
+        """采纳单组：先写决策（版本与归属校验，fail-closed），再逐图实时对账物理状态。
+
+        allow_automatic=True 允许改自动组（数据集定夺里把自动回收的图找回来、或撤销找回）：
+        图库审核逐图实时对账，恢复走同一批回收操作槽位，不会出现旧批次审核那种找不到文件。
+        """
         self.repository.update_crawl_review_decisions(
             review_id, [{"group_id": group_id, "selected_image_ids": selected_image_ids}], version=version,
+            allow_automatic=allow_automatic,
         )
         images = self.repository.crawl_review_group_images(review_id, group_id)
         snapshots = {snapshot["asset_id"]: snapshot for snapshot in self.repository.snapshot(review_id)}
