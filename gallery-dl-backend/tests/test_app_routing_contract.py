@@ -72,6 +72,7 @@ _EXPECTED_OPENAPI_OPERATIONS = {
     ("GET", "/api/v1/gallery/sources/{source_id}/scan"): ("get_gallery_scan_api_v1_gallery_sources__source_id__scan_get", ("200", "422")),
     ("POST", "/api/v1/gallery/sources/{source_id}/reconciliation/retry"): ("retry_gallery_reconciliation_api_v1_gallery_sources__source_id__reconciliation_retry_post", ("202", "422")),
     ("GET", "/api/v1/gallery/directories/{directory_id}/entries"): ("list_gallery_directory_entries_api_v1_gallery_directories__directory_id__entries_get", ("200", "422")),
+    ("GET", "/api/v1/gallery/directories/{directory_id}/ancestors"): ("list_gallery_directory_ancestors_api_v1_gallery_directories__directory_id__ancestors_get", ("200", "422")),
     ("GET", "/api/v1/gallery/search"): ("search_gallery_assets_api_v1_gallery_search_get", ("200", "422")),
     ("GET", "/api/v1/gallery/assets/{asset_id}"): ("get_gallery_asset_api_v1_gallery_assets__asset_id__get", ("200", "422")),
     ("GET", "/api/v1/gallery/assets/{asset_id}/content"): ("get_gallery_asset_content_api_v1_gallery_assets__asset_id__content_get", ("200", "422")),

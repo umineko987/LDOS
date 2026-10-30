@@ -236,6 +236,17 @@ class GalleryDirectoryPageResponse(BaseModel):
     source_roots: dict[str, str] = Field(default_factory=dict)
 
 
+class GalleryDirectoryAncestorResponse(BaseModel):
+    directory_id: str = Field(min_length=1, max_length=128)
+    name: str = Field(max_length=255)
+
+
+class GalleryDirectoryAncestorsResponse(BaseModel):
+    directory_id: str = Field(min_length=1, max_length=128)
+    # 根目录 → 父目录，不含自身；根目录为空列表。
+    ancestors: list[GalleryDirectoryAncestorResponse]
+
+
 class GallerySearchPageResponse(BaseModel):
     scope: Literal["directory", "source", "library"]
     assets: list[GalleryAssetEntryResponse]
@@ -650,6 +661,20 @@ def create_gallery_router() -> APIRouter:
             raise ApiError(422, "invalid_gallery_request", "请求参数无效") from None
         _attach_source_roots(container, result, result["assets"])
         return result
+
+    @router.get(
+        "/gallery/directories/{directory_id}/ancestors",
+        response_model=GalleryDirectoryAncestorsResponse,
+    )
+    async def list_gallery_directory_ancestors(
+        directory_id: str,
+        container: Any = Depends(get_service),
+    ) -> Any:
+        """面包屑：目录页的 entries 载荷有严格键合同，祖先链单独给。"""
+        ancestors = container.db.gallery.directory_ancestors(directory_id)
+        if ancestors is None:
+            raise ApiError(404, "directory_not_found", "图库目录不存在")
+        return {"directory_id": directory_id, "ancestors": ancestors}
 
     @router.get("/gallery/search", response_model=GallerySearchPageResponse)
     async def search_gallery_assets(

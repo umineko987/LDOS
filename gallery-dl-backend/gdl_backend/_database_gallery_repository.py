@@ -1134,6 +1134,28 @@ class GalleryRepository:
                 (source_id,),
             ).fetchone()
         return None if row is None else self._project_directory_row(row)
+
+    def directory_ancestors(self, directory_id: str) -> list[dict[str, str]] | None:
+        """根目录 → 父目录的链（不含自身，根目录为空列表）；目录不存在或已失效时返回 None。"""
+        with self._read() as conn:
+            rows = conn.execute(
+                """
+                WITH RECURSIVE chain(id, parent_id, name, depth) AS (
+                    SELECT id, parent_id, name, 0 FROM gallery_directories
+                    WHERE id=? AND lifecycle_state='active'
+                    UNION ALL
+                    SELECT d.id, d.parent_id, d.name, chain.depth + 1
+                    FROM gallery_directories d JOIN chain ON d.id = chain.parent_id
+                    WHERE chain.depth < 1024
+                )
+                SELECT id, name, depth FROM chain ORDER BY depth DESC
+                """,
+                (directory_id,),
+            ).fetchall()
+        if not rows:
+            return None
+        return [{"directory_id": row["id"], "name": row["name"]} for row in rows if row["depth"] > 0]
+
     @staticmethod
     def _project_directory_row(row: Any) -> dict[str, Any]:
         return {

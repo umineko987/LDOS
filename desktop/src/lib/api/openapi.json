@@ -8213,6 +8213,50 @@
         "title": "GalleryAssetEnvelopeResponse",
         "type": "object"
       },
+      "GalleryDirectoryAncestorResponse": {
+        "properties": {
+          "directory_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Directory Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 255,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "directory_id",
+          "name"
+        ],
+        "title": "GalleryDirectoryAncestorResponse",
+        "type": "object"
+      },
+      "GalleryDirectoryAncestorsResponse": {
+        "properties": {
+          "ancestors": {
+            "items": {
+              "$ref": "#/components/schemas/GalleryDirectoryAncestorResponse"
+            },
+            "title": "Ancestors",
+            "type": "array"
+          },
+          "directory_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Directory Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "directory_id",
+          "ancestors"
+        ],
+        "title": "GalleryDirectoryAncestorsResponse",
+        "type": "object"
+      },
       "GalleryDirectoryEntryResponse": {
         "properties": {
           "cover_asset_ids": {
@@ -20104,6 +20148,46 @@
           }
         },
         "summary": "Get Gallery Asset Thumbnail"
+      }
+    },
+    "/api/v1/gallery/directories/{directory_id}/ancestors": {
+      "get": {
+        "description": "面包屑：目录页的 entries 载荷有严格键合同，祖先链单独给。",
+        "operationId": "list_gallery_directory_ancestors_api_v1_gallery_directories__directory_id__ancestors_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "directory_id",
+            "required": true,
+            "schema": {
+              "title": "Directory Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GalleryDirectoryAncestorsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Gallery Directory Ancestors"
       }
     },
     "/api/v1/gallery/directories/{directory_id}/entries": {

@@ -310,6 +310,38 @@ class GalleryDirectoryEntriesRoutesTest(GalleryApiTestBase):
             [a["relative_path"] for a in searched.json()["assets"]], ["sub/1.jpg"]
         )
 
+    def test_ancestors_run_from_root_to_parent(self) -> None:
+        self.make_source_root({"a/b/c/1.jpg": _png_bytes()})
+        source_id = self.source["source_id"]
+        scan = self.client.post(f"/api/v1/gallery/sources/{source_id}/scan")
+        self.assertEqual(scan.status_code, 202, scan.text)
+        self.wait_scan_finished(source_id)
+        root = self.container.db.gallery.get_root_directory(source_id)
+        assert root is not None
+        chain = [root]
+        for name in ("a", "b", "c"):
+            page = self.client.get(f"/api/v1/gallery/directories/{chain[-1]['directory_id']}/entries")
+            self.assertEqual(page.status_code, 200, page.text)
+            chain.append(next(child for child in page.json()["directories"] if child["name"] == name))
+
+        response = self.client.get(f"/api/v1/gallery/directories/{chain[-1]['directory_id']}/ancestors")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json(),
+            {
+                "directory_id": chain[-1]["directory_id"],
+                "ancestors": [
+                    {"directory_id": item["directory_id"], "name": item["name"]} for item in chain[:-1]
+                ],
+            },
+        )
+        top = self.client.get(f"/api/v1/gallery/directories/{root['directory_id']}/ancestors")
+        self.assertEqual(top.json()["ancestors"], [])
+
+        missing = self.client.get("/api/v1/gallery/directories/missing/ancestors")
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.json()["error"]["code"], "directory_not_found")
+
     def test_entries_error_codes(self) -> None:
         missing = self.client.get("/api/v1/gallery/directories/missing/entries")
         self.assertEqual(missing.status_code, 404)
@@ -751,6 +783,9 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
             ("GET", "/api/v1/gallery/directories/{directory_id}/entries"): {
                 "directory", "directories", "assets", "directory_cursor",
                 "asset_cursor", "include_descendants", "limit", "source_roots",
+            },
+            ("GET", "/api/v1/gallery/directories/{directory_id}/ancestors"): {
+                "directory_id", "ancestors",
             },
             ("GET", "/api/v1/gallery/search"): {
                 "scope", "assets", "asset_cursor", "limit", "source_roots",

@@ -20,6 +20,7 @@ EXPECTED_GALLERY_OPERATIONS: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/gallery/sources/{source_id}/scan"),
         ("GET", "/api/v1/gallery/sources/{source_id}/scan"),
         ("GET", "/api/v1/gallery/directories/{directory_id}/entries"),
+        ("GET", "/api/v1/gallery/directories/{directory_id}/ancestors"),
         # §7.2 资产、TXT 与缩略图
         ("GET", "/api/v1/gallery/assets/{asset_id}"),
         ("GET", "/api/v1/gallery/assets/{asset_id}/content"),

@@ -1111,6 +1111,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/gallery/directories/{directory_id}/ancestors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Gallery Directory Ancestors
+         * @description 面包屑：目录页的 entries 载荷有严格键合同，祖先链单独给。
+         */
+        get: operations["list_gallery_directory_ancestors_api_v1_gallery_directories__directory_id__ancestors_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/gallery/directories/{directory_id}/entries": {
         parameters: {
             query?: never;
@@ -4786,6 +4806,20 @@ export interface components {
             source_roots?: {
                 [key: string]: string;
             };
+        };
+        /** GalleryDirectoryAncestorResponse */
+        GalleryDirectoryAncestorResponse: {
+            /** Directory Id */
+            directory_id: string;
+            /** Name */
+            name: string;
+        };
+        /** GalleryDirectoryAncestorsResponse */
+        GalleryDirectoryAncestorsResponse: {
+            /** Ancestors */
+            ancestors: components["schemas"]["GalleryDirectoryAncestorResponse"][];
+            /** Directory Id */
+            directory_id: string;
         };
         /** GalleryDirectoryEntryResponse */
         GalleryDirectoryEntryResponse: {
@@ -9590,6 +9624,37 @@ export interface operations {
                 };
                 content: {
                     "image/jpeg": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_gallery_directory_ancestors_api_v1_gallery_directories__directory_id__ancestors_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                directory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryDirectoryAncestorsResponse"];
                 };
             };
             /** @description Validation Error */
