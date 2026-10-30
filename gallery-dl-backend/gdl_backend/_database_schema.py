@@ -126,8 +126,8 @@ def _ensure_dataset_schema(connection: sqlite3.Connection) -> None:
 def _ensure_caption_batch_schema(connection: sqlite3.Connection) -> None:
     # v16：caption 批量写入的撤销记录。每次批量写入一行 caption_batches，
     # 每张写过（或 from_tagger 记下打标基线）的图一行 caption_batch_items。
-    # 版本是写入前后的磁盘版本（gallery_safe_paths 的 disk_version），
-    # 撤销只在当前版本仍等于 after_version 时恢复。
+    # 版本是写入前后的磁盘版本（gallery_safe_paths 的 disk_version）；
+    # 撤销看当前文本是否仍等于 after_text（撤销本身是重写文件，磁盘版本会变）。
     connection.executescript(
         """
         CREATE TABLE IF NOT EXISTS caption_batches (

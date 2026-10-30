@@ -37,11 +37,11 @@ interface Entry {
   version: number;
 }
 
-/** 撤销要用的：写入前的标签和状态、写入后的版本（之后又被改过就是冲突）、写入前上次打标的标签。 */
+/** 撤销要用的：写入前的标签和状态、写入后的标签（撤销时已经不是它就是之后又被改过，算冲突）、写入前上次打标的标签。 */
 interface Saved {
   readonly tags: string[];
   readonly state: CaptionState;
-  readonly version: number;
+  readonly after: string[];
   readonly previous: string[] | undefined;
 }
 
@@ -161,7 +161,7 @@ export class FakeCaptions {
       batchId = `cb${++this.sequence}`;
       const before = new Map<string, Saved>();
       for (const [assetId, entry, tags] of changes) {
-        before.set(assetId, { tags: entry.tags, state: entry.state, version: entry.version + 1, previous: this.previous.get(assetId) });
+        before.set(assetId, { tags: entry.tags, state: entry.state, after: tags, previous: this.previous.get(assetId) });
         entry.tags = tags;
         entry.state = tags.length ? "normal" : "blank";
         entry.version += 1;
@@ -305,9 +305,9 @@ export class FakeCaptions {
       const conflicts: Schemas["CaptionReportItem"][] = [];
       for (const [assetId, saved] of batch.before) {
         const entry = this.entry(assetId);
-        if (entry.version !== saved.version) {
+        if (!sameTags(entry.tags, saved.after)) {
           stats.conflicts += 1;
-          conflicts.push({ asset_id: assetId, reason: "caption_version_conflict" });
+          conflicts.push({ asset_id: assetId, reason: "caption_changed_since_batch" });
           continue;
         }
         entry.tags = saved.tags;

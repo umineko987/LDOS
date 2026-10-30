@@ -103,6 +103,39 @@ test("查询过滤，全选后删掉 hat，预览差异再写入，toast 撤销"
   await expect(count(page)).toHaveAttribute("data-count", String(TOTAL));
 });
 
+test("Z 按批次一步步撤销到最早", async ({ page }) => {
+  await page.goto("/#/datasets/ds1/review");
+  await expect(count(page)).toHaveAttribute("data-count", String(TOTAL));
+  const history = page.getByTestId("studio-history");
+  const ops = history.locator('[data-kind="ops"]');
+
+  async function removeFromAll(tag: string, changes: number) {
+    await cell(page, 0).click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await expect(page.getByTestId("studio-selection")).toContainText(`已选 ${TOTAL} 张`);
+    // 9/12 张带的标签在“部分图有”一栏。
+    await page.getByTestId("studio-tags-partial").locator(`[data-tag="${tag}"]`).locator('[data-action="remove"]').click();
+    const dialog = page.getByTestId("studio-op-dialog");
+    await expect(dialog.getByTestId("studio-op-stats")).toHaveAttribute("data-changes", String(changes));
+    await dialog.getByTestId("studio-op-apply").click();
+    await expect(dialog).toBeHidden();
+  }
+
+  await removeFromAll("hat", WITH_HAT);
+  await removeFromAll("solo", WITH_HAT);
+  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl"]);
+  await expect(ops).toHaveCount(2);
+
+  // 先撤后一批，再撤前一批：前一批写下的标签还在，照样能撤。
+  await page.keyboard.press("z");
+  await expect(ops.first()).toHaveAttribute("data-undone", "true");
+  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl", "solo"]);
+  await page.keyboard.press("z");
+  await expect(ops.nth(1)).toHaveAttribute("data-undone", "true");
+  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl", "hat", "solo"]);
+  expect(captions.requests.filter((request) => request.path === "undo")).toHaveLength(2);
+});
+
 test("点频率表里的标签改查询，黑名单划线", async ({ page }) => {
   await page.goto("/#/datasets/ds1/review");
   await expect(count(page)).toHaveAttribute("data-count", String(TOTAL));

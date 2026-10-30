@@ -5,8 +5,9 @@ caption 就是图片旁边的同名 .txt。读写都走 GalleryCatalogService �
 FTS 索引同步），所以这里写的文件在图库里立刻可见、可搜索。
 
 caption 的版本就是磁盘版本（gallery_safe_paths 的 disk_version，不透明字符串）。
-每次批量写入记成一个 caption 批次（schema v16）：条目带写入前后的文本和版本，
-撤销只恢复当前版本仍等于 after_version 的文件，其余报告为冲突。
+每次批量写入记成一个 caption 批次（schema v16）：条目带写入前后的文本和版本。
+撤销按文本判断：当前文本仍等于 after_text 才恢复（每次写都是临时文件 + 改名，
+磁盘版本会变，所以不能拿版本比），恢复本身仍按刚读到的版本做条件写入。
 
 标签解析和序列化全部用 caption_tags，后端只此一份。
 """
@@ -549,7 +550,7 @@ class CaptionService:
             )
 
     def undo(self, batch_id: str) -> dict[str, Any]:
-        """撤销一个批次：只恢复当前版本仍等于 after_version 的图，其余报告为冲突。"""
+        """撤销一个批次：当前文本仍等于 after_text 的图恢复成 before_text，其余报告为冲突。"""
         batch = self._repo.get_batch(batch_id)
         if batch is None:
             raise DatasetError(404, "caption_batch_not_found", "caption 批次不存在")
@@ -578,7 +579,7 @@ class CaptionService:
                     entry = entries[asset_id]
                     if entry.get("error"):
                         reports["failed"].append({"asset_id": asset_id, "reason": entry["error"]})
-                    elif entry["disk_version"] != item["after_version"]:
+                    elif entry["content"] is None or entry["content"] != item["after_text"]:
                         reports["conflicts"].append({"asset_id": asset_id, "reason": "caption_changed_since_batch"})
                     else:
                         try:

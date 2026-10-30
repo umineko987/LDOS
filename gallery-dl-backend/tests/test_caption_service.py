@@ -318,6 +318,26 @@ class CaptionUndoTest(CaptionTestBase):
         self.assertEqual(self.text("a"), "1girl, solo, smile, blush")
         self.assertEqual(self.text("b"), "")
 
+    def batch(self, batch_id: str) -> dict:
+        items = self.client.get(f"/api/v1/datasets/{self.dataset_id}/caption-batches").json()["items"]
+        return next(item for item in items if item["batch_id"] == batch_id)
+
+    def test_undo_chain_restores_each_earlier_batch(self) -> None:
+        a, c = self.ids["a"], self.ids["c"]
+        first = self.ops([a, c], [{"op": "add", "tags": ["smile"]}])
+        second = self.ops([a, c], [{"op": "add", "tags": ["hat"]}])
+        self.assertEqual((self.text("a"), self.text("c")), ("1girl, solo, smile, hat", "smile, hat"))
+
+        body = self.undo(second["batch_id"]).json()
+        self.assertEqual(body["stats"], {"total": 2, "restored": 2, "conflicts": 0, "failed": 0})
+        self.assertEqual((self.text("a"), self.text("c")), ("1girl, solo, smile", "smile"))
+        # 撤销是重写文件，磁盘版本已经不是第一批记下的 after_version；文本没变就照样能撤
+        self.assertTrue(self.batch(first["batch_id"])["can_undo"])
+        body = self.undo(first["batch_id"]).json()
+        self.assertEqual(body["stats"], {"total": 2, "restored": 2, "conflicts": 0, "failed": 0})
+        self.assertEqual(self.text("a"), "1girl, solo")
+        self.assertIsNone(self.text("c"))
+
     def test_service_level_undo_errors(self) -> None:
         with self.assertRaises(DatasetError) as caught:
             self.captions.undo("nope")
