@@ -349,6 +349,8 @@ class ServiceContainer:
             await asyncio.to_thread(
                 self.gallery_catalog.retry_pending_review_reconciliations
             )
+            # 上次退出时写到一半的 caption 批次：按磁盘文本收尾，已写的图照常可撤销。
+            await asyncio.to_thread(self.captions.recover)
             await asyncio.to_thread(self.datasets.reconcile)
             await asyncio.to_thread(self.dataset_exports.recover)
             self._health_task = asyncio.create_task(self._proxy_health_loop(), name="proxy-health-monitor")

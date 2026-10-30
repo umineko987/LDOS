@@ -76,14 +76,15 @@ class CaptionSchemaTest(unittest.TestCase):
             again.close()
 
     def test_early_v16_tables_gain_new_columns_with_old_behaviour(self) -> None:
-        # 早期 v16 的表没有逐张撤销的列：打开时补上，旧行默认是未撤销
+        # 早期 v16 的表没有写入日志和逐张撤销的列：打开时补上，旧行默认是已写完、未撤销
         path = self.root / "early-v16.sqlite3"
         early = Database(path)
         dataset_id = early.datasets.create_dataset(name="d", kind="style")["dataset_id"]
         batch = early.captions.create_batch(dataset_id, kind="ops", params={}, stats={},
                                             items=[_item("a1", "old", "new")])
         with early._transaction() as conn:
-            for table, column in (("caption_batch_items", "undo_state"),):
+            for table, column in (("caption_batches", "state"), ("caption_batch_items", "write_state"),
+                                  ("caption_batch_items", "undo_state")):
                 conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
         early.close()
 
@@ -91,9 +92,10 @@ class CaptionSchemaTest(unittest.TestCase):
         try:
             self.assertEqual(_version(upgraded._conn), str(CURRENT_SCHEMA_VERSION))
             kept = upgraded.captions.get_batch(batch["batch_id"])
-            self.assertEqual((kept["changed_count"], kept["undoable_count"]), (1, 1))
+            self.assertEqual((kept["state"], kept["changed_count"], kept["undoable_count"]), ("complete", 1, 1))
             (item,) = upgraded.captions.batch_items(batch["batch_id"])
-            self.assertIsNone(item["undo_state"])
+            self.assertEqual((item["write_state"], item["undo_state"]), ("written", None))
+            self.assertEqual(upgraded.captions.writing_batches(), [])
         finally:
             upgraded.close()
 

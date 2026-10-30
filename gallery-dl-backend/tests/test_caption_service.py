@@ -383,6 +383,87 @@ class CaptionUndoTest(CaptionTestBase):
         self.assertEqual((caught.exception.status, caught.exception.code), (404, "caption_batch_not_found"))
 
 
+class _Crash(BaseException):
+    """模拟进程在写到一半时退出：不是 Exception，单张写入的错误处理接不住。"""
+
+
+class CaptionRecoveryTest(CaptionTestBase):
+    def crash_during_ops(self, target: object, method: str, *, after: int) -> str:
+        """target.method 前 after 次照常调用，之后抛 _Crash；返回留在 writing 的批次 id。"""
+        real = getattr(target, method)
+        calls = 0
+
+        def flaky(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > after:
+                raise _Crash()
+            return real(*args, **kwargs)
+
+        with patch.object(target, method, side_effect=flaky), self.assertRaises(_Crash):
+            self.captions.run_ops(
+                self.dataset_id, asset_ids=list(self.ids.values()), ops=[{"op": "add", "tags": ["smile"]}],
+            )
+        (batch,) = self.db.captions.writing_batches()
+        return batch["batch_id"]
+
+    def history(self) -> list[dict]:
+        return self.client.get(f"/api/v1/datasets/{self.dataset_id}/caption-batches").json()["items"]
+
+    def test_recovery_finishes_batch_interrupted_between_files(self) -> None:
+        batch_id = self.crash_during_ops(self.catalog, "save_annotation", after=1)
+        self.assertEqual((self.text("a"), self.text("b"), self.text("c")), ("1girl, solo, smile", "", None))
+
+        self.assertEqual(self.captions.recover(), 1)
+        self.assertEqual(self.db.captions.writing_batches(), [])
+        self.assertEqual([item["asset_id"] for item in self.db.captions.batch_items(batch_id)], [self.ids["a"]])
+        (batch,) = self.history()
+        self.assertEqual(batch["batch_id"], batch_id)
+        self.assertTrue(batch["can_undo"])
+        self.assertEqual((batch["stats"]["written"], batch["stats"]["interrupted"]), (1, True))
+        self.assertEqual(self.container.jobs.get(f"captions:{batch_id}")["status"], "failed")
+
+        body = self.client.post(f"/api/v1/caption-batches/{batch_id}/undo").json()
+        self.assertEqual(body["stats"], {"total": 1, "restored": 1, "conflicts": 0, "failed": 0})
+        self.assertEqual(self.text("a"), "1girl, solo")
+
+    def test_recovery_claims_file_written_before_the_journal_caught_up(self) -> None:
+        # a 已经写到磁盘，记账之前进程退出：按磁盘文本认领
+        batch_id = self.crash_during_ops(self.db.captions, "mark_written", after=0)
+        self.assertEqual(self.text("a"), "1girl, solo, smile")
+
+        self.assertEqual(self.captions.recover(), 1)
+        items = self.db.captions.batch_items(batch_id)
+        self.assertEqual([(item["asset_id"], item["write_state"]) for item in items], [(self.ids["a"], "written")])
+        self.assertTrue(self.history()[0]["can_undo"])
+        self.client.post(f"/api/v1/caption-batches/{batch_id}/undo")
+        self.assertEqual(self.text("a"), "1girl, solo")
+
+    def test_unreadable_sources_keep_the_batch_pending(self) -> None:
+        batch_id = self.crash_during_ops(self.catalog, "save_annotation", after=1)
+        offline = lambda asset_ids: {  # noqa: E731
+            asset_id: {"asset_id": asset_id, "error": "source_offline"} for asset_id in asset_ids
+        }
+        with patch.object(self.catalog, "read_annotations", side_effect=offline):
+            self.assertEqual(self.captions.recover(), 0)
+            # 来源离线时撤销：已写的图读不到算失败，没写完的图算待定；批次仍可撤销
+            body = self.captions.undo(batch_id)
+        self.assertFalse(body["undone"])
+        self.assertEqual(body["stats"], {"total": 3, "restored": 0, "conflicts": 0, "failed": 3})
+        self.assertEqual(
+            {item["reason"] for item in body["failed"]}, {"source_offline", "caption_write_pending"}
+        )
+        self.assertEqual([batch["batch_id"] for batch in self.db.captions.writing_batches()], [batch_id])
+
+        # 来源回来了：撤销先收尾，再恢复已写的图
+        body = self.captions.undo(batch_id)
+        self.assertTrue(body["undone"])
+        self.assertEqual(body["stats"], {"total": 1, "restored": 1, "conflicts": 0, "failed": 0})
+        self.assertEqual(self.text("a"), "1girl, solo")
+        self.assertEqual(self.captions.recover(), 1)
+        self.assertEqual(self.db.captions.writing_batches(), [])
+
+
 class CaptionFromTaggerTest(CaptionTestBase):
     def apply(self, tags: dict[str, list[str]], mode: str, **extra) -> dict:
         return self.captions.apply_tagger(

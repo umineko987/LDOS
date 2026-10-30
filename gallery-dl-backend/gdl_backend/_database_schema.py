@@ -138,7 +138,8 @@ def _ensure_caption_batch_schema(connection: sqlite3.Connection) -> None:
             stats_json TEXT NOT NULL DEFAULT '{}',
             created_at REAL NOT NULL,
             undone_at REAL,
-            undo_stats_json TEXT NOT NULL DEFAULT '{}'
+            undo_stats_json TEXT NOT NULL DEFAULT '{}',
+            state TEXT NOT NULL DEFAULT 'complete'
         );
         CREATE INDEX IF NOT EXISTS idx_caption_batches_dataset
             ON caption_batches(dataset_id, created_at);
@@ -151,6 +152,7 @@ def _ensure_caption_batch_schema(connection: sqlite3.Connection) -> None:
             after_text TEXT,
             after_version TEXT NOT NULL,
             tagger_tags_json TEXT,
+            write_state TEXT NOT NULL DEFAULT 'written',
             undo_state TEXT,
             PRIMARY KEY(batch_id, asset_id)
         );
@@ -158,10 +160,16 @@ def _ensure_caption_batch_schema(connection: sqlite3.Connection) -> None:
             ON caption_batch_items(asset_id);
         """
     )
-    # 逐张撤销（在 v16 表上补列，默认值即旧行为，不升 schema 版本，旧构建照常打开）：
-    # caption_batch_items.undo_state：restored 表示这张已恢复，重试撤销时跳过。
+    # 写入日志和逐张撤销（同在 v16 表上补列，默认值即旧行为，不升 schema 版本，旧构建照常打开）：
+    # caption_batches.state：writing 表示批次还在写（或写到一半进程没了，启动时 recover 收尾）；
+    # caption_batch_items.write_state：planned 是写之前先记下的意图，written 是已落盘；
+    # undo_state：restored 表示这张已恢复，重试撤销时跳过。
     added = {
-        "caption_batch_items": (("undo_state", "TEXT"),),
+        "caption_batches": (("state", "TEXT NOT NULL DEFAULT 'complete'"),),
+        "caption_batch_items": (
+            ("write_state", "TEXT NOT NULL DEFAULT 'written'"),
+            ("undo_state", "TEXT"),
+        ),
     }
     for table, columns in added.items():
         existing = {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}

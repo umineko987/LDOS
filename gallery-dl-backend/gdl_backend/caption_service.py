@@ -6,6 +6,7 @@ FTS 索引同步），所以这里写的文件在图库里立刻可见、可搜�
 
 caption 的版本就是磁盘版本（gallery_safe_paths 的 disk_version，不透明字符串）。
 每次批量写入记成一个 caption 批次（schema v16）：条目带写入前后的文本和版本。
+写入是日志式的：先记意图再写文件，进程中途退出时启动恢复（recover）收尾。
 撤销按文本判断：当前文本仍等于 after_text 才恢复（每次写都是临时文件 + 改名，
 磁盘版本会变，所以不能拿版本比），恢复本身仍按刚读到的版本做条件写入。
 每张恢复成功就记下，有暂时失败（来源离线、读写出错）时批次保持可撤销，重试只做剩下的。
@@ -354,24 +355,52 @@ class CaptionService:
         if dry_run:
             return result
         to_write = [item for item in plan.planned if item.change != "unchanged"]
+        if not to_write:
+            return result
         batch_id = str(uuid.uuid4())
-        job_id = None
-        if to_write:
-            job_id = self._job(
-                "captions.write", f"写入 caption {len(to_write)} 张",
-                job_id=f"captions:{batch_id}", total=len(to_write),
-                ref={"dataset_id": dataset_id, "batch_id": batch_id, "kind": kind},
-            )
+        texts = {planned.asset_id: format_caption(planned.after) for planned in to_write}
+        # 先记意图：进程在写到一半时退出，启动恢复按磁盘文本认领已写的图，批次仍可撤销。
+        self._repo.begin_batch(
+            dataset_id, kind=kind, params=params, stats={**stats, "written": 0, "failed": 0},
+            batch_id=batch_id,
+            planned=[
+                {
+                    "asset_id": planned.asset_id,
+                    "before_text": planned.entry["content"],
+                    "before_version": planned.entry["disk_version"],
+                    "after_text": texts[planned.asset_id],
+                    "tagger_tags": planned.tagger_tags,
+                }
+                for planned in to_write
+            ],
+            # from_tagger 把没变的图也记下打标基线，下次 merge 才认得出手改。
+            baseline=[
+                {
+                    "asset_id": planned.asset_id,
+                    "before_text": planned.entry["content"],
+                    "before_version": planned.entry["disk_version"],
+                    "after_text": planned.entry["content"],
+                    "after_version": planned.entry["disk_version"],
+                    "tagger_tags": planned.tagger_tags,
+                }
+                for planned in plan.planned
+                if planned.change == "unchanged" and planned.tagger_tags is not None
+            ],
+        )
+        job_id = self._job(
+            "captions.write", f"写入 caption {len(to_write)} 张",
+            job_id=f"captions:{batch_id}", total=len(to_write),
+            ref={"dataset_id": dataset_id, "batch_id": batch_id, "kind": kind},
+        )
         reports: dict[str, list[dict[str, str]]] = {"conflicts": list(plan.conflicts), "failed": []}
-        items: list[dict[str, Any]] = []
+        written = 0
         try:
             for position, planned in enumerate(to_write, start=1):
-                text = format_caption(planned.after)
                 entry = planned.entry
                 try:
                     saved = self._catalog.save_annotation(
                         planned.asset_id,
-                        text,
+                        texts[planned.asset_id],
                         expected_txt_version=int(entry["txt_version"]),
                         expected_disk_version=str(entry["disk_version"]),
                     )
@@ -381,17 +410,12 @@ class CaptionService:
                         logger.exception("caption write failed; asset_id=%s", planned.asset_id)
                     reports[category].append({"asset_id": planned.asset_id, "reason": reason})
                 else:
-                    items.append({
-                        "asset_id": planned.asset_id,
-                        "before_text": entry["content"],
-                        "before_version": entry["disk_version"],
-                        "after_text": text,
-                        "after_version": saved["disk_version"],
-                        "tagger_tags": planned.tagger_tags,
-                    })
+                    self._repo.mark_written(batch_id, planned.asset_id, saved["disk_version"])
+                    written += 1
                 if position % _PROGRESS_EVERY == 0 or position == len(to_write):
                     self._job_call("update", job_id, current=position, total=len(to_write))
-            written = len(items)
+            # 写失败的图多半没动过文件；万一动了（比如回滚失败），按磁盘文本认领。
+            written += self._settle_planned(batch_id)
             stats = {
                 **stats,
                 "conflicts": len(reports["conflicts"]),
@@ -399,22 +423,10 @@ class CaptionService:
                 "failed": len(reports["failed"]),
             }
             if written:
-                # from_tagger 把没变的图也记下打标基线，下次 merge 才认得出手改。
-                for planned in plan.planned:
-                    if planned.change == "unchanged" and planned.tagger_tags is not None:
-                        items.append({
-                            "asset_id": planned.asset_id,
-                            "before_text": planned.entry["content"],
-                            "before_version": planned.entry["disk_version"],
-                            "after_text": planned.entry["content"],
-                            "after_version": planned.entry["disk_version"],
-                            "tagger_tags": planned.tagger_tags,
-                        })
-                self._repo.create_batch(
-                    dataset_id, kind=kind, params=params, stats=stats, items=items,
-                    batch_id=batch_id,
-                )
+                self._repo.finish_batch(batch_id, stats=stats)
                 result["batch_id"] = batch_id
+            else:
+                self._repo.delete_batch(batch_id)
         except BaseException:
             self._job_call("finish", job_id, "failed", message="caption 写入中断")
             raise
@@ -428,6 +440,50 @@ class CaptionService:
         result["conflicts"] = reports["conflicts"][:REPORT_LIMIT]
         result["failed"] = reports["failed"][:REPORT_LIMIT]
         return result
+
+    def _settle_planned(self, batch_id: str) -> int:
+        """处理还是 planned 的条目：磁盘文本已是 after_text 的认领为已写，其余丢弃。
+
+        读不到的（来源离线等）保留为 planned，下次启动恢复再看。返回认领数。
+        """
+        planned = self._repo.planned_items(batch_id)
+        if not planned:
+            return 0
+        entries = self._catalog.read_annotations([item["asset_id"] for item in planned])
+        claimed = 0
+        for item in planned:
+            entry = entries[item["asset_id"]]
+            if entry.get("error"):
+                continue
+            content = entry["content"]
+            if content is not None and content == item["after_text"] and content != item["before_text"]:
+                self._repo.mark_written(batch_id, item["asset_id"], str(entry["disk_version"]))
+                claimed += 1
+            else:
+                self._repo.drop_planned(batch_id, item["asset_id"])
+        return claimed
+
+    def recover(self) -> int:
+        """启动恢复：上次写到一半的批次按磁盘文本收尾，已写的图照常可撤销。返回收尾的批次数。"""
+        recovered = 0
+        for batch in self._repo.writing_batches():
+            batch_id = str(batch["batch_id"])
+            try:
+                with self._dataset_lock(str(batch["dataset_id"])):
+                    self._settle_planned(batch_id)
+                    if self._repo.planned_items(batch_id):
+                        # 还有读不到的图：批次留在 writing，下次启动再收尾；已认领的已经可撤销。
+                        continue
+                    current = self._repo.get_batch(batch_id) or batch
+                    if current["changed_count"] == 0:
+                        self._repo.delete_batch(batch_id)
+                    else:
+                        stats = {**current["stats"], "written": current["changed_count"], "interrupted": True}
+                        self._repo.finish_batch(batch_id, stats=stats)
+                recovered += 1
+            except Exception:
+                logger.exception("caption batch recovery failed; batch_id=%s", batch_id)
+        return recovered
 
     # ---- 对外操作 ----
 
@@ -565,9 +621,15 @@ class CaptionService:
                 raise DatasetError(404, "caption_batch_not_found", "caption 批次不存在")
             if batch["undone_at"] is not None:
                 raise DatasetError(409, "caption_batch_already_undone", "这个批次已经撤销过了")
+            pending: list[dict[str, Any]] = []
+            if batch["state"] == "writing":
+                # 上次写到一半、启动恢复还没收完尾：先按磁盘文本认领，仍读不到的图算暂时失败。
+                self._settle_planned(batch_id)
+                pending = self._repo.planned_items(batch_id)
             items = [
                 item for item in self._repo.batch_items(batch_id)
-                if item["undo_state"] is None and item["before_version"] != item["after_version"]
+                if item["write_state"] == "written" and item["undo_state"] is None
+                and item["before_version"] != item["after_version"]
             ]
             entries = self._catalog.read_annotations([item["asset_id"] for item in items])
             job_id = self._job(
@@ -576,7 +638,10 @@ class CaptionService:
                 ref={"dataset_id": dataset_id, "batch_id": batch_id},
             ) if items else None
             restored = 0
-            reports: dict[str, list[dict[str, str]]] = {"conflicts": [], "failed": []}
+            reports: dict[str, list[dict[str, str]]] = {
+                "conflicts": [],
+                "failed": [{"asset_id": item["asset_id"], "reason": "caption_write_pending"} for item in pending],
+            }
             try:
                 for position, item in enumerate(items, start=1):
                     asset_id = item["asset_id"]
@@ -606,7 +671,7 @@ class CaptionService:
                     if position % _PROGRESS_EVERY == 0 or position == len(items):
                         self._job_call("update", job_id, current=position, total=len(items))
                 undo_stats = {
-                    "total": len(items),
+                    "total": len(items) + len(pending),
                     "restored": restored,
                     "conflicts": len(reports["conflicts"]),
                     "failed": len(reports["failed"]),
@@ -640,6 +705,7 @@ class CaptionService:
         batches = []
         for batch in self._repo.list_batches(dataset_id, limit=limit):
             undoable = batch.pop("undoable_count")
+            batch.pop("state")
             batches.append({**batch, "can_undo": batch["undone_at"] is None and undoable > 0})
         return batches
 
