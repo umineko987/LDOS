@@ -12,8 +12,8 @@ npm run test:e2e:ui                   # 交互式调试
 Linux 上有 `/usr/bin/chromium` 时直接用它；别的路径用 `LDOS_CHROMIUM_PATH` 指定。
 
 设了 `http_proxy` 的 shell 里，Playwright 等待 `localhost:1420` 的探测会走代理（代理回 502），
-等满 60 秒报 `Timed out waiting ... from config.webServer`。跑之前 `unset http_proxy https_proxy`，
-或者把 `localhost` 加进 `no_proxy`。
+等满 60 秒报 `Timed out waiting ... from config.webServer`。代理不用关，把本地地址加进白名单：
+`no_proxy=localhost,127.0.0.1,::1 NO_PROXY=localhost,127.0.0.1,::1 npm run test:e2e`。
 
 ## 两个项目
 
