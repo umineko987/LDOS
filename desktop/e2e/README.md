@@ -84,6 +84,25 @@ const connections = await mockEvents(page, [                      // 第一次�
 - 不用 `waitForTimeout`；等状态就用 `expect(...).toHave*` 或 `expect.poll()`。
 - 键盘交互走真实按键（`page.keyboard.press("Control+k")`），这样按键注册表和 Esc 链也一起被测到。
 
+## 黄金路径（真实后端）
+
+`golden/pipeline.golden.ts` 在真实后端上走一遍 建数据集 → 导入文件夹 → 清洗 → 去重 → 打标 → 校对（标签工作室删标签）→ 导出，
+最后用 Node 检查导出目录里的图片和 caption。它用单独的配置，`npm run test:e2e` 不会跑到它。
+
+```sh
+no_proxy=localhost,127.0.0.1,::1 NO_PROXY=localhost,127.0.0.1,::1 npm run test:e2e:golden
+```
+
+- `golden/setup.ts`（globalSetup）在系统临时目录里建数据目录、配置和 8 张生成的 PNG（含像素相同和缩小的近重复），
+  在空闲端口上启动 `python -m gdl_backend --config …`（和桌面宿主开发模式同一个入口），结束时关掉后端、删掉临时目录。
+  不碰 `~/.config` 和真实数据目录，不联网，不要 HF token。
+- 页面按桌面模式连后端：用例模拟 Tauri 宿主，`runtime_metadata` 返回真实后端的 `apiOrigin`，选目录按队列返回素材和导出目录。
+- 模型是替身（`golden/fakes/`）：去重和打标跑真实的 worker / CLI 和后端流水线，只把推理换成按像素判断——
+  完成度过滤按灰度 / 近白判黑白和草稿，WD 打标按底色给 `*_theme`。模型文件是占位，探测脚本直接报可用。
+- 解释器默认用 `scripts/setup-linux.sh` 建的两个虚拟环境（`gallery-dl-backend/.venv`、`.venv`），
+  可用 `LDOS_GOLDEN_BACKEND_PYTHON`、`LDOS_GOLDEN_TOOL_PYTHON` 指定；`LDOS_GOLDEN_KEEP=1` 保留临时目录（后端日志在 `backend.log`）。
+- 去重的 Python 替身是 sh 脚本，只在 Linux / macOS 上能跑。
+
 ## CSP 检查
 
 - `csp.spec.ts`：开发服务器的响应头等于 `devCsp`，页面里没有内联脚本。

@@ -4,6 +4,6 @@
     "types": ["node", "@playwright/test"],
     "rootDir": ".."
   },
-  "include": ["./**/*.ts", "../playwright.config.ts"],
+  "include": ["./**/*.ts", "../playwright.config.ts", "../playwright.golden.config.ts"],
   "exclude": []
 }

@@ -19,6 +19,7 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
+    "test:e2e:golden": "playwright test -c playwright.golden.config.ts",
     "tauri": "tauri",
     "api:gen": "openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts --default-non-nullable false"
   },
