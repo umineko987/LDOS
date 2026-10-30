@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/svelte-query";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createApi } from "../client.ts";
 import {
@@ -98,6 +98,31 @@ describe("captionsQuery", () => {
     expect((await newClient().fetchQuery(captionsQuery(api, "d1"))).etag).toBe('"body"');
     const { api: bare } = fakeApi(() => ({ status: 200, body: { ...LIST, etag: "" } }));
     expect((await newClient().fetchQuery(captionsQuery(bare, "d1"))).etag).toBeNull();
+  });
+
+  it("304 时返回此刻的缓存：请求途中写进缓存的编辑不会被盖掉", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let calls = 0;
+    const api = createApi("http://127.0.0.1:8787", {
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return new Response(JSON.stringify(LIST), { status: 200, headers: { "Content-Type": "application/json", ETag: '"v1"' } });
+        }
+        await gate;
+        return new Response(null, { status: 304 });
+      },
+    });
+    const client = newClient();
+    await client.fetchQuery(captionsQuery(api, "d1"));
+    const refetch = client.fetchQuery({ ...captionsQuery(api, "d1"), staleTime: 0 });
+    await vi.waitFor(() => expect(calls).toBe(2));
+    applyCaptionEdit(client, "d1", { batch_id: "e1", caption: { asset_id: "a", state: "normal", text: "x", tags: ["x"], version: "v2" } });
+    release();
+    const snapshot = await refetch;
+    expect(snapshot.list.items[0]).toMatchObject({ text: "x", version: "v2" });
+    expect(client.getQueryData<CaptionsSnapshot>(captionKeys.list("d1"))).toBe(snapshot);
   });
 
   it("没有缓存时 304 照常抛出", async () => {

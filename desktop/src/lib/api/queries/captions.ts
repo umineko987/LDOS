@@ -72,7 +72,10 @@ export function captionsQuery(api: Api, datasetId: string) {
         // 响应头拿不到 ETag 时（跨域没暴露）用响应体里的同一个值。
         return { etag: result.response.headers.get("ETag") ?? (list.etag || null), list };
       } catch (error) {
-        if (previous && isApiError(error) && error.status === 304) return previous;
+        // 取此刻的缓存，不用请求开始时的：请求途中写进缓存的编辑（applyCaptionEdit）不能被旧对象盖掉。
+        if (previous && isApiError(error) && error.status === 304) {
+          return client.getQueryData<CaptionsSnapshot>(queryKey) ?? previous;
+        }
         throw error;
       }
     },
