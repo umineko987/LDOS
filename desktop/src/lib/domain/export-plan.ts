@@ -27,10 +27,15 @@ export interface ExportForm {
 }
 
 /**
- * 默认值：沿用上一次导出的选项（目录、布局、转换），触发词取数据集当前的。
+ * 默认值：沿用上一次导出的选项（目录、布局、转换），触发词取数据集当前的；
+ * 黑名单优先取标签工作室存在数据集 config 里的（`studioBlacklist`，没存过时为 null）。
  * 上一次的文件夹名是后端算出来的（kohya 带了 repeats 前缀），不能原样填回去，所以不沿用。
  */
-export function exportFormDefaults(triggerWord: string, last?: ExportOptions | null): ExportForm {
+export function exportFormDefaults(
+  triggerWord: string,
+  last?: ExportOptions | null,
+  studioBlacklist?: readonly string[] | null,
+): ExportForm {
   return {
     target: last?.target_path ?? "",
     layout: last?.layout ?? "kohya",
@@ -40,7 +45,7 @@ export function exportFormDefaults(triggerWord: string, last?: ExportOptions | n
     rename: last?.rename ?? "none",
     captions: last?.include_captions ?? true,
     pinTrigger: last?.pin_trigger ?? true,
-    blacklist: (last?.tag_blacklist ?? []).join(", "),
+    blacklist: (studioBlacklist ?? last?.tag_blacklist ?? []).join(", "),
     underscores: last?.underscore_to_space ?? false,
   };
 }

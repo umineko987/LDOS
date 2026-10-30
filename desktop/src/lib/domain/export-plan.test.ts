@@ -64,6 +64,12 @@ describe("exportFormDefaults", () => {
     });
     expect(exportFormDefaults("", LAST).trigger).toBe("old");
   });
+
+  it("黑名单优先取标签工作室存的，存过空表也算", () => {
+    expect(exportFormDefaults("miku", LAST, ["watermark", "text"]).blacklist).toBe("watermark, text");
+    expect(exportFormDefaults("miku", LAST, []).blacklist).toBe("");
+    expect(exportFormDefaults("miku", LAST, null).blacklist).toBe("a, b");
+  });
 });
 
 describe("parseTagList / isAbsolutePath", () => {

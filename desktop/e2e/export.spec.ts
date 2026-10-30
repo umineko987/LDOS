@@ -4,9 +4,9 @@ import { FakeDatasets } from "./fixtures/datasets";
 import { FakeExports, fakeDesktopHost, hostCalls } from "./fixtures/exports";
 import { expect, test } from "./fixtures/test";
 
-async function setup(page: Page, prepare?: (exports: FakeExports) => void) {
+async function setup(page: Page, prepare?: (exports: FakeExports) => void, config?: Record<string, unknown>) {
   const datasets = new FakeDatasets();
-  const id = datasets.add({ name: "角色 A", trigger_word: "alice", members: 6 });
+  const id = datasets.add({ name: "角色 A", trigger_word: "alice", members: 6, config });
   await datasets.install(page);
   const exports = new FakeExports(datasets, id);
   prepare?.(exports);
@@ -68,6 +68,22 @@ test("kohya 布局：选目录、预览计划、开始导出，完成后在文�
 
   await current.getByTestId("export-reveal").click();
   await expect.poll(() => hostCalls(page)).toContainEqual({ command: "reveal_in_file_manager", args: { path: "/home/me/train/12_alice" } });
+});
+
+test("黑名单默认取标签工作室存的，手动改过以后照用户的", async ({ page }) => {
+  const { id, exports } = await setup(page, undefined, { tag_blacklist: ["watermark", "text"] });
+  await page.goto(`/#/datasets/${id}/export`);
+
+  const blacklist = page.getByTestId("export-blacklist");
+  await expect(blacklist).toHaveValue("watermark, text");
+  await page.getByTestId("export-target").fill("/home/me/train");
+  await page.getByTestId("export-preview").click();
+  await expect(page.getByTestId("export-plan")).toBeVisible();
+  expect(exports.requests.at(-1)).toMatchObject({ dry_run: true, tag_blacklist: ["watermark", "text"] });
+
+  await blacklist.fill("watermark");
+  await page.getByTestId("export-preview").click();
+  await expect.poll(() => exports.requests.at(-1)?.tag_blacklist).toEqual(["watermark"]);
 });
 
 test("浏览器模式：手填目录，没有选目录和在文件管理器中打开；中断的导出可以续传", async ({ page }) => {

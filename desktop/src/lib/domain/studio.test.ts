@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   blacklistOf,
+  storedBlacklist,
   BLACKLIST_KEY,
   clampPane,
   draftOp,
@@ -84,6 +85,8 @@ describe("黑名单", () => {
     expect(blacklistOf({ [BLACKLIST_KEY]: [" watermark ", "watermark", 3, "text"] })).toEqual(["watermark", "text"]);
     expect(blacklistOf({ [BLACKLIST_KEY]: "watermark" })).toEqual([]);
     expect(blacklistOf(null)).toEqual([]);
+    expect(storedBlacklist({})).toBeNull();
+    expect(storedBlacklist({ [BLACKLIST_KEY]: [] })).toEqual([]);
   });
 
   it("写回时保留 config 里的其他键", () => {

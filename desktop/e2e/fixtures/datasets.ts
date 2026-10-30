@@ -36,6 +36,7 @@ interface FakeDataset {
   updated_at: number;
   readonly roots: Root[];
   members: Member[];
+  config: Record<string, unknown>;
   /** 采集段被排除的 asset_id。 */
   readonly excluded: Set<string>;
 }
@@ -46,6 +47,7 @@ export interface FakeDatasetInit {
   readonly trigger_word?: string;
   /** 预先挂一个有这么多张图的文件夹。 */
   readonly members?: number;
+  readonly config?: Record<string, unknown>;
 }
 
 function idOf(request: Request, index = 0): string {
@@ -76,6 +78,7 @@ export class FakeDatasets {
       updated_at: TIME,
       roots: [],
       members: [],
+      config: { ...init.config },
       excluded: new Set(),
     });
     if (init.members) this.attachFolder(dataset_id, `/data/${init.name}`, init.members);
@@ -156,7 +159,7 @@ export class FakeDatasets {
       name: dataset.name,
       kind: dataset.kind,
       trigger_word: dataset.trigger_word,
-      config: {},
+      config: { ...dataset.config },
       created_at: dataset.created_at,
       updated_at: dataset.updated_at,
       member_count,
@@ -209,6 +212,7 @@ export class FakeDatasets {
       if (patch.name != null) dataset.name = patch.name;
       if (patch.kind != null) dataset.kind = patch.kind;
       if (patch.trigger_word != null) dataset.trigger_word = patch.trigger_word;
+      if (patch.config != null) dataset.config = { ...patch.config };
       dataset.updated_at += 1;
       return { body: this.detail(dataset.dataset_id) };
     });

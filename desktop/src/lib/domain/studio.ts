@@ -99,8 +99,13 @@ export function latestUndoable<T extends { readonly can_undo: boolean; readonly 
 export const BLACKLIST_KEY = "tag_blacklist";
 
 export function blacklistOf(config: Readonly<Record<string, unknown>> | null | undefined): string[] {
+  return storedBlacklist(config) ?? [];
+}
+
+/** 标签工作室存过的黑名单；从没存过（或存的不是数组）时为 null，和“存了空表”区分开。 */
+export function storedBlacklist(config: Readonly<Record<string, unknown>> | null | undefined): string[] | null {
   const raw = config?.[BLACKLIST_KEY];
-  if (!Array.isArray(raw)) return [];
+  if (!Array.isArray(raw)) return null;
   return dedupe(raw.filter((tag): tag is string => typeof tag === "string").map((tag) => tag.trim()));
 }
 

@@ -38,6 +38,7 @@
     type ExportForm,
     type ExportFormIssue,
   } from "#lib/domain/export-plan.ts";
+  import { storedBlacklist } from "#lib/domain/studio.ts";
   import { useJobs } from "#lib/events/jobs.svelte.ts";
   import { useBindings } from "#lib/keys/bindings.svelte.ts";
   import { m } from "#lib/paraglide/messages.js";
@@ -60,6 +61,9 @@
 
   let form = $state<Form>(exportFormDefaults(""));
   let initialized = $state(false);
+  // 黑名单默认跟着标签工作室（数据集 config）走，用户在这里改过以后就不再跟。
+  const studioBlacklist = $derived(storedBlacklist(dataset.detail?.config));
+  let blacklistEdited = $state(false);
   let plan = $state.raw<ExportPlan | null>(null);
   let planKey = $state<string | null>(null);
   let planning = $state(false);
@@ -73,9 +77,15 @@
     if (initialized || history.isPending || dataset.loading) return;
     const last = history.data?.[0]?.options ?? null;
     untrack(() => {
-      form = { ...exportFormDefaults(dataset.triggerWord, last) };
+      form = { ...exportFormDefaults(dataset.triggerWord, last, studioBlacklist) };
       initialized = true;
     });
+  });
+
+  $effect(() => {
+    const tags = studioBlacklist;
+    if (!initialized || blacklistEdited || tags === null) return;
+    untrack(() => (form.blacklist = tags.join(", ")));
   });
 
   const request = $derived(exportRequest(form));
@@ -273,7 +283,14 @@
     {#if form.captions}
       {@render check(form.pinTrigger, (value) => (form.pinTrigger = value), m.export_pin_trigger(), "export-pin-trigger")}
       {@render check(form.underscores, (value) => (form.underscores = value), m.export_underscores(), "export-underscores")}
-      <Input bind:value={form.blacklist} class="h-8 text-xs" placeholder={m.export_blacklist_placeholder()} aria-label={m.export_blacklist()} data-testid="export-blacklist" />
+      <Input
+        bind:value={form.blacklist}
+        oninput={() => (blacklistEdited = true)}
+        class="h-8 text-xs"
+        placeholder={m.export_blacklist_placeholder()}
+        aria-label={m.export_blacklist()}
+        data-testid="export-blacklist"
+      />
     {/if}
   </div>
 {/snippet}
