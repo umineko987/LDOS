@@ -30,8 +30,7 @@ describe("library domain", () => {
       { directoryId: "d2", label: "b", path: "/library/s1/d2" },
     ]);
     expect(crumbs("s1", "", chain.slice(0, 1))[0]!.label).toBe("pictures");
-    // 链断了（上级取不到）时没有根，全部按目录显示。
-    expect(crumbs("s1", "我的图", chain.slice(1)).map((crumb) => crumb.path)).toEqual(["/library/s1/d1", "/library/s1/d2"]);
+    expect(crumbs("s1", "我的图", [])).toEqual([]);
   });
 
   it("主名去掉扩展名", () => {

@@ -277,6 +277,16 @@ export class FakeLibrary {
         },
       };
     });
+    await mockApi(page, "get", "/api/v1/gallery/directories/{directory_id}/ancestors", (request) => {
+      const id = segment(request, 5);
+      const directory = this.directories.get(id);
+      if (!directory) return notFound("directory");
+      const ancestors: Schemas["GalleryDirectoryAncestorResponse"][] = [];
+      for (let parent = this.directories.get(directory.parent_id ?? ""); parent; parent = this.directories.get(parent.parent_id ?? "")) {
+        ancestors.unshift({ directory_id: parent.directory_id, name: parent.name });
+      }
+      return { body: { directory_id: id, ancestors } };
+    });
     await mockApi(page, "get", "/api/v1/gallery/search", (request) => {
       const params = new URL(request.url()).searchParams;
       const query = (params.get("query") ?? "").toLowerCase();

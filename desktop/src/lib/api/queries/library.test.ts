@@ -20,7 +20,6 @@ import {
   librarySourceQuery,
   librarySourcesQuery,
   libraryTrashQuery,
-  MAX_DIRECTORY_DEPTH,
   nextEntriesCursor,
   purgeTrash,
   relinkSource,
@@ -31,7 +30,6 @@ import {
   startScan,
   trashItems,
   undoOperation,
-  type LibraryDirectory,
   type LibraryDirectoryPage,
 } from "./library.ts";
 
@@ -49,10 +47,6 @@ function fakeApi(reply: (request: Request) => unknown) {
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 const url = (request: Request) => new URL(request.url);
 const query = (request: Request) => Object.fromEntries(url(request).searchParams);
-
-function directory(id: string, parent: string | null): LibraryDirectory {
-  return { directory_id: id, name: id, parent_id: parent } as LibraryDirectory;
-}
 
 describe("library queries", () => {
   it("键都在 library 下", () => {
@@ -143,32 +137,14 @@ describe("library queries", () => {
     expect(query(requests.at(-1)!)).toEqual({ view: "desktop", include_descendants: "true", asset_cursor: "n", limit: String(ENTRIES_PAGE_SIZE) });
   });
 
-  it("目录链沿 parent_id 往上找，遇到缓存的上级就接上", async () => {
-    const tree: Record<string, LibraryDirectory> = {
-      root: directory("root", null),
-      d1: directory("d1", "root"),
-      d2: directory("d2", "d1"),
-      d3: directory("d3", "d2"),
-    };
-    const { api, requests } = fakeApi((request) => ({ directory: tree[url(request).pathname.split("/")[5]!] }));
-    const queries = client();
-    const ids = (chain: LibraryDirectory[]) => chain.map((entry) => entry.directory_id);
-    expect(ids(await queries.fetchQuery(libraryPathQuery(api, queries, "d2")))).toEqual(["root", "d1", "d2"]);
-    expect(requests).toHaveLength(3);
-    expect(query(requests[0]!)).toEqual({ view: "desktop", limit: "1" });
-    expect(ids(await queries.fetchQuery(libraryPathQuery(api, queries, "d3")))).toEqual(["root", "d1", "d2", "d3"]);
-    expect(requests).toHaveLength(4);
-  });
-
-  it("目录链有深度上限", async () => {
-    const { api, requests } = fakeApi((request) => {
-      const id = url(request).pathname.split("/")[5]!;
-      return { directory: directory(id, `${id}x`) };
-    });
-    const queries = client();
-    const chain = await queries.fetchQuery(libraryPathQuery(api, queries, "d"));
-    expect(chain).toHaveLength(MAX_DIRECTORY_DEPTH);
-    expect(requests).toHaveLength(MAX_DIRECTORY_DEPTH);
+  it("面包屑的上级来自 ancestors 接口", async () => {
+    const ancestors = [
+      { directory_id: "root", name: "pictures" },
+      { directory_id: "d1", name: "a" },
+    ];
+    const { api, requests } = fakeApi(() => ({ directory_id: "d2", ancestors }));
+    await expect(client().fetchQuery(libraryPathQuery(api, "d2"))).resolves.toEqual(ancestors);
+    expect(requests.map((request) => url(request).pathname)).toEqual(["/api/v1/gallery/directories/d2/ancestors"]);
   });
 
   it("搜索按范围带参数并按 asset_cursor 翻页", async () => {

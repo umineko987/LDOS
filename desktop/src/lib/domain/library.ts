@@ -39,12 +39,11 @@ export interface Crumb {
 interface DirectoryLike {
   readonly directory_id: string;
   readonly name: string;
-  readonly parent_id?: string | null;
 }
 
-/** 面包屑：根目录显示来源名，其余显示目录名。 */
+/** 面包屑：`chain` 从来源根目录开始；根目录显示来源名，其余显示目录名。 */
 export function crumbs(sourceId: string, sourceName: string, chain: readonly DirectoryLike[]): Crumb[] {
-  const rootId = chain.find((directory) => !directory.parent_id)?.directory_id ?? null;
+  const rootId = chain[0]?.directory_id ?? null;
   return chain.map((directory) => ({
     directoryId: directory.directory_id,
     label: directory.directory_id === rootId ? sourceName || directory.name : directory.name,

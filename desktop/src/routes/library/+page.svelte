@@ -30,6 +30,7 @@
   import { Checkbox } from "#lib/components/ui/checkbox/index.ts";
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
+  import { Progress } from "#lib/components/ui/progress/index.ts";
   import { formatAgo } from "#lib/domain/elapsed.ts";
   import { libraryPath, SOURCE_DOT, sourceState, type SourceAvailability } from "#lib/domain/library.ts";
   import { i18n } from "#lib/i18n/locale.svelte.ts";
@@ -225,14 +226,25 @@
               <span data-testid="library-source-state">{STATES[state]()}</span>
               <span class="tabular-nums" data-testid="library-source-count">{m.library_asset_count({ count: source.asset_count })}</span>
               {#if state === "scanning"}
+                <!-- 遍历文件夹时只有已读张数；开始写索引时才有总数，这时才画进度条。 -->
                 <span class="flex items-center gap-1 text-fg2" role="status" data-testid="library-scan-progress">
                   <LoaderCircleIcon class="size-3 animate-spin" />
                   {#if job?.total}
                     {m.library_scan_progress({ done: job.current ?? 0, total: job.total })}
+                  {:else if job?.current}
+                    {m.library_scan_read({ count: job.current })}
                   {:else}
                     {job?.message || m.library_scanning()}
                   {/if}
                 </span>
+                {#if job?.total}
+                  <Progress
+                    class="w-24"
+                    value={Math.min(job.current ?? 0, job.total)}
+                    max={job.total}
+                    data-testid="library-scan-bar"
+                  />
+                {/if}
               {:else}
                 <span>{lastScan(source)}</span>
               {/if}

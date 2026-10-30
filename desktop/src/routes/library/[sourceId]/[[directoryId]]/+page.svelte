@@ -102,7 +102,7 @@
   });
 
   const searching = $derived(query.length > 0);
-  const path = createQuery(() => ({ ...libraryPathQuery(api, client, directoryId ?? ""), enabled: directoryId !== null }));
+  const path = createQuery(() => ({ ...libraryPathQuery(api, directoryId ?? ""), enabled: directoryId !== null }));
   const entries = createInfiniteQuery(() => ({
     ...libraryEntriesQuery(api, directoryId ?? "", { includeDescendants }),
     enabled: directoryId !== null && !searching,
@@ -124,7 +124,10 @@
     return typeof nextEntriesCursor(last, data.pageParams.at(-1) as EntriesCursor)?.directories === "string";
   });
   const order = $derived(assets.map((asset) => asset.asset_id));
-  const trail = $derived(crumbs(sourceId, source.data?.display_name ?? "", path.data ?? []));
+  // 上级没取到之前不显示面包屑：否则当前目录会被当成根目录、显示成来源名。
+  const trail = $derived(
+    path.data ? crumbs(sourceId, source.data?.display_name ?? "", here ? [...path.data, here] : path.data) : [],
+  );
   const label = $derived(trail.map((crumb) => crumb.label).join(" / ") || (source.data?.display_name ?? ""));
   const total = $derived(here ? (includeDescendants ? here.recursive_asset_count : here.direct_asset_count) : 0);
   const scanning = $derived(source.data ? source.data.availability === "scanning" || scans.running(sourceId) : false);

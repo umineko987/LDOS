@@ -688,6 +688,7 @@
   "library_rescan": "重新扫描",
   "library_scan": "扫描",
   "library_scan_progress": "扫描中 {done} / {total}",
+  "library_scan_read": "扫描中 已读 {count} 张",
   "library_scanning": "扫描中…",
   "library_scope": "搜索范围",
   "library_scope_directory": "此文件夹",

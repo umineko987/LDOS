@@ -688,6 +688,7 @@
   "library_rescan": "Rescan",
   "library_scan": "Scan",
   "library_scan_progress": "Scanning {done} / {total}",
+  "library_scan_read": "Scanning · {count} read",
   "library_scanning": "Scanning…",
   "library_scope": "Search in",
   "library_scope_directory": "This folder",

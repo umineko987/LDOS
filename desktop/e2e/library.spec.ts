@@ -77,6 +77,28 @@ test("来源列表 → 打开文件夹 → 查看器里改 TXT，Backspace 回�
   await expect(page).toHaveURL(/#\/library$/);
 });
 
+test("直接打开深层文件夹：面包屑的上级一次取回，根目录显示来源名", async ({ page }) => {
+  const library = new FakeLibrary();
+  const source = library.addSource({ name: "角色图", tree: { "": 1, a: 1, "a/b": 2 } });
+  // 真实扫描器给根目录存的是文件夹名，面包屑应该显示来源名。
+  library.directories.set(source.rootId, { ...library.directories.get(source.rootId)!, name: "pictures" });
+  await library.install(page);
+  const ancestors: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith("/ancestors")) ancestors.push(path);
+  });
+  await page.goto(`/#/library/${source.sourceId}/${source.directories["a/b"]}`);
+
+  const crumbs = page.getByTestId("library-breadcrumb");
+  await expect(crumbs).toHaveText(/图库\s*角色图\s*a\s*b/);
+  await expect(crumbs).not.toContainText("pictures");
+  expect(ancestors).toEqual([`/api/v1/gallery/directories/${source.directories["a/b"]}/ancestors`]);
+  await crumbs.getByRole("link", { name: "a" }).click();
+  await expect(page).toHaveURL(new RegExp(`#/library/${source.sourceId}/${source.directories.a}$`));
+  await expect(crumbs).toHaveText(/图库\s*角色图\s*a$/);
+});
+
 test("改名只改主名，扩展名不变", async ({ page }) => {
   const library = new FakeLibrary();
   const source = library.addSource({ name: "角色图", tree: { "": 2 } });
@@ -266,9 +288,11 @@ test("扫描进度跟着任务走，任务结束后重拉来源；手动扫描�
     title: "扫描 角色图",
     ref: { source_id: source.sourceId },
     current: 3,
-    total: 10,
+    total: null,
   });
-  // 第一次连接推「扫描中」；重连时等用例放行再推「已完成」。
+  // 第一次连接推「遍历中，已读 3 张」；第二次等用例放行推「写索引，10 / 10」；第三次推「已完成」。
+  let commit = () => {};
+  const committing = new Promise<void>((resolve) => (commit = resolve));
   let finish = () => {};
   const finished = new Promise<void>((resolve) => (finish = resolve));
   let connections = 0;
@@ -279,9 +303,13 @@ test("扫描进度跟着任务走，任务结束后重拉来源；手动扫描�
       let events: SseEvent[] = [];
       if (connections === 1) events = [{ event: "job.updated", id: "s-1", data: { job: running } }];
       if (connections === 2) {
+        await committing;
+        events = [{ event: "job.updated", id: "s-2", data: { job: { ...running, current: 10, total: 10 } } }];
+      }
+      if (connections === 3) {
         await finished;
         const at = Math.floor(Date.now() / 1000);
-        events = [{ event: "job.updated", id: "s-2", data: { job: { ...running, status: "succeeded", current: 10, updated_at: at, finished_at: at } } }];
+        events = [{ event: "job.updated", id: "s-3", data: { job: { ...running, status: "succeeded", current: 10, total: 10, updated_at: at, finished_at: at } } }];
       }
       await route.fulfill({
         status: 200,
@@ -294,8 +322,13 @@ test("扫描进度跟着任务走，任务结束后重拉来源；手动扫描�
 
   const row = page.locator(`[data-source="${source.sourceId}"]`);
   await expect(row).toHaveAttribute("data-state", "scanning");
-  await expect(row.getByTestId("library-scan-progress")).toHaveText("扫描中 3 / 10");
+  // 还没有总数：只显示已读张数，不画进度条。
+  await expect(row.getByTestId("library-scan-progress")).toHaveText("扫描中 已读 3 张");
+  await expect(row.getByTestId("library-scan-bar")).toHaveCount(0);
   await expect(row.getByTestId("library-scan")).toBeDisabled();
+  commit();
+  await expect(row.getByTestId("library-scan-progress")).toHaveText("扫描中 10 / 10");
+  await expect(row.getByTestId("library-scan-bar")).toBeVisible();
 
   library.sources.set(source.sourceId, { ...library.sources.get(source.sourceId)!, last_scanned_at: Math.floor(Date.now() / 1000) });
   finish();

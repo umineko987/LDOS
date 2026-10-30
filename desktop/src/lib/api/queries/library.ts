@@ -13,6 +13,7 @@ export type LibrarySource = Schemas["GallerySourceResponse"];
 export type LibraryDirectory = Schemas["GalleryDirectoryEntryResponse"];
 export type LibraryAsset = Schemas["GalleryAssetEntryResponse"];
 export type LibraryDirectoryPage = Schemas["GalleryDirectoryPageResponse"];
+export type LibraryAncestor = Schemas["GalleryDirectoryAncestorResponse"];
 export type LibraryScan = Schemas["GalleryScanOperationResponse"];
 export type LibrarySearchPage = Schemas["GallerySearchPageResponse"];
 export type LibrarySearchScope = LibrarySearchPage["scope"];
@@ -43,8 +44,6 @@ export const DIRECTORY_PAGE_SIZE = 200;
 /** 浏览页每页的条数（子目录和图片各自最多这么多）。 */
 export const ENTRIES_PAGE_SIZE = 200;
 export const TRASH_PAGE_SIZE = 50;
-/** 面包屑最多往上找这么多层。 */
-export const MAX_DIRECTORY_DEPTH = 64;
 
 const entriesFilterKey = (filter: EntriesFilter) => ({ includeDescendants: filter.includeDescendants ?? false });
 
@@ -69,7 +68,7 @@ export const libraryKeys = {
   entriesAll: (directoryId: string) => [...libraryKeys.all, "entries", directoryId] as const,
   entries: (directoryId: string, filter: EntriesFilter = {}) =>
     [...libraryKeys.entriesAll(directoryId), entriesFilterKey(filter)] as const,
-  /** 从来源根目录到这个目录的路径（面包屑）。 */
+  /** 这个目录的上级，从来源根目录到父目录（面包屑）。 */
   path: (directoryId: string) => [...libraryKeys.all, "path", directoryId] as const,
   searchAll: () => [...libraryKeys.all, "search"] as const,
   search: (params: SearchParams) => [...libraryKeys.searchAll(), searchKey(params)] as const,
@@ -221,31 +220,20 @@ export function libraryEntriesQuery(api: Api, directoryId: string, filter: Entri
   });
 }
 
-/**
- * 从来源根目录到 `directoryId` 的目录链（面包屑）。沿 `parent_id` 往上逐级取目录信息，
- * 遇到已缓存的上级路径就接上，所以逐级往下浏览时每层只多一个请求。
- */
-export function libraryPathQuery(api: Api, client: QueryClient, directoryId: string) {
+/** 目录的上级，从来源根目录到父目录，不含它自己；根目录是空数组。目录不会改名，缓存一分钟。 */
+export function libraryPathQuery(api: Api, directoryId: string) {
   return queryOptions({
     queryKey: libraryKeys.path(directoryId),
     staleTime: 60_000,
-    queryFn: async ({ signal }) => {
-      const below: LibraryDirectory[] = [];
-      let id: string | null = directoryId;
-      while (id !== null && below.length < MAX_DIRECTORY_DEPTH) {
-        const known = id === directoryId ? undefined : client.getQueryData<LibraryDirectory[]>(libraryKeys.path(id));
-        if (known) return [...known, ...below.reverse()];
-        const page: LibraryDirectoryPage = await data(
-          api.client.GET("/api/v1/gallery/directories/{directory_id}/entries", {
-            params: { path: { directory_id: id }, query: { view: "desktop", limit: 1 } },
+    queryFn: async ({ signal }): Promise<LibraryAncestor[]> =>
+      (
+        await data(
+          api.client.GET("/api/v1/gallery/directories/{directory_id}/ancestors", {
+            params: { path: { directory_id: directoryId } },
             signal,
           }),
-        );
-        below.push(page.directory);
-        id = page.directory.parent_id ?? null;
-      }
-      return below.reverse();
-    },
+        )
+      ).ancestors,
   });
 }
 
