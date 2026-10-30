@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import time
+import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 from gdl_backend._database_gallery_repository import gallery_asset_id, gallery_directory_id
+from gdl_backend.app import ServiceContainer, create_app
 from gdl_backend.dataset_tagging import accepts_gzip
+from tests.helpers import local_test_client, make_settings
 from tests.test_dataset_service import DatasetTestBase, png_bytes
 
 # 假 CLI：记下 argv 和 stdin，按 fake_tagger.json 里的分数回答 tag / candidates / compose。
@@ -223,6 +227,39 @@ class TagStageRunTest(DatasetTaggingTestBase):
         runs = self.client.get(f"/api/v1/datasets/{self.dataset_id}/stage-runs?stage=tag").json()["items"]
         self.assertEqual([run["run_id"] for run in runs], [first.json()["run_id"]])
         self.wait_run(first.json()["run_id"])
+
+    def test_recover_interrupts_orphaned_tag_runs_only(self) -> None:
+        stats = {"models": [MODEL], "total": 2, "skipped": 0}
+        orphan = self.service.start_stage_run(self.dataset_id, "tag", ref_id="job-gone", stats=stats)
+        live = self.service.start_stage_run(self.dataset_id, "tag", ref_id="job-live")
+        clean = self.service.start_stage_run(self.dataset_id, "clean")
+        with patch.object(type(self.container.tagger), "current_job_id", new_callable=PropertyMock) as current:
+            current.return_value = "job-live"
+            self.assertEqual(self.container.dataset_tagging.recover(), 1)
+        recovered = self.db.datasets.get_stage_run(orphan["run_id"])
+        self.assertEqual((recovered["status"], recovered["error_code"]), ("failed", "interrupted"))
+        self.assertEqual(recovered["stats"], stats)
+        self.assertIsNotNone(recovered["finished_at"])
+        # 正在跑的 tagger 任务和别的阶段不动。
+        self.assertEqual(self.db.datasets.get_stage_run(live["run_id"])["status"], "running")
+        self.assertEqual(self.db.datasets.get_stage_run(clean["run_id"])["status"], "running")
+
+
+class TagRunStartupRecoveryTest(unittest.TestCase):
+    def test_backend_start_interrupts_tag_runs_left_running(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = make_settings(Path(tmp))
+            settings.tagger.model_dir = Path(tmp) / "tagger-models"
+            settings.dedup.model_dir = Path(tmp) / "dedup-models"
+            first = ServiceContainer(settings)
+            with local_test_client(create_app(settings, container=first, start_background=False), settings):
+                dataset_id = first.datasets.create(name="角色A", kind="character")["dataset_id"]
+                run = first.datasets.start_stage_run(dataset_id, "tag", ref_id="job-from-last-session")
+            # 后端重启：新容器带后台任务启动。
+            second = ServiceContainer(settings)
+            with local_test_client(create_app(settings, container=second, start_background=True), settings):
+                recovered = second.db.datasets.get_stage_run(run["run_id"])
+            self.assertEqual((recovered["status"], recovered["error_code"]), ("failed", "interrupted"))
 
 
 def many_tags(prefix: str, count: int = 40) -> list[list]:

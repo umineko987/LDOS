@@ -257,6 +257,26 @@ class DatasetTaggingService:
             registered.set()
         return run
 
+    def recover(self) -> int:
+        """启动恢复：tagger 子进程随上次会话退出，还挂着 running 的 tag 运行标为中断。"""
+        with self._db._read() as conn:
+            rows = conn.execute(
+                "SELECT id, ref_id FROM dataset_stage_runs WHERE status='running' AND stage='tag'"
+            ).fetchall()
+        active = self._tagger.current_job_id
+        recovered = 0
+        for row in rows:
+            if active is not None and str(row["ref_id"]) == active:
+                continue
+            run = self._db.datasets.get_stage_run(str(row["id"]))
+            if run is None or run["status"] != "running":
+                continue
+            self._datasets.finish_stage_run(
+                run["run_id"], status="failed", stats=run["stats"], error_code="interrupted"
+            )
+            recovered += 1
+        return recovered
+
     # ---- 候选分数 ----
 
     def _candidate_key(

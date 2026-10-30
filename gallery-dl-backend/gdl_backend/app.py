@@ -342,6 +342,8 @@ class ServiceContainer:
             await self.reviews.start()
             # 图库审核刚被清空：还挂着 running 的清洗 / 去重运行标为中断。
             await asyncio.to_thread(self.dataset_triage.recover)
+            # tagger 子进程随上次会话退出：还挂着 running 的打标运行同样标为中断。
+            await asyncio.to_thread(self.dataset_tagging.recover)
             await asyncio.to_thread(self.reconcile_gallery_batch_sources)
             await asyncio.to_thread(self.reconcile_applied_gallery_reviews)
             await asyncio.to_thread(
