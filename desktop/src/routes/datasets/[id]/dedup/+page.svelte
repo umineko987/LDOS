@@ -207,6 +207,7 @@
                 {@const restored = memberKept(member)}
                 <div class="flex w-[132px] flex-col overflow-hidden rounded-lg border border-line bg-bg1">
                   <img
+                    crossorigin="anonymous"
                     src={api.resourceUrl(member.thumbnail_url)}
                     alt={member.name}
                     loading="lazy"

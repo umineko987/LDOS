@@ -76,6 +76,7 @@
   >
     {#if src}
       <img
+        crossorigin="anonymous"
         {src}
         {alt}
         draggable="false"

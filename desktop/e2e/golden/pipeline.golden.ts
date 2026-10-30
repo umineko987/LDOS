@@ -45,6 +45,11 @@ const rail = (page: Page) => page.getByTestId("stage-rail");
 const removed = (page: Page, stage: string) => rail(page).locator(`[data-stage="${stage}"] [data-removed]`);
 const output = (page: Page, stage: string) => rail(page).locator(`[data-stage="${stage}"] [data-count]`);
 
+/** 区域里解码成功的图片数。跨源的后端图片少了 crossorigin 会被 local_origin_guard 403，这里会是 0。 */
+const loadedImages = (scope: ReturnType<Page["locator"]>) =>
+  scope.locator("img").evaluateAll((images) =>
+    images.filter((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0).length);
+
 test("建数据集、导入、清洗、去重、打标、校对、导出，导出目录里是留下的图和改好的 caption", async ({ page }) => {
   const { apiOrigin, source, exportTarget } = goldenEnv();
   await desktopHost(page, apiOrigin);
@@ -67,6 +72,7 @@ test("建数据集、导入、清洗、去重、打标、校对、导出，导�
   await expect(page.getByTestId("collect-roots")).toContainText("golden_set");
   await expect(page.getByTestId("virtual-grid").getByRole("option")).toHaveCount(8);
   await expect(output(page, "collect")).toHaveText("8");
+  await expect.poll(() => loadedImages(page.getByTestId("virtual-grid"))).toBe(8);
 
   // 清洗：默认选项下假完成度模型标出黑白和草稿各一张；标记默认保留，整批剔除后 Enter 提交。
   await rail(page).locator('[data-stage="clean"]').click();
@@ -90,6 +96,7 @@ test("建数据集、导入、清洗、去重、打标、校对、导出，导�
   await expect(removed(page, "dedup")).toHaveText("−1");
   const deck = page.getByTestId("compare-deck");
   await expect(deck.getByTestId("deck-card")).toHaveCount(2);
+  await expect.poll(() => loadedImages(deck)).toBe(2);
   const kept = deck.locator('[data-testid="deck-card"][data-kept="true"]');
   await expect(kept).toHaveCount(1);
   await expect(kept).toContainText("b.png");

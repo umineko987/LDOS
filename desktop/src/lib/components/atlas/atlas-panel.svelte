@@ -169,7 +169,7 @@
             onclick={() => onfocus(index)}
             data-asset={model.ids[index]}
           >
-            <img src={thumbnailUrl(index)} alt="" loading="lazy" class="size-full object-cover" />
+            <img crossorigin="anonymous" src={thumbnailUrl(index)} alt="" loading="lazy" class="size-full object-cover" />
           </button>
         {/each}
       </div>

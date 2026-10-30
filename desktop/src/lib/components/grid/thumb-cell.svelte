@@ -41,6 +41,7 @@
 <div class={cn("relative size-full", className)}>
   {#if src && !failed}
     <img
+      crossorigin="anonymous"
       {src}
       {alt}
       loading="lazy"

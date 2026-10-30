@@ -42,7 +42,7 @@
 >
   <span class="flex h-[70px] w-14 items-center justify-center overflow-hidden rounded-md bg-bg2 text-fg3">
     {#if cover}
-      <img src={cover} alt="" loading="lazy" draggable="false" class="size-full object-cover" />
+      <img crossorigin="anonymous" src={cover} alt="" loading="lazy" draggable="false" class="size-full object-cover" />
     {:else}
       <ImagesIcon class="size-4" />
     {/if}

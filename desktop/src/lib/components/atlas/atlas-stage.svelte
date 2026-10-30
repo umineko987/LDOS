@@ -383,6 +383,7 @@
       data-asset={model.ids[hoverAt.index]}
     >
       <img
+        crossorigin="anonymous"
         src={thumbnailUrl(hoverAt.index)}
         alt=""
         class="aspect-square w-full rounded-sm bg-bg3 object-cover"

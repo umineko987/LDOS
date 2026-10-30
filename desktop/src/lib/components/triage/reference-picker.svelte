@@ -102,7 +102,7 @@
               data-testid="clean-reference"
               onclick={() => toggle(member.asset_id)}
             >
-              <img src={api.resourceUrl(member.thumbnail_url)} alt="" loading="lazy" class="absolute inset-1 size-[calc(100%-8px)] rounded-[4px] object-cover" />
+              <img crossorigin="anonymous" src={api.resourceUrl(member.thumbnail_url)} alt="" loading="lazy" class="absolute inset-1 size-[calc(100%-8px)] rounded-[4px] object-cover" />
               {#if selected}
                 <span class="absolute top-1.5 right-1.5 flex size-4 items-center justify-center rounded-full bg-gold text-gold-ink">
                   <CheckIcon class="size-3" />

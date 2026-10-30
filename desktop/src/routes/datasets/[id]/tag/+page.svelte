@@ -486,6 +486,7 @@
               {#each plan.changes.slice(0, SAMPLE_ROWS) as change (change.asset_id)}
                 <li class="flex items-center gap-3 border-b border-line py-1.5">
                   <img
+                    crossorigin="anonymous"
                     src={api.resourceUrl(assetThumbnailPath(change.asset_id, 128))}
                     alt=""
                     class="size-10 flex-none rounded-sm bg-bg2 object-cover"

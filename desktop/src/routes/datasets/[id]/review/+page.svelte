@@ -154,7 +154,10 @@
   $effect(() => {
     if (!triage) return;
     const next = order[triageIndex + 1];
-    if (next) new Image().src = api.resourceUrl(assetContentPath(next));
+    if (!next) return;
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.src = api.resourceUrl(assetContentPath(next));
   });
 
   function enterTriage(index = focus) {

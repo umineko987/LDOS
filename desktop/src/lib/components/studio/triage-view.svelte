@@ -80,7 +80,7 @@
         <ImageOffIcon class="size-6" />
       </div>
     {:else}
-      <img {src} alt={item.name} class="max-h-full max-w-full object-contain" draggable="false" onerror={() => (failed = true)} />
+      <img crossorigin="anonymous" {src} alt={item.name} class="max-h-full max-w-full object-contain" draggable="false" onerror={() => (failed = true)} />
     {/if}
     {#if approved}
       <span class="absolute top-3 right-3 flex items-center gap-1 rounded-sm bg-bg0/80 px-1.5 py-0.5 text-2xs text-ok" data-testid="studio-triage-approved">

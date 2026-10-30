@@ -101,7 +101,11 @@
     if (!open) return;
     for (const offset of [1, -1, 2]) {
       const neighbor = items[index + offset];
-      if (neighbor) new Image().src = neighbor.src;
+      if (!neighbor) continue;
+      // 和页面上的图片同一种 CORS 模式，预取的结果才能被复用。
+      const image = new Image();
+      image.crossOrigin = "anonymous";
+      image.src = neighbor.src;
     }
   });
 
@@ -287,10 +291,11 @@
             >
               {#if current && !failed}
                 {#if current.thumb && !loaded}
-                  <img src={current.thumb} alt="" draggable="false" class="absolute inset-0 size-full object-contain" />
+                  <img crossorigin="anonymous" src={current.thumb} alt="" draggable="false" class="absolute inset-0 size-full object-contain" />
                 {/if}
                 {#key current.id}
                   <img
+                    crossorigin="anonymous"
                     src={current.src}
                     alt={current.name}
                     draggable="false"
@@ -344,7 +349,7 @@
                 onclick={() => (index = position)}
               >
                 {#if item.thumb}
-                  <img src={item.thumb} alt="" loading="lazy" draggable="false" class="size-full object-cover" />
+                  <img crossorigin="anonymous" src={item.thumb} alt="" loading="lazy" draggable="false" class="size-full object-cover" />
                 {/if}
               </button>
             {/each}
