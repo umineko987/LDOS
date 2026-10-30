@@ -81,8 +81,9 @@ export const CRAWL_JOB = job({
 
 export const CRAWL_LIST: Schemas["CrawlBatchListResponse"] = {
   items: [
-    { id: "batch-7", status: "running", created_at: NOW - 600 },
-    { id: "batch-6", status: "completed_with_errors", created_at: NOW - 7_200 },
+    // view=desktop 的列表带任务计数；进行中的批次显示实时任务的进度。
+    { id: "batch-7", status: "running", created_at: NOW - 600, task_count: 10, succeeded_task_count: 5, failed_task_count: 1 },
+    { id: "batch-6", status: "completed_with_errors", created_at: NOW - 7_200, task_count: 10, succeeded_task_count: 9, failed_task_count: 1 },
   ],
 };
 

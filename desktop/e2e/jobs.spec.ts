@@ -147,6 +147,7 @@ test("任务页：实时任务、采集批次历史和下载任务日志", async
   await expect(running).toContainText("运行中");
   await expect(running).toContainText("6/10");
   await expect(page.locator('[data-batch="batch-6"]')).toContainText("完成（有失败）");
+  await expect(page.locator('[data-batch="batch-6"]')).toContainText("成功 9/10 · 失败 1");
 
   await tabs.getByRole("button", { name: "下载任务" }).click();
   const tasks = page.getByTestId("download-tasks");
