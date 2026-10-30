@@ -75,7 +75,7 @@ def _expected_sources(component: str) -> set[str]:
             for path in (base / "gdl_backend").rglob("*.py")
         }
     if component == "dedup":
-        return {path.name for path in ROOT.glob("dedup_*.py")}
+        return {path.relative_to(ROOT).as_posix() for path in (ROOT / "dedup").glob("dedup_*.py")}
     raise ValueError(f"unknown component: {component}")
 
 
