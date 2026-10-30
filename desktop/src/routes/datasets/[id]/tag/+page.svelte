@@ -80,7 +80,8 @@
 
   const taggerModels = createQuery(() => taggerModelsQuery(api));
   const batches = createQuery(() => captionBatchesQuery(api, id));
-  const captions = createQuery(() => captionsQuery(api, id));
+  // 只在模型就绪后的分支里读 caption 列表：默认的属性追踪下，列表先于就绪返回就不会再通知，预览一直是 0 / 0。
+  const captions = createQuery(() => ({ ...captionsQuery(api, id), notifyOnChangeProps: "all" as const }));
 
   let selected = $state.raw<readonly string[]>([]);
   let overrides = $state.raw<Readonly<Record<string, Thresholds>>>({});
