@@ -58,7 +58,8 @@ print(json.dumps({{'type': 'done', 'inputs': args.inputs, 'inputs_file': args.in
         self.assertIsNone(self.service.state.last_result["inputs"])
         self.assertEqual(self.service.state.last_result["inputs_file"], "-")
         self.assertEqual(self.service.state.last_result["stdin"], ["/first path", "/second", ""])
-        self.assertFalse(self.service.state.last_result["no_captions"])
+        # 打标从不直接写 .txt
+        self.assertTrue(self.service.state.last_result["no_captions"])
         self.assertEqual(self.service.state.last_result["thresholds"], [
             ["wd-vit-v3", "general", "0.4"], ["pixai-tagger-v1", "general", "0.2"], ["pixai-tagger-v1", "style", "0.15"],
         ])
@@ -87,7 +88,7 @@ lines = [line for line in sys.stdin.buffer.read().decode('utf-8').split('\\n') i
 print(json.dumps({'type': 'done', 'count': len(lines), 'last': lines[-1]}), flush=True)
 """)
         inputs = [f"/library/图片 {index:05d}.png" for index in range(20_000)]
-        await self.service.tag(["wd-vit-v3"], inputs, write_captions=False)
+        await self.service.tag(["wd-vit-v3"], inputs)
         await self.finish()
         self.assertEqual(self.service.state.phase, "idle")
         self.assertEqual(self.service.state.last_result, {"type": "done", "count": 20_000, "last": inputs[-1]})
@@ -172,7 +173,7 @@ print(json.dumps({'type': 'done', 'received_token': bool(received),
         result = self.service.state.last_result
         self.assertTrue(result["received_token"])
         self.assertEqual(result["mirror"], "https://mirror.example")
-        self.assertNotIn(token, str(self.service.status()))
+        self.assertNotIn(token, str(self.service.state))
         self.assertIn("--accept-license", result["args"])
 
     async def test_download_proxy_is_scoped_to_prepare_and_overrides_environment(self) -> None:
@@ -208,8 +209,8 @@ raise SystemExit(1)
         await self.finish()
         self.assertEqual(self.service.state.phase, "failed")
         self.assertIn("http://***:***@127.0.0.1:7890", self.service.state.message)
-        self.assertNotIn("test-user", str(self.service.status()))
-        self.assertNotIn("test-password", str(self.service.status()))
+        self.assertNotIn("test-user", str(self.service.state))
+        self.assertNotIn("test-password", str(self.service.state))
 
     async def test_prepare_bundle_download_really_uses_proxy_and_mirror(self) -> None:
         requests: list[str] = []

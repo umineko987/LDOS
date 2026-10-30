@@ -148,19 +148,6 @@ class TaggerService:
                 continue
         return total
 
-    def status(self) -> dict[str, Any]:
-        state = self.state
-        return {
-            "phase": state.phase,
-            "stage": state.stage,
-            "done": state.done,
-            "total": state.total,
-            "message": state.message,
-            "download": state.download,
-            "last_result": state.last_result,
-            "enabled": self._settings.tagger.enabled,
-        }
-
     # ---- 子进程管理 ----
 
     async def _create_process(
@@ -353,8 +340,6 @@ class TaggerService:
         *,
         thresholds: dict[str, dict[str, float]] | None = None,
         categories: list[str] | None = None,
-        write_captions: bool = True,
-        overwrite_captions: bool = False,
         batch_size: int = 8,
         job_ref: Mapping[str, Any] | None = None,
         on_finished: FinishedCallback | None = None,
@@ -378,16 +363,13 @@ class TaggerService:
                 "--cache", str(self._settings.tagger.cache_path),
                 "--batch-size", str(batch_size),
             ]
-            args += ["--inputs-file", "-"]
+            # 只算分写进缓存，从不直接写 .txt：caption 一律经数据集的 caption 批次（可撤销、更新图库索引）。
+            args += ["--inputs-file", "-", "--no-captions"]
             for model, overrides in (thresholds or {}).items():
                 for category, value in overrides.items():
                     args += ["--model-threshold", model, category, str(value)]
             if categories:
                 args += ["--categories", ",".join(categories)]
-            if not write_captions:
-                args += ["--no-captions"]
-            if overwrite_captions:
-                args += ["--overwrite"]
             job_id = self._job_id
             await self._spawn(
                 args, encode_input_lines(inputs), env=None,

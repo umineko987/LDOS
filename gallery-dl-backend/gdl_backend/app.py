@@ -592,7 +592,6 @@ def create_app(
             source_path.startswith("/api/v1/proxy/sources")
             or source_path == "/api/v1/auth/proxy"
             or source_path == "/api/v1/settings/downloads"
-            or source_path == "/api/v1/tagger/models/prepare"
             or policy_request
         )
         if sensitive_request:

@@ -254,15 +254,6 @@ class ModelsService:
         listing = await asyncio.to_thread(self.list_models)
         return {"started": started, **listing}
 
-    async def prepare_tagger(
-        self, keys: list[str], *, accept_license: bool, overrides: dict[str, Any],
-    ) -> dict[str, Any]:
-        """旧 /tagger/models/prepare：请求里显式给出的 token/镜像/代理原样使用，
-        没给的取统一下载设置。返回 TaggerService.prepare 的原始结果。"""
-
-        result, _environment = await self._start_tagger(keys, accept_license=accept_license, overrides=overrides)
-        return result
-
     def _tagger_catalog(self) -> list[dict[str, Any]]:
         try:
             return self._tagger.model_catalog()
@@ -270,9 +261,9 @@ class ModelsService:
             logger.warning("tagger model catalog unavailable: %s", redact_text(error, limit=300))
             raise ModelsError(503, "tagger_unavailable", "打标模型登记表不可用") from error
 
-    async def _resolve(self, owner: str, overrides: dict[str, Any] | None = None) -> DownloadEnvironment:
+    async def _resolve(self, owner: str) -> DownloadEnvironment:
         try:
-            return await asyncio.to_thread(self._downloads.resolve, owner, **(overrides or {}))
+            return await asyncio.to_thread(self._downloads.resolve, owner)
         except DownloadProxyUnavailable as error:
             raise ModelsError(409, "download_proxy_unavailable", str(error)) from error
 
@@ -292,9 +283,9 @@ class ModelsService:
         return {"family": "dedup", "keys": covered, "job_id": DEDUP_JOB_ID, "proxy_source": environment.proxy_source}
 
     async def _start_tagger(
-        self, keys: list[str], *, accept_license: bool, overrides: dict[str, Any] | None = None,
+        self, keys: list[str], *, accept_license: bool,
     ) -> tuple[dict[str, Any], DownloadEnvironment]:
-        environment = await self._resolve(f"models:tagger:{uuid.uuid4().hex}", overrides)
+        environment = await self._resolve(f"models:tagger:{uuid.uuid4().hex}")
         secrets = (environment.token,) if environment.token else ()
         try:
             result = await self._tagger.prepare(

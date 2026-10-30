@@ -241,28 +241,6 @@ class ModelsApiTests(unittest.TestCase):
 
     # ---- 旧接口 ----
 
-    def test_legacy_tagger_prepare_falls_back_to_unified_settings(self) -> None:
-        _install, prepare = self.patch_install()
-        self.container.download_settings.update(hf_mirror="https://hf-mirror.example", proxy_mode="custom",
-                                                custom_proxy="http://127.0.0.1:7890", hf_token=TOKEN)
-        response = self.client.post("/api/v1/tagger/models/prepare", json={"models": ["wd-vit-v3"]})
-        self.assertEqual(response.status_code, 202, response.text)
-        self.assertEqual(response.json(), {"phase": "preparing"})
-        prepare.assert_awaited_once_with(["wd-vit-v3"], TOKEN, accept_license=False,
-                                         proxy_url="https://hf-mirror.example", download_proxy="http://127.0.0.1:7890")
-        # 请求里显式给出的字段（包括空值）优先
-        prepare.reset_mock()
-        response = self.client.post("/api/v1/tagger/models/prepare", json={
-            "models": ["wd-vit-v3"], "token": "hf_request", "proxy_url": "", "download_proxy": "http://10.0.0.1:3128",
-        })
-        self.assertEqual(response.status_code, 202, response.text)
-        prepare.assert_awaited_once_with(["wd-vit-v3"], "hf_request", accept_license=False,
-                                         proxy_url=None, download_proxy="http://10.0.0.1:3128")
-        # 校验失败时不回显请求里的 token
-        response = self.client.post("/api/v1/tagger/models/prepare", json={"models": [], "token": "hf_secret_echo"})
-        self.assertEqual(response.status_code, 422)
-        self.assertNotIn("hf_secret_echo", response.text)
-
     def test_legacy_setup_install_uses_unified_mirror_only(self) -> None:
         install, _prepare = self.patch_install()
         self.container.download_settings.update(hf_mirror="https://hf-mirror.example", proxy_mode="custom",
@@ -319,11 +297,11 @@ class ModelsServiceLeaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_pool_lease_is_released_when_start_fails(self) -> None:
         with patch.object(self.tagger, "prepare", new_callable=AsyncMock, side_effect=OSError("boom")):
             with self.assertRaises(Exception):
-                await self.service.prepare_tagger(["wd-vit-v3"], accept_license=False, overrides={})
+                await self.service.install(["wd-vit-v3"])
         self.assertEqual(len(self.pool.released), 1)
         # 没有运行中的任务（AsyncMock 不会启动子进程）也立即归还
         with patch.object(self.tagger, "prepare", new_callable=AsyncMock, return_value={"phase": "preparing"}):
-            await self.service.prepare_tagger(["wd-vit-v3"], accept_license=False, overrides={})
+            await self.service.install(["wd-vit-v3"])
         self.assertEqual(len(self.pool.released), 2)
 
 

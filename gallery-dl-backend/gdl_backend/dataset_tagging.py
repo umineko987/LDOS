@@ -236,7 +236,7 @@ class DatasetTaggingService:
         try:
             started = await self._tagger.tag(
                 models, [item.path for item in runnable],
-                write_captions=False, batch_size=batch_size,
+                batch_size=batch_size,
                 job_ref={"dataset_id": dataset_id, "stage": "tag"},
                 on_finished=finished,
             )
