@@ -243,6 +243,8 @@ class CaptionUndoStats(BaseModel):
 class CaptionUndoResponse(BaseModel):
     batch_id: str
     dataset_id: str
+    # false：有图暂时恢复失败（来源离线等），批次仍可撤销，重试只做剩下的。
+    undone: bool
     stats: CaptionUndoStats
     conflicts: list[CaptionReportItem]
     failed: list[CaptionReportItem]

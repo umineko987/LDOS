@@ -67,6 +67,8 @@ export class FakeCaptions {
   readonly approved = new Set<string>();
   /** 收到的写请求（按顺序），用例里可以检查请求体。 */
   readonly requests: { path: string; body: unknown }[] = [];
+  /** 接下来这么多次撤销一张都恢复不了（像来源离线）：批次保持可撤销，可以重试。 */
+  undoOutages = 0;
   private generation = 1;
   private sequence = 0;
 
@@ -301,6 +303,13 @@ export class FakeCaptions {
       if (!batch || batch.summary.undone_at !== null) {
         return { status: 409, body: errorEnvelope("caption_batch_not_undoable", "这个批次不能撤销") };
       }
+      if (this.undoOutages > 0) {
+        this.undoOutages -= 1;
+        const failed = [...batch.before.keys()].map((asset_id) => ({ asset_id, reason: "source_offline" }));
+        const stats = { total: failed.length, restored: 0, conflicts: 0, failed: failed.length };
+        this.batches[index] = { ...batch, summary: { ...batch.summary, undo_stats: stats } };
+        return { body: { batch_id: batchId, dataset_id: batch.summary.dataset_id, undone: false, stats, conflicts: [], failed } };
+      }
       const stats = { total: batch.before.size, restored: 0, conflicts: 0, failed: 0 };
       const conflicts: Schemas["CaptionReportItem"][] = [];
       for (const [assetId, saved] of batch.before) {
@@ -319,7 +328,7 @@ export class FakeCaptions {
       }
       this.generation += 1;
       this.batches[index] = { ...batch, summary: { ...batch.summary, undone_at: TIME + 1000, can_undo: false, undo_stats: stats } };
-      return { body: { batch_id: batchId, dataset_id: batch.summary.dataset_id, stats, conflicts, failed: [] } };
+      return { body: { batch_id: batchId, dataset_id: batch.summary.dataset_id, undone: true, stats, conflicts, failed: [] } };
     });
 
     // review 阶段的决定：只接管 stage=review 的请求，其余交给 FakeDatasets。

@@ -103,7 +103,7 @@ test("查询过滤，全选后删掉 hat，预览差异再写入，toast 撤销"
   await expect(count(page)).toHaveAttribute("data-count", String(TOTAL));
 });
 
-test("Z 按批次一步步撤销到最早", async ({ page }) => {
+test("Z 按批次一步步撤销到最早；有图暂时没恢复时 toast 带重试", async ({ page }) => {
   await page.goto("/#/datasets/ds1/review");
   await expect(count(page)).toHaveAttribute("data-count", String(TOTAL));
   const history = page.getByTestId("studio-history");
@@ -134,6 +134,18 @@ test("Z 按批次一步步撤销到最早", async ({ page }) => {
   await expect(ops.nth(1)).toHaveAttribute("data-undone", "true");
   expect(captions.tags(assetId(0))).toEqual(["sks", "1girl", "hat", "solo"]);
   expect(captions.requests.filter((request) => request.path === "undo")).toHaveLength(2);
+
+  // 来源离线：一张都没恢复，批次还能撤销；toast 里重试。
+  await removeFromAll("hat", WITH_HAT);
+  captions.undoOutages = 1;
+  await page.keyboard.press("z");
+  const incomplete = page.locator("[data-sonner-toast]").filter({ hasText: `${WITH_HAT} 张暂时没能恢复` });
+  await expect(incomplete).toBeVisible();
+  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl", "solo"]);
+  await expect(ops.first()).toHaveAttribute("data-undone", "false");
+  await incomplete.getByRole("button", { name: "重试" }).click();
+  await expect(ops.first()).toHaveAttribute("data-undone", "true");
+  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl", "hat", "solo"]);
 });
 
 test("点频率表里的标签改查询，黑名单划线", async ({ page }) => {

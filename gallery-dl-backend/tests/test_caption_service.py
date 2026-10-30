@@ -317,6 +317,9 @@ class CaptionUndoTest(CaptionTestBase):
         self.assertEqual(body["conflicts"], [{"asset_id": self.ids["a"], "reason": "caption_changed_since_batch"}])
         self.assertEqual(self.text("a"), "1girl, solo, smile, blush")
         self.assertEqual(self.text("b"), "")
+        # 冲突是终局：批次算撤销完了
+        self.assertTrue(body["undone"])
+        self.assertFalse(self.batch(result["batch_id"])["can_undo"])
 
     def batch(self, batch_id: str) -> dict:
         items = self.client.get(f"/api/v1/datasets/{self.dataset_id}/caption-batches").json()["items"]
@@ -335,8 +338,44 @@ class CaptionUndoTest(CaptionTestBase):
         self.assertTrue(self.batch(first["batch_id"])["can_undo"])
         body = self.undo(first["batch_id"]).json()
         self.assertEqual(body["stats"], {"total": 2, "restored": 2, "conflicts": 0, "failed": 0})
+        self.assertTrue(body["undone"])
         self.assertEqual(self.text("a"), "1girl, solo")
         self.assertIsNone(self.text("c"))
+
+    def test_transient_failure_keeps_batch_undoable_and_retry_skips_restored(self) -> None:
+        a, b = self.ids["a"], self.ids["b"]
+        result = self.ops([a, b], [{"op": "add", "tags": ["smile"]}])
+        real_replace = os.replace
+
+        def failing_replace(source, target, *args, **kwargs):
+            if str(target).endswith("a.txt"):
+                raise OSError("disk full")
+            return real_replace(source, target, *args, **kwargs)
+
+        with patch("gdl_backend.gallery_safe_paths.os.replace", side_effect=failing_replace):
+            body = self.undo(result["batch_id"]).json()
+        self.assertFalse(body["undone"])
+        self.assertEqual(body["stats"], {"total": 2, "restored": 1, "conflicts": 0, "failed": 1})
+        self.assertEqual(body["failed"], [{"asset_id": a, "reason": "txt_write_failed"}])
+        self.assertEqual((self.text("a"), self.text("b")), ("1girl, solo, smile", ""))
+        batch = self.batch(result["batch_id"])
+        self.assertTrue(batch["can_undo"])
+        self.assertIsNone(batch["undone_at"])
+        self.assertEqual(batch["undo_stats"], body["stats"])
+
+        # 已恢复的 b 之后又被手改：重试只做剩下的 a，不碰 b，也不把它报成冲突
+        version = self.versions()[b]
+        self.client.put(
+            f"/api/v1/datasets/{self.dataset_id}/captions/{b}",
+            json={"text": "blush", "expected_version": version},
+        )
+        retry = self.undo(result["batch_id"]).json()
+        self.assertTrue(retry["undone"])
+        self.assertEqual(retry["stats"], {"total": 1, "restored": 1, "conflicts": 0, "failed": 0})
+        self.assertEqual((self.text("a"), self.text("b")), ("1girl, solo", "blush"))
+        batch = self.batch(result["batch_id"])
+        self.assertFalse(batch["can_undo"])
+        self.assertIsNotNone(batch["undone_at"])
 
     def test_service_level_undo_errors(self) -> None:
         with self.assertRaises(DatasetError) as caught:

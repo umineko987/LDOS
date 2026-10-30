@@ -8,6 +8,7 @@ caption 的版本就是磁盘版本（gallery_safe_paths 的 disk_version，不�
 每次批量写入记成一个 caption 批次（schema v16）：条目带写入前后的文本和版本。
 撤销按文本判断：当前文本仍等于 after_text 才恢复（每次写都是临时文件 + 改名，
 磁盘版本会变，所以不能拿版本比），恢复本身仍按刚读到的版本做条件写入。
+每张恢复成功就记下，有暂时失败（来源离线、读写出错）时批次保持可撤销，重试只做剩下的。
 
 标签解析和序列化全部用 caption_tags，后端只此一份。
 """
@@ -550,7 +551,10 @@ class CaptionService:
             )
 
     def undo(self, batch_id: str) -> dict[str, Any]:
-        """撤销一个批次：当前文本仍等于 after_text 的图恢复成 before_text，其余报告为冲突。"""
+        """撤销一个批次：当前文本仍等于 after_text 的图恢复成 before_text，其余报告为冲突。
+
+        有暂时失败（来源离线、读写出错）时批次不标记为已撤销，可以重试；已恢复的图不再重做。
+        """
         batch = self._repo.get_batch(batch_id)
         if batch is None:
             raise DatasetError(404, "caption_batch_not_found", "caption 批次不存在")
@@ -563,7 +567,7 @@ class CaptionService:
                 raise DatasetError(409, "caption_batch_already_undone", "这个批次已经撤销过了")
             items = [
                 item for item in self._repo.batch_items(batch_id)
-                if item["before_version"] != item["after_version"]
+                if item["undo_state"] is None and item["before_version"] != item["after_version"]
             ]
             entries = self._catalog.read_annotations([item["asset_id"] for item in items])
             job_id = self._job(
@@ -597,6 +601,7 @@ class CaptionService:
                                 logger.exception("caption undo failed; asset_id=%s", asset_id)
                             reports[category].append({"asset_id": asset_id, "reason": reason})
                         else:
+                            self._repo.mark_item_restored(batch_id, asset_id)
                             restored += 1
                     if position % _PROGRESS_EVERY == 0 or position == len(items):
                         self._job_call("update", job_id, current=position, total=len(items))
@@ -606,8 +611,12 @@ class CaptionService:
                     "conflicts": len(reports["conflicts"]),
                     "failed": len(reports["failed"]),
                 }
-                # 撤销只做一次：冲突的图保持现状，不会在下次撤销时被覆盖。
-                self._repo.mark_undone(batch_id, undo_stats)
+                # 冲突是终局（之后又被改过的图保持现状）；暂时失败的图留着重试，批次不标记。
+                undone = not reports["failed"]
+                if undone:
+                    self._repo.mark_undone(batch_id, undo_stats)
+                else:
+                    self._repo.record_undo_attempt(batch_id, undo_stats)
             except BaseException:
                 self._job_call("finish", job_id, "failed", message="caption 撤销中断")
                 raise
@@ -620,6 +629,7 @@ class CaptionService:
         return {
             "batch_id": batch_id,
             "dataset_id": dataset_id,
+            "undone": undone,
             "stats": undo_stats,
             "conflicts": reports["conflicts"][:REPORT_LIMIT],
             "failed": reports["failed"][:REPORT_LIMIT],
@@ -627,10 +637,11 @@ class CaptionService:
 
     def history(self, dataset_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
         self._dataset(dataset_id)
-        return [
-            {**batch, "can_undo": batch["undone_at"] is None and batch["changed_count"] > 0}
-            for batch in self._repo.list_batches(dataset_id, limit=limit)
-        ]
+        batches = []
+        for batch in self._repo.list_batches(dataset_id, limit=limit):
+            undoable = batch.pop("undoable_count")
+            batches.append({**batch, "can_undo": batch["undone_at"] is None and undoable > 0})
+        return batches
 
 
 __all__ = ["CaptionService", "EDITABLE_STATES", "entry_state"]

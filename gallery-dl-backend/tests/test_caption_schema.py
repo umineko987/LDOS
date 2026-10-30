@@ -75,6 +75,28 @@ class CaptionSchemaTest(unittest.TestCase):
         finally:
             again.close()
 
+    def test_early_v16_tables_gain_new_columns_with_old_behaviour(self) -> None:
+        # 早期 v16 的表没有逐张撤销的列：打开时补上，旧行默认是未撤销
+        path = self.root / "early-v16.sqlite3"
+        early = Database(path)
+        dataset_id = early.datasets.create_dataset(name="d", kind="style")["dataset_id"]
+        batch = early.captions.create_batch(dataset_id, kind="ops", params={}, stats={},
+                                            items=[_item("a1", "old", "new")])
+        with early._transaction() as conn:
+            for table, column in (("caption_batch_items", "undo_state"),):
+                conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        early.close()
+
+        upgraded = Database(path)
+        try:
+            self.assertEqual(_version(upgraded._conn), str(CURRENT_SCHEMA_VERSION))
+            kept = upgraded.captions.get_batch(batch["batch_id"])
+            self.assertEqual((kept["changed_count"], kept["undoable_count"]), (1, 1))
+            (item,) = upgraded.captions.batch_items(batch["batch_id"])
+            self.assertIsNone(item["undo_state"])
+        finally:
+            upgraded.close()
+
     def test_repository_round_trip_undo_and_tagger_baseline(self) -> None:
         db = Database(self.root / "repo.sqlite3")
         self.addCleanup(db.close)

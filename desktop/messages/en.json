@@ -149,6 +149,7 @@
   "captions_diff_none": "No changes",
   "captions_undo": "Undo",
   "captions_undo_failed": "Undo failed: {reason}",
+  "captions_undo_incomplete": "Restored {restored}; {failed} couldn't be restored yet (source offline or a read/write error), you can retry",
   "captions_undo_partial": "Restored {restored}; {skipped} were edited since and left as is",
   "captions_undone": "Undone, restored {count}",
   "clean_batch_hint": "{count} per batch: number keys toggle keep, Enter applies the batch.",

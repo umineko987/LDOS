@@ -1471,11 +1471,16 @@
           },
           "stats": {
             "$ref": "#/components/schemas/CaptionUndoStats"
+          },
+          "undone": {
+            "title": "Undone",
+            "type": "boolean"
           }
         },
         "required": [
           "batch_id",
           "dataset_id",
+          "undone",
           "stats",
           "conflicts",
           "failed"

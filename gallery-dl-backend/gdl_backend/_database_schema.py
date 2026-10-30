@@ -151,12 +151,24 @@ def _ensure_caption_batch_schema(connection: sqlite3.Connection) -> None:
             after_text TEXT,
             after_version TEXT NOT NULL,
             tagger_tags_json TEXT,
+            undo_state TEXT,
             PRIMARY KEY(batch_id, asset_id)
         );
         CREATE INDEX IF NOT EXISTS idx_caption_batch_items_asset
             ON caption_batch_items(asset_id);
         """
     )
+    # 逐张撤销（在 v16 表上补列，默认值即旧行为，不升 schema 版本，旧构建照常打开）：
+    # caption_batch_items.undo_state：restored 表示这张已恢复，重试撤销时跳过。
+    added = {
+        "caption_batch_items": (("undo_state", "TEXT"),),
+    }
+    for table, columns in added.items():
+        existing = {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, definition in columns:
+            if name not in existing:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+
 
 def initialize_schema(
     connection: sqlite3.Connection,

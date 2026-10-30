@@ -90,6 +90,21 @@ class CaptionBatchRepository:
         assert batch is not None
         return batch
 
+    def mark_item_restored(self, batch_id: str, asset_id: str) -> None:
+        with self._transaction() as conn:
+            conn.execute(
+                "UPDATE caption_batch_items SET undo_state='restored' WHERE batch_id=? AND asset_id=?",
+                (batch_id, asset_id),
+            )
+
+    def record_undo_attempt(self, batch_id: str, undo_stats: Mapping[str, Any]) -> None:
+        """撤销没做完（有暂时失败）：记下这次的统计，批次保持可撤销。"""
+        with self._transaction() as conn:
+            conn.execute(
+                "UPDATE caption_batches SET undo_stats_json=? WHERE id=? AND undone_at IS NULL",
+                (json.dumps(dict(undo_stats)), batch_id),
+            )
+
     def get_batch(self, batch_id: str) -> dict[str, Any] | None:
         with self._read() as conn:
             row = conn.execute(
@@ -126,6 +141,7 @@ class CaptionBatchRepository:
                 "tagger_tags": (
                     None if row["tagger_tags_json"] is None else _loads(row["tagger_tags_json"], [])
                 ),
+                "undo_state": row["undo_state"],
             }
             for row in rows
         ]
@@ -155,6 +171,7 @@ class CaptionBatchRepository:
                 JOIN caption_batches AS b ON b.id = i.batch_id
                 WHERE b.dataset_id=? AND b.kind='from_tagger' AND b.undone_at IS NULL
                   AND i.tagger_tags_json IS NOT NULL
+                  AND i.undo_state IS NULL
                 ORDER BY b.created_at, b.rowid
                 """,
                 (dataset_id,),
@@ -170,7 +187,9 @@ class CaptionBatchRepository:
         "b.id, b.dataset_id, b.kind, b.params_json, b.stats_json, b.created_at, "
         "b.undone_at, b.undo_stats_json, "
         "(SELECT COUNT(*) FROM caption_batch_items AS i WHERE i.batch_id = b.id "
-        " AND i.before_version != i.after_version) AS changed_count"
+        " AND i.before_version != i.after_version) AS changed_count, "
+        "(SELECT COUNT(*) FROM caption_batch_items AS i WHERE i.batch_id = b.id "
+        " AND i.before_version != i.after_version AND i.undo_state IS NULL) AS undoable_count"
     )
 
     @staticmethod
@@ -185,6 +204,7 @@ class CaptionBatchRepository:
             "created_at": row["created_at"],
             "undone_at": row["undone_at"],
             "undo_stats": _loads(row["undo_stats_json"], {}),
+            "undoable_count": int(row["undoable_count"]),
         }
 
 

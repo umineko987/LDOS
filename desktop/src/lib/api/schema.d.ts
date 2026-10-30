@@ -2681,6 +2681,8 @@ export interface components {
             /** Failed */
             failed: components["schemas"]["CaptionReportItem"][];
             stats: components["schemas"]["CaptionUndoStats"];
+            /** Undone */
+            undone: boolean;
         };
         /** CaptionUndoStats */
         CaptionUndoStats: {

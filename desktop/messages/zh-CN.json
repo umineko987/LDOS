@@ -149,6 +149,7 @@
   "captions_diff_none": "没有改动",
   "captions_undo": "撤销",
   "captions_undo_failed": "撤销失败：{reason}",
+  "captions_undo_incomplete": "已恢复 {restored} 张，{failed} 张暂时没能恢复（来源离线或读写出错），可以重试",
   "captions_undo_partial": "已恢复 {restored} 张，{skipped} 张之后又被改过，没有恢复",
   "captions_undone": "已撤销，恢复了 {count} 张",
   "clean_batch_hint": "每批 {count} 张：数字键切换保留，Enter 提交这一批。",

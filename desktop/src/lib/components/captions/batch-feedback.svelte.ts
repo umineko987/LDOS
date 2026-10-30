@@ -35,7 +35,12 @@ export function useCaptionFeedback(id: () => string): CaptionFeedback {
       const result = await undoCaptionBatch(api, batchId);
       quiet(`captions:undo:${batchId}`);
       const { restored, conflicts, failed } = result.stats;
-      if (conflicts || failed) toast.warning(m.captions_undo_partial({ restored, skipped: conflicts + failed }));
+      // 有图暂时没恢复（来源离线等）：批次还能撤销，重试只做剩下的。
+      if (!result.undone) {
+        toast.warning(m.captions_undo_incomplete({ restored, failed }), {
+          action: { label: m.common_retry(), onClick: () => void undo(batchId) },
+        });
+      } else if (conflicts) toast.warning(m.captions_undo_partial({ restored, skipped: conflicts }));
       else toast(m.captions_undone({ count: restored }));
       return true;
     } catch (error) {
