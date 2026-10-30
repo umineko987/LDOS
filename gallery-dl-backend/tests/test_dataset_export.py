@@ -332,6 +332,49 @@ class ExportRunTest(DatasetExportTestBase):
         self.assertEqual(self.export_runs()[0]["status"], "cancelled")
         self.assertFalse(job["resumable"])
 
+    def test_cancel_racing_completion_keeps_succeeded(self) -> None:
+        # 取消请求读到 running 之后、拿到锁之前，复制线程写完 succeeded 并释放了取消事件。
+        job = self.export()
+        self.assertEqual(job["status"], "succeeded")
+        export_id = job["export_id"]
+        real = self.service._require_row
+        stale = {**dict(real(export_id)), "status": "running", "finished_at": None}
+        calls = iter([stale])
+        self.service._require_row = lambda value: next(calls, None) or real(value)
+        try:
+            response = self.client.post(f"/api/v1/exports/{export_id}/cancel")
+        finally:
+            self.service._require_row = real
+        self.assertEqual(self.error(response), (409, "export_not_cancellable"))
+        self.assertEqual(self.service.get(export_id)["status"], "succeeded")
+        self.assertEqual(len(self.tree("10_hero")), 8)
+        self.assertEqual(self.export_runs()[0]["status"], "succeeded")
+
+    def test_resume_after_cancel_won_the_lock_is_rejected(self) -> None:
+        def occupy(export_id: str, index: int) -> None:
+            if index == 4:
+                (self.out / "10_hero").mkdir()
+
+        self.service.after_item = occupy
+        job = self.export()
+        self.assertTrue(job["resumable"])
+        (self.out / "10_hero").rmdir()
+        self.service.after_item = None
+        export_id = job["export_id"]
+        # 续传读到可续传之后、占位之前，另一个请求把它取消了。
+        real_reserve = self.service._reserve
+
+        def reserve_after_cancel(value: str, reservation: tuple[str, str]) -> None:
+            self.service._reserve = real_reserve
+            self.assertEqual(self.service.cancel(value)["status"], "cancelled")
+            real_reserve(value, reservation)
+
+        self.service._reserve = reserve_after_cancel
+        response = self.client.post(f"/api/v1/exports/{export_id}/resume")
+        self.assertEqual(self.error(response), (409, "export_not_resumable"))
+        self.assertEqual(self.service.get(export_id)["status"], "cancelled")
+        self.assertEqual(os.listdir(self.out), [])
+
     def test_name_taken_at_commit_keeps_staging_for_resume(self) -> None:
         def occupy(export_id: str, index: int) -> None:
             if index == 4:

@@ -488,6 +488,11 @@ class DatasetExportService:
         target_key = canonical_root_key(Path(row["target_path"]))
         self._reserve(export_id, (target_key, portable_name_key(str(options.get("folder_name") or ""))))
         try:
+            # 等锁的时候可能刚被取消：占位之后再确认一次还能续传。
+            current = self._require_row(export_id)
+            if not self._resumable(current):
+                raise DatasetError(409, "export_not_resumable", "这次导出不能续传",
+                                   details={"status": current["status"], "error_code": current["error_class"]})
             with self._db._transaction() as conn:
                 conn.execute(
                     "UPDATE dataset_export_jobs SET status='queued', error_class='', finished_at=NULL,"
@@ -504,17 +509,20 @@ class DatasetExportService:
         return self.get(export_id)
 
     def cancel(self, export_id: str) -> dict[str, Any]:
-        row = self._require_row(export_id)
+        self._require_row(export_id)
         with self._lock:
             event = self._cancel_events.get(export_id)
             if event is not None:
                 # 正在复制：复制线程在下一块 / 下一个条目处收尾并清理临时目录。
                 event.set()
                 return self.get(export_id)
-        if row["status"] in ACTIVE_EXPORT_STATUSES or self._resumable(row):
-            self._remove_staging(export_id, row)
-            self._finish(export_id, "cancelled", "")
-            return self.get(export_id)
+            # 复制线程先写终态再释放取消事件，所以这里在锁内重读：拿进锁之前读到的 running
+            # 会把刚写下的 succeeded 改成 cancelled。收尾也在锁内，续传的 _reserve 要等它做完。
+            row = self._require_row(export_id)
+            if row["status"] in ACTIVE_EXPORT_STATUSES or self._resumable(row):
+                self._remove_staging(export_id, row)
+                self._finish(export_id, "cancelled", "")
+                return self.get(export_id)
         raise DatasetError(409, "export_not_cancellable", "这次导出已经结束",
                            details={"status": row["status"]})
 
