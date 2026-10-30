@@ -22,12 +22,14 @@ interface ClusterSpec {
   readonly prefix: string;
   readonly center: readonly [number, number];
   readonly count: number;
+  readonly topTags: readonly string[];
 }
 
+/** 簇 1 没有代表标签（没有 caption），界面按编号叫它。 */
 export const ATLAS_CLUSTERS: readonly ClusterSpec[] = [
-  { id: 0, prefix: "a", center: [-0.5, -0.4], count: 12 },
-  { id: 1, prefix: "b", center: [0.5, -0.3], count: 6 },
-  { id: 2, prefix: "c", center: [0, 0.55], count: 4 },
+  { id: 0, prefix: "a", center: [-0.5, -0.4], count: 12, topTags: ["red_hair", "smile"] },
+  { id: 1, prefix: "b", center: [0.5, -0.3], count: 6, topTags: [] },
+  { id: 2, prefix: "c", center: [0, 0.55], count: 4, topTags: ["hat"] },
 ];
 
 export const OUTLIER = { asset_id: "o1", x: 0.85, y: 0.8, cluster: 1 } as const;
@@ -44,6 +46,7 @@ function clusterItems(spec: ClusterSpec): AtlasItem[] {
       outlier: 0.1,
       sha256: null,
       sprite: null,
+      name: `${spec.prefix}${index}.png`,
     };
   });
 }
@@ -93,6 +96,7 @@ export function readyAtlas({ removed = [] as readonly string[] } = {}): AtlasRes
       y: spec.center[1],
       live_size: liveSize,
       live_share: live.length ? liveSize / live.length : 0,
+      top_tags: [...spec.topTags],
     };
   });
   return {

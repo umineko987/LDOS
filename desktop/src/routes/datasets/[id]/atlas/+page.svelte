@@ -104,7 +104,9 @@
   const viewState = $derived(atlasViewState(atlas, query.error, runError));
   const progress = $derived(atlasProgress(atlas, job));
 
-  const clusterLabel = (cluster: number) => m.atlas_cluster_label({ n: cluster + 1 });
+  // 有代表标签的簇用标签当名字，没有的按编号。
+  const clusterLabel = (cluster: number) =>
+    model?.clusterTags.get(cluster)?.join(" · ") ?? m.atlas_cluster_label({ n: cluster + 1 });
   const thumbnailUrl = (index: number) => api.resourceUrl(atlasThumbnailPath(model?.ids[index] ?? ""));
 
   const refresh = () => invalidateAtlas(client, id);

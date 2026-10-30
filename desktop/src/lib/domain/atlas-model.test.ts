@@ -28,15 +28,15 @@ function response(overrides: Partial<AtlasResponse> = {}): AtlasResponse {
     delta: { added: 0, changed: 0, removed_asset_ids: ["a2"] },
     run: { run_id: "1760000000000-0123abcd", options: {}, params: {}, counts: {} },
     items: [
-      { asset_id: "a0", x: -0.5, y: 0.5, cluster: 0, outlier: 0.1, sha256: null, sprite: [0, 0] },
-      { asset_id: "a1", x: 0.5, y: 0.5, cluster: 1, outlier: 0.95, sha256: null, sprite: [0, 1] },
+      { asset_id: "a0", x: -0.5, y: 0.5, cluster: 0, outlier: 0.1, sha256: null, sprite: [0, 0], name: "a0.png" },
+      { asset_id: "a1", x: 0.5, y: 0.5, cluster: 1, outlier: 0.95, sha256: null, sprite: [0, 1], name: "  " },
       { asset_id: "a2", x: 0, y: 0, cluster: 0, outlier: 0.99, sha256: null, sprite: [1, 3] },
       { asset_id: "bad", x: Number.NaN, y: 0, cluster: 0, outlier: 0, sha256: null, sprite: null },
       { asset_id: "a1", x: 0.1, y: 0.1, cluster: 0, outlier: 0, sha256: null, sprite: null },
       { asset_id: "a3", x: 0.2, y: -0.2, cluster: 70_000, outlier: Number.NaN, sha256: null, sprite: [0, 9] },
     ],
     clusters: [
-      { id: 0, size: 3, share: 0.6, medoid_asset_id: "a0", x: -0.2, y: 0.2, live_size: 2, live_share: 0.67 },
+      { id: 0, size: 3, share: 0.6, medoid_asset_id: "a0", x: -0.2, y: 0.2, live_size: 2, live_share: 0.67, top_tags: [" hat ", "", "smile", "1girl", "solo"] },
       { id: 1, size: 1, share: 0.2, medoid_asset_id: "missing", x: 0.5, y: 0.5, live_size: 1, live_share: 0.33 },
     ],
     hints: {
@@ -94,6 +94,13 @@ describe("buildAtlasModel", () => {
     expect(model.outliers).toEqual([1]);
     expect(model.outlierThreshold).toBe(0.9);
     expect(model.shareThreshold).toBe(0.08);
+  });
+
+  it("文件名只收非空字符串，簇标签去空白、去空项、最多 3 个", () => {
+    const model = buildAtlasModel(response());
+    expect(model.names).toEqual(["a0.png", null, null, null]);
+    expect(model.clusterList.map((cluster) => cluster.topTags)).toEqual([["hat", "smile", "1girl"], []]);
+    expect([...model.clusterTags]).toEqual([[0, ["hat", "smile", "1girl"]]]);
   });
 
   it("没有结果时是空模型；雪碧图和向量无效时为 null", () => {

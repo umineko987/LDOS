@@ -4,6 +4,7 @@
 // - `delta.removed_asset_ids` 里的点是已经从打标输入里移除的（地图上移除、或之后被清洗/去重排除），
 //   默认隐藏；打开“显示已移除”时画成空心圈，可以选中再恢复。
 // - 雪碧图格子越界（sheet 超出 urls、cell 超出 per_sheet）时当作没有缩略图。
+// - 文件名（已移除的点后端给 null）和簇的代表标签（最多 3 个）只做类型和长度检查。
 
 import type { components } from "#lib/api/schema.d.ts";
 
@@ -29,12 +30,16 @@ export interface AtlasClusterInfo {
   readonly x: number;
   readonly y: number;
   readonly overRepresented: boolean;
+  /** 簇里最多图片带着的标签（触发词除外），最多 3 个；没有 caption 时为空。 */
+  readonly topTags: readonly string[];
 }
 
 export interface AtlasModel {
   readonly runId: string | null;
   readonly count: number;
   readonly ids: readonly string[];
+  /** 每个点的文件名；已移除或后端没给时为 null。 */
+  readonly names: readonly (string | null)[];
   readonly indexOf: ReadonlyMap<string, number>;
   /** (x0, y0, x1, y1, …)，世界坐标。 */
   readonly positions: Float32Array;
@@ -48,6 +53,8 @@ export interface AtlasModel {
   readonly vectors: PcaVectors | null;
   readonly sheets: SpriteSheets | null;
   readonly clusterList: readonly AtlasClusterInfo[];
+  /** 簇 id → 代表标签（只收有标签的簇）。 */
+  readonly clusterTags: ReadonlyMap<number, readonly string[]>;
   /** 离群图的下标，离群分从高到低；不含已移除的。 */
   readonly outliers: readonly number[];
   readonly outlierThreshold: number;
@@ -62,6 +69,20 @@ export const FLAG_OUTLIER = 8;
 export const FLAG_HIDDEN = 16;
 
 const MAX_CLUSTER = 0xffff;
+const MAX_TOP_TAGS = 3;
+
+function nameOf(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function topTagsOf(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((tag): tag is string => typeof tag === "string")
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .slice(0, MAX_TOP_TAGS);
+}
 
 function positiveInt(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
@@ -97,6 +118,7 @@ export function buildAtlasModel(response: AtlasResponse): AtlasModel {
   const removedIds = new Set(response.delta?.removed_asset_ids ?? []);
 
   const ids: string[] = [];
+  const names: (string | null)[] = [];
   const indexOf = new Map<string, number>();
   const rows: number[] = [];
   items.forEach((item, row) => {
@@ -104,6 +126,7 @@ export function buildAtlasModel(response: AtlasResponse): AtlasModel {
     if (!Number.isFinite(item.x) || !Number.isFinite(item.y)) return;
     indexOf.set(item.asset_id, ids.length);
     ids.push(item.asset_id);
+    names.push(nameOf(item.name));
     rows.push(row);
   });
 
@@ -141,7 +164,11 @@ export function buildAtlasModel(response: AtlasResponse): AtlasModel {
     x: cluster.x,
     y: cluster.y,
     overRepresented: over.has(cluster.id),
+    topTags: topTagsOf(cluster.top_tags),
   }));
+  const clusterTags = new Map(
+    clusterList.filter((cluster) => cluster.topTags.length).map((cluster) => [cluster.id, cluster.topTags] as const),
+  );
 
   const outliers = (hints?.outliers ?? [])
     .map((id) => indexOf.get(id))
@@ -151,6 +178,7 @@ export function buildAtlasModel(response: AtlasResponse): AtlasModel {
     runId: response.run?.run_id ?? null,
     count,
     ids,
+    names,
     indexOf,
     positions,
     clusters,
@@ -162,6 +190,7 @@ export function buildAtlasModel(response: AtlasResponse): AtlasModel {
     vectors: decodeVectors(response.vectors, items.length),
     sheets,
     clusterList,
+    clusterTags,
     outliers,
     outlierThreshold: hints?.outlier_threshold ?? 1,
     shareThreshold: hints?.share_threshold ?? 0.08,

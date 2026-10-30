@@ -127,14 +127,18 @@ test.describe("Canvas2D", () => {
     // 簇 1 占 12/23 ≈ 52%，超过 8% 的阈值；o1 的离群分 0.97 超过 0.9。
     await expect(page.getByTestId("atlas-hint-cluster")).toHaveCount(1);
     await expect(page.getByTestId("atlas-hint-cluster")).toHaveAttribute("data-cluster", "0");
-    await expect(page.getByTestId("atlas-hint-cluster")).toContainText("簇 1 占 52%");
+    // 有代表标签的簇用标签当名字，没有的按编号。
+    await expect(page.getByTestId("atlas-hint-cluster")).toContainText("red_hair · smile 占 52%");
     await expect(page.getByTestId("atlas-outliers")).toHaveAttribute("data-count", "1");
     await expect(page.getByTestId("atlas-cluster")).toHaveCount(3);
+    await expect(page.locator('[data-testid="atlas-cluster"][data-cluster="1"]')).toContainText("簇 2");
+    await expect(page.locator('[data-testid="atlas-cluster"][data-cluster="2"]')).toContainText("hat");
 
     // 指着 a0 滚轮放大：缩放以指针为中心，a0 一直在指针下面。
     const a0 = await toScreen(page, itemPosition("a0"));
     await page.mouse.move(...a0);
     await expect(page.getByTestId("atlas-tooltip")).toHaveAttribute("data-asset", "a0");
+    await expect(page.getByTestId("atlas-tooltip-name")).toHaveText("a0.png");
     await expect(page.getByTestId("atlas-tooltip").locator("img")).toHaveAttribute(
       "src",
       /\/api\/v1\/gallery\/assets\/a0\/thumbnail\?size=256$/,

@@ -388,6 +388,9 @@
         class="aspect-square w-full rounded-sm bg-bg3 object-cover"
         onerror={(event) => ((event.currentTarget as HTMLImageElement).style.visibility = "hidden")}
       />
+      {#if model.names[hoverAt.index]}
+        <span class="truncate px-0.5 text-2xs text-fg" data-testid="atlas-tooltip-name">{model.names[hoverAt.index]}</span>
+      {/if}
       <div class="flex items-center gap-1.5 px-0.5 text-2xs">
         <span
           class="inline-block size-2 shrink-0 rounded-full"
