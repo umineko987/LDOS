@@ -90,6 +90,5 @@ const connections = await mockEvents(page, [                      // 第一次�
 - `csp.dist.spec.ts`：构建产物的响应头等于生产 `csp`，同样没有内联脚本。
 - 其余每条用例都带着 `cspViolations` 夹具，所以新页面只要被测到，就同时检查了 CSP。
 
-已知问题：`src-tauri/tauri.conf.json` 的 CSP 里有 `http://[::1]:*`。CSP 的主机语法不接受 IPv6 字面量，
-Chromium 会报 “contains an invalid source” 并忽略这一项（等于没有放行 `[::1]`）。`runtimeErrors` 里专门过滤了这条提示；
-改 CSP 之后删掉那条过滤。
+CSP 里不写 `http://[::1]:*`：CSP 的主机语法不接受 IPv6 字面量。后端监听 `::1` 时，桌面端给前端的源是
+`http://localhost:{port}`（见 `src-tauri/src/backend.rs` 的 `api_origin`）。

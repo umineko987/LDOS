@@ -117,8 +117,14 @@ impl Endpoint {
         }
     }
 
+    /// 给 WebView 用的源。CSP 的主机语法不接受 IPv6 字面量，`::1` 换成同样指向回环的 localhost
+    /// （后端的 allowed_hosts 认 `localhost:{port}`）；自己做健康检查时仍按 authority 直连。
     fn api_origin(&self) -> String {
-        format!("http://{}", self.authority())
+        if self.host == "::1" {
+            format!("http://localhost:{}", self.port)
+        } else {
+            format!("http://{}", self.authority())
+        }
     }
 
     fn socket_addresses(&self) -> io::Result<Vec<SocketAddr>> {
@@ -534,6 +540,9 @@ mod tests {
         });
         let endpoint = Endpoint::from_config(&config).expect("valid endpoint");
         assert_eq!(endpoint.api_origin(), "http://127.0.0.1:9123");
+        let ipv6 = Endpoint::new("::1", 9123).expect("valid endpoint");
+        assert_eq!(ipv6.authority(), "[::1]:9123");
+        assert_eq!(ipv6.api_origin(), "http://localhost:9123");
         assert!(Endpoint::from_config(&serde_json::json!({"server": {"port": 70000}})).is_err());
         assert!(Endpoint::from_config(&serde_json::json!({"server": []})).is_err());
     }

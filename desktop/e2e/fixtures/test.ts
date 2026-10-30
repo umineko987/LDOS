@@ -58,8 +58,6 @@ export const test = base.extend<Fixtures>({
     page.on("console", (message) => {
       if (message.type() !== "error" || allowConsoleErrors) return;
       if (message.text().startsWith("Failed to load resource: the server responded with a status of")) return;
-      // tauri.conf.json 的 CSP 里有 `http://[::1]:*`，CSP 语法不接受 IPv6 字面量，Chromium 会提示并忽略它。
-      if (/Content Security Policy directive '[a-z-]+' contains an invalid source: 'http:\/\/\[::1\]:\*'/.test(message.text())) return;
       errors.push(`console.error: ${message.text()}`);
     });
     page.on("response", (response) => {
