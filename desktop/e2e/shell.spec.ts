@@ -34,10 +34,6 @@ test("侧栏导航切换页面，金色圆点跟到当前项", async ({ page }) 
   // 圆点只有一个，颜色是金色。
   await expect(nav.getByTestId("nav-dot")).toHaveCount(1);
   expect(await dot.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(230, 189, 117)");
-
-  // 旧版工作台是整页跳转。
-  await expect(nav.getByRole("link", { name: "旧版工作台" })).toHaveAttribute("href", "/legacy/index.html");
-  await expect(nav.getByRole("link", { name: "旧版工作台" })).toHaveAttribute("data-sveltekit-reload", /^(true)?$/);
 });
 
 test("数据集阶段和设置分区各有自己的圆点", async ({ page }) => {

@@ -61,8 +61,7 @@
   });
 
   function go(link: NavLink) {
-    if (link.reload) window.location.assign(link.href);
-    else void goto(link.href);
+    void goto(link.href);
   }
 
   const general = m.keys_group_general;

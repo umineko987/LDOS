@@ -13,14 +13,9 @@ export interface NavLink {
   readonly href: string;
   /** 侧栏高亮用；不在侧栏的条目为 undefined。 */
   readonly section?: Section;
-  /** 整页跳转（旧版工作台是另一个应用）。 */
-  readonly reload?: boolean;
   readonly keywords?: readonly string[];
   readonly group?: Text;
 }
-
-/** 旧版工作台由 vite.legacy.config.ts 构建到 static/legacy/，和新前端同源。 */
-export const LEGACY_HREF = "/legacy/index.html";
 
 export function primaryNav(): NavLink[] {
   return [
@@ -33,7 +28,6 @@ export function primaryNav(): NavLink[] {
 export function systemNav(): NavLink[] {
   return [
     { id: "settings", section: "settings", label: m.nav_settings, href: resolve("/settings/network"), keywords: ["settings", "shezhi"] },
-    { id: "legacy", label: m.nav_legacy, href: LEGACY_HREF, reload: true, keywords: ["legacy", "jiuban"] },
   ];
 }
 

@@ -1,6 +1,6 @@
 # 界面文案
 
-新前端（`src/`）的文案由 [Paraglide JS](https://paraglidejs.com) 编译。旧版工作台（`legacy-src/`）仍用自己的 i18n，不读这里。
+前端（`src/`）的文案由 [Paraglide JS](https://paraglidejs.com) 编译。
 
 - `zh-CN.json` 是基准语言，也是默认界面语言；`en.json` 是英文。
 - 项目配置在 `../project.inlang/`：`settings.json` 列出语言和插件，`paraglide.config.ts` 是编译选项（localStorage 键 `ldos.locale`，没有存过就用 zh-CN）。

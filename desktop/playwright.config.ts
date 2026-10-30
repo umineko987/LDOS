@@ -45,7 +45,6 @@ export default defineConfig({
   ],
   webServer: [
     {
-      // 不走 `npm run dev`：旧版构建由下面的 dist 服务负责，两边并发写 static/legacy 会互相覆盖。
       command: "npx vite dev",
       url: DEV_URL,
       reuseExistingServer: !process.env.CI,

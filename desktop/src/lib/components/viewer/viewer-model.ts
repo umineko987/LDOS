@@ -1,5 +1,5 @@
 // 查看器的纯逻辑：缩放和平移的约束、翻页、底部缩略条的窗口、打开时的飞入变换。
-// 手感沿用旧版图库查看器（legacy-src/apps/gallery/Viewer.svelte 和 review/engine.ts 的 clampReviewPan）：
+// 手感沿用旧版图库查看器：
 // 缩放下限是“适配”（1），上限 8 倍，滚轮每格 1.12 倍并以指针为中心；平移被图片边缘约束。
 
 export const MIN_SCALE = 1;

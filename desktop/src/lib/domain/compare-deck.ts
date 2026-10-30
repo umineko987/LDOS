@@ -1,5 +1,5 @@
 // 去重卡组的纯逻辑：卡片怎么排、组内所有图共用的同步缩放和平移。
-// 从旧版 legacy-src/apps/review/engine.ts 移植（calculateReviewLayout、updateReviewZoom、panReviewZoom、clampReviewPan），
+// 从旧版审阅引擎移植（calculateReviewLayout、updateReviewZoom、panReviewZoom、clampReviewPan），
 // 去掉了旧版对不可信输入的防御（这里的尺寸来自已生成类型的接口），不合法的数值按“没有尺寸”处理而不是抛错。
 
 export const DECK_GAP = 12;

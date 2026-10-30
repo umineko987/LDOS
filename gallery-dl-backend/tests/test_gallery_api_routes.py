@@ -7,7 +7,6 @@ TXT 标注读取，以及稳定错误码与 view=desktop 投影约束。
 from __future__ import annotations
 
 import io
-import re
 import tempfile
 import time
 import unittest
@@ -18,23 +17,6 @@ from fastapi.testclient import TestClient
 from fastapi.routing import APIRoute
 
 from gdl_backend.app import ServiceContainer, create_app
-from gdl_backend.api_routes.gallery import (
-    GalleryAnnotationResponse,
-    GalleryAssetEntryResponse,
-    GalleryDirectoryEntryResponse,
-    GalleryDirectoryExportOperationResponse,
-    GalleryDirectoryExportResultResponse,
-    GalleryDirectoryPageResponse,
-    GalleryFileOperationResponse,
-    GalleryPurgeAllTrashResponse,
-    GalleryScanOperationResponse,
-    GalleryScanStatsResponse,
-    GallerySearchPageResponse,
-    GallerySourcePageResponse,
-    GallerySourceResponse,
-    GalleryTrashOperationResponse,
-    GalleryTrashPageResponse,
-)
 from tests.helpers import local_test_client, make_settings
 
 
@@ -53,23 +35,6 @@ def _included_api_routes(router):
         original = getattr(route, "original_router", None)
         if original is not None:
             yield from _included_api_routes(original)
-
-
-_DESKTOP_GALLERY_MODEL = (
-    Path(__file__).resolve().parents[2] / "desktop/legacy-src/apps/gallery/model.ts"
-)
-
-
-def _typescript_key_set(name: str) -> set[str]:
-    source = _DESKTOP_GALLERY_MODEL.read_text(encoding="utf-8")
-    match = re.search(
-        rf"const {re.escape(name)} = new Set(?:<[^>]+>)?\(\[(.*?)\]\);",
-        source,
-        flags=re.DOTALL,
-    )
-    if match is None:
-        raise AssertionError(f"missing desktop Gallery key set: {name}")
-    return set(re.findall(r'"([^"]+)"', match.group(1)))
 
 
 class GalleryApiTestBase(unittest.TestCase):
@@ -827,33 +792,6 @@ class GalleryFileOperationRoutesTest(GalleryApiTestBase):
                 response_model = routes[key].response_model
                 self.assertIsNotNone(response_model)
                 self.assertEqual(set(response_model.model_fields), expected_keys)
-
-    def test_backend_models_match_desktop_strict_key_contracts(self) -> None:
-        contracts = {
-            "SOURCE_SUMMARY_KEYS": GallerySourceResponse,
-            "SCAN_OPERATION_KEYS": GalleryScanOperationResponse,
-            "SCAN_STATS_KEYS": GalleryScanStatsResponse,
-            "DIRECTORY_ENTRY_KEYS": GalleryDirectoryEntryResponse,
-            "ASSET_ENTRY_KEYS": GalleryAssetEntryResponse,
-            "SOURCE_PAGE_KEYS": GallerySourcePageResponse,
-            "DIRECTORY_PAGE_KEYS": GalleryDirectoryPageResponse,
-            "SEARCH_PAGE_KEYS": GallerySearchPageResponse,
-            "ANNOTATION_KEYS": GalleryAnnotationResponse,
-            "DIRECTORY_EXPORT_OPERATION_KEYS": (
-                GalleryDirectoryExportOperationResponse
-            ),
-            "DIRECTORY_EXPORT_RESULT_KEYS": GalleryDirectoryExportResultResponse,
-            "FILE_OPERATION_RESULT_KEYS": GalleryFileOperationResponse,
-            "PURGE_ALL_TRASH_RESULT_KEYS": GalleryPurgeAllTrashResponse,
-            "TRASH_OPERATION_KEYS": GalleryTrashOperationResponse,
-            "TRASH_PAGE_KEYS": GalleryTrashPageResponse,
-        }
-        for key_set_name, response_model in contracts.items():
-            with self.subTest(key_set=key_set_name):
-                self.assertEqual(
-                    set(response_model.model_fields),
-                    _typescript_key_set(key_set_name),
-                )
 
     def test_rename_route(self) -> None:
         asset_id = self.assets["pic.jpg"]["asset_id"]

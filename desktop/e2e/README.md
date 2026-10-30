@@ -11,6 +11,10 @@ npm run test:e2e:ui                   # 交互式调试
 
 Linux 上有 `/usr/bin/chromium` 时直接用它；别的路径用 `LDOS_CHROMIUM_PATH` 指定。
 
+设了 `http_proxy` 的 shell 里，Playwright 等待 `localhost:1420` 的探测会走代理（代理回 502），
+等满 60 秒报 `Timed out waiting ... from config.webServer`。跑之前 `unset http_proxy https_proxy`，
+或者把 `localhost` 加进 `no_proxy`。
+
 ## 两个项目
 
 | 项目 | 匹配 | 服务 | CSP |
@@ -89,8 +93,3 @@ const connections = await mockEvents(page, [                      // 第一次�
 已知问题：`src-tauri/tauri.conf.json` 的 CSP 里有 `http://[::1]:*`。CSP 的主机语法不接受 IPv6 字面量，
 Chromium 会报 “contains an invalid source” 并忽略这一项（等于没有放行 `[::1]`）。`runtimeErrors` 里专门过滤了这条提示；
 改 CSP 之后删掉那条过滤。
-
-## 旧版冒烟测试
-
-`legacy.dist.spec.ts` 只验证旧版工作台能在生产 CSP 下从 `/legacy/index.html` 加载并渲染出内容：
-`/healthz` 返回健康，其余 `/api/**` 一律 503。旧版的功能测试在 `legacy-src` 的 Vitest 里。

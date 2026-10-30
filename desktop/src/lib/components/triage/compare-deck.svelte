@@ -12,7 +12,7 @@
   import DeckCard from "./deck-card.svelte";
 
   // 去重的对比卡组：一组近似重复并排，卡片一样大，滚轮缩放、拖动平移时所有图同步（以焦点那张为准约束）。
-  // 双击复原。换组时复原。从 legacy-src/apps/review/engine.ts 移植。
+  // 双击复原。换组时复原。
   let {
     api,
     group,

@@ -56,7 +56,6 @@
         href={link.href}
         active={link.section !== undefined && section === link.section}
         data-nav={link.id}
-        data-sveltekit-reload={link.reload || undefined}
       >
         {link.label()}
       </NavItem>
