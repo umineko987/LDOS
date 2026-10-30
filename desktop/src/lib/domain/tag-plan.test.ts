@@ -9,6 +9,7 @@ import {
   composeTags,
   fromTaggerRequest,
   indexCandidates,
+  lastRunInterrupted,
   latestTagBatch,
   planTagging,
   roundThreshold,
@@ -271,5 +272,15 @@ describe("打标页的选项和请求", () => {
     ];
     expect(latestTagBatch(batches)?.batch_id).toBe("t1");
     expect(latestTagBatch(undefined)).toBeUndefined();
+  });
+});
+
+describe("lastRunInterrupted", () => {
+  it("只看最近一次运行，要求 failed + interrupted", () => {
+    expect(lastRunInterrupted([{ status: "failed", error_code: "interrupted" }, { status: "succeeded", error_code: "" }])).toBe(true);
+    expect(lastRunInterrupted([{ status: "succeeded", error_code: "" }, { status: "failed", error_code: "interrupted" }])).toBe(false);
+    expect(lastRunInterrupted([{ status: "failed", error_code: "tagger_failed" }])).toBe(false);
+    expect(lastRunInterrupted([])).toBe(false);
+    expect(lastRunInterrupted(undefined)).toBe(false);
   });
 });

@@ -330,3 +330,12 @@ export function savedTagSettings(params: Readonly<Record<string, unknown>>): Sav
 export function latestTagBatch<T extends Pick<BatchSummary, "kind" | "undone_at">>(batches: readonly T[] | undefined): T | undefined {
   return batches?.find((batch) => batch.kind === "from_tagger" && batch.undone_at === null);
 }
+
+/**
+ * 最近一次 tag 阶段运行（stage-runs 按时间倒序）是不是被应用退出打断的：后端启动时把遗留的
+ * running 运行标成 failed / interrupted，已经算好的分数还在缓存里。
+ */
+export function lastRunInterrupted(runs: readonly { readonly status: string; readonly error_code: string }[] | undefined): boolean {
+  const last = runs?.[0];
+  return last?.status === "failed" && last.error_code === "interrupted";
+}

@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 
+import { mockApi } from "./fixtures/api";
 import { FakeCaptions } from "./fixtures/captions";
 import { FakeDatasets } from "./fixtures/datasets";
 import { FakeTagger, WD_MODEL } from "./fixtures/tagger";
@@ -89,8 +90,27 @@ test("拖阈值实时更新频率和改动数，预览后写入，toast 撤销",
 
 test("没有分数的图先计算分数；写入方式和类别影响预览", async ({ page }) => {
   for (let index = 0; index < 4; index += 1) tagger.unscored.add(assetId(index));
+  // 上次运行被应用退出打断（后端启动时标成 failed / interrupted）。
+  await mockApi(page, "get", "/api/v1/datasets/{dataset_id}/stage-runs", {
+    items: [
+      {
+        run_id: "r1",
+        dataset_id: "ds1",
+        stage: "tag",
+        status: "failed",
+        error_code: "interrupted",
+        ref_id: "",
+        input_digest: "",
+        stats: {},
+        created_at: 1_760_000_000,
+        updated_at: 1_760_000_100,
+        finished_at: 1_760_000_100,
+      },
+    ],
+  });
   await page.goto("/#/datasets/ds1/tag");
   await expect(page.getByTestId("tag-scores")).toContainText(`${TOTAL} 张里有 4 张还没有打标分数`);
+  await expect(page.getByTestId("tag-interrupted")).toContainText("上次计算分数时应用退出了");
   // 没分数的 4 张里有 3 张本来会加 hat：现在只算 i ≥ 4 的 8 张。
   await expect(changed(page)).toHaveAttribute("data-count", "8");
 

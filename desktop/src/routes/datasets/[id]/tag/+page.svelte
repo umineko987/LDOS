@@ -15,6 +15,7 @@
     type CaptionsFromTaggerRequest,
   } from "#lib/api/queries/captions.ts";
   import { useCaptionEvents } from "#lib/api/queries/captions-live.svelte.ts";
+  import { datasetKeys, datasetStageRunsQuery } from "#lib/api/queries/datasets.ts";
   import {
     cancelTagger,
     candidatesQuery,
@@ -41,6 +42,7 @@
     composeTags,
     fromTaggerRequest,
     indexCandidates,
+    lastRunInterrupted,
     latestTagBatch,
     planTagging,
     roundThreshold,
@@ -186,10 +188,13 @@
   );
   const tagging = $derived(tagJob !== undefined && isActiveJob(tagJob));
   const progress = $derived(tagJob ? jobProgress(tagJob) : null);
+  const tagRuns = createQuery(() => datasetStageRunsQuery(api, id, "tag"));
+  const interrupted = $derived(lastRunInterrupted(tagRuns.data));
 
   useEvent("job.updated", ({ job }) => {
     if (job.kind !== "tagger.tag" || job.ref.dataset_id !== id || isActiveJob(job)) return;
     void invalidateCandidates(client, id);
+    void client.invalidateQueries({ queryKey: datasetKeys.stageRuns(id, "tag") });
     if (job.status === "succeeded" && job.id === runJobId) toast.success(m.tag_run_done());
   });
 
@@ -416,6 +421,9 @@
           </Button>
         {/if}
       </section>
+      {#if interrupted && !tagging}
+        <p class="-mt-3 text-2xs text-warn" role="status" data-testid="tag-interrupted">{m.tag_run_interrupted()}</p>
+      {/if}
 
       {#if plan}
         <section class="grid grid-cols-4 gap-px overflow-hidden rounded-lg border border-line bg-line" data-testid="tag-stats">

@@ -1074,6 +1074,7 @@
   "tag_run_again": "Recompute",
   "tag_run_done": "Tagger scores updated",
   "tag_run_failed": "Could not start tagging: {reason}",
+  "tag_run_interrupted": "The last scoring run stopped when the app quit. Scores already computed are kept; run it again to finish the rest.",
   "tag_running": "Computing tagger scores {done} / {total}",
   "tag_samples": "Example changes",
   "tag_scores_missing": "{count} of {total} images have no tagger scores yet",
