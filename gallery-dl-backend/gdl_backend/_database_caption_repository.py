@@ -87,13 +87,14 @@ class CaptionBatchRepository:
             str(item.get("after_version") or ""),
             None if item.get("tagger_tags") is None else json.dumps(list(item["tagger_tags"])),
             write_state,
+            1 if item.get("before_bom") else 0,
         )
 
     _INSERT_ITEM = """
         INSERT INTO caption_batch_items(batch_id, asset_id, before_text, before_version,
                                         after_text, after_version, tagger_tags_json,
-                                        write_state)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                        write_state, before_bom)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
     def begin_batch(
@@ -219,6 +220,7 @@ class CaptionBatchRepository:
                 ),
                 "write_state": row["write_state"],
                 "undo_state": row["undo_state"],
+                "before_bom": bool(row["before_bom"]),
             }
             for row in rows
         ]

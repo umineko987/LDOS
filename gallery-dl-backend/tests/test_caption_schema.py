@@ -84,7 +84,7 @@ class CaptionSchemaTest(unittest.TestCase):
                                             items=[_item("a1", "old", "new")])
         with early._transaction() as conn:
             for table, column in (("caption_batches", "state"), ("caption_batch_items", "write_state"),
-                                  ("caption_batch_items", "undo_state")):
+                                  ("caption_batch_items", "undo_state"), ("caption_batch_items", "before_bom")):
                 conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
         early.close()
 
@@ -94,7 +94,7 @@ class CaptionSchemaTest(unittest.TestCase):
             kept = upgraded.captions.get_batch(batch["batch_id"])
             self.assertEqual((kept["state"], kept["changed_count"], kept["undoable_count"]), ("complete", 1, 1))
             (item,) = upgraded.captions.batch_items(batch["batch_id"])
-            self.assertEqual((item["write_state"], item["undo_state"]), ("written", None))
+            self.assertEqual((item["write_state"], item["undo_state"], item["before_bom"]), ("written", None, False))
             self.assertEqual(upgraded.captions.writing_batches(), [])
         finally:
             upgraded.close()

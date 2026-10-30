@@ -368,6 +368,7 @@ class CaptionService:
                     "asset_id": planned.asset_id,
                     "before_text": planned.entry["content"],
                     "before_version": planned.entry["disk_version"],
+                    "before_bom": bool(planned.entry.get("bom")),
                     "after_text": texts[planned.asset_id],
                     "tagger_tags": planned.tagger_tags,
                 }
@@ -659,7 +660,9 @@ class CaptionService:
                             if item["before_text"] is None:
                                 self._catalog.remove_annotation(asset_id, **versions)
                             else:
-                                self._catalog.save_annotation(asset_id, item["before_text"], **versions)
+                                self._catalog.save_annotation(
+                                    asset_id, item["before_text"], bom=item["before_bom"], **versions
+                                )
                         except Exception as error:
                             category, reason = self._write_failure(error)
                             if reason == "caption_write_failed":

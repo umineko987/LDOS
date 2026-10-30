@@ -154,6 +154,7 @@ def _ensure_caption_batch_schema(connection: sqlite3.Connection) -> None:
             tagger_tags_json TEXT,
             write_state TEXT NOT NULL DEFAULT 'written',
             undo_state TEXT,
+            before_bom INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY(batch_id, asset_id)
         );
         CREATE INDEX IF NOT EXISTS idx_caption_batch_items_asset
@@ -163,12 +164,13 @@ def _ensure_caption_batch_schema(connection: sqlite3.Connection) -> None:
     # 写入日志和逐张撤销（同在 v16 表上补列，默认值即旧行为，不升 schema 版本，旧构建照常打开）：
     # caption_batches.state：writing 表示批次还在写（或写到一半进程没了，启动时 recover 收尾）；
     # caption_batch_items.write_state：planned 是写之前先记下的意图，written 是已落盘；
-    # undo_state：restored 表示这张已恢复，重试撤销时跳过。
+    # undo_state：restored 表示这张已恢复，重试撤销时跳过；before_bom：写入前文件带 UTF-8 BOM。
     added = {
         "caption_batches": (("state", "TEXT NOT NULL DEFAULT 'complete'"),),
         "caption_batch_items": (
             ("write_state", "TEXT NOT NULL DEFAULT 'written'"),
             ("undo_state", "TEXT"),
+            ("before_bom", "INTEGER NOT NULL DEFAULT 0"),
         ),
     }
     for table, columns in added.items():

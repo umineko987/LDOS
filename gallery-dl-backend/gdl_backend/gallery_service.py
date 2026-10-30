@@ -27,6 +27,7 @@ from ._database_gallery_repository import (
 from .gallery_catalog import (
     LDOS_RESERVED_DIR,
     LDOS_TEMP_DIRECTORY_PREFIXES,
+    _UTF8_BOM,
     classify_txt_state,
     decode_txt_bytes,
     is_supported_image_name,
@@ -632,6 +633,7 @@ class GalleryCatalogService:
         *,
         expected_txt_version: int,
         expected_disk_version: str,
+        bom: bool = False,
     ) -> dict[str, Any]:
         """Save strict UTF-8 TXT after checking both DB and on-disk versions.
 
@@ -639,12 +641,14 @@ class GalleryCatalogService:
         disk version is recomputed from a descriptor-anchored read immediately
         before replacement.  If the SQLite update fails, the prior bytes are
         restored only while the just-written version still owns the path.
+        ``bom`` prefixes a UTF-8 BOM (caption undo restores files that had one).
         """
         return self._write_annotation(
             asset_id,
             content,
             expected_txt_version=expected_txt_version,
             expected_disk_version=expected_disk_version,
+            bom=bom,
         )
 
     def remove_annotation(
@@ -669,6 +673,7 @@ class GalleryCatalogService:
         *,
         expected_txt_version: int,
         expected_disk_version: str,
+        bom: bool = False,
     ) -> dict[str, Any]:
         initial = self._repo.get_asset(asset_id)
         if initial is None:
@@ -705,7 +710,7 @@ class GalleryCatalogService:
                 if asset["txt_relative_path"]
                 else _txt_relative_for_image(asset["relative_path"])
             )
-            data = None if content is None else content.encode("utf-8", errors="strict")
+            data = None if content is None else (_UTF8_BOM if bom else b"") + content.encode("utf-8", errors="strict")
             try:
                 with SafeSourceRoot(source["root_path"]) as safe_root:
                     previous_payload, actual_disk_version = safe_root.read_with_disk_version(
@@ -1153,6 +1158,7 @@ def _read_annotation(safe_root: SafeSourceRoot, asset: Mapping[str, Any]) -> dic
         "txt_version": int(asset["txt_version"]),
         "disk_version": disk_version,
         "content": content,
+        "bom": payload is not None and payload.startswith(_UTF8_BOM),
     }
 
 

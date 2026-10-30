@@ -377,6 +377,14 @@ class CaptionUndoTest(CaptionTestBase):
         self.assertFalse(batch["can_undo"])
         self.assertIsNotNone(batch["undone_at"])
 
+    def test_undo_restores_utf8_bom(self) -> None:
+        self.txt("a").write_bytes(b"\xef\xbb\xbf1girl, solo")
+        self.catalog.scan_source(self.source_id)
+        result = self.ops([self.ids["a"]], [{"op": "add", "tags": ["smile"]}])
+        self.assertEqual(self.text("a"), "1girl, solo, smile")
+        self.undo(result["batch_id"])
+        self.assertEqual(self.txt("a").read_bytes(), b"\xef\xbb\xbf1girl, solo")
+
     def test_service_level_undo_errors(self) -> None:
         with self.assertRaises(DatasetError) as caught:
             self.captions.undo("nope")
