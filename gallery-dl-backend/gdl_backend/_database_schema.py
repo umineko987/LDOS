@@ -5,7 +5,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 
-CURRENT_SCHEMA_VERSION = 17
+CURRENT_SCHEMA_VERSION = 18
 SITE_POLICY_SIMPLIFICATION_SCHEMA_VERSION = 8
 GALLERY_EXPORT_SCHEMA_VERSION = 9
 GALLERY_RECONCILIATION_SCHEMA_VERSION = 10
@@ -13,6 +13,7 @@ GALLERY_DIRECTORY_TRASH_SCHEMA_VERSION = 11
 DATASET_SCHEMA_VERSION = 15
 CAPTION_BATCH_SCHEMA_VERSION = 16
 DATASET_EXPORT_SCHEMA_VERSION = 17
+DATASET_DECISION_STASH_SCHEMA_VERSION = 18
 TransactionFactory = Callable[[], AbstractContextManager[sqlite3.Connection]]
 
 
@@ -90,6 +91,8 @@ def _ensure_dataset_schema(connection: sqlite3.Connection) -> None:
             asset_id TEXT NOT NULL,
             decision TEXT NOT NULL,
             reason TEXT NOT NULL DEFAULT '',
+            previous_decision TEXT,
+            previous_reason TEXT NOT NULL DEFAULT '',
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
             PRIMARY KEY(dataset_id, stage, asset_id)
@@ -884,4 +887,18 @@ def initialize_schema(
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(DATASET_EXPORT_SCHEMA_VERSION),),
+            )
+
+    if schema_version < DATASET_DECISION_STASH_SCHEMA_VERSION:
+        # v18 迁移：决定行补上「被地图移除盖掉的原决定」，还原时放回去。
+        # 按列探测：没有数据集表的旧库由 _ensure_dataset_schema 直接建出带新列的表。
+        with transaction() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(dataset_decisions)")}
+            if "previous_decision" not in columns:
+                conn.execute("ALTER TABLE dataset_decisions ADD COLUMN previous_decision TEXT")
+            if "previous_reason" not in columns:
+                conn.execute("ALTER TABLE dataset_decisions ADD COLUMN previous_reason TEXT NOT NULL DEFAULT ''")
+            conn.execute(
+                "UPDATE meta SET value=? WHERE key='schema_version'",
+                (str(DATASET_DECISION_STASH_SCHEMA_VERSION),),
             )

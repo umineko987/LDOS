@@ -107,7 +107,7 @@ export function removeFromAtlas(api: Api, datasetId: string, assetIds: readonly 
   return decideInBatches(api, datasetId, "/api/v1/datasets/{dataset_id}/atlas/remove", assetIds);
 }
 
-/** 只清掉 reason=atlas 的去重决定。 */
+/** 只撤销 reason=atlas 的移除，放回移除前的去重决定；`updated` 是真正放回的张数。 */
 export function restoreToAtlas(api: Api, datasetId: string, assetIds: readonly string[]) {
   return decideInBatches(api, datasetId, "/api/v1/datasets/{dataset_id}/atlas/restore", assetIds);
 }

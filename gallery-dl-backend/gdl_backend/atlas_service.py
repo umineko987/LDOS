@@ -18,8 +18,10 @@ worker 启动时会删掉输出目录里旧的 atlas.json 和雪碧图，所以�
 输入与移除：
 - 地图读取打标阶段（``tag``）的输入，也就是清洗、去重排除之后的活跃图片。
 - 在地图上移除图片记为 **去重阶段** 的 ``exclude`` 决定（reason=``atlas``），不动文件；
-  于是它们从打标、校对、导出的输入里消失。之后去重阶段对同一张图做出的决定会覆盖它。
-- restore 只清掉 reason=atlas 的去重决定，不碰去重审核自己记下的决定。
+  于是它们从打标、校对、导出的输入里消失。原来的去重决定（比如审核时的「通过」）收在同一行里，
+  已经被排除的图不动。之后去重阶段对同一张图做出的决定会覆盖它，restore 就不再碰这一行。
+- restore 只撤销 reason=atlas 的移除：放回原来的去重决定，没有就清掉；不碰去重审核自己记下的排除。
+- 一次 remove / restore 只发一条 ``dataset.updated``（reason=``atlas``），没有变化时不发。
 
 缓存与 stale：输入摘要 = 每张图的指纹（content_sha256，缺失时用 大小:修改时间）+ 选项。
 摘要不变时 run 直接返回已有结果（除非 force）。读取时把当前输入和结果的输入清单比对：
@@ -959,32 +961,14 @@ class AtlasService:
     # ---- 地图上的移除 ----
 
     def remove(self, dataset_id: str, asset_ids: Sequence[str]) -> dict[str, Any]:
-        result = self._datasets.decide(
-            dataset_id,
-            stage=REMOVAL_STAGE,
-            asset_ids=list(asset_ids),
-            decision="exclude",
-            reason=REMOVAL_REASON,
+        return self._datasets.set_aside(
+            dataset_id, stage=REMOVAL_STAGE, asset_ids=list(asset_ids), reason=REMOVAL_REASON
         )
-        self._publish_dataset(dataset_id)
-        return result
 
     def restore(self, dataset_id: str, asset_ids: Sequence[str]) -> dict[str, Any]:
-        self._datasets.require(dataset_id)
-        removed = [
-            row["asset_id"]
-            for row in self._db.datasets.list_decisions(dataset_id, asset_ids)
-            if row["stage"] == REMOVAL_STAGE and row["decision"] == "exclude" and row["reason"] == REMOVAL_REASON
-        ]
-        if not removed:
-            return {"updated": 0, "funnel": self._datasets.funnel(dataset_id)}
-        result = self._datasets.decide(dataset_id, stage=REMOVAL_STAGE, asset_ids=removed, decision="clear")
-        self._publish_dataset(dataset_id)
-        return result
-
-    def _publish_dataset(self, dataset_id: str) -> None:
-        if self._events is not None:
-            self._events.publish("dataset.updated", {"dataset_id": dataset_id, "reason": REMOVAL_REASON})
+        return self._datasets.put_back(
+            dataset_id, stage=REMOVAL_STAGE, asset_ids=list(asset_ids), reason=REMOVAL_REASON
+        )
 
 
 __all__ = [

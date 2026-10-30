@@ -404,7 +404,11 @@ class DatasetRepository:
         *,
         reason: str = "",
     ) -> int:
-        """给一批图在某一阶段记「排除」或「通过」。同一阶段只保留最新一条。"""
+        """给一批图在某一阶段记「排除」或「通过」。同一阶段只保留最新一条。
+
+        不动 previous_*：它只在这一行仍是 `set_aside` 记下的排除时才有意义（`set_aside` 每次都重写），
+        这样去重定夺撤销时把 (exclude, atlas) 写回去，`put_back` 仍能放回移除前的决定。
+        """
         if stage not in DATASET_STAGES:
             raise ValueError("invalid_dataset_stage")
         if decision not in DATASET_DECISIONS:
@@ -427,6 +431,88 @@ class DatasetRepository:
                 )
             self.touch_dataset(conn, dataset_id)
         return len(dict.fromkeys(asset_ids))
+
+    def set_aside(self, dataset_id: str, stage: str, asset_ids: Sequence[str], *, reason: str) -> int:
+        """在某一阶段把一批图记为排除（`reason`），原来的决定收进 previous_*，`put_back` 时放回。
+
+        已经在这一阶段或更早阶段被排除的图不动（它们本来就不在之后的输入里）。
+        返回真正新排除的张数。
+        """
+        if stage not in DATASET_STAGES:
+            raise ValueError("invalid_dataset_stage")
+        upto = DATASET_STAGES[: DATASET_STAGES.index(stage) + 1]
+        placeholders = ",".join("?" for _ in upto)
+        now = self._clock()
+        updated = 0
+        with self._transaction() as conn:
+            if conn.execute("SELECT 1 FROM datasets WHERE id=?", (dataset_id,)).fetchone() is None:
+                raise DatasetNotFound(dataset_id)
+            for asset_id in dict.fromkeys(asset_ids):
+                excluded = conn.execute(
+                    f"""
+                    SELECT 1 FROM dataset_decisions
+                    WHERE dataset_id=? AND asset_id=? AND decision='exclude' AND stage IN ({placeholders})
+                    """,
+                    (dataset_id, asset_id, *upto),
+                ).fetchone()
+                if excluded is not None:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO dataset_decisions(dataset_id, stage, asset_id, decision, reason,
+                                                  previous_decision, previous_reason,
+                                                  created_at, updated_at)
+                    VALUES (?, ?, ?, 'exclude', ?, NULL, '', ?, ?)
+                    ON CONFLICT(dataset_id, stage, asset_id) DO UPDATE SET
+                        previous_decision=dataset_decisions.decision,
+                        previous_reason=dataset_decisions.reason,
+                        decision=excluded.decision, reason=excluded.reason,
+                        updated_at=excluded.updated_at
+                    """,
+                    (dataset_id, stage, asset_id, reason, now, now),
+                )
+                updated += 1
+            if updated:
+                self.touch_dataset(conn, dataset_id)
+        return updated
+
+    def put_back(self, dataset_id: str, stage: str, asset_ids: Sequence[str], *, reason: str) -> int:
+        """撤销 `set_aside`：有收起的原决定就放回，没有就删掉这一行。别的原因记下的排除不碰。"""
+        if stage not in DATASET_STAGES:
+            raise ValueError("invalid_dataset_stage")
+        now = self._clock()
+        restored = 0
+        with self._transaction() as conn:
+            if conn.execute("SELECT 1 FROM datasets WHERE id=?", (dataset_id,)).fetchone() is None:
+                raise DatasetNotFound(dataset_id)
+            for asset_id in dict.fromkeys(asset_ids):
+                key = (dataset_id, stage, asset_id)
+                row = conn.execute(
+                    """
+                    SELECT previous_decision FROM dataset_decisions
+                    WHERE dataset_id=? AND stage=? AND asset_id=? AND decision='exclude' AND reason=?
+                    """,
+                    (*key, reason),
+                ).fetchone()
+                if row is None:
+                    continue
+                if row["previous_decision"] is None:
+                    conn.execute(
+                        "DELETE FROM dataset_decisions WHERE dataset_id=? AND stage=? AND asset_id=?", key
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE dataset_decisions SET decision=previous_decision, reason=previous_reason,
+                            previous_decision=NULL, previous_reason='', updated_at=?
+                        WHERE dataset_id=? AND stage=? AND asset_id=?
+                        """,
+                        (now, *key),
+                    )
+                restored += 1
+            if restored:
+                self.touch_dataset(conn, dataset_id)
+        return restored
 
     def clear_decisions(self, dataset_id: str, stage: str, asset_ids: Sequence[str]) -> int:
         if stage not in DATASET_STAGES:

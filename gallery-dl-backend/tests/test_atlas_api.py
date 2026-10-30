@@ -570,6 +570,56 @@ class AtlasHttpTest(AtlasTestBase):
         self.assertEqual((stranger.status_code, self.error_code(stranger)), (422, "dataset_asset_not_member"))
         self.assertEqual(self.client.post(f"{self.base}/remove", json={"asset_ids": []}).status_code, 422)
 
+    def test_remove_keeps_prior_dedup_decision_and_restore_brings_it_back(self) -> None:
+        self.run_ready()
+        self.service.decide(self.dataset_id, stage="dedup", asset_ids=[self.ids[0]], decision="approve", reason="审核保留")
+        self.service.decide(self.dataset_id, stage="dedup", asset_ids=[self.ids[1]], decision="exclude", reason="近重复")
+
+        def decisions() -> dict[str, tuple[str, str]]:
+            return {
+                row["asset_id"]: (row["decision"], row["reason"])
+                for row in self.db.datasets.list_decisions(self.dataset_id)
+                if row["stage"] == "dedup"
+            }
+
+        def dataset_events() -> list[dict]:
+            events, _ = self.container.events.events_after(0)
+            return [dict(event.data) for event in events if event.kind == "dataset.updated"]
+
+        before = len(dataset_events())
+        # 已经被去重排除的图不动；通过的图被移除，原决定收起来。
+        removed = self.client.post(f"{self.base}/remove", json={"asset_ids": self.ids})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertEqual(removed.json()["updated"], 2)
+        self.assertEqual(
+            decisions(),
+            {self.ids[0]: ("exclude", "atlas"), self.ids[1]: ("exclude", "近重复"), self.ids[2]: ("exclude", "atlas")},
+        )
+        self.assertEqual(dataset_events()[before:], [{"dataset_id": self.dataset_id, "reason": "atlas"}])
+
+        # 再移除一次：没有变化，也不发事件。
+        again = self.client.post(f"{self.base}/remove", json={"asset_ids": self.ids})
+        self.assertEqual(again.json()["updated"], 0)
+        self.assertEqual(len(dataset_events()), before + 1)
+
+        restored = self.client.post(f"{self.base}/restore", json={"asset_ids": self.ids})
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["updated"], 2)
+        self.assertEqual(decisions(), {self.ids[0]: ("approve", "审核保留"), self.ids[1]: ("exclude", "近重复")})
+        self.assertEqual(dataset_events()[before + 1:], [{"dataset_id": self.dataset_id, "reason": "atlas"}])
+        self.assertEqual(self.client.post(f"{self.base}/restore", json={"asset_ids": self.ids}).json()["updated"], 0)
+        self.assertEqual(len(dataset_events()), before + 2)
+
+        # 移除之后去重阶段重新做的决定覆盖它：restore 不再碰这一行。
+        self.client.post(f"{self.base}/remove", json={"asset_ids": [self.ids[0]]})
+        self.service.decide(self.dataset_id, stage="dedup", asset_ids=[self.ids[0]], decision="approve", reason="复审")
+        self.assertEqual(self.client.post(f"{self.base}/restore", json={"asset_ids": [self.ids[0]]}).json()["updated"], 0)
+        self.assertEqual(decisions()[self.ids[0]], ("approve", "复审"))
+        # 再移除、再还原，放回的是最新的决定。
+        self.client.post(f"{self.base}/remove", json={"asset_ids": [self.ids[0]]})
+        self.client.post(f"{self.base}/restore", json={"asset_ids": [self.ids[0]]})
+        self.assertEqual(decisions()[self.ids[0]], ("approve", "复审"))
+
 
 if __name__ == "__main__":
     unittest.main()

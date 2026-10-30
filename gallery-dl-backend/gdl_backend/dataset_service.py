@@ -391,8 +391,32 @@ class DatasetService:
 
         只接受当前确实是本数据集成员的图，避免记下和数据集无关的行。
         """
+        self._require_members(dataset_id, asset_ids)
+        stage_index(stage)
+        if decision == "clear":
+            updated = self._repo.clear_decisions(dataset_id, stage, asset_ids)
+        elif decision in DATASET_DECISIONS:
+            updated = self._repo.set_decisions(dataset_id, stage, asset_ids, decision, reason=reason)
+        else:
+            raise DatasetError(422, "invalid_dataset_decision", f"未知决定: {decision}")
+        return self._decided(dataset_id, updated, "decisions")
+
+    def set_aside(self, dataset_id: str, *, stage: str, asset_ids: Sequence[str], reason: str) -> dict[str, Any]:
+        """临时排除一批成员：原决定收起来，`put_back` 时放回。`reason` 同时是决定和事件的原因。"""
+        self._require_members(dataset_id, asset_ids)
+        stage_index(stage)
+        updated = self._repo.set_aside(dataset_id, stage, asset_ids, reason=reason)
+        return self._decided(dataset_id, updated, reason)
+
+    def put_back(self, dataset_id: str, *, stage: str, asset_ids: Sequence[str], reason: str) -> dict[str, Any]:
+        """撤销 `set_aside`：只动这个 `reason` 记下的排除，`updated` 是真正放回的张数。"""
         self._require(dataset_id)
         stage_index(stage)
+        updated = self._repo.put_back(dataset_id, stage, asset_ids, reason=reason)
+        return self._decided(dataset_id, updated, reason)
+
+    def _require_members(self, dataset_id: str, asset_ids: Sequence[str]) -> None:
+        self._require(dataset_id)
         member_ids = {member["asset_id"] for member in self._repo.member_rows(dataset_id)}
         unknown = [asset_id for asset_id in dict.fromkeys(asset_ids) if asset_id not in member_ids]
         if unknown:
@@ -402,14 +426,11 @@ class DatasetService:
                 "有图片不属于这个数据集",
                 details={"asset_ids": unknown[:20]},
             )
-        if decision == "clear":
-            updated = self._repo.clear_decisions(dataset_id, stage, asset_ids)
-        elif decision in DATASET_DECISIONS:
-            updated = self._repo.set_decisions(dataset_id, stage, asset_ids, decision, reason=reason)
-        else:
-            raise DatasetError(422, "invalid_dataset_decision", f"未知决定: {decision}")
+
+    def _decided(self, dataset_id: str, updated: int, reason: str) -> dict[str, Any]:
+        """决定写完：有变化时发一条 `dataset.updated`，返回张数和新的漏斗。"""
         if updated:
-            self.publish_updated(dataset_id, "decisions")
+            self.publish_updated(dataset_id, reason)
         return {"updated": updated, "funnel": self.funnel(dataset_id)}
 
     # ---- 阶段运行（Wave 2 的各阶段服务调用） ----
