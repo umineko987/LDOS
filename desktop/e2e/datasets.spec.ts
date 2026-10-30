@@ -1,6 +1,7 @@
 import type { Locator } from "@playwright/test";
 
 import { FakeDatasets } from "./fixtures/datasets";
+import { sseBody } from "./fixtures/jobs";
 import { expect, test } from "./fixtures/test";
 
 /** 圆点左缘和当前段锚点（标签后面的零宽占位）的横向距离。 */
@@ -63,7 +64,11 @@ test("新建数据集，导入 24 张图的文件夹，排除 2 张后漏斗剩 
     { stage: "collect", decision: "exclude", reason: "", asset_ids: ["a2-003", "a2-005"] },
   ]);
 
-  // 按决定筛选：只看排除的两张；Esc 清空选择。
+  // 按决定筛选：保留的 22 张（decision=kept），只看排除的两张；Esc 清空选择。
+  const kept = page.waitForRequest((request) => new URL(request.url()).searchParams.get("decision") === "kept");
+  await page.getByTestId("collect-filter").getByRole("button", { name: "保留 22" }).click();
+  await kept;
+  await expect(grid.getByRole("option")).toHaveCount(22);
   await page.getByTestId("collect-filter").getByRole("button", { name: "已排除 2" }).click();
   await expect(grid.getByRole("option")).toHaveCount(2);
   await page.keyboard.press("Escape");
@@ -75,6 +80,45 @@ test("新建数据集，导入 24 张图的文件夹，排除 2 张后漏斗剩 
   await expect(card).toHaveCount(1);
   await expect(card).toContainText("角色 A");
   await expect(card.getByTestId("dataset-output")).toHaveText("22");
+});
+
+test("哈希进度跟着 dataset.updated（reason=hashing）刷新，不轮询", async ({ page }) => {
+  const backend = new FakeDatasets();
+  await backend.install(page);
+  const id = backend.add({ name: "哈希", members: 8 });
+  backend.hashPending.set(id, 5);
+  let hashingRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === `/api/v1/datasets/${id}/hashing`) hashingRequests += 1;
+  });
+  // SSE 先挂着不回，等页面显示出“正在计算”再推进度事件。
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let connections = 0;
+  await page.route(
+    (url) => url.pathname === "/api/v1/events",
+    async (route) => {
+      connections += 1;
+      const first = connections === 1;
+      if (first) await released;
+      await route.fulfill({
+        status: 200,
+        headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+        body: `: ldos e2e\n\n${first ? sseBody([{ event: "dataset.updated", id: "e1-0", data: { dataset_id: id, reason: "hashing" } }]) : ""}`,
+      });
+    },
+  );
+
+  await page.goto(`/#/datasets/${id}/collect`);
+  const status = page.getByTestId("collect-hashing");
+  await expect(status).toHaveText("正在计算哈希 3/8");
+  // 没有事件就不再请求（以前每 2 秒轮询一次）。
+  await page.waitForTimeout(2_500);
+  expect(hashingRequests).toBe(1);
+
+  backend.hashPending.set(id, 0);
+  release();
+  await expect(status).toHaveText("哈希已算完");
 });
 
 test("网格方向键移动焦点，Space 打开查看器，←/→ 翻页，Esc 关闭后焦点停在看过的那张", async ({ page }) => {

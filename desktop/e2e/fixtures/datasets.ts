@@ -59,6 +59,8 @@ export class FakeDatasets {
   readonly datasets = new Map<string, FakeDataset>();
   /** 收到的决定请求（按顺序），用例里可以检查请求体。 */
   readonly decisions: Schemas["DatasetDecisionRequest"][] = [];
+  /** 每个数据集还没算完哈希的张数（默认 0）；改了以后要靠 dataset.updated reason=hashing 让页面重新取。 */
+  readonly hashPending = new Map<string, number>();
   /** `POST /roots { path }` 挂上的文件夹里有几张图。 */
   importSize = 24;
   private sequence = 0;
@@ -250,7 +252,7 @@ export class FakeDatasets {
       const matches = dataset.members.filter((member) => {
         const excluded = dataset.excluded.has(member.asset_id);
         if (decision === "excluded" && !excluded) return false;
-        if ((decision === "undecided" || decision === "approved") && excluded) return false;
+        if ((decision === "undecided" || decision === "approved" || decision === "kept") && excluded) return false;
         if (decision === "approved") return false;
         return !query || member.name.toLowerCase().includes(query);
       });
@@ -275,7 +277,8 @@ export class FakeDatasets {
       const dataset = this.datasets.get(idOf(request));
       if (!dataset) return missing();
       const count = dataset.members.length;
-      return { body: { hashed_count: count, member_count: count, pending: 0 } };
+      const pending = Math.min(count, this.hashPending.get(dataset.dataset_id) ?? 0);
+      return { body: { hashed_count: count - pending, member_count: count, pending } };
     });
     await mockApi(page, "get", "/api/v1/datasets/{dataset_id}/crawls", (request) =>
       this.datasets.has(idOf(request)) ? { body: { items: [] } } : missing(),

@@ -82,17 +82,14 @@
 
   const memberFilter = $derived<MemberFilter>({
     stage: "collect",
-    decision: filter === "kept" ? "undecided" : filter === "excluded" ? "excluded" : undefined,
+    decision: filter === "kept" ? "kept" : filter === "excluded" ? "excluded" : undefined,
     query,
   });
 
   const roots = createQuery(() => datasetRootsQuery(api, id));
   const crawls = createQuery(() => datasetCrawlsQuery(api, id));
-  const hashing = createQuery(() => ({
-    ...datasetHashingQuery(api, id),
-    // 哈希完成没有事件：队列里还有活时轮询。
-    refetchInterval: (current) => ((current.state.data?.pending ?? 0) > 0 ? 2000 : false),
-  }));
+  // 哈希进度靠 dataset.updated（reason=hashing）刷新，见 datasetInvalidation。
+  const hashing = createQuery(() => datasetHashingQuery(api, id));
   const members = createInfiniteQuery(() => datasetMembersQuery(api, id, memberFilter));
 
   const items = $derived(members.data?.pages.flatMap((page) => page.items) ?? []);

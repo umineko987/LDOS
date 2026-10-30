@@ -237,6 +237,10 @@ describe("dataset invalidation", () => {
     ]);
     expect(datasetInvalidation("dataset.updated", { dataset_id: "ds1", reason: "updated" })).toEqual(ALWAYS);
     expect(datasetInvalidation("dataset.updated", { dataset_id: "ds1", reason: "captions" })).toEqual(ALWAYS);
+    expect(datasetInvalidation("dataset.updated", { dataset_id: "ds1", reason: "hashing" })).toEqual([
+      ...ALWAYS,
+      datasetKeys.hashing("ds1"),
+    ]);
     expect(datasetInvalidation("dataset.updated", { dataset_id: "ds1", reason: "decisions" })).toEqual([
       ...ALWAYS,
       ...MEMBERS,

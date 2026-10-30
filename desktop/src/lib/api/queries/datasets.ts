@@ -39,7 +39,8 @@ export const DATASET_KINDS = ["character", "style", "concept"] as const satisfie
 /** 成员列表的过滤条件；按决定过滤时必须同时给阶段（后端规则）。 */
 export interface MemberFilter {
   readonly stage?: DatasetStage;
-  readonly decision?: "excluded" | "approved" | "undecided";
+  /** kept = 没被排除（undecided + approved）。 */
+  readonly decision?: "excluded" | "approved" | "undecided" | "kept";
   readonly query?: string;
 }
 
@@ -220,12 +221,14 @@ export function applyFunnel(client: QueryClient, funnel: DatasetFunnel): void {
 
 /** 只改了元数据或 caption 的 dataset.updated（reason 见 dataset_service.publish_updated）：成员、根目录都没变。 */
 const METADATA_ONLY = new Set(["updated", "captions"]);
+/** 哈希进度（每 1/4 和结束各一条）：只有哈希状态和依赖哈希的漏斗（去重）会变。 */
+const HASHING = "hashing";
 
 export type DatasetEventKind = "dataset.updated" | "dataset.stage.updated" | "resync";
 
 /**
  * 一条领域事件要让哪些查询失效（TanStack 按前缀匹配）。列表、详情、漏斗、阶段运行总是刷新；
- * 成员列表（可能有好几页）、根目录、哈希、采集只在成员或决定可能变化时才刷新。
+ * 成员列表（可能有好几页）、根目录、采集只在成员或决定可能变化时才刷新，哈希状态另外在哈希进度时刷新。
  */
 export function datasetInvalidation<K extends DatasetEventKind>(
   kind: K,
@@ -242,6 +245,7 @@ export function datasetInvalidation<K extends DatasetEventKind>(
     datasetKeys.stageRunsAll(id),
   ];
   if (reason !== undefined && METADATA_ONLY.has(reason)) return keys;
+  if (reason === HASHING) return [...keys, datasetKeys.hashing(id)];
   return [...keys, datasetKeys.roots(id), datasetKeys.hashing(id), datasetKeys.crawls(id), datasetKeys.membersAll(id)];
 }
 
