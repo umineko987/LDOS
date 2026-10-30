@@ -61,7 +61,7 @@ class DownloadSettingsStoreTests(unittest.TestCase):
     def test_defaults_without_files(self) -> None:
         self.assertEqual(self.store.view(), {
             "hf_mirror": None, "proxy_mode": "none", "custom_proxy": None,
-            "custom_proxy_has_credentials": False, "token_set": False, "token_hint": None,
+            "custom_proxy_has_credentials": False, "token_set": False,
         })
         self.assertIsNone(self.store.token())
 
@@ -131,8 +131,9 @@ class DownloadSettingsStoreTests(unittest.TestCase):
     def test_token_is_write_only_and_private(self) -> None:
         view = self.store.update(hf_token=f"  {TOKEN}  ")
         self.assertTrue(view["token_set"])
-        self.assertEqual(view["token_hint"], "…abcd")
-        self.assertNotIn(TOKEN, json.dumps(view))
+        # 只说有没有：连末几位也不回显
+        self.assertNotIn("token_hint", view)
+        self.assertNotIn(TOKEN[-4:], json.dumps(view))
         self.assertEqual(self.store.token(), TOKEN)
         token_path = self.runtime / "hf-token"
         if os.name != "nt":
@@ -142,8 +143,6 @@ class DownloadSettingsStoreTests(unittest.TestCase):
         # 不传 hf_token 时保持不变
         self.store.update(hf_mirror="https://hf-mirror.example")
         self.assertEqual(self.store.token(), TOKEN)
-        # 短 token 不给提示
-        self.assertIsNone(self.store.update(hf_token="hf_abc")["token_hint"])
         cleared = self.store.update(hf_token=None)
         self.assertFalse(cleared["token_set"])
         self.assertFalse(token_path.exists())
@@ -245,7 +244,7 @@ class DownloadSettingsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {
             "hf_mirror": None, "proxy_mode": "none", "custom_proxy": None,
-            "custom_proxy_has_credentials": False, "token_set": False, "token_hint": None,
+            "custom_proxy_has_credentials": False, "token_set": False,
         })
 
     def test_put_round_trip(self) -> None:
@@ -285,8 +284,8 @@ class DownloadSettingsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(TOKEN, response.text)
         self.assertEqual(response.json()["token_set"], True)
-        self.assertEqual(response.json()["token_hint"], "…abcd")
-        self.assertNotIn(TOKEN, self.client.get("/api/v1/settings/downloads").text)
+        self.assertNotIn(TOKEN[-4:], response.text)
+        self.assertNotIn(TOKEN[-4:], self.client.get("/api/v1/settings/downloads").text)
         token_path = self.settings.runtime_dir / "hf-token"
         self.assertEqual(token_path.read_text(encoding="utf-8").strip(), TOKEN)
         if os.name != "nt":

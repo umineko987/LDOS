@@ -10,7 +10,6 @@ const VIEW: DownloadSettings = {
   custom_proxy: null,
   custom_proxy_has_credentials: false,
   token_set: false,
-  token_hint: null,
 };
 
 const draft = (overrides: Partial<DownloadDraft> = {}): DownloadDraft => ({ ...toDraft(VIEW), ...overrides });

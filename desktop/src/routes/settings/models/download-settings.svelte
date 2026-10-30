@@ -206,7 +206,7 @@
       </label>
       <div class="flex min-h-row flex-col justify-center gap-1.5 border-b border-line py-2.5">
         <p class="text-xs text-fg2" aria-live="polite" data-testid="downloads-token-state" data-token-set={base.token_set}>
-          {base.token_set ? m.downloads_token_set({ hint: base.token_hint ?? "" }) : m.downloads_token_unset()}
+          {base.token_set ? m.downloads_token_set() : m.downloads_token_unset()}
         </p>
         <div class="flex max-w-[560px] items-center gap-2">
           <Input

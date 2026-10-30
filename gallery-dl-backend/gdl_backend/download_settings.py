@@ -160,7 +160,6 @@ class DownloadSettingsStore:
             "custom_proxy": redact_text(settings.custom_proxy) if settings.custom_proxy else None,
             "custom_proxy_has_credentials": _has_credentials(settings.custom_proxy),
             "token_set": token is not None,
-            "token_hint": f"…{token[-4:]}" if token and len(token) >= 8 else None,
         }
 
     # ---- 写入 ----

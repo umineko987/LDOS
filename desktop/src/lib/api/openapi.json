@@ -7748,18 +7748,6 @@
             "title": "Proxy Mode",
             "type": "string"
           },
-          "token_hint": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "token 末四位提示，形如 …abcd",
-            "title": "Token Hint"
-          },
           "token_set": {
             "description": "是否已保存 HF token；token 本身从不返回",
             "title": "Token Set",
@@ -7771,8 +7759,7 @@
           "proxy_mode",
           "custom_proxy",
           "custom_proxy_has_credentials",
-          "token_set",
-          "token_hint"
+          "token_set"
         ],
         "title": "DownloadSettingsView",
         "type": "object"

@@ -4583,11 +4583,6 @@ export interface components {
              */
             proxy_mode: "none" | "pool" | "custom";
             /**
-             * Token Hint
-             * @description token 末四位提示，形如 …abcd
-             */
-            token_hint: string | null;
-            /**
              * Token Set
              * @description 是否已保存 HF token；token 本身从不返回
              */

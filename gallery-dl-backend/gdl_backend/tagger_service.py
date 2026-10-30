@@ -3,7 +3,7 @@
 - prepare / tag 两条命令各自启动一个 CLI 子进程（同一时刻至多一个）；
 - stdout 逐行解析 JSON 事件（--progress-json 协议），更新轮询状态；
 - stderr 只保留尾部若干行用于失败诊断；
-- token 只写子进程 stdin，不进日志；
+- token 只写子进程 stdin，不进日志；CLI 把它回显到 stderr 时，失败消息里打码；
 - tag 的图片列表经 stdin 传给 `--inputs-file -`，不受命令行长度限制；
 - candidates / compose 是只读缓存的查询，用 `query()` 一次性收集数据行，
   不占用 prepare / tag 的运行槽。
@@ -71,6 +71,8 @@ class TaggerService:
         # 最近一次 prepare 涉及的模型（统一模型表用它判断「安装中/失败」）。
         self.prepare_models: tuple[str, ...] = ()
         self._on_finished: FinishedCallback | None = None
+        # 当前子进程拿到的 token（只有 prepare 有）：CLI 回显到 stderr 时，状态、Job 和查询错误里都打码。
+        self._secrets: tuple[str, ...] = ()
         # 每次 tag 运行结束（不论成败，推理可能已写入部分分数）都加一；
         # 候选分数的缓存键用它判断打标缓存是否变过。
         self.cache_generation = 0
@@ -198,8 +200,9 @@ class TaggerService:
             process = await self._create_process(args, stdin=stdin_data is not None, env=env)
         except Exception as error:
             self.state.phase = "failed"
-            self.state.message = str(error)
-            self._job_finish("failed", redact_text(error)[-500:])
+            self.state.message = self._redact(error)
+            self._secrets = ()
+            self._job_finish("failed", self.state.message)
             raise
         self._process = process
         self._on_finished = on_finished
@@ -235,7 +238,7 @@ class TaggerService:
             else:
                 self.state.phase = "failed"
                 tail = stderr_tail.decode("utf-8", errors="replace").splitlines()[-8:]
-                self.state.message = redact_text("；".join(tail))[-500:] or f"子进程退出码 {return_code}"
+                self.state.message = self._redact("；".join(tail)) or f"子进程退出码 {return_code}"
         except Exception as error:
             if process.returncode is None:
                 try:
@@ -244,9 +247,10 @@ class TaggerService:
                     pass
             await process.wait()
             self.state.phase = "failed"
-            self.state.message = redact_text(error)[-500:]
+            self.state.message = self._redact(error)
         finally:
             self._process = None
+            self._secrets = ()
             if self.state.phase == "failed":
                 status = "cancelled" if self._cancelling else "failed"
                 self._job_finish(status, "" if self._cancelling else self.state.message)
@@ -256,6 +260,9 @@ class TaggerService:
             callback, self._on_finished = self._on_finished, None
             if callback is not None:
                 await self._notify_finished(callback, status)
+
+    def _redact(self, value: object) -> str:
+        return redact_text(value, secrets=self._secrets)[-500:]
 
     async def _notify_finished(self, callback: FinishedCallback, status: str) -> None:
         summary = {
@@ -330,6 +337,7 @@ class TaggerService:
                     "NO_PROXY": "", "no_proxy": "",
                 })
             stdin_data = token.encode("utf-8") + b"\n" if token else None
+            self._secrets = (token,) if token else ()
             await self._spawn(args, stdin_data, env=env or None)
             return {"phase": "preparing", "models": models}
 
@@ -413,7 +421,7 @@ class TaggerService:
         try:
             process = await self._create_process(args, stdin=True)
         except OSError as error:
-            raise TaggerQueryError(-1, redact_text(error)[-500:]) from error
+            raise TaggerQueryError(-1, self._redact(error)) from error
         try:
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(encode_input_lines(input_lines)), timeout=timeout
@@ -430,7 +438,7 @@ class TaggerService:
             raise
         if process.returncode != 0:
             tail = stderr.decode("utf-8", errors="replace").splitlines()[-8:]
-            message = redact_text("；".join(tail))[-500:] or f"子进程退出码 {process.returncode}"
+            message = self._redact("；".join(tail)) or f"子进程退出码 {process.returncode}"
             raise TaggerQueryError(int(process.returncode or 0), message)
         lines: list[dict[str, Any]] = []
         for raw in stdout.splitlines():

@@ -57,7 +57,6 @@ export const DOWNLOADS: DownloadSettingsView = {
   custom_proxy: null,
   custom_proxy_has_credentials: false,
   token_set: false,
-  token_hint: null,
 };
 
 /** 把一个模型改成安装中（模拟 POST /models/install 之后的表）。 */

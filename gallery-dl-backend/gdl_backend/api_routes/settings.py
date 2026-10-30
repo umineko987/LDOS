@@ -19,7 +19,6 @@ class DownloadSettingsView(BaseModel):
     custom_proxy: str | None = Field(description="自定义下载代理，凭据已打码")
     custom_proxy_has_credentials: bool
     token_set: bool = Field(description="是否已保存 HF token；token 本身从不返回")
-    token_hint: str | None = Field(description="token 末四位提示，形如 …abcd")
 
 
 class DownloadSettingsUpdate(BaseModel):

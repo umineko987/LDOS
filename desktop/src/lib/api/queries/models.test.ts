@@ -32,7 +32,6 @@ const DOWNLOADS: DownloadSettings = {
   custom_proxy: null,
   custom_proxy_has_credentials: false,
   token_set: true,
-  token_hint: "…abcd",
 };
 
 describe("model queries", () => {

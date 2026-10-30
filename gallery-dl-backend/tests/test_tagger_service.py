@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 import tempfile
@@ -332,6 +333,45 @@ raise SystemExit(3)
         self.assertEqual((job["kind"], job["status"]), ("tagger.prepare", "failed"))
         self.assertEqual((job["current"], job["total"]), (5, 10))
         self.assertIn("network down", job["message"])
+
+    async def test_token_echoed_in_stderr_stays_out_of_state_job_and_logs(self) -> None:
+        token = "hf_EchoedTestToken0123456789abcdef"  # 不是真 token
+        # 不带 token= 之类的前缀，通用规则认不出来，只能靠 secrets 打码。
+        self.script("""
+import sys
+received = sys.stdin.readline().strip()
+sys.stderr.write('401 Unauthorized for ' + received + '\\n')
+raise SystemExit(2)
+""")
+        records: list[logging.LogRecord] = []
+        handler = logging.Handler(logging.DEBUG)
+        handler.emit = records.append  # type: ignore[method-assign]
+        root = logging.getLogger()
+        root.addHandler(handler)
+        self.addCleanup(root.removeHandler, handler)
+        previous_level = root.level
+        root.setLevel(logging.DEBUG)
+        self.addCleanup(root.setLevel, previous_level)
+
+        await self.service.prepare(["wd-vit-v3"], token)
+        await self.finish()
+        self.assertEqual(self.service.state.phase, "failed")
+        self.assertIn("401 Unauthorized for ***", self.service.state.message)
+        job = self.only_job()
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("401 Unauthorized for ***", job["message"])
+        events, _ = self.bus.events_after(0)
+        self.assertNotIn(token, str(self.service.state))
+        self.assertNotIn(token, str(self.jobs.list()))
+        self.assertNotIn(token, str([event.data for event in events]))
+        self.assertNotIn(token, "\n".join(record.getMessage() for record in records))
+
+        # 子进程起不来时，错误里带出的 token 同样打码。
+        with patch.object(self.service, "_create_process", side_effect=OSError("cannot start " + token)):
+            with self.assertRaises(OSError):
+                await self.service.prepare(["wd-vit-v3"], token)
+        self.assertEqual(self.service.state.message, "cannot start ***")
+        self.assertNotIn(token, str(self.jobs.list()))
 
     async def test_cancel_finishes_job_cancelled(self) -> None:
         self.script("""

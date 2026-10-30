@@ -94,7 +94,7 @@ test("安装失败时显示后端原因", async ({ page }) => {
   await expect(page.locator("[data-sonner-toast]")).toContainText("安装失败：已有模型在安装");
 });
 
-test("HF token 只写：保存后输入框清空，只显示末四位提示；可以清除", async ({ page }) => {
+test("HF token 只写：保存后输入框清空，只显示已保存，不回显任何一部分；可以清除", async ({ page }) => {
   const secret = "hf_e2eWriteOnlyToken9876";
   let view: DownloadSettingsView = DOWNLOADS;
   const bodies: unknown[] = [];
@@ -102,7 +102,7 @@ test("HF token 只写：保存后输入框清空，只显示末四位提示；�
   await mockApi(page, "put", "/api/v1/settings/downloads", (request) => {
     const body = request.postDataJSON() as { hf_token?: string; clear_hf_token?: boolean };
     bodies.push(body);
-    view = body.clear_hf_token ? { ...view, token_set: false, token_hint: null } : { ...view, token_set: true, token_hint: "…9876" };
+    view = { ...view, token_set: !body.clear_hf_token };
     return { body: view };
   });
   await page.goto("/#/settings/models");
@@ -115,10 +115,11 @@ test("HF token 只写：保存后输入框清空，只显示末四位提示；�
 
   await input.fill(secret);
   await token.getByTestId("downloads-token-save").click();
-  await expect(token.getByTestId("downloads-token-state")).toHaveText("已保存 …9876");
+  await expect(token.getByTestId("downloads-token-state")).toHaveText("已保存");
   await expect(input).toHaveValue("");
   expect(bodies).toEqual([{ clear_hf_token: false, hf_token: secret }]);
   await expect(page.locator("body")).not.toContainText(secret);
+  await expect(page.locator("body")).not.toContainText(secret.slice(-4));
   expect(await page.content()).not.toContain(secret);
 
   await token.getByTestId("downloads-token-clear").click();
