@@ -1094,6 +1094,12 @@ def extract_bundle(bundle: Path, destination: Path) -> Path:
             raise ReleaseError("AppImage extraction requires Linux")
         bundle.chmod(bundle.stat().st_mode | stat.S_IXUSR)
         run([bundle, "--appimage-extract"], cwd=destination, capture=True)
+        # --appimage-extract 把 AppDir 解到 squashfs-root/；以它为根，AppRun 和 usr/lib
+        # 才落在 verify_bundle_tree 的 AppImage 专属检查所看的位置。
+        app_dir = destination / "squashfs-root"
+        if not (app_dir / "AppRun").is_file():
+            raise ReleaseError(f"{bundle.name} did not extract to squashfs-root/AppRun")
+        return app_dir
     elif lower_name.endswith(".exe"):
         seven_zip = shutil.which("7z") or shutil.which("7z.exe")
         if seven_zip is None:

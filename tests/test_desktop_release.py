@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 import sys
 import tarfile
 import tempfile
@@ -537,31 +538,48 @@ class DesktopReleaseTests(unittest.TestCase):
                 "usr/lib/ldos/frontend-manifest.json",
             )
 
-    def test_appimage_tree_rejects_bundled_libwayland_client(self) -> None:
+    @unittest.skipIf(os.name == "nt", "AppImage extraction requires Linux")
+    def test_appimage_bundle_rejects_bundled_libwayland_client(self) -> None:
+        # 走完整的 verify_bundle：真实的 --appimage-extract 把 AppDir 解到 squashfs-root/，
+        # 守卫曾因只看解包目录的根而从未生效。
         with temporary_path() as tmp_path:
             canonical, frontend_payload = use_test_frontend_manifest(tmp_path)
-            backend = tmp_path / "backend"
-            backend.mkdir()
+            app_dir = tmp_path / "AppDir"
+            backend = app_dir / "usr" / "share" / "LDOS" / "backend"
+            backend.mkdir(parents=True)
             minimal_tree(backend)
-            (tmp_path / "frontend-manifest.json").write_bytes(frontend_payload)
-            (tmp_path / "AppRun").write_text("#!/bin/sh\n", encoding="utf-8")
-            bundled = tmp_path / "usr" / "lib" / "libwayland-client.so.0"
-            bundled.parent.mkdir(parents=True)
+            frontend = app_dir / "usr" / "lib" / "LDOS" / "frontend-manifest.json"
+            frontend.parent.mkdir(parents=True)
+            frontend.write_bytes(frontend_payload)
+            (app_dir / "AppRun").write_text("#!/bin/sh\n", encoding="utf-8")
+            bundled = app_dir / "usr" / "lib" / "libwayland-client.so.0"
             bundled.write_bytes(b"stale wayland client")
+            bundle = tmp_path / "LDOS_0.0.0_amd64.AppImage"
+            bundle.write_text(
+                "#!/bin/sh\n"
+                f'[ "$1" = --appimage-extract ] && cp -R {shlex.quote(str(app_dir))} squashfs-root\n',
+                encoding="utf-8",
+            )
 
             with (
                 mock.patch.object(release, "FRONTEND_MANIFEST", canonical),
                 mock.patch.object(release, "verify_release_identity"),
-                self.assertRaisesRegex(release.ReleaseError, "libwayland-client"),
             ):
-                release.verify_bundle_tree(tmp_path)
+                with self.assertRaisesRegex(release.ReleaseError, "libwayland-client"):
+                    release.verify_bundle(bundle)
+                bundled.unlink()
+                result = release.verify_bundle(bundle)
 
-            bundled.unlink()
-            with (
-                mock.patch.object(release, "FRONTEND_MANIFEST", canonical),
-                mock.patch.object(release, "verify_release_identity"),
-            ):
-                release.verify_bundle_tree(tmp_path)
+            self.assertEqual(result["backend_relative"], "usr/share/LDOS/backend")
+
+    @unittest.skipIf(os.name == "nt", "AppImage extraction requires Linux")
+    def test_appimage_bundle_without_an_appdir_fails_closed(self) -> None:
+        with temporary_path() as tmp_path:
+            bundle = tmp_path / "LDOS_0.0.0_amd64.AppImage"
+            bundle.write_text("#!/bin/sh\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(release.ReleaseError, "squashfs-root/AppRun"):
+                release.verify_bundle(bundle)
 
     def test_bundle_tree_rejects_a_second_frontend(self) -> None:
         with temporary_path() as tmp_path:
