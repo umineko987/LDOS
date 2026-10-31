@@ -165,6 +165,16 @@ mod tests {
     }
 
     #[test]
+    fn main_window_loads_the_app_root_with_a_trailing_slash() {
+        // 默认的 "index.html" 会被 Tauri 简化成 `tauri://localhost`。WebKit 对这种无路径的
+        // 非特殊 scheme 给出 location.pathname "/"、new URL(href).pathname ""，SvelteKit 的
+        // hash 路由据此把当前页判成外部 URL，整页跳转回同一地址，无限重载，窗口一直空白。
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("valid Tauri config JSON");
+        assert_eq!(config["app"]["windows"][0]["url"], "/");
+    }
+
+    #[test]
     fn capability_exposes_only_scoped_external_url_opening() {
         let capability: serde_json::Value =
             serde_json::from_str(include_str!("../capabilities/main.json"))
