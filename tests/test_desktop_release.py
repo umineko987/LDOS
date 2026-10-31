@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shlex
+import struct
 import sys
 import tarfile
 import tempfile
@@ -94,6 +95,22 @@ def minimal_tree(root: Path) -> dict[str, object]:
         json.dumps(manifest), encoding="utf-8"
     )
     return manifest
+
+
+def synthetic_elf(phnum: int, note_offset: int) -> bytes:
+    # 64 位小端 ELF：程序头表从 64 开始，每项 56 字节；一个 .note 节，节名表在 0x300，节头表在 0x400。
+    shoff = 0x400
+    names = b"\0.note\0.shstrtab\0"
+    header = b"\x7fELF" + bytes([2, 1, 1]) + bytes(9)
+    header += struct.pack("<HHIQQQIHHHHHH", 3, 62, 1, 0, 64, shoff, 0, 64, 56, phnum, 64, 3, 2)
+    body = bytearray(header.ljust(shoff, b"\0"))
+    body[0x300 : 0x300 + len(names)] = names
+    sections = [
+        bytes(64),
+        struct.pack("<IIQQQQIIQQ", 1, 7, 2, note_offset, note_offset, 0x24, 0, 0, 4, 0),
+        struct.pack("<IIQQQQIIQQ", 7, 3, 0, 0, 0x300, len(names), 0, 0, 1, 0),
+    ]
+    return bytes(body) + b"".join(sections)
 
 
 def use_test_frontend_manifest(tmp_path: Path) -> tuple[Path, bytes]:
@@ -571,6 +588,44 @@ class DesktopReleaseTests(unittest.TestCase):
                 result = release.verify_bundle(bundle)
 
             self.assertEqual(result["backend_relative"], "usr/share/LDOS/backend")
+
+    def test_program_header_table_overlapping_a_section_is_detected(self) -> None:
+        with temporary_path() as tmp_path:
+            # 11 项程序头正好止于 0x2a8；patchelf 加到 12 项后表尾到 0x2e0，压住 0x2a8 处的 note。
+            clean = tmp_path / "clean.so"
+            clean.write_bytes(synthetic_elf(11, 0x2A8))
+            damaged = tmp_path / "damaged.so"
+            damaged.write_bytes(synthetic_elf(12, 0x2A8))
+            text = tmp_path / "loaders.cache"
+            text.write_text("not an ELF file\n", encoding="utf-8")
+
+            self.assertIsNone(release.overlapping_program_header_section(clean))
+            self.assertEqual(release.overlapping_program_header_section(damaged), ".note")
+            self.assertIsNone(release.overlapping_program_header_section(text))
+
+    def test_appimage_tree_rejects_a_library_damaged_by_patchelf(self) -> None:
+        with temporary_path() as tmp_path:
+            canonical, frontend_payload = use_test_frontend_manifest(tmp_path)
+            backend = tmp_path / "usr" / "share" / "LDOS" / "backend"
+            backend.mkdir(parents=True)
+            minimal_tree(backend)
+            frontend = tmp_path / "usr" / "lib" / "LDOS" / "frontend-manifest.json"
+            frontend.parent.mkdir(parents=True)
+            frontend.write_bytes(frontend_payload)
+            (tmp_path / "AppRun").write_text("#!/bin/sh\n", encoding="utf-8")
+            library = tmp_path / "usr" / "lib" / "libleancrypto.so.1.9"
+            library.write_bytes(synthetic_elf(12, 0x2A8))
+
+            with (
+                mock.patch.object(release, "FRONTEND_MANIFEST", canonical),
+                mock.patch.object(release, "verify_release_identity"),
+            ):
+                with self.assertRaisesRegex(
+                    release.ReleaseError, r"usr/lib/libleancrypto\.so\.1\.9 \(\.note\)"
+                ):
+                    release.verify_bundle_tree(tmp_path)
+                library.write_bytes(synthetic_elf(11, 0x2A8))
+                release.verify_bundle_tree(tmp_path)
 
     @unittest.skipIf(os.name == "nt", "AppImage extraction requires Linux")
     def test_appimage_bundle_without_an_appdir_fails_closed(self) -> None:

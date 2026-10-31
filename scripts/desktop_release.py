@@ -14,6 +14,7 @@ import re
 import shutil
 import socket
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
@@ -1114,6 +1115,38 @@ def extract_bundle(bundle: Path, destination: Path) -> Path:
     return destination
 
 
+def overlapping_program_header_section(path: Path) -> str | None:
+    """返回被程序头表压住的节名，没有则返回 None。只看 64 位小端 ELF。
+
+    patchelf 0.15 给紧凑布局的库加 RUNPATH 时，会把多出的程序头接着写在原表后面，
+    压住 .note.gnu.build-id/.gnu.hash，却不把它们搬走；这样的库 dlopen 时就会崩。"""
+    with path.open("rb") as handle:
+        header = handle.read(64)
+        if len(header) < 64 or header[:4] != b"\x7fELF" or header[4:6] != b"\x02\x01":
+            return None
+        phoff, shoff = struct.unpack_from("<QQ", header, 32)
+        phentsize, phnum, shentsize, shnum, shstrndx = struct.unpack_from("<HHHHH", header, 54)
+        if shoff == 0 or shnum == 0 or shentsize < 64:
+            return None
+        handle.seek(shoff)
+        table = handle.read(shnum * shentsize)
+        if len(table) < shnum * shentsize:
+            return None
+        sections = [struct.unpack_from("<IIQQQQ", table, index * shentsize) for index in range(shnum)]
+        table_end = phoff + phnum * phentsize
+        for name, kind, _flags, _address, offset, size in sections:
+            # SHT_NULL 和 SHT_NOBITS 不占文件内容。
+            if kind in (0, 8) or size == 0 or offset >= table_end or offset + size <= phoff:
+                continue
+            if shstrndx >= shnum:
+                return f"section at {offset:#x}"
+            names_offset, names_size = sections[shstrndx][4:6]
+            handle.seek(names_offset + name)
+            raw = handle.read(max(0, min(256, names_size - name)))
+            return raw.split(b"\0", 1)[0].decode("ascii", "replace") or f"section at {offset:#x}"
+    return None
+
+
 def verify_bundle_tree(extracted: Path) -> dict[str, Any]:
     release_manifests = sorted(extracted.rglob(MANIFEST_NAME))
     if len(release_manifests) != 1:
@@ -1137,14 +1170,26 @@ def verify_bundle_tree(extracted: Path) -> dict[str, Any]:
         raise ReleaseError("bundled frontend manifest differs from the canonical Svelte build")
     if any(path.name == "webui_dist" for path in extracted.rglob("webui_dist")):
         raise ReleaseError("bundle contains a second frontend tree")
-    if (extracted / "AppRun").is_file() and any(
-        extracted.glob("usr/lib/libwayland-client.so.0*")
-    ):
-        raise ReleaseError(
-            "AppImage bundles libwayland-client.so.0: the stale copy shadows the host "
-            "library and breaks EGL initialization on Mesa 25+ Wayland hosts "
-            "(linuxdeploy excludelist must keep it out)"
-        )
+    if (extracted / "AppRun").is_file():
+        if any(extracted.glob("usr/lib/libwayland-client.so.0*")):
+            raise ReleaseError(
+                "AppImage bundles libwayland-client.so.0: the stale copy shadows the host "
+                "library and breaks EGL initialization on Mesa 25+ Wayland hosts "
+                "(linuxdeploy excludelist must keep it out)"
+            )
+        damaged = [
+            f"{path.relative_to(extracted).as_posix()} ({section})"
+            for directory in ("usr/bin", "usr/lib")
+            for path in sorted((extracted / directory).rglob("*"))
+            if path.is_file()
+            and not path.is_symlink()
+            and (section := overlapping_program_header_section(path))
+        ]
+        if damaged:
+            raise ReleaseError(
+                "AppImage ELF files whose program headers overwrite a section "
+                "(patchelf damage; they crash when loaded): " + ", ".join(damaged)
+            )
     runtime_roots = [path for path in extracted.rglob("runtime") if path.parent == backend]
     if runtime_roots != [backend / "runtime"]:
         raise ReleaseError("bundle does not contain exactly one controlled Python runtime")
