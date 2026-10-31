@@ -97,17 +97,19 @@ def minimal_tree(root: Path) -> dict[str, object]:
     return manifest
 
 
-def synthetic_elf(phnum: int, note_offset: int) -> bytes:
-    # 64 位小端 ELF：程序头表从 64 开始，每项 56 字节；一个 .note 节，节名表在 0x300，节头表在 0x400。
-    shoff = 0x400
+def synthetic_elf(
+    phnum: int, note_offset: int, note_size: int = 0x24, note_type: int = 7, shoff: int = 0x400
+) -> bytes:
+    # 64 位小端 ELF：程序头表从 64 开始，每项 56 字节；一个 .note 节，节名表在 0x300，节头表默认在 0x400。
+    # shoff=0 表示没有节头表。
     names = b"\0.note\0.shstrtab\0"
     header = b"\x7fELF" + bytes([2, 1, 1]) + bytes(9)
     header += struct.pack("<HHIQQQIHHHHHH", 3, 62, 1, 0, 64, shoff, 0, 64, 56, phnum, 64, 3, 2)
-    body = bytearray(header.ljust(shoff, b"\0"))
+    body = bytearray(header.ljust(0x400, b"\0"))
     body[0x300 : 0x300 + len(names)] = names
     sections = [
         bytes(64),
-        struct.pack("<IIQQQQIIQQ", 1, 7, 2, note_offset, note_offset, 0x24, 0, 0, 4, 0),
+        struct.pack("<IIQQQQIIQQ", 1, note_type, 2, note_offset, note_offset, note_size, 0, 0, 4, 0),
         struct.pack("<IIQQQQIIQQ", 7, 3, 0, 0, 0x300, len(names), 0, 0, 1, 0),
     ]
     return bytes(body) + b"".join(sections)
@@ -599,9 +601,20 @@ class DesktopReleaseTests(unittest.TestCase):
             text = tmp_path / "loaders.cache"
             text.write_text("not an ELF file\n", encoding="utf-8")
 
+            # 把 ELF 头和整张程序头表包在里面的节（Guile .go 的布局）、不占文件内容的 NOBITS 节、没有节头表都不算损坏。
+            wrapping = tmp_path / "rnrs.go"
+            wrapping.write_bytes(synthetic_elf(3, 0, note_size=0xE8))
+            nobits = tmp_path / "nobits.so"
+            nobits.write_bytes(synthetic_elf(12, 0x2A8, note_type=8))
+            no_sections = tmp_path / "no-sections.so"
+            no_sections.write_bytes(synthetic_elf(12, 0x2A8, shoff=0))
+
             self.assertIsNone(release.overlapping_program_header_section(clean))
             self.assertEqual(release.overlapping_program_header_section(damaged), ".note")
             self.assertIsNone(release.overlapping_program_header_section(text))
+            self.assertIsNone(release.overlapping_program_header_section(wrapping))
+            self.assertIsNone(release.overlapping_program_header_section(nobits))
+            self.assertIsNone(release.overlapping_program_header_section(no_sections))
 
     def test_appimage_tree_rejects_a_library_damaged_by_patchelf(self) -> None:
         with temporary_path() as tmp_path:
@@ -625,6 +638,32 @@ class DesktopReleaseTests(unittest.TestCase):
                 ):
                     release.verify_bundle_tree(tmp_path)
                 library.write_bytes(synthetic_elf(11, 0x2A8))
+                release.verify_bundle_tree(tmp_path)
+
+    def test_deb_tree_rejects_a_binary_damaged_by_patchelf(self) -> None:
+        with temporary_path() as tmp_path:
+            canonical, frontend_payload = use_test_frontend_manifest(tmp_path)
+            backend = tmp_path / "usr" / "lib" / "LDOS" / "backend"
+            backend.mkdir(parents=True)
+            minimal_tree(backend)
+            (tmp_path / "usr" / "lib" / "LDOS" / "frontend-manifest.json").write_bytes(
+                frontend_payload
+            )
+            binary = tmp_path / "usr" / "bin" / "ldos-desktop"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(synthetic_elf(12, 0x2A8))
+            # 指向坏文件的符号链接不重复报告。
+            (tmp_path / "usr" / "bin" / "ldos").symlink_to("ldos-desktop")
+
+            with (
+                mock.patch.object(release, "FRONTEND_MANIFEST", canonical),
+                mock.patch.object(release, "verify_release_identity"),
+            ):
+                with self.assertRaisesRegex(
+                    release.ReleaseError, r"overwrite a section .*: usr/bin/ldos-desktop \(\.note\)$"
+                ):
+                    release.verify_bundle_tree(tmp_path)
+                binary.write_bytes(synthetic_elf(11, 0x2A8))
                 release.verify_bundle_tree(tmp_path)
 
     @unittest.skipIf(os.name == "nt", "AppImage extraction requires Linux")

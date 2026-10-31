@@ -1135,8 +1135,14 @@ def overlapping_program_header_section(path: Path) -> str | None:
         sections = [struct.unpack_from("<IIQQQQ", table, index * shentsize) for index in range(shnum)]
         table_end = phoff + phnum * phentsize
         for name, kind, _flags, _address, offset, size in sections:
-            # SHT_NULL 和 SHT_NOBITS 不占文件内容。
-            if kind in (0, 8) or size == 0 or offset >= table_end or offset + size <= phoff:
+            # SHT_NULL 和 SHT_NOBITS 不占文件内容；把整张程序头表包在里面的节（如 Guile 的 .go）是正常布局。
+            if (
+                kind in (0, 8)
+                or size == 0
+                or offset >= table_end
+                or offset + size <= phoff
+                or (offset <= phoff and offset + size >= table_end)
+            ):
                 continue
             if shstrndx >= shnum:
                 return f"section at {offset:#x}"
@@ -1177,19 +1183,19 @@ def verify_bundle_tree(extracted: Path) -> dict[str, Any]:
                 "library and breaks EGL initialization on Mesa 25+ Wayland hosts "
                 "(linuxdeploy excludelist must keep it out)"
             )
-        damaged = [
-            f"{path.relative_to(extracted).as_posix()} ({section})"
-            for directory in ("usr/bin", "usr/lib")
-            for path in sorted((extracted / directory).rglob("*"))
-            if path.is_file()
-            and not path.is_symlink()
-            and (section := overlapping_program_header_section(path))
-        ]
-        if damaged:
-            raise ReleaseError(
-                "AppImage ELF files whose program headers overwrite a section "
-                "(patchelf damage; they crash when loaded): " + ", ".join(damaged)
-            )
+    # linuxdeploy 改的 usr/lib 和宿主 patchelf 改的后端 wheel 库都可能被写坏，所以扫整棵树。
+    damaged = [
+        f"{path.relative_to(extracted).as_posix()} ({section})"
+        for path in sorted(extracted.rglob("*"))
+        if path.is_file()
+        and not path.is_symlink()
+        and (section := overlapping_program_header_section(path))
+    ]
+    if damaged:
+        raise ReleaseError(
+            "bundled ELF files whose program headers overwrite a section "
+            "(patchelf damage; they crash when loaded): " + ", ".join(damaged)
+        )
     runtime_roots = [path for path in extracted.rglob("runtime") if path.parent == backend]
     if runtime_roots != [backend / "runtime"]:
         raise ReleaseError("bundle does not contain exactly one controlled Python runtime")
