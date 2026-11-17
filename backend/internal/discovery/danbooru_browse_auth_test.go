@@ -19,6 +19,13 @@ func TestDanbooruBrowseWithRealAuthResolver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The Go-only CI job does not check out submodules. The Linux executor
+	// job requires this source and runs the integration test with its dependencies.
+	if _, err := os.Stat(filepath.Join(root, "gallery-dl-codeberg", "gallery_dl", "__init__.py")); os.IsNotExist(err) {
+		t.Skip("gallery-dl submodule is required for the real auth resolver")
+	} else if err != nil {
+		t.Fatal(err)
+	}
 	python := filepath.Join(root, "gallery-dl-backend", ".venv", "bin", "python")
 	if _, err := os.Stat(python); err != nil {
 		python, err = exec.LookPath("python3")
