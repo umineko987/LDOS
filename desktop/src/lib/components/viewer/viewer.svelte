@@ -42,6 +42,7 @@
     type Size,
     type ViewerItem,
   } from "./viewer-model.ts";
+  import { ViewerImages } from "./viewer-images.ts";
 
   let {
     items,
@@ -67,6 +68,7 @@
 
   const current = $derived(items[index] ?? null);
   const strip = $derived(stripWindow(index, items.length));
+  const images = new ViewerImages();
 
   let stage = $state<HTMLDivElement | null>(null);
   let flight = $state<HTMLDivElement | null>(null);
@@ -80,33 +82,44 @@
 
   const viewport = (): Size => ({ width: stage?.clientWidth ?? 0, height: stage?.clientHeight ?? 0 });
 
-  // 换图：复位缩放和加载状态。
-  $effect(() => {
-    void current?.id;
+  // 复用已解码的 img 节点。新图准备好之前，DOM 继续保留上一帧。
+  function displayImage(host: HTMLDivElement) {
+    if (!open) return;
+    const item = current;
+    if (!item) {
+      host.replaceChildren();
+      images.clear();
+      return;
+    }
+    const neighbors = [1, -1, 2, -2].flatMap((offset) => items[index + offset] ?? []);
     untrack(() => {
       pan = RESET;
+      stopDrag();
       loaded = false;
       failed = false;
-      natural = current?.width && current?.height ? { width: current.width, height: current.height } : null;
+      natural = item.width && item.height ? { width: item.width, height: item.height } : null;
     });
-  });
+    return images.select(item, neighbors, (image, original) => {
+      image.alt = item.name;
+      image.draggable = false;
+      image.className = "size-full object-contain";
+      if (host.firstChild !== image) host.replaceChildren(image);
+      loaded = original;
+      if (original && image.naturalWidth && image.naturalHeight) {
+        natural = { width: image.naturalWidth, height: image.naturalHeight };
+        pan = clampPan(pan, natural, viewport());
+      }
+    }, () => { failed = true; });
+  }
 
   // 翻到最后几张时要下一页。
   $effect(() => {
     if (open && hasMore && items.length > 0 && index >= items.length - 3) untrack(() => onendreached?.());
   });
 
-  // 邻近两张预取原图。
+  // 关闭或卸载时释放预加载；浏览时只保留前后两张和当前图片。
   $effect(() => {
-    if (!open) return;
-    for (const offset of [1, -1, 2]) {
-      const neighbor = items[index + offset];
-      if (!neighbor) continue;
-      // 和页面上的图片同一种 CORS 模式，预取的结果才能被复用。
-      const image = new Image();
-      image.crossOrigin = "anonymous";
-      image.src = neighbor.src;
-    }
+    if (open) return () => images.clear();
   });
 
   function reducedMotion() {
@@ -184,14 +197,6 @@
     dragging = false;
   }
 
-  function onload(event: Event) {
-    const image = event.currentTarget as HTMLImageElement;
-    loaded = true;
-    if (image.naturalWidth && image.naturalHeight) {
-      natural = { width: image.naturalWidth, height: image.naturalHeight };
-      pan = clampPan(pan, natural, viewport());
-    }
-  }
 
   const group = m.keys_group_viewer;
   useOverlay(() => open, {
@@ -273,6 +278,7 @@
           aria-label={m.viewer_stage()}
           data-testid="viewer-stage"
           data-scale={pan.scale}
+          aria-busy={current !== null && !loaded && !failed}
           class={cn(
             "relative min-w-0 flex-1 touch-none overflow-hidden outline-none select-none",
             pan.scale > 1 && (dragging ? "cursor-grabbing" : "cursor-grab"),
@@ -289,23 +295,11 @@
               class="absolute inset-0 will-change-transform"
               style:transform="translate({pan.x}px, {pan.y}px) scale({pan.scale})"
             >
-              {#if current && !failed}
-                {#if current.thumb && !loaded}
-                  <img crossorigin="anonymous" src={current.thumb} alt="" draggable="false" class="absolute inset-0 size-full object-contain" />
-                {/if}
-                {#key current.id}
-                  <img
-                    crossorigin="anonymous"
-                    src={current.src}
-                    alt={current.name}
-                    draggable="false"
-                    class="absolute inset-0 size-full object-contain transition-opacity duration-(--t-color)"
-                    style:opacity={loaded ? 1 : 0}
-                    {onload}
-                    onerror={() => (failed = true)}
-                  />
-                {/key}
-              {/if}
+              <div
+                class="absolute inset-0"
+                style:visibility={failed ? "hidden" : "visible"}
+                {@attach displayImage}
+              ></div>
             </div>
           </div>
           {#if current && failed}

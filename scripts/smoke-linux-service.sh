@@ -6,6 +6,7 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(CDPATH= cd -- "$script_dir/.." && pwd)"
 backend_dir="$root_dir/gallery-dl-backend"
 python_bin="$backend_dir/.venv/bin/python"
+native_bin="$root_dir/backend/build/ldos-backend"
 port="${LDOS_SMOKE_PORT:-18787}"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/ldos-service-smoke.XXXXXX")"
 server_pid=""
@@ -24,10 +25,15 @@ trap cleanup EXIT INT TERM
     exit 1
 }
 
+[[ -x "$native_bin" ]] || {
+    printf '错误：Go 后端不可用，请先运行 setup-linux.sh。\n' >&2
+    exit 1
+}
+
 make_config() {
     local mode="$1"
     local destination="$work_dir/config-$mode.json"
-    "$python_bin" - "$backend_dir/config.example.json" "$destination" "$work_dir/$mode" "$port" "$mode" "$root_dir" <<'PY'
+    "$python_bin" - "$backend_dir/config.example.json" "$destination" "$work_dir/$mode" "$port" "$mode" "$root_dir" <<'PY' || return
 import json
 import os
 import sys
@@ -47,13 +53,15 @@ data["server"]["port"] = int(port)
 data["gallery"]["repo_path"] = str(workspace / "gallery-dl-codeberg")
 data["gallery"]["cache_file"] = str(root / "credentials" / "managed" / "cache.sqlite3")
 data["gallery"]["python_executable"] = sys.executable
+data["gallery"]["migrate_default_auth"] = False
+data["tagger"] = {"enabled": False, "cache_path": str(root / "tagger" / "tags.sqlite3"), "model_dir": str(root / "tagger" / "models") }
 data["proxy"]["enabled"] = False
 data["proxy"]["auto_start"] = False
 data["dedup"]["enabled"] = mode == "missing-models"
 data["dedup"]["device"] = "cpu"
 data["dedup"]["python_executable"] = str(workspace / ".venv" / "bin" / "python")
-data["dedup"]["worker_script"] = str(workspace / "dedup_review_worker.py")
-data["dedup"]["core_script"] = str(workspace / "dedup_core.py")
+data["dedup"]["worker_script"] = str(workspace / "dedup" / "dedup_review_worker.py")
+data["dedup"]["core_script"] = str(workspace / "dedup" / "dedup_core.py")
 data["dedup"]["model_dir"] = str(root / "missing-models")
 path = Path(destination)
 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -87,7 +95,7 @@ run_server() {
     local config="$1"
     (
         cd "$backend_dir"
-        exec "$python_bin" -m gdl_backend --config "$config"
+        exec "$native_bin" --config "$config" --executors-dir "$root_dir/backend/executors"
     ) >"$work_dir/server.log" 2>&1 &
     server_pid=$!
     wait_for_health

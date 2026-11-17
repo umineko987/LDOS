@@ -4,7 +4,14 @@ Thumbs.db
 Desktop.ini
 .idea/
 .vscode/
-/.pi/mcp.json
+# Local agent/editor configuration
+.pi/
+.agents/
+.claude/
+.codex/
+.cursor/
+.mcp.json
+skills-lock.json
 *.swp
 *.tmp
 
@@ -22,6 +29,7 @@ Desktop.ini
 **/venv/
 /desktop/node_modules/
 /desktop/.svelte-kit/
+/desktop/.mygo/
 /desktop/src/lib/paraglide/
 /desktop/coverage/
 /desktop/playwright-report/
@@ -29,6 +37,8 @@ Desktop.ini
 /desktop/src-tauri/target/
 /desktop/src-tauri/gen/
 /desktop/src-tauri/release/
+/desktop/resources/backend/
+/desktop/resources/frontend-manifest.json
 /.release-cache/
 /.models/
 **/dist/
@@ -61,6 +71,18 @@ Desktop.ini
 **/Web Data-journal
 **/Local State
 
+# Local environment secrets and private keys
+.env
+.env.*
+!.env.example
+!.env.*.example
+.netrc
+.git-credentials
+*.key
+*.pem
+*.p12
+*.pfx
+
 # gallery-dl backend machine-local configuration and run output
 /gallery-dl-backend/config.json
 /gallery-dl-backend/credentials/
@@ -77,12 +99,13 @@ Desktop.ini
 /*_Clash_*.yml
 /subscriptions/
 
-# Project-local documentation and design notes
-/docs/*
-!/docs/source-build.md
-!/docs/source-build.en.md
-!/docs/release-install.md
-!/docs/release-install.en.md
+# Keep development notes local; publish README and legal notices only
+*.[mM][dD]
+![Rr][Ee][Aa][Dd][Mm][Ee]*.[mM][dD]
+![Ll][Ii][Cc][Ee][Nn][Ss][Ee]*.[mM][dD]
+![Nn][Oo][Tt][Ii][Cc][Ee]*.[mM][dD]
+!THIRD-PARTY-NOTICES*.[mM][dD]
+/docs/
 
 # Tagger local models and result cache
 tagger/.models/

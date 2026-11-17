@@ -1,0 +1,7 @@
+# Runtime dependencies for the isolated gallery-dl executor.
+# Keep model inference dependencies in requirements-dedup-*.txt.
+requests[socks]
+curl-cffi
+Pillow
+PyYAML
+truststore

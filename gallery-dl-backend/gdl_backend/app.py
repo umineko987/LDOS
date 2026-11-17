@@ -94,8 +94,7 @@ logger = logging.getLogger(__name__)
 
 class ServiceContainer:
     def __init__(self, settings: AppSettings) -> None:
-        if os.name != "nt":
-            os.umask(0o077)
+        os.umask(0o077)
         self.settings = settings
         # 活动中心：事件总线与统一 Job 表，供各服务发布进度。
         self.events = EventBus()

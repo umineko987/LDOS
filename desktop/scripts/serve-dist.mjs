@@ -1,13 +1,12 @@
 // 以生产 CSP 头提供 dist/，给 Playwright 的 dist 项目用：验证打包后的页面在
-// tauri.conf.json 的 `app.security.csp` 下能启动。用法：node scripts/serve-dist.mjs [port]
+// csp.json 的 `production` 策略下能启动。用法：node scripts/serve-dist.mjs [port]
 import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../dist", import.meta.url));
-const tauriConfig = JSON.parse(await readFile(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
-const csp = tauriConfig.app.security.csp;
+const { production: csp } = JSON.parse(await readFile(new URL("../csp.json", import.meta.url), "utf8"));
 const port = Number(process.argv[2] ?? process.env.LDOS_DIST_PORT ?? 1421);
 
 const TYPES = {

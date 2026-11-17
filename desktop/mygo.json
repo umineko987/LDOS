@@ -1,0 +1,17 @@
+{
+  "name": "LDOS",
+  "slug": "ldos",
+  "identifier": "dev.ldos.desktop",
+  "version": "0.1.5",
+  "main": "./src-mygo",
+  "icon": "src-tauri/icons/icon.png",
+  "devUrl": "http://localhost:1420",
+  "devCommand": "npm run build:backend && npm run dev:web",
+  "buildCommand": "npm run build:backend && npm run build:web",
+  "bindings": "src/lib/platform/mygo.generated.ts",
+  "frontendDist": "dist",
+  "out": "build",
+  "linux": {
+    "formats": []
+  }
+}

@@ -8,15 +8,9 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
-#[cfg(windows)]
-use std::os::windows::process::CommandExt as WindowsCommandExt;
-#[cfg(windows)]
-use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 pub struct ProcessTree {
     child: Child,
     stdin: Option<ChildStdin>,
-    #[cfg(windows)]
-    job: windows_job::Job,
 }
 
 impl ProcessTree {
@@ -24,29 +18,16 @@ impl ProcessTree {
         command.stdin(Stdio::piped());
         #[cfg(unix)]
         command.process_group(0);
-        #[cfg(windows)]
-        command.creation_flags(CREATE_NO_WINDOW);
 
         let mut child = command.spawn()?;
         let stdin = child
             .stdin
             .take()
             .ok_or_else(|| io::Error::other("backend stdin pipe was not created"))?;
-        #[cfg(windows)]
-        let job = match windows_job::Job::assign(&child) {
-            Ok(job) => job,
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(error);
-            }
-        };
 
         Ok(Self {
             child,
             stdin: Some(stdin),
-            #[cfg(windows)]
-            job,
         })
     }
 
@@ -103,11 +84,6 @@ impl ProcessTree {
         }
         self.child.kill()
     }
-
-    #[cfg(windows)]
-    fn terminate_tree(&mut self, _force: bool) -> io::Result<()> {
-        self.job.terminate()
-    }
 }
 
 impl Drop for ProcessTree {
@@ -116,66 +92,6 @@ impl Drop for ProcessTree {
             drop(self.stdin.take());
             let _ = self.terminate_tree(true);
             let _ = self.child.wait();
-        }
-    }
-}
-
-#[cfg(windows)]
-mod windows_job {
-    use std::{ffi::c_void, io, mem::size_of, os::windows::io::AsRawHandle, process::Child};
-
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, HANDLE},
-        System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        },
-    };
-
-    pub struct Job(HANDLE);
-
-    unsafe impl Send for Job {}
-
-    impl Job {
-        pub fn assign(child: &Child) -> io::Result<Self> {
-            let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-            if handle.is_null() {
-                return Err(io::Error::last_os_error());
-            }
-
-            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            let configured = unsafe {
-                SetInformationJobObject(
-                    handle,
-                    JobObjectExtendedLimitInformation,
-                    &limits as *const _ as *const c_void,
-                    size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-                )
-            };
-            let assigned = configured != 0
-                && unsafe { AssignProcessToJobObject(handle, child.as_raw_handle() as HANDLE) }
-                    != 0;
-            if !assigned {
-                let error = io::Error::last_os_error();
-                unsafe { CloseHandle(handle) };
-                return Err(error);
-            }
-            Ok(Self(handle))
-        }
-
-        pub fn terminate(&self) -> io::Result<()> {
-            if unsafe { TerminateJobObject(self.0, 1) } == 0 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        }
-    }
-
-    impl Drop for Job {
-        fn drop(&mut self) {
-            unsafe { CloseHandle(self.0) };
         }
     }
 }
@@ -190,12 +106,6 @@ mod tests {
         let mut command = {
             let mut command = Command::new("sh");
             command.args(["-c", "cat >/dev/null"]);
-            command
-        };
-        #[cfg(windows)]
-        let mut command = {
-            let mut command = Command::new("cmd");
-            command.args(["/C", "more >NUL"]);
             command
         };
 

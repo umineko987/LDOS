@@ -249,10 +249,7 @@ class AuthManager:
 
     @staticmethod
     def _default_gallery_cache() -> Path:
-        if os.name == "nt":
-            base = Path(os.environ.get("APPDATA") or "~").expanduser()
-        else:
-            base = Path(os.environ.get("XDG_CACHE_HOME") or "~/.cache").expanduser()
+        base = Path(os.environ.get("XDG_CACHE_HOME") or "~/.cache").expanduser()
         return (base / "gallery-dl" / "cache.sqlite3").resolve()
 
     def _ensure_cache(self, cache_file: Path | None = None) -> None:

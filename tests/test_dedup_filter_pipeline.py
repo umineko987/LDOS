@@ -10,11 +10,10 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "dedup"))
-sys.path.insert(0, str(ROOT / "gallery-dl-backend"))
 
 from PIL import Image
-from gdl_backend import review_filters
-from gdl_backend.gallery_safe_paths import SafeSourceRoot
+import review_filters
+from review_safe_paths import SafeSourceRoot, held_file_disk_version
 import dedup_review_worker as worker
 import test_dedup_review_worker as fixtures
 
@@ -182,10 +181,10 @@ class FilterPipelineTests(unittest.TestCase):
                 source = root / str(n)
                 source.mkdir()
                 Image.new("RGB", (16, 16), color).save(source / "image.png")
-                with SafeSourceRoot(source) as safe:
+                with SafeSourceRoot(source) as safe, safe.open_binary("image.png") as handle:
                     selected.append({"asset_id": str(n), "source_id": str(n), "relative_path": "image.png",
                                      "root_path": str(source), "root_identity": list(safe.root_identity()),
-                                     "disk_version": safe.disk_version("image.png")})
+                                     "disk_version": held_file_disk_version(handle)})
             settings = config(basic_dedup=False, similarity_groups=False, filter_character=True, reference_asset_ids=["1"])
             input_path, output = root / "input.json", root / "output.json"
             payload = {"review_id": "r", "filter_config": settings, "images": selected[:1], "references": selected[1:]}

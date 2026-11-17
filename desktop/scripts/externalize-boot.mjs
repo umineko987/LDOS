@@ -4,8 +4,9 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { extractInlineScripts } from "./external-boot.ts";
+import { extractInlineScripts, insertCspMeta } from "./external-boot.ts";
 
+const { production: csp } = JSON.parse(await readFile(new URL("../csp.json", import.meta.url), "utf8"));
 const dist = fileURLToPath(new URL("../dist", import.meta.url));
 const entries = await readdir(dist, { withFileTypes: true, recursive: true });
 let moved = 0;
@@ -13,9 +14,8 @@ for (const entry of entries) {
   if (!entry.isFile() || !entry.name.endsWith(".html")) continue;
   const file = join(entry.parentPath, entry.name);
   const { html, scripts } = extractInlineScripts(await readFile(file, "utf8"), (name) => `./${name}`);
-  if (scripts.length === 0) continue;
   for (const script of scripts) await writeFile(join(dirname(file), script.name), script.code, "utf8");
-  await writeFile(file, html, "utf8");
+  await writeFile(file, insertCspMeta(html, csp), "utf8");
   moved += scripts.length;
 }
 if (!(await readFile(join(dist, "index.html"), "utf8")).includes('src="./boot.')) {

@@ -12,7 +12,7 @@ const ORIGIN = "http://127.0.0.1:9123";
 function platform(statuses: BackendStatus[], metadata: () => Promise<unknown> = async () => ({})) {
   const queue = [...statuses];
   return {
-    mode: "tauri",
+    mode: "mygo",
     capabilities: { selectDirectory: true, selectBrowserExecutable: true, revealInFileManager: true },
     getBackendStatus: vi.fn(async () => (queue.length > 1 ? queue.shift()! : queue[0]!)),
     getRuntimeMetadata: vi.fn(async () => {

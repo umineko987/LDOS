@@ -32,6 +32,7 @@
     type MemberFilter,
   } from "#lib/api/queries/datasets.ts";
   import CrawlDialog from "#lib/components/collect/crawl-dialog.svelte";
+  import DanbooruDialog from "#lib/components/collect/danbooru-dialog.svelte";
   import LibraryPicker from "#lib/components/collect/library-picker.svelte";
   import PathDialog from "#lib/components/collect/path-dialog.svelte";
   import RootsBar from "#lib/components/collect/roots-bar.svelte";
@@ -69,6 +70,7 @@
   let pathOpen = $state(false);
   let libraryOpen = $state(false);
   let crawlOpen = $state(false);
+  let danbooruOpen = $state(false);
   let removing = $state<DatasetRoot | null>(null);
   let viewerOpen = $state(false);
   let viewerIndex = $state(0);
@@ -305,6 +307,15 @@
         crawlOpen = true;
       },
     },
+    {
+      id: "collect.danbooru",
+      label: m.danbooru_add,
+      group,
+      palette: true,
+      run: () => {
+        danbooruOpen = true;
+      },
+    },
   ]);
 
   useOverlay(() => removing !== null, { id: "collect-remove-root" });
@@ -319,6 +330,9 @@
   </Button>
   <Button variant="outline" {size} onclick={() => (crawlOpen = true)} data-testid="collect-add-crawl">
     <GlobeIcon />{m.collect_add_crawl()}
+  </Button>
+  <Button variant="outline" {size} onclick={() => (danbooruOpen = true)} data-testid="collect-add-danbooru">
+    <GlobeIcon data-icon="inline-start" />{m.danbooru_add()}
   </Button>
 {/snippet}
 
@@ -362,7 +376,7 @@
         <Button variant="ghost" size="sm" onclick={() => selection.clear()}>{m.collect_clear_selection()} <Kbd>Esc</Kbd></Button>
       {/if}
       <div class="ml-auto flex items-center gap-3">
-        {#if hashing.data}
+        {#if hashing.data && (hashing.data.pending > 0 || hashing.data.hashed_count < hashing.data.member_count)}
           {@const status = hashing.data}
           <span class="flex items-center gap-1.5 text-2xs text-fg3" data-testid="collect-hashing">
             {#if status.pending > 0}
@@ -372,8 +386,6 @@
               <HashIcon class="size-3" />
               {m.collect_hashing_partial({ done: status.hashed_count, total: status.member_count })}
               <Button variant="ghost" size="xs" onclick={hash}>{m.collect_hashing_start()}</Button>
-            {:else if status.member_count > 0}
-              <HashIcon class="size-3" />{m.collect_hashing_done()}
             {/if}
           </span>
         {/if}
@@ -471,6 +483,7 @@
 <PathDialog bind:open={pathOpen} onsubmit={(path) => addRoot({ path }, path)} />
 <LibraryPicker bind:open={libraryOpen} onsubmit={addRoot} />
 <CrawlDialog bind:open={crawlOpen} onsubmit={submitCrawl} />
+<DanbooruDialog bind:open={danbooruOpen} datasetId={id} />
 
 <Dialog.Root
   open={removing !== null}

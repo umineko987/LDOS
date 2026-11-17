@@ -13,7 +13,6 @@
     crawlBatchQuery,
     crawlKeys,
     crawlTasksQuery,
-    isActiveBatchStatus,
     isTerminalBatchStatus,
     isTerminalTaskStatus,
     runCrawlOperation,
@@ -38,9 +37,8 @@
   import { cn } from "#lib/utils.ts";
 
   // 采集批次详情：摘要、来源 / 地址、去重审核、分页的任务列表和选中任务的日志。
-  // 实时更新靠 crawl.batch 任务的 job.updated（限频后重拉详情和任务页）；SSE 没连上时退回定时轮询。
+  // 事件触发限频刷新；查询同时定时核对，直到批次和任务行都读到最终状态。
   const REFRESH_MS = 1_500;
-  const FALLBACK_POLL_MS = 5_000;
 
   const api = useApi();
   const jobs = useJobs();
@@ -64,15 +62,11 @@
   const batch = createQuery(() => ({
     ...crawlBatchQuery(api, batchId),
     enabled: valid,
-    refetchInterval: (query) =>
-      jobs.connection !== "open" && query.state.data && isActiveBatchStatus(query.state.data.status) ? FALLBACK_POLL_MS : false,
   }));
   const tasks = createQuery(() => ({
-    ...crawlTasksQuery(api, batchId, offset),
+    ...crawlTasksQuery(api, batchId, offset, batch.data?.status),
     enabled: valid,
     placeholderData: keepPreviousData,
-    refetchInterval: () =>
-      jobs.connection !== "open" && batch.data && isActiveBatchStatus(batch.data.status) ? FALLBACK_POLL_MS : false,
   }));
 
   const refresh = throttle(() => {
@@ -88,9 +82,8 @@
   const status = $derived(summary?.status ?? job?.status ?? "");
   const terminal = $derived(summary ? isTerminalBatchStatus(summary.status) : false);
   const progress = $derived.by(() => {
-    if (job && isActiveJob(job)) return jobProgress(job);
-    if (!summary || summary.taskCount === 0) return null;
-    return (summary.succeeded + summary.failed + summary.cancelled) / summary.taskCount;
+    if (summary && summary.taskCount > 0) return (summary.succeeded + summary.failed + summary.cancelled) / summary.taskCount;
+    return job && isActiveJob(job) && !terminal ? jobProgress(job) : null;
   });
   const can = $derived({
     cancel: !pending && !!summary && !terminal && !summary.cancelRequested && summary.status !== "cancelling",

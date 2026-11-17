@@ -29,7 +29,7 @@ usage() {
   --skip-models           跳过 SSCD/DINOv2 下载与校验
   --skip-mihomo           跳过 Mihomo 安装
   --skip-submodule        跳过 git submodule 初始化
-  --skip-backend-deps     跳过后端依赖安装（venv 仍会检查/创建）
+  --skip-executor-deps    跳过 gallery-dl 执行器依赖安装（venv 仍会检查/创建）
   --skip-dedup-deps       跳过去重依赖安装（venv 仍会检查/创建）
   -h, --help              显示帮助
 EOF
@@ -40,6 +40,7 @@ fail_missing() {
     printf '错误：缺少系统依赖：%s\n' "$name" >&2
     printf 'Debian/Ubuntu：sudo apt install python3 python3-venv git curl ca-certificates gzip coreutils\n' >&2
     printf 'Arch Linux：sudo pacman -S python git curl ca-certificates gzip coreutils\n' >&2
+    printf '另需 Go 1.26+，并将 go 放入 PATH。\n' >&2
     printf '安装器不会自动运行 sudo。\n' >&2
     exit 1
 }
@@ -92,7 +93,7 @@ while [[ $# -gt 0 ]]; do
         --skip-models) skip_models=1; shift ;;
         --skip-mihomo) skip_mihomo=1; shift ;;
         --skip-submodule) skip_submodule=1; shift ;;
-        --skip-backend-deps) skip_backend_deps=1; shift ;;
+        --skip-executor-deps|--skip-backend-deps) skip_backend_deps=1; shift ;;
         --skip-dedup-deps) skip_dedup_deps=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) printf '错误：未知选项：%s\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -116,7 +117,7 @@ case "$(uname -m)" in
         ;;
 esac
 
-for command_name in git gzip chmod mkdir cp find; do
+for command_name in go git gzip chmod mkdir cp find; do
     command -v "$command_name" >/dev/null 2>&1 || fail_missing "$command_name"
 done
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
@@ -164,6 +165,10 @@ fi
     exit 1
 }
 
+printf '构建 Go 业务后端（需要 Go 1.26+）。\n'
+mkdir -p "$root_dir/backend/build"
+(cd "$root_dir/backend" && CGO_ENABLED=0 go build -trimpath -o build/ldos-backend ./cmd/ldos-backend) || stage_failed "Go 后端构建"
+
 for venv_path in "$backend_venv" "$dedup_venv"; do
     if [[ ! -x "$venv_path/bin/python" ]]; then
         printf '创建虚拟环境：%s\n' "$venv_path"
@@ -179,9 +184,9 @@ dedup_python="$dedup_venv/bin/python"
 if [[ $skip_backend_deps -eq 0 ]]; then
     "$backend_python" -m pip install --disable-pip-version-check --no-input \
         --require-hashes --only-binary=:all: \
-        -r "$backend_dir/requirements.txt" || stage_failed "后端锁定依赖安装"
+        -r "$root_dir/desktop/release/requirements-executors.txt" || stage_failed "gallery-dl 执行器锁定依赖安装"
 else
-    printf '跳过后端依赖安装。\n'
+    printf '跳过gallery-dl 执行器依赖安装。\n'
 fi
 
 if [[ $skip_dedup_deps -eq 0 ]]; then
@@ -338,8 +343,8 @@ from pathlib import Path
 example, destination, backend_python, dedup_python, device = sys.argv[1:]
 data = json.loads(Path(example).read_text(encoding="utf-8"))
 data["gallery"]["python_executable"] = os.path.abspath(backend_python)
-# 安装下载代理与项目抓取代理池不同；没有节点源时新配置默认禁用抓取代理池。
-data["proxy"]["enabled"] = False
+# 安装下载代理与项目抓取代理池不同；允许配置节点源后手动启动，默认不自动启动。
+data["proxy"]["enabled"] = True
 data["proxy"]["auto_start"] = False
 data["proxy"]["transport_core_binary"] = "bin/proxy-core"
 data["dedup"]["enabled"] = True
@@ -358,7 +363,7 @@ with os.fdopen(fd, "w", encoding="utf-8") as handle:
     json.dump(data, handle, ensure_ascii=False, indent=2)
     handle.write("\n")
 PY
-    printf '已创建配置：%s（项目抓取代理池默认禁用，未写入安装代理）\n' "$config_path"
+    printf '已创建配置：%s（项目抓取代理池默认手动启动，未写入安装代理）\n' "$config_path"
 else
     printf '保留已有配置，不覆盖：%s\n' "$config_path"
 fi

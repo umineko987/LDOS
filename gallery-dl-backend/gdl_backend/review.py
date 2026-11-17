@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -228,7 +227,6 @@ class DedupReviewManager:
         environment["PYTHONPATH"] = str(Path(__file__).parent.parent) + os.pathsep + environment.get("PYTHONPATH", "")
         environment.setdefault("PYTHONUTF8", "1")
         environment.setdefault("PYTHONUNBUFFERED", "1")
-        creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         with open_private_binary(log_path) as log_file:
             self._process = await asyncio.create_subprocess_exec(
                 *command,
@@ -236,7 +234,6 @@ class DedupReviewManager:
                 env=environment,
                 stdout=log_file,
                 stderr=asyncio.subprocess.STDOUT,
-                creationflags=creation_flags,
             )
             return_code = await self._process.wait()
             self._process = None

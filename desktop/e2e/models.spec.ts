@@ -156,7 +156,7 @@ test("镜像和下载代理只提交改动的字段；自定义代理只显示�
 
   await downloads.locator('[data-download="mirror"]').getByRole("button", { name: "hf-mirror.com" }).click();
   await downloads.locator('[data-download="proxy"]').getByRole("button", { name: "代理池" }).click();
-  await expect(downloads).toContainText("每次下载从代理池租一个节点");
+  await expect(downloads).toContainText("每次登录或下载从代理池租用节点");
   await save.click();
   await expect.poll(() => bodies).toEqual([{ clear_hf_token: false, hf_mirror: "https://hf-mirror.com", proxy_mode: "pool" }]);
   await expect(save).toBeDisabled();

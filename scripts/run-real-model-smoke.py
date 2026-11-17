@@ -14,10 +14,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-try:
-    import resource
-except ImportError:  # Windows 不提供 resource；模型闭环本身仍可完整验证。
-    resource = None
+import resource
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,8 +87,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.base_images < 2:
         parser.error("--base-images 必须大于等于 2")
-    if os.name != "nt":
-        os.umask(0o077)
+    os.umask(0o077)
 
     temporary: tempfile.TemporaryDirectory[str] | None = None
     if args.work_dir:
@@ -178,11 +174,7 @@ def main() -> int:
         if probes and probe_failures:
             raise RuntimeError(f"worker 运行期间 /healthz 失败 {probe_failures}/{probes} 次")
 
-        peak_rss_kib = (
-            int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
-            if resource is not None
-            else None
-        )
+        peak_rss_kib = int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
         report = {
             "ok": True,
             "generated_images": image_count,

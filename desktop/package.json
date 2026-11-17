@@ -8,8 +8,11 @@
     "#lib/*": "./src/lib/*"
   },
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build && node scripts/externalize-boot.mjs && node scripts/frontend-manifest.mjs",
+    "dev": "npm run mygo -- dev",
+    "dev:web": "vite dev",
+    "build": "npm run mygo -- build -platform linux/amd64",
+    "build:backend": "node scripts/build-backend.mjs",
+    "build:web": "vite build && node scripts/externalize-boot.mjs && node scripts/frontend-manifest.mjs",
     "preview": "vite preview",
     "sync": "svelte-kit sync",
     "check": "npm run i18n && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p e2e/tsconfig.json",
@@ -20,11 +23,14 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:golden": "playwright test -c playwright.golden.config.ts",
-    "tauri": "tauri",
+    "mygo": "go run github.com/egoist/mygo/cmd/mygo@v0.9.1",
+    "generate": "npm run mygo -- generate",
+    "desktop:start": "bash ../scripts/start-mygo-linux.sh",
+    "smoke:linux": "python3 ../scripts/smoke-mygo-linux.py",
     "api:gen": "openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts --default-non-nullable false"
   },
   "dependencies": {
-    "@tauri-apps/api": "2.11.1",
+    "mygo-runtime": "0.9.1",
     "svelte": "5.57.3"
   },
   "devDependencies": {
@@ -41,7 +47,6 @@
     "@tailwindcss/vite": "4.3.3",
     "@tanstack/svelte-query": "6.3.6",
     "@tanstack/virtual-core": "3.19.8",
-    "@tauri-apps/cli": "2.11.4",
     "@types/node": "24.13.3",
     "@vitest/coverage-v8": "4.1.11",
     "bits-ui": "2.20.0",

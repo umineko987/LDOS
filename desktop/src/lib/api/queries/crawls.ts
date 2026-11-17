@@ -10,6 +10,7 @@ import { ContractError } from "./system.ts";
 
 export const CRAWL_LIST_LIMIT = 100;
 export const CRAWL_TASK_PAGE = 100;
+const CRAWL_POLL_MS = 2_000;
 
 export const crawlKeys = {
   all: ["crawls"] as const,
@@ -294,10 +295,12 @@ export function crawlBatchQuery(api: Api, batchId: string) {
           }),
         ),
       ),
+    refetchInterval: (query) =>
+      query.state.data && isActiveBatchStatus(query.state.data.status) ? CRAWL_POLL_MS : false,
   });
 }
 
-export function crawlTasksQuery(api: Api, batchId: string, offset: number) {
+export function crawlTasksQuery(api: Api, batchId: string, offset: number, batchStatus?: string) {
   return queryOptions({
     queryKey: crawlKeys.taskPage(batchId, offset),
     queryFn: async ({ signal }) =>
@@ -310,6 +313,11 @@ export function crawlTasksQuery(api: Api, batchId: string, offset: number) {
         ),
         offset,
       ),
+    // 批次可能先读到终态，仍要刷新缓存中尚未结束的任务行。
+    refetchInterval: (query) =>
+      isActiveBatchStatus(batchStatus ?? "") || query.state.data?.items.some((task) => !isTerminalTaskStatus(task.status))
+        ? CRAWL_POLL_MS
+        : false,
   });
 }
 

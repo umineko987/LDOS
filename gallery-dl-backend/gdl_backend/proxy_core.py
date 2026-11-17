@@ -50,16 +50,7 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _core_binary_names(platform_name: str | None = None) -> tuple[str, ...]:
-    if (platform_name or os.name) == "nt":
-        return (
-            "proxy-core.exe",
-            "mihomo.exe",
-            "verge-mihomo.exe",
-            "proxy-core",
-            "mihomo",
-            "verge-mihomo",
-        )
+def _core_binary_names() -> tuple[str, ...]:
     return ("proxy-core", "mihomo", "verge-mihomo")
 
 
@@ -81,7 +72,7 @@ def resolve_core_binary(
     for candidate in candidates:
         resolved = candidate.resolve()
         if resolved.is_file():
-            if os.name != "nt" and not os.access(resolved, os.X_OK):
+            if not os.access(resolved, os.X_OK):
                 non_executable.append(resolved)
                 continue
             if expected:
@@ -97,8 +88,7 @@ def resolve_core_binary(
     if explicit:
         raise FileNotFoundError(f"代理传输核心文件不存在: {Path(explicit).expanduser()}")
     raise FileNotFoundError(
-        "代理传输核心文件不存在；请运行 scripts/install_mihomo.sh（Linux）或 "
-        "scripts/install_mihomo.ps1（Windows）安装到项目 bin 目录，"
+        "代理传输核心文件不存在；请运行 scripts/install_mihomo.sh 安装到项目 bin 目录，"
         "或将 mihomo 加入 PATH，或设置 proxy.transport_core_binary"
     )
 
@@ -257,9 +247,6 @@ class TunnelTransportCore:
         self._log_path = self.runtime_dir / "core.log"
         self._last_error = ""
 
-    @staticmethod
-    def _creation_flags() -> int:
-        return int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0
 
     def _read_version(self, binary: Path) -> str:
         try:
@@ -267,7 +254,6 @@ class TunnelTransportCore:
                 [str(binary), "-v"],
                 capture_output=True,
                 timeout=5,
-                creationflags=self._creation_flags(),
                 check=False,
             )
             output = (result.stdout or result.stderr).decode("utf-8", errors="replace")
@@ -280,7 +266,6 @@ class TunnelTransportCore:
             [str(binary), "-t", "-f", str(self._config_path), "-d", str(self.runtime_dir)],
             capture_output=True,
             timeout=30,
-            creationflags=self._creation_flags(),
             check=False,
         )
         if result.returncode != 0:
@@ -343,7 +328,6 @@ class TunnelTransportCore:
                 cwd=str(self.runtime_dir),
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
-                creationflags=self._creation_flags(),
             )
             self._wait_ready(process, endpoints)
         except Exception:

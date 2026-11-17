@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import subprocess
 import sys
 import time
 import uuid
@@ -248,12 +247,7 @@ class GalleryRunner:
             "stdout": asyncio.subprocess.PIPE,
             "stderr": asyncio.subprocess.PIPE,
         }
-        if os.name == "nt":
-            kwargs["creationflags"] = (
-                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-            )
-        else:
-            kwargs["start_new_session"] = True
+        kwargs["start_new_session"] = True
         process = await asyncio.create_subprocess_exec(*command, **kwargs)
         async with self._lock:
             self._active[task_id] = (process, marker)
@@ -433,12 +427,7 @@ class GalleryRunner:
             "stdout": asyncio.subprocess.PIPE,
             "stderr": asyncio.subprocess.PIPE,
         }
-        if os.name == "nt":
-            kwargs["creationflags"] = (
-                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-            )
-        else:
-            kwargs["start_new_session"] = True
+        kwargs["start_new_session"] = True
         process = await asyncio.create_subprocess_exec(*command, **kwargs)
         async with self._lock:
             self._active[operation_id] = (process, marker)

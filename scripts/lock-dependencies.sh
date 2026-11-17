@@ -136,6 +136,11 @@ compile_lock() {
 }
 
 compile_lock \
+    executors \
+    "$root_dir/desktop/release/requirements-executors.txt" \
+    "" \
+    "$root_dir/backend/executors/requirements.in"
+compile_lock \
     backend \
     "$root_dir/gallery-dl-backend/requirements.txt" \
     "" \

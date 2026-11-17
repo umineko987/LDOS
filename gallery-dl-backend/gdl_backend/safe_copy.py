@@ -82,8 +82,7 @@ class TargetRoot:
         if self._fd is not None or self._identity is not None:
             return
         if not _HAS_DIR_FD:
-            # Windows CRT 无法以描述符锚定目录（os.open 打开目录直接
-            # PermissionError）：走组件级 lstat 校验，身份取根 lstat。
+            # 没有 dir_fd 时逐组件校验路径，并保存根目录身份。
             metadata = _validate_absolute_directory_components(self.path)
             self._identity = (int(metadata.st_dev), int(metadata.st_ino))
             return
@@ -403,13 +402,7 @@ def file_versions_match(
     observed: TargetFileSnapshot, expected: TargetFileSnapshot
 ) -> bool:
     """Compare an enumerated file with its safely opened handle."""
-    # Python 3.14 Windows uses different st_ctime meanings for DirEntry.stat
-    # (WIN32_FIND_DATA) and fstat (handle metadata).  Size and mtime remain
-    # comparable; the full handle-to-handle version check below still includes
-    # ctime for detecting changes during the copy.
-    if observed[2:4] != expected[2:4]:
-        return False
-    return expected[:2] == (0, 0) or observed[:2] == expected[:2]
+    return observed == expected
 
 def portable_name_key(name: str) -> str:
     return unicodedata.normalize("NFC", name).casefold()
@@ -727,9 +720,6 @@ def _rename_directory_noreplace(
             raise OSError(code, os.strerror(code), target_name)
         return
 
-    if os.name == "nt":
-        os.rename(parent_path / source_name, parent_path / target_name)
-        return
     raise SafeCopyError("no_clobber_unsupported")
 
 

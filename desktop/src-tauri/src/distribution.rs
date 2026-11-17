@@ -9,9 +9,9 @@ const RESOURCE_ENV: &str = "LDOS_DESKTOP_RESOURCE_ROOT";
 const DATA_ENV: &str = "LDOS_DESKTOP_DATA_ROOT";
 const PYTHON_ENV: &str = "LDOS_DESKTOP_PYTHON";
 
-fn packaged_backend_root(resource_dir: &Path, windows: bool) -> PathBuf {
+fn packaged_backend_root(resource_dir: &Path) -> PathBuf {
     let standard = resource_dir.join("backend");
-    if windows || standard.join("release-manifest.json").is_file() {
+    if standard.join("release-manifest.json").is_file() {
         return standard;
     }
 
@@ -37,25 +37,12 @@ pub struct BackendDistribution {
 
 impl BackendDistribution {
     pub fn prepare(resource_dir: &Path, config_dir: &Path, data_dir: &Path) -> io::Result<Self> {
-        Self::prepare_for_platform(resource_dir, config_dir, data_dir, cfg!(windows))
-    }
-
-    fn prepare_for_platform(
-        resource_dir: &Path,
-        config_dir: &Path,
-        data_dir: &Path,
-        windows: bool,
-    ) -> io::Result<Self> {
-        let backend_root = packaged_backend_root(resource_dir, windows);
+        let backend_root = packaged_backend_root(resource_dir);
         let app_root = backend_root.join("app");
         let python_executable = backend_root
             .join("runtime")
             .join("python")
-            .join(if windows {
-                "python.exe"
-            } else {
-                "bin/python3.13"
-            });
+            .join("bin/python3.13");
         let required = [
             python_executable.clone(),
             app_root.join("gdl_backend/__init__.py"),
@@ -206,14 +193,10 @@ mod tests {
         ))
     }
 
-    fn fake_resources(root: &Path, windows: bool) {
+    fn fake_resources(root: &Path) {
         let backend = root.join("backend");
         for path in [
-            backend.join(if windows {
-                "runtime/python/python.exe"
-            } else {
-                "runtime/python/bin/python3.13"
-            }),
+            backend.join("runtime/python/bin/python3.13"),
             backend.join("app/gdl_backend/__init__.py"),
             backend.join("app/gallery-dl-codeberg/gallery_dl/__init__.py"),
             backend.join("app/dedup_review_worker.py"),
@@ -231,7 +214,7 @@ mod tests {
         let resources = root.join("resources");
         let config = root.join("config");
         let data = root.join("data");
-        fake_resources(&resources, cfg!(windows));
+        fake_resources(&resources);
 
         let distribution =
             BackendDistribution::prepare(&resources, &config, &data).expect("prepare distribution");
@@ -288,11 +271,10 @@ mod tests {
         let appimage_root = root.join("usr/share/LDOS");
         let config = root.join("config");
         let data = root.join("data");
-        fake_resources(&appimage_root, false);
+        fake_resources(&appimage_root);
 
-        let distribution =
-            BackendDistribution::prepare_for_platform(&resource_dir, &config, &data, false)
-                .expect("prepare AppImage distribution");
+        let distribution = BackendDistribution::prepare(&resource_dir, &config, &data)
+            .expect("prepare AppImage distribution");
         assert_eq!(distribution.backend_root, appimage_root.join("backend"),);
         assert_eq!(
             distribution.python_executable,
@@ -307,29 +289,27 @@ mod tests {
         let resources = root.join("resources");
         let config = root.join("config");
         let data = root.join("data");
-        fake_resources(&resources, true);
+        fake_resources(&resources);
         fs::create_dir_all(&config).expect("config dir");
         fs::write(config.join("backend.json"), b"{\"user\":true}\n").expect("user config");
 
         let distribution =
-            BackendDistribution::prepare_for_platform(&resources, &config, &data, true)
-                .expect("prepare distribution");
+            BackendDistribution::prepare(&resources, &config, &data).expect("prepare distribution");
         assert_eq!(
             fs::read(&distribution.config_path).expect("read user config"),
             b"{\"user\":true}\n"
         );
-        assert!(distribution.python_executable.ends_with("python.exe"));
+        assert!(distribution.python_executable.ends_with("bin/python3.13"));
         fs::remove_dir_all(root).expect("clean fixture");
     }
 
     #[test]
     fn incomplete_resource_tree_fails_closed() {
         let root = test_root("missing-resource");
-        let error = BackendDistribution::prepare_for_platform(
+        let error = BackendDistribution::prepare(
             &root.join("resources"),
             &root.join("config"),
             &root.join("data"),
-            false,
         )
         .expect_err("missing resources must fail");
         assert_eq!(error.kind(), io::ErrorKind::NotFound);

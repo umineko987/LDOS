@@ -1,0 +1,4 @@
+{
+  "production": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self'",
+  "development": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; connect-src 'self' ws://localhost:1420 http://127.0.0.1:* http://localhost:*; img-src 'self' data: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self'"
+}

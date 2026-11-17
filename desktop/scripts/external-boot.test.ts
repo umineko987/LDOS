@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { extractInlineScripts } from "./external-boot.ts";
+import { extractInlineScripts, insertCspMeta } from "./external-boot.ts";
 
 const src = (name: string) => `./${name}`;
 
@@ -36,5 +36,24 @@ describe("extractInlineScripts", () => {
     const result = extractInlineScripts(html, src);
     expect(result.scripts).toEqual([]);
     expect(result.html).toBe(html);
+  });
+});
+
+describe("insertCspMeta", () => {
+  it("puts the production policy before every other head element, even without inline scripts", () => {
+    const html = '<html><head><script src="./boot.js"></script></head><body></body></html>';
+    expect(insertCspMeta(html, "script-src 'self'")).toBe(
+      '<html><head><meta http-equiv="Content-Security-Policy" content="script-src \'self\'"><script src="./boot.js"></script></head><body></body></html>',
+    );
+  });
+
+  it("escapes the policy as an HTML attribute", () => {
+    expect(insertCspMeta("<head></head>", '"<&>')).toBe(
+      '<head><meta http-equiv="Content-Security-Policy" content="&quot;&lt;&amp;&gt;"></head>',
+    );
+  });
+
+  it("fails the build when HTML has no head", () => {
+    expect(() => insertCspMeta("<body></body>", "default-src 'self'")).toThrow("HTML has no head");
   });
 });

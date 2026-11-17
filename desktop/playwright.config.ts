@@ -7,7 +7,7 @@ const localChromium = process.platform === "linux" && existsSync("/usr/bin/chrom
   : undefined;
 const executablePath = configuredExecutable || localChromium;
 
-// 和 tauri.conf.json 的 devUrl 同一个主机名：devCsp 只放行 ws://localhost:1420 的 HMR 连接。
+// 和 mygo.json 的 devUrl 同一个主机名：devCsp 只放行 ws://localhost:1420 的 HMR 连接。
 const DEV_URL = "http://localhost:1420";
 const DIST_URL = "http://localhost:1421";
 
@@ -45,13 +45,13 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "npx vite dev",
+      command: "npm run dev:web",
       url: DEV_URL,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
     {
-      command: "npm run build && node scripts/serve-dist.mjs 1421",
+      command: "npm run build:web && node scripts/serve-dist.mjs 1421",
       url: DIST_URL,
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,

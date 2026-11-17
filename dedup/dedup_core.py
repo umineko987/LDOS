@@ -27,10 +27,9 @@ if _early_resource_profile is not None:
 
 
 def project_venv_python():
-    """返回当前平台的根目录去重 venv Python，同时保持 Windows 旧路径。"""
+    """返回项目去重 venv 的 Linux Python 路径。"""
     root = os.path.dirname(os.path.abspath(__file__))
-    relative = ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
-    return os.path.join(root, ".venv", *relative)
+    return os.path.join(root, ".venv", "bin", "python")
 
 
 def reexec_in_project_venv():
@@ -742,10 +741,7 @@ def extract_deep_candidates(base_infos, args):
         from dedup_models import DeepEmbeddingExtractor, cosine_topk_pairs
     except ImportError as exc:
         setup_device = "cuda" if args.device == "cuda" else "cpu"
-        if os.name == "nt":
-            setup_command = f".\\setup-dedup.ps1 -Device {setup_device}"
-        else:
-            setup_command = f"./scripts/setup-linux.sh --device {setup_device}"
+        setup_command = f"./scripts/setup-linux.sh --device {setup_device}"
         raise RuntimeError(
             f"深度特征依赖缺失，请使用 {project_venv_python()} 运行脚本，"
             f"或先执行 {setup_command}。原始错误: {exc}"
@@ -1703,8 +1699,7 @@ def build_argument_parser():
 
 
 def main():
-    if os.name != "nt":
-        os.umask(0o077)
+    os.umask(0o077)
     parser = build_argument_parser()
 
     args = parser.parse_args()

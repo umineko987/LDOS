@@ -12,15 +12,20 @@ from gdl_backend.config import AppSettings
 from tests.helpers import local_test_client, make_settings
 
 
+MYGO_ORIGIN = "mygo://localhost"
+WINDOWS_MYGO_ORIGIN = "http://mygo.localhost"
 TAURI_ORIGIN = "tauri://localhost"
 WINDOWS_TAURI_ORIGIN = "http://tauri.localhost"
 VITE_ORIGIN = "http://localhost:1420"
 
 
 class DesktopOriginConfigTests(unittest.TestCase):
-    def test_only_exact_tauri_and_loopback_vite_origins_are_normalized(self) -> None:
+    def test_only_exact_mygo_legacy_tauri_and_loopback_vite_origins_are_normalized(self) -> None:
         settings = AppSettings()
         settings.server.cors_origins = [
+            " MYGO://LOCALHOST/ ",
+            WINDOWS_MYGO_ORIGIN,
+            MYGO_ORIGIN,
             f" {TAURI_ORIGIN}/ ",
             WINDOWS_TAURI_ORIGIN,
             VITE_ORIGIN,
@@ -33,6 +38,8 @@ class DesktopOriginConfigTests(unittest.TestCase):
         self.assertEqual(
             settings.server.cors_origins,
             [
+                MYGO_ORIGIN,
+                WINDOWS_MYGO_ORIGIN,
                 TAURI_ORIGIN,
                 WINDOWS_TAURI_ORIGIN,
                 VITE_ORIGIN,
@@ -43,17 +50,18 @@ class DesktopOriginConfigTests(unittest.TestCase):
     def test_supervised_desktop_origin_augments_legacy_config_safely(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             config_path = Path(temporary) / "config.json"
-            config_path.write_text(
-                json.dumps({"server": {"cors_origins": []}}),
-                encoding="utf-8",
-            )
-            with patch.dict(
-                os.environ,
-                {"LDOS_DESKTOP_ORIGIN": VITE_ORIGIN},
-            ):
-                settings = AppSettings.load(config_path)
-
-            self.assertEqual(settings.server.cors_origins, [VITE_ORIGIN])
+            for configured in ([], [TAURI_ORIGIN, WINDOWS_TAURI_ORIGIN, VITE_ORIGIN]):
+                original = json.dumps({"server": {"cors_origins": configured}})
+                config_path.write_text(original, encoding="utf-8")
+                for supervised in (MYGO_ORIGIN, WINDOWS_MYGO_ORIGIN, VITE_ORIGIN):
+                    with self.subTest(configured=configured, supervised=supervised):
+                        with patch.dict(os.environ, {"LDOS_DESKTOP_ORIGIN": supervised}):
+                            settings = AppSettings.load(config_path)
+                        self.assertEqual(
+                            settings.server.cors_origins,
+                            list(dict.fromkeys([*configured, supervised])),
+                        )
+                        self.assertEqual(config_path.read_text(encoding="utf-8"), original)
 
             with patch.dict(
                 os.environ,
@@ -68,6 +76,19 @@ class DesktopOriginConfigTests(unittest.TestCase):
             "null",
             "https://evil.example.com",
             "tauri://evil.example.com",
+            "mygo://evil.example.com",
+            "mygo://localhost.evil.example.com",
+            "mygo://127.0.0.1",
+            "mygo://localhost:1420",
+            "mygo://localhost:",
+            "mygo://localhost/path",
+            "mygo://user:secret@localhost",
+            "mygo://localhost?token=secret",
+            "mygo://localhost#fragment",
+            "http://mygo.localhost:1420",
+            "http://mygo.localhost:80",
+            "http://mygo.localhost.evil.example.com",
+            "https://mygo.localhost",
             "http://localhost",
             "http://localhost:1420/path",
             "http://user:secret@localhost:1420",
@@ -95,6 +116,8 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
         self.settings = make_settings(self.root)
         self.settings.server.port = 19091
         self.settings.server.cors_origins = [
+            MYGO_ORIGIN,
+            WINDOWS_MYGO_ORIGIN,
             TAURI_ORIGIN,
             WINDOWS_TAURI_ORIGIN,
             VITE_ORIGIN,
@@ -108,14 +131,16 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
         self.temporary.cleanup()
 
     @staticmethod
-    def cross_origin_headers(origin: str = TAURI_ORIGIN) -> dict[str, str]:
+    def cross_origin_headers(origin: str = MYGO_ORIGIN) -> dict[str, str]:
         return {
             "Origin": origin,
             "Sec-Fetch-Site": "cross-site",
         }
 
-    def test_exact_configured_tauri_and_vite_origins_reach_healthz(self) -> None:
+    def test_exact_configured_mygo_legacy_tauri_and_vite_origins_reach_healthz(self) -> None:
         for origin, fetch_site in (
+            (MYGO_ORIGIN, "cross-site"),
+            (WINDOWS_MYGO_ORIGIN, "cross-site"),
             (TAURI_ORIGIN, "cross-site"),
             (WINDOWS_TAURI_ORIGIN, "cross-site"),
             (VITE_ORIGIN, "same-site"),
@@ -149,6 +174,12 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
             {"Origin": "https://evil.example.com", "Sec-Fetch-Site": "cross-site"},
             {"Origin": "https://evil.example.com", "Sec-Fetch-Site": "same-site"},
             {"Origin": "https://evil.example.com"},
+            {"Origin": "mygo://localhost:1420", "Sec-Fetch-Site": "cross-site"},
+            {"Origin": "mygo://localhost.evil.example", "Sec-Fetch-Site": "cross-site"},
+            {"Origin": "https://mygo.localhost", "Sec-Fetch-Site": "cross-site"},
+            {"Origin": "http://mygo.localhost:1420", "Sec-Fetch-Site": "cross-site"},
+            {"Origin": "http://localhost:1421", "Sec-Fetch-Site": "same-site"},
+            {"Origin": "http://127.0.0.1:1420", "Sec-Fetch-Site": "same-site"},
             {"Sec-Fetch-Site": "cross-site"},
         )
         for headers in cases:
@@ -165,7 +196,7 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
         response = self.client.options(
             "/api/v1/auth/proxy",
             headers={
-                **self.cross_origin_headers(VITE_ORIGIN),
+                **self.cross_origin_headers(MYGO_ORIGIN),
                 "Access-Control-Request-Method": "PUT",
                 "Access-Control-Request-Headers": (
                     "accept,content-type,idempotency-key,if-none-match,x-request-id"
@@ -173,7 +204,7 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.headers["Access-Control-Allow-Origin"], VITE_ORIGIN)
+        self.assertEqual(response.headers["Access-Control-Allow-Origin"], MYGO_ORIGIN)
         self.assertEqual(
             response.headers["Access-Control-Allow-Methods"],
             "GET, POST, PUT, PATCH, DELETE",
@@ -191,7 +222,7 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
         denied = self.client.options(
             "/api/v1/auth/proxy",
             headers={
-                **self.cross_origin_headers(VITE_ORIGIN),
+                **self.cross_origin_headers(MYGO_ORIGIN),
                 "Access-Control-Request-Method": "PUT",
                 "Access-Control-Request-Headers": "authorization",
             },
@@ -199,11 +230,11 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
         self.assertEqual(denied.status_code, 400, denied.text)
 
     def test_preflight_allows_patch_for_source_rename(self) -> None:
-        # 打包版从 tauri:// 跨域重命名来源走 PATCH；预检被拒时浏览器直接拦下请求。
+        # 打包版从 mygo:// 跨域重命名来源走 PATCH；预检被拒时浏览器直接拦下请求。
         response = self.client.options(
             "/api/v1/gallery/sources/1",
             headers={
-                **self.cross_origin_headers(VITE_ORIGIN),
+                **self.cross_origin_headers(MYGO_ORIGIN),
                 "Access-Control-Request-Method": "PATCH",
                 "Access-Control-Request-Headers": "content-type",
             },
@@ -223,7 +254,7 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.headers["Access-Control-Allow-Origin"], TAURI_ORIGIN)
+        self.assertEqual(response.headers["Access-Control-Allow-Origin"], MYGO_ORIGIN)
         self.assertEqual(response.headers["X-Request-ID"], request_id)
         self.assertNotIn("error", response.json())
 
@@ -240,7 +271,43 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
             {"code", "message", "details", "request_id"},
         )
         self.assertEqual(missing.json()["error"]["request_id"], request_id)
-        self.assertEqual(missing.headers["Access-Control-Allow-Origin"], TAURI_ORIGIN)
+        self.assertEqual(missing.headers["Access-Control-Allow-Origin"], MYGO_ORIGIN)
+
+    def test_mygo_credential_routes_keep_redaction_and_origin_guard(self) -> None:
+        private_proxy = "http://contract-user:contract-secret@127.0.0.1:7890"
+        updated = self.client.put(
+            "/api/v1/auth/proxy?view=vault",
+            json={"proxy_url": private_proxy},
+            headers=self.cross_origin_headers(),
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["proxy_url"], "http://***@127.0.0.1:7890")
+        self.assertEqual(updated.headers["Access-Control-Allow-Origin"], MYGO_ORIGIN)
+        for method, path, kwargs in (
+            ("GET", "/api/v1/config", {}),
+            ("GET", "/api/v1/auth?view=vault", {}),
+            ("GET", "/api/v1/auth/proxy?view=vault", {}),
+            ("PUT", "/api/v1/auth/proxy", {"json": {"proxy_url": ""}}),
+            ("DELETE", "/api/v1/auth/twitter", {}),
+            ("GET", "/api/v1/events", {}),
+        ):
+            with self.subTest(method=method, path=path):
+                denied = self.client.request(
+                    method,
+                    path,
+                    headers=self.cross_origin_headers("http://localhost:1421"),
+                    **kwargs,
+                )
+                self.assertEqual(denied.status_code, 403, denied.text)
+                self.assertEqual(denied.json()["error"]["code"], "forbidden_cross_site")
+                self.assertNotIn("Access-Control-Allow-Origin", denied.headers)
+                self.assertNotIn("contract-secret", denied.text)
+        status = self.client.get("/api/v1/auth/proxy?view=vault", headers=self.cross_origin_headers())
+        self.assertEqual(status.status_code, 200, status.text)
+        self.assertEqual(status.json()["proxy_url"], "http://***@127.0.0.1:7890")
+        for response in (updated, status):
+            self.assertNotIn("contract-secret", response.text)
+            self.assertNotIn("contract-user", response.text)
 
     def test_cross_origin_media_and_static_images_are_canvas_safe(self) -> None:
         created = self.client.post(
@@ -262,7 +329,7 @@ class DesktopOriginHttpContractTests(unittest.TestCase):
         )
         self.assertEqual(media.status_code, 200, media.text)
         self.assertEqual(media.headers["Content-Type"], "image/png")
-        self.assertEqual(media.headers["Access-Control-Allow-Origin"], TAURI_ORIGIN)
+        self.assertEqual(media.headers["Access-Control-Allow-Origin"], MYGO_ORIGIN)
         self.assertEqual(
             media.headers["Cross-Origin-Resource-Policy"],
             "cross-origin",

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
@@ -176,10 +175,7 @@ class BrowserOrchestrator:
                 "stdout": asyncio.subprocess.DEVNULL,
                 "stderr": asyncio.subprocess.DEVNULL,
             }
-            if os.name == "nt":
-                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-            else:
-                kwargs["start_new_session"] = True
+            kwargs["start_new_session"] = True
             try:
                 process = await self._runtime.spawn_process(*command, **kwargs)
             except (OSError, RuntimeError) as exc:
@@ -500,12 +496,7 @@ class GalleryDlPixivOAuthAdapter:
             "stdout": asyncio.subprocess.PIPE,
             "stderr": asyncio.subprocess.STDOUT,
         }
-        if os.name == "nt":
-            kwargs["creationflags"] = (
-                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-            )
-        else:
-            kwargs["start_new_session"] = True
+        kwargs["start_new_session"] = True
         return await self._spawn_process(*command, **kwargs)
 
     async def output_chunks(

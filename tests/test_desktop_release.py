@@ -11,7 +11,6 @@ import sys
 import tarfile
 import tempfile
 import unittest
-import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
@@ -38,8 +37,12 @@ def minimal_tree(root: Path) -> dict[str, object]:
     python.parent.mkdir(parents=True)
     python.write_bytes(b"python")
     app = root / "app"
-    (app / "gdl_backend").mkdir(parents=True)
-    (app / "gdl_backend" / "worker_entry.py").write_text("", encoding="utf-8")
+    (app / "executors" / "ldos_gallery").mkdir(parents=True)
+    (app / "executors" / "ldos_gallery" / "worker_entry.py").write_text("", encoding="utf-8")
+    backend = root / "bin" / "ldos-backend"
+    backend.parent.mkdir()
+    backend.write_bytes(b"native")
+    backend.chmod(0o755)
     (app / "dedup_review_worker.py").write_text("", encoding="utf-8")
     (app / "atlas_worker.py").write_text("", encoding="utf-8")
     (app / "tagger").mkdir()
@@ -82,6 +85,7 @@ def minimal_tree(root: Path) -> dict[str, object]:
             "python": "runtime/python/bin/python3.13",
             "archive_sha256": "1" * 64,
         },
+        "application": {"backend": "bin/ldos-backend", "executors": "app/executors", "worker": "-m ldos_gallery.worker_entry"},
         "bundled_resources": {
             "mihomo": {
                 "binary": "app/bin/mihomo",
@@ -139,7 +143,7 @@ class DesktopReleaseTests(unittest.TestCase):
                 "license_sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
             },
         )
-        self.assertEqual(set(lock["targets"]), {"linux-x86_64", "windows-x86_64"})
+        self.assertEqual(set(lock["targets"]), {"linux-x86_64"})
         self.assertEqual(
             lock["targets"]["linux-x86_64"]["python"],
             "runtime/python/bin/python3.13",
@@ -148,8 +152,6 @@ class DesktopReleaseTests(unittest.TestCase):
             all(
                 len(item["sha256"]) == 64
                 and len(item["metadata_sha256"]) == 64
-                # 各平台的 CPython LICENSE.txt 不同（Windows 追加 Microsoft
-                # Distributable Code 条款），哈希必须按 target 分别锁定。
                 and len(item["python_license_sha256"]) == 64
                 and len(item["mihomo"]["sha256"]) == 64
                 and len(item["mihomo"]["binary_sha256"]) == 64
@@ -165,6 +167,32 @@ class DesktopReleaseTests(unittest.TestCase):
             },
         )
 
+    def test_release_host_rejects_windows(self) -> None:
+        with (
+            mock.patch.object(release.platform, "machine", return_value="AMD64"),
+            mock.patch.object(release.sys, "platform", "win32"),
+            mock.patch.object(release.os, "name", "nt"),
+        ):
+            with self.assertRaisesRegex(release.ReleaseError, "unsupported release host"):
+                release.host_target()
+
+    def test_windows_installer_is_not_supported(self) -> None:
+        with temporary_path() as tmp_path:
+            with self.assertRaisesRegex(release.ReleaseError, "unsupported desktop bundle"):
+                release.extract_bundle(tmp_path / "LDOS-setup.exe", tmp_path / "output")
+
+    def test_all_workflows_only_use_linux_runners(self) -> None:
+        workflows = sorted((ROOT / ".github/workflows").glob("*.y*ml"))
+        self.assertTrue(workflows)
+        for path in workflows:
+            with self.subTest(workflow=path.name):
+                workflow = path.read_text(encoding="utf-8")
+                runners = [line.strip() for line in workflow.splitlines()
+                           if line.lstrip().startswith("runs-on:")]
+                self.assertTrue(runners)
+                self.assertTrue(all(line.startswith("runs-on: ubuntu-") for line in runners))
+                self.assertNotIn(".ps1", workflow)
+
     def test_linux_runtime_keeps_only_the_locked_real_interpreter(self) -> None:
         with temporary_path() as tmp_path:
             bin_dir = tmp_path / "python" / "bin"
@@ -179,88 +207,73 @@ class DesktopReleaseTests(unittest.TestCase):
                 {"python3.13"},
             )
 
-    def test_tauri_release_resources_are_platform_specific(self) -> None:
-        base = json.loads(
-            (ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
-        )
-        release_config_path = ROOT / "desktop" / release.TAURI_RELEASE_CONFIG
-        release_config = json.loads(release_config_path.read_text(encoding="utf-8"))
-        linux_config = json.loads(
-            (ROOT / "desktop/src-tauri/tauri.linux.conf.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        windows_config = json.loads(
-            (ROOT / "desktop/src-tauri/tauri.windows.conf.json").read_text(
-                encoding="utf-8"
-            )
-        )
+    def test_mygo_build_hooks_compile_the_native_backend(self) -> None:
+        config = json.loads((ROOT / "desktop/mygo.json").read_text(encoding="utf-8"))
+        self.assertEqual(config["devCommand"], "npm run build:backend && npm run dev:web")
+        self.assertEqual(config["buildCommand"], "npm run build:backend && npm run build:web")
+        self.assertEqual(config["linux"]["formats"], [])
+        self.assertEqual(release.DEFAULT_OUTPUT, ROOT / "desktop/resources/backend")
+        package = json.loads((ROOT / "desktop/package.json").read_text(encoding="utf-8"))
+        command = shlex.split(package["scripts"]["build"])
+        self.assertEqual(command[command.index("-platform") + 1], "linux/amd64")
 
-        self.assertFalse(base["bundle"]["active"])
-        self.assertNotIn("resources", base["bundle"])
-        self.assertNotIn("beforeBundleCommand", base["build"])
-        self.assertNotIn("beforeBuildCommand", release_config["build"])
-        self.assertTrue(release_config["bundle"]["active"])
-        self.assertEqual(
-            release_config["bundle"]["resources"],
-            {"../dist/frontend-manifest.json": "frontend-manifest.json"},
-        )
-        self.assertEqual(
-            linux_config["bundle"]["linux"]["deb"]["files"],
-            {"/usr/lib/LDOS/backend": "release/backend"},
-        )
-        self.assertEqual(
-            linux_config["bundle"]["linux"]["appimage"]["files"],
-            {"/usr/share/LDOS/backend": "release/backend"},
-        )
-        self.assertEqual(
-            windows_config["bundle"]["resources"],
-            {"release/backend/": "backend/"},
-        )
-
-    def test_release_workflow_publishes_only_version_tags(self) -> None:
+    def test_release_workflow_is_manual_linux_validation_without_publishing(self) -> None:
         workflow = (ROOT / ".github/workflows/desktop-release.yml").read_text(
             encoding="utf-8"
         )
-        before_publish, publish = workflow.split("\n  publish:\n", maxsplit=1)
-
-        self.assertIn("permissions:\n  contents: read", before_publish)
-        self.assertIn(
-            "if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')",
-            publish,
+        active_workflow = "\n".join(
+            line for line in workflow.splitlines()
+            if not line.lstrip().startswith("#")
         )
-        self.assertIn("needs: bundle", publish)
-        self.assertIn("permissions:\n      contents: write", publish)
-        self.assertIn("name: ldos-linux-x86_64", publish)
-        self.assertIn("name: ldos-windows-x86_64", publish)
-        self.assertIn("gh release create", publish)
-        self.assertIn("gh release upload", publish)
+        triggers = active_workflow.split("\non:\n", maxsplit=1)[1].split(
+            "\npermissions:", maxsplit=1
+        )[0]
+        self.assertEqual(triggers.strip(), "workflow_dispatch:")
+        self.assertIn("permissions:\n  contents: read", active_workflow)
+        self.assertNotRegex(active_workflow, r"(?m):\s*[\"']?write(?:-all)?[\"']?\s*$")
+        self.assertNotIn("secrets.", active_workflow)
 
-    def test_backend_projection_omits_the_duplicate_frontend(self) -> None:
+        jobs = active_workflow.split("\njobs:\n", maxsplit=1)[1]
+        self.assertEqual(
+            [line.strip() for line in jobs.splitlines()
+             if line.startswith("  ") and not line.startswith("   ")],
+            ["linux-build:"],
+        )
+        self.assertRegex(jobs, r"(?m)^    runs-on: ubuntu-")
+        self.assertIn("run: go test ./src-mygo/...", jobs)
+        self.assertIn("run: npm run build", jobs)
+        self.assertIn("test -x desktop/build/linux-amd64/ldos", jobs)
+        for publishing_step in (
+            "upload-artifact@", "gh release", "gh api", "/releases",
+            "action-gh-release@", "release-action@", "desktop_release.py build",
+            "npm run tauri", "npx tauri",
+        ):
+            with self.subTest(publishing_step=publishing_step):
+                self.assertNotIn(publishing_step, active_workflow)
+
+        with mock.patch.object(release, "build_release", return_value={"target": "linux-x86_64"}) as native_build:
+            with mock.patch("sys.stdout", new_callable=io.StringIO):
+                self.assertEqual(release.main(["build"]), 0)
+            native_build.assert_called_once()
+
+    def test_executor_projection_omits_business_backend_and_frontend(self) -> None:
+        import ast
         with temporary_path() as tmp_path:
             app = tmp_path / "app"
             app.mkdir()
-
-            release.copy_backend_sources(app)
-
-            package = app / "gdl_backend"
-            self.assertTrue((package / "__main__.py").is_file())
+            release.copy_executor_sources(app)
+            release.copy_application_scripts(app, release.load_lock())
+            package = app / "executors" / "ldos_gallery"
+            self.assertEqual({p.name for p in package.iterdir()}, {p.name for p in release.EXECUTORS_SOURCE.glob("*.py")})
             self.assertTrue((package / "worker_entry.py").is_file())
-            self.assertFalse((package / "webui_dist").exists())
-            expected = {
-                Path(item).relative_to("gallery-dl-backend").as_posix()
-                for item in release.tracked_files(
-                    ROOT, "gallery-dl-backend/gdl_backend"
-                )
-            }
-            expected.add("gdl_backend/review_filter_models.py")
-            self.assertTrue((package / "review_filter_models.py").is_file())
-            actual = {
-                item.relative_to(app).as_posix()
-                for item in app.rglob("*")
-                if item.is_file()
-            }
-            self.assertEqual(actual, expected)
+            self.assertFalse((app / "gdl_backend").exists())
+            self.assertFalse(any(app.rglob("webui_dist")))
+            for source in app.rglob("*.py"):
+                for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+                    if isinstance(node, ast.Import):
+                        self.assertFalse(any(alias.name == "gdl_backend" or alias.name.startswith("gdl_backend.") for alias in node.names), source)
+                    elif isinstance(node, ast.ImportFrom):
+                        self.assertFalse(node.module and (node.module == "gdl_backend" or node.module.startswith("gdl_backend.")), source)
 
     def test_application_projection_preserves_tagger_package_and_only_ships_code(self) -> None:
         import subprocess
@@ -358,24 +371,6 @@ class DesktopReleaseTests(unittest.TestCase):
             )
             self.assertEqual(installed.read_bytes(), payload)
 
-            zip_archive = tmp_path / "mihomo.zip"
-            with zipfile.ZipFile(zip_archive, "w") as archive:
-                archive.writestr("mihomo.exe", payload)
-            windows = lock["targets"]["windows-x86_64"]["mihomo"]
-            windows.update(
-                {
-                    "archive": zip_archive.name,
-                    "sha256": release.sha256_file(zip_archive),
-                    "member": "mihomo.exe",
-                    "binary": "app/bin/mihomo.exe",
-                    "binary_sha256": release.sha256_bytes(payload),
-                }
-            )
-            windows_output = tmp_path / "windows"
-            installed = release.install_mihomo(
-                zip_archive, windows_output, lock, "windows-x86_64"
-            )
-            self.assertEqual(installed.read_bytes(), payload)
 
     def test_extract_deb_reads_data_archive_without_system_tools(self) -> None:
         with temporary_path() as tmp_path:
@@ -491,7 +486,6 @@ class DesktopReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseError, "release file mismatch"):
                 release.verify_tree(tmp_path)
 
-    @unittest.skipIf(os.name == "nt", "symlink creation is not guaranteed on Windows")
     def test_file_manifest_records_relative_symlinks(self) -> None:
         with temporary_path() as tmp_path:
             target = tmp_path / "runtime" / "python3.13"
@@ -504,7 +498,6 @@ class DesktopReleaseTests(unittest.TestCase):
             lines = (tmp_path / release.FILES_NAME).read_text(encoding="utf-8")
             self.assertIn("\tL\truntime/python3\n", lines)
 
-    @unittest.skipIf(os.name == "nt", "symlink creation is not guaranteed on Windows")
     def test_bundle_tree_accepts_tauri_materialized_symlinks(self) -> None:
         with temporary_path() as tmp_path:
             minimal_tree(tmp_path)
@@ -557,7 +550,6 @@ class DesktopReleaseTests(unittest.TestCase):
                 "usr/lib/ldos/frontend-manifest.json",
             )
 
-    @unittest.skipIf(os.name == "nt", "AppImage extraction requires Linux")
     def test_appimage_bundle_rejects_bundled_libwayland_client(self) -> None:
         # 走完整的 verify_bundle：真实的 --appimage-extract 把 AppDir 解到 squashfs-root/，
         # 守卫曾因只看解包目录的根而从未生效。
@@ -666,7 +658,6 @@ class DesktopReleaseTests(unittest.TestCase):
                 binary.write_bytes(synthetic_elf(11, 0x2A8))
                 release.verify_bundle_tree(tmp_path)
 
-    @unittest.skipIf(os.name == "nt", "AppImage extraction requires Linux")
     def test_appimage_bundle_without_an_appdir_fails_closed(self) -> None:
         with temporary_path() as tmp_path:
             bundle = tmp_path / "LDOS_0.0.0_amd64.AppImage"
@@ -707,7 +698,7 @@ class DesktopReleaseTests(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "LDOS_PREBUILT_FRONTEND"}
         with mock.patch.dict(os.environ, env, clear=True):
             commands = release.frontend_build_commands("npm")
-        self.assertEqual(commands, [["npm", "run", "build"]])
+        self.assertEqual(commands, [["npm", "run", "build:web"]])
 
     def test_scan_exempts_upstream_sbom_paths_but_not_credentials(self) -> None:
         # 用真实存在的路径作禁用针，避免 Windows 把 "/home/..." 解析成

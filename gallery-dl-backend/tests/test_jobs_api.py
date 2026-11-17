@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from gdl_backend.app import ServiceContainer, create_app
 from tests.helpers import local_test_client, make_settings
 
-DESKTOP_ORIGIN = "http://127.0.0.1:5173"
+DESKTOP_ORIGIN = "mygo://localhost"
 
 
 class SseConnection:
@@ -103,7 +103,7 @@ class JobsApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.settings = make_settings(Path(self.temp.name))
-        self.settings.server.cors_origins = [DESKTOP_ORIGIN]
+        self.settings.server.cors_origins = [DESKTOP_ORIGIN, "http://127.0.0.1:5173"]
         self.container = ServiceContainer(self.settings)
         self.app = create_app(self.settings, container=self.container, start_background=False)
         self.port = self.settings.server.port
@@ -116,7 +116,8 @@ class JobsApiTests(unittest.IsolatedAsyncioTestCase):
         self.temp.cleanup()
 
     def connect(self, **kwargs) -> SseConnection:
-        return SseConnection(self.app, self.port, **kwargs)
+        headers = {"Origin": DESKTOP_ORIGIN, "Sec-Fetch-Site": "cross-site", **kwargs.pop("headers", {})}
+        return SseConnection(self.app, self.port, headers=headers, **kwargs)
 
     async def wait_for_subscribers(self, count: int) -> None:
         async with asyncio.timeout(5):
@@ -202,19 +203,29 @@ class JobsApiTests(unittest.IsolatedAsyncioTestCase):
         await sse.disconnect()
         await self.wait_for_subscribers(0)
 
-    async def test_desktop_origin_event_source_gets_cors_header(self) -> None:
-        headers = {"Origin": DESKTOP_ORIGIN, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors"}
-        async with self.connect(headers=headers) as sse:
-            await sse.next_event()
-        self.assertEqual(sse.status, 200)
-        self.assertEqual(sse.headers["access-control-allow-origin"], DESKTOP_ORIGIN)
+    async def test_desktop_and_vite_origin_event_sources_get_cors_header(self) -> None:
+        for origin in self.settings.server.cors_origins:
+            with self.subTest(origin=origin):
+                headers = {"Origin": origin, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors"}
+                async with self.connect(headers=headers) as sse:
+                    await sse.next_event()
+                self.assertEqual(sse.status, 200)
+                self.assertEqual(sse.headers["access-control-allow-origin"], origin)
 
     async def test_unknown_origin_is_rejected(self) -> None:
-        headers = {"Origin": "http://evil.example", "Sec-Fetch-Site": "cross-site"}
-        async with self.connect(headers=headers) as sse:
-            self.assertIsNone(await sse.next_event())
-        self.assertEqual(sse.status, 403)
-
+        for origin in (
+            "http://evil.example",
+            "mygo://localhost:1420",
+            "mygo://localhost.evil.example",
+            "http://127.0.0.1:5174",
+        ):
+            with self.subTest(origin=origin):
+                headers = {"Origin": origin, "Sec-Fetch-Site": "cross-site"}
+                async with self.connect(headers=headers) as sse:
+                    self.assertIsNone(await sse.next_event())
+                self.assertEqual(sse.status, 403)
+                self.assertNotIn("access-control-allow-origin", sse.headers)
+                self.assertEqual(self.container.events.subscriber_count, 0)
 
 if __name__ == "__main__":
     unittest.main()

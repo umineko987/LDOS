@@ -118,7 +118,7 @@ test("哈希进度跟着 dataset.updated（reason=hashing）刷新，不轮询",
 
   backend.hashPending.set(id, 0);
   release();
-  await expect(status).toHaveText("哈希已算完");
+  await expect(status).toHaveCount(0);
 });
 
 test("网格方向键移动焦点，Space 打开查看器，←/→ 翻页，Esc 关闭后焦点停在看过的那张", async ({ page }) => {

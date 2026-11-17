@@ -182,9 +182,6 @@ impl LaunchSpec {
         let python = if let Some(python) = environment_value("PYTHON")? {
             PathBuf::from(python)
         } else {
-            #[cfg(windows)]
-            let candidate = backend_dir.join(".venv/Scripts/python.exe");
-            #[cfg(not(windows))]
             let candidate = backend_dir.join(".venv/bin/python");
             if !candidate.is_file() {
                 return Err(());

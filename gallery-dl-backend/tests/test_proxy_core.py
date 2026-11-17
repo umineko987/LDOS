@@ -53,12 +53,8 @@ def _mark_all_records_healthy(adapter: ProxyPoolAdapter) -> dict[str, object]:
 
 
 class ProxyCoreTests(unittest.TestCase):
-    def test_core_binary_search_names_are_platform_specific(self):
-        self.assertEqual(_core_binary_names("posix"), ("proxy-core", "mihomo", "verge-mihomo"))
-        self.assertEqual(
-            _core_binary_names("nt")[:3],
-            ("proxy-core.exe", "mihomo.exe", "verge-mihomo.exe"),
-        )
+    def test_core_binary_search_names_are_linux_executables(self):
+        self.assertEqual(_core_binary_names(), ("proxy-core", "mihomo", "verge-mihomo"))
 
     def test_project_bin_is_preferred_over_path(self):
         with tempfile.TemporaryDirectory() as tmp:

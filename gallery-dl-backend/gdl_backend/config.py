@@ -74,9 +74,9 @@ def normalize_authorization_proxy(value: Any) -> str:
 
 
 def normalize_desktop_origin(value: Any) -> str:
-    """只接受可精确匹配的 Tauri 生产 origin 或回环 Vite origin。"""
+    """只接受可精确匹配的 MyGo/Tauri 生产 origin 或回环 Vite origin。"""
     if not isinstance(value, str) or not value.strip() or len(value.strip()) > 256:
-        raise ValueError("server.cors_origins 只允许精确 Tauri/Vite origin")
+        raise ValueError("server.cors_origins 只允许精确 MyGo/Tauri/Vite origin")
     try:
         parsed = urlsplit(value.strip())
         port = parsed.port
@@ -92,6 +92,10 @@ def normalize_desktop_origin(value: Any) -> str:
         or parsed.fragment
     ):
         raise ValueError("server.cors_origins 必须是无凭证、路径或查询的精确 origin")
+    mygo_origin = (scheme, parsed.netloc.lower()) in {
+        ("mygo", "localhost"),
+        ("http", "mygo.localhost"),
+    }
     tauri_origin = (
         (scheme == "tauri" and hostname == "localhost" and port is None)
         or (
@@ -105,8 +109,8 @@ def normalize_desktop_origin(value: Any) -> str:
         and hostname in {"127.0.0.1", "localhost", "::1"}
         and port is not None
     )
-    if not tauri_origin and not vite_origin:
-        raise ValueError("server.cors_origins 只允许精确 Tauri/Vite origin")
+    if not mygo_origin and not tauri_origin and not vite_origin:
+        raise ValueError("server.cors_origins 只允许精确 MyGo/Tauri/Vite origin")
     host = f"[{hostname}]" if ":" in hostname else hostname
     port_suffix = f":{port}" if port is not None else ""
     return f"{scheme}://{host}{port_suffix}"
@@ -197,9 +201,7 @@ def _desktop_distribution_data(data: dict[str, Any]) -> dict[str, Any]:
     python = Path(os.path.abspath(os.fspath(Path(python_value))))
     if not resource_root.is_absolute() or not data_root.is_absolute() or not python.is_absolute():
         raise ValueError("桌面分发路径必须是绝对路径")
-    expected_python = resource_root / "runtime" / "python" / (
-        "python.exe" if os.name == "nt" else "bin/python3.13"
-    )
+    expected_python = resource_root / "runtime" / "python" / "bin/python3.13"
     if os.path.normcase(os.fspath(python)) != os.path.normcase(os.fspath(expected_python)):
         raise ValueError("桌面后端、gallery worker 与去重 worker 必须使用同一受控 Python")
 
@@ -387,8 +389,7 @@ class SchedulerSettings:
 
 
 def _default_dedup_python() -> Path:
-    relative = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
-    return Path(os.path.abspath(WORKSPACE_DIR / ".venv" / relative))
+    return Path(os.path.abspath(WORKSPACE_DIR / ".venv" / "bin/python"))
 
 
 @dataclass(slots=True)

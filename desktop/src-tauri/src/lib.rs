@@ -221,17 +221,9 @@ mod tests {
         let linux: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.linux.conf.json"))
                 .expect("valid Linux Tauri config JSON");
-        let windows: serde_json::Value =
-            serde_json::from_str(include_str!("../tauri.windows.conf.json"))
-                .expect("valid Windows Tauri config JSON");
         assert_eq!(
             linux["bundle"]["targets"],
             serde_json::json!(["deb", "appimage"])
-        );
-        assert_eq!(windows["bundle"]["targets"], serde_json::json!(["nsis"]));
-        assert_eq!(
-            windows["bundle"]["windows"]["nsis"]["installMode"],
-            "currentUser"
         );
         assert_eq!(config["app"]["windows"][0]["decorations"], true);
         assert_eq!(config["app"]["windows"][0]["dataDirectory"], "webview");

@@ -258,7 +258,7 @@ def _disabled_dedup_components() -> dict[str, dict[str, Any]]:
 def _probe_dedup_components(settings: AppSettings) -> dict[str, dict[str, Any]]:
     python = settings.dedup.python_executable
 
-    if not python.is_file() or (os.name != "nt" and not os.access(python, os.X_OK)):
+    if not python.is_file() or not os.access(python, os.X_OK):
         blocked = _component("error", "去重 Python 不可用")
         result = {
             "dedup": _component("error", "去重环境不完整"),
@@ -709,7 +709,7 @@ def _directory_component(path: Path, label: str) -> dict[str, Any]:
         return _component("error", f"{label}不存在")
     if not os.access(path, os.R_OK | os.W_OK | os.X_OK):
         return _component("error", f"{label}不可读写")
-    if os.name != "nt" and path.stat().st_mode & 0o077:
+    if path.stat().st_mode & 0o077:
         return _component("error", f"{label}权限过宽，需要 0700")
     return _component("ok", f"{label}可读写且权限受限")
 
@@ -724,7 +724,7 @@ def _private_files_component(paths: list[Path], label: str) -> dict[str, Any]:
         existing += 1
         if not path.is_file() or not os.access(path, os.R_OK | os.W_OK):
             return _component("error", f"{label}包含不可读写文件")
-        if os.name != "nt" and path.stat().st_mode & 0o077:
+        if path.stat().st_mode & 0o077:
             return _component("error", f"{label}文件权限过宽，需要 0600")
     return _component("ok", f"{label}权限受限", existing_file_count=existing)
 
@@ -758,7 +758,7 @@ def _external_output_component(settings: AppSettings) -> dict[str, Any]:
     path = settings.default_output_root
     if not path.is_dir() or not os.access(path, os.R_OK | os.W_OK | os.X_OK):
         return _component("error", "外部输出目录不可读写", required=False)
-    if os.name != "nt" and path.stat().st_mode & 0o022:
+    if path.stat().st_mode & 0o022:
         return _component(
             "optional_warning",
             "外部输出目录可被组或其他用户写入；doctor 仅报告，不会修改",
@@ -813,7 +813,7 @@ def doctor_snapshot(settings: AppSettings) -> dict[str, Any]:
     config = settings.config_path
     if config is None or not config.is_file():
         config_component = _component("error", "正式配置文件不存在")
-    elif os.name != "nt" and (
+    elif (
         config.stat().st_mode & 0o077 or config.stat().st_mode & 0o600 != 0o600
     ):
         config_component = _component("error", "配置文件权限需要 0600")

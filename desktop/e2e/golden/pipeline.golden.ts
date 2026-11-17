@@ -1,5 +1,5 @@
 // 黄金路径：真实后端上 建数据集 → 导入 → 清洗 → 去重 → 打标 → 校对 → 导出，最后检查磁盘上的导出结果。
-// 后端、素材和替身见 setup.ts 与 fakes/；这里只模拟 Tauri 宿主（runtime_metadata 指向真实后端，选目录按队列返回）。
+// 后端、素材和替身见 setup.ts 与 fakes/；这里只模拟 MyGo 宿主（Host.RuntimeMetadata 指向真实后端，选目录按队列返回）。
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,14 +23,13 @@ async function desktopHost(page: Page, apiOrigin: string): Promise<void> {
   await page.addInitScript((origin) => {
     window.__goldenPicks = [];
     Object.assign(window, {
-      isTauri: true,
-      __TAURI_INTERNALS__: {
-        invoke: async (command: string) => {
-          if (command === "backend_status") return { state: "ready" };
-          if (command === "runtime_metadata") return { apiOrigin: origin, backendVersion: null };
-          if (command === "select_directory") return window.__goldenPicks?.shift() ?? null;
-          if (command === "reveal_in_file_manager") return null;
-          throw new Error(`unexpected command ${command}`);
+      mygo: {
+        call: async (method: string) => {
+          if (method === "Host.BackendStatus") return { state: "ready" };
+          if (method === "Host.RuntimeMetadata") return { apiOrigin: origin, backendVersion: null };
+          if (method === "Host.SelectDirectory") return window.__goldenPicks?.shift() ?? null;
+          if (method === "Host.RevealInFileManager") return null;
+          throw new Error(`unexpected method ${method}`);
         },
       },
     });

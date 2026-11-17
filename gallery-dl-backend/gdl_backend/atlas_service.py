@@ -39,7 +39,6 @@ import re
 import secrets
 import shutil
 import stat
-import subprocess
 import threading
 import time
 from collections import OrderedDict
@@ -557,10 +556,7 @@ class AtlasService:
         environment.setdefault("PYTHONUTF8", "1")
         environment["PYTHONUNBUFFERED"] = "1"
         kwargs: dict[str, Any] = {}
-        if os.name == "nt":
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
-        else:
-            kwargs["start_new_session"] = True
+        kwargs["start_new_session"] = True
         log_path = prepared.run_dir / "worker.log"
         worker_error: dict[str, Any] | None = None
         with open_private_binary(log_path) as log_file:

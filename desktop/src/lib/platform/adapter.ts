@@ -1,7 +1,9 @@
-// 桌面宿主适配层，从旧版 core/platform/adapter.ts 移植。
-// 只调用 src-tauri/src/lib.rs 注册的 5 个命令；浏览器模式（vite dev、e2e）退回同源后端。
+// 桌面宿主适配层，只调用 mygo Host 生成绑定的五个方法。
+// 浏览器模式（vite dev、e2e）退回同源后端。
 
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { isMyGo } from "mygo-runtime";
+
+import { Host } from "./mygo.generated.ts";
 
 import {
   RuntimeContractError,
@@ -21,13 +23,19 @@ export class PlatformCapabilityError extends Error {
   }
 }
 
-export interface TauriBridge {
-  isTauri(): boolean;
-  invoke(command: string, payload?: Record<string, unknown>): Promise<unknown>;
+export interface MyGoBridge {
+  isMyGo(): boolean;
+  readonly host: {
+    runtimeMetadata(): Promise<unknown>;
+    backendStatus(): Promise<unknown>;
+    selectDirectory(): Promise<unknown>;
+    selectBrowserExecutable(): Promise<unknown>;
+    revealInFileManager(path: string): Promise<unknown>;
+  };
 }
 
 export interface PlatformDependencies {
-  readonly bridge?: TauriBridge;
+  readonly bridge?: MyGoBridge;
   readonly location?: { readonly origin: string } | undefined;
 }
 
@@ -41,7 +49,7 @@ export interface PlatformCapabilities {
 }
 
 export interface PlatformAdapter {
-  readonly mode: "browser" | "tauri";
+  readonly mode: "browser" | "mygo";
   /** 三项都只在桌面模式可用；界面据此隐藏按钮，而不是等调用失败。 */
   readonly capabilities: PlatformCapabilities;
   getRuntimeMetadata(): Promise<RuntimeMetadata>;
@@ -53,7 +61,7 @@ export interface PlatformAdapter {
   revealInFileManager(path: string): Promise<void>;
 }
 
-const defaultBridge: TauriBridge = { isTauri, invoke };
+const defaultBridge: MyGoBridge = { isMyGo, host: Host };
 
 function unavailable(): never {
   throw new PlatformCapabilityError("capability_unavailable");
@@ -63,14 +71,14 @@ export function createPlatformAdapter({
   bridge = defaultBridge,
   location = globalThis.location,
 }: PlatformDependencies = {}): PlatformAdapter {
-  const mode = bridge.isTauri() ? "tauri" : "browser";
-  const desktop = mode === "tauri";
+  const mode = bridge.isMyGo() ? "mygo" : "browser";
+  const desktop = mode === "mygo";
 
-  async function pick(command: string): Promise<string | null> {
+  async function pick(select: () => Promise<unknown>): Promise<string | null> {
     if (!desktop) unavailable();
     let picked: unknown;
     try {
-      picked = await bridge.invoke(command);
+      picked = await select();
     } catch {
       unavailable();
     }
@@ -92,7 +100,7 @@ export function createPlatformAdapter({
         return sanitizeRuntimeMetadata({ apiOrigin: location.origin, backendVersion: null });
       }
       try {
-        return sanitizeRuntimeMetadata(await bridge.invoke("runtime_metadata"));
+        return sanitizeRuntimeMetadata(await bridge.host.runtimeMetadata());
       } catch {
         throw new RuntimeContractError("runtime_metadata_unavailable");
       }
@@ -101,20 +109,20 @@ export function createPlatformAdapter({
     async getBackendStatus() {
       if (!desktop) return sanitizeBackendStatus({ state: "ready" });
       try {
-        return sanitizeBackendStatus(await bridge.invoke("backend_status"));
+        return sanitizeBackendStatus(await bridge.host.backendStatus());
       } catch {
         return sanitizeBackendStatus({ state: "failed", code: "platform_unavailable" });
       }
     },
 
     // 目录只返回宿主给定的绝对路径字符串，只供短生命周期的表单草稿使用。
-    selectDirectory: (_purpose: PlatformDirectoryPurpose) => pick("select_directory"),
-    selectBrowserExecutable: () => pick("select_browser_executable"),
+    selectDirectory: (_purpose: PlatformDirectoryPurpose) => pick(() => bridge.host.selectDirectory()),
+    selectBrowserExecutable: () => pick(() => bridge.host.selectBrowserExecutable()),
 
     async revealInFileManager(path: string) {
       if (!desktop || hostPath(path) === null) unavailable();
       try {
-        await bridge.invoke("reveal_in_file_manager", { path });
+        await bridge.host.revealInFileManager(path);
       } catch {
         unavailable();
       }

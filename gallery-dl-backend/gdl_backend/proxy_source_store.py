@@ -359,7 +359,7 @@ def _open_absolute_no_follow(path: Path) -> int:
     nofollow = int(getattr(os, "O_NOFOLLOW", 0))
     cloexec = int(getattr(os, "O_CLOEXEC", 0))
     directory = int(getattr(os, "O_DIRECTORY", 0))
-    if os.name == "nt" or not directory or not candidate.is_absolute():
+    if not directory or not candidate.is_absolute():
         try:
             return os.open(candidate, os.O_RDONLY | nofollow | cloexec)
         except OSError as exc:

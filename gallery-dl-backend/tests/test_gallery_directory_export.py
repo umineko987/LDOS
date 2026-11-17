@@ -230,67 +230,6 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         self.assertTrue((target / "empty-output").is_dir())
         self.assertEqual(list((target / "empty-output").iterdir()), [])
 
-    def test_windows_style_scandir_stats_without_file_index_copy_completes(self) -> None:
-        # Windows 的 DirEntry.stat() 来自 WIN32_FIND_DATA，st_dev/st_ino 恒为
-        # 0；_copy_file 的源版本比较不得因此把未变化的文件判成 source_changed。
-        _source, _root, directory_id = self._source(
-            "sources", "alpha", {"nested/one.jpg": b"source"}
-        )
-        target = self.root / "target"
-        target.mkdir()
-
-        def zero_index(metadata: os.stat_result) -> os.stat_result:
-            return os.stat_result(
-                (
-                    metadata.st_mode,
-                    0,
-                    0,
-                    metadata.st_nlink,
-                    metadata.st_uid,
-                    metadata.st_gid,
-                    metadata.st_size,
-                    metadata.st_atime,
-                    metadata.st_mtime,
-                    metadata.st_ctime,
-                ),
-                {
-                    "st_atime_ns": metadata.st_atime_ns,
-                    "st_mtime_ns": metadata.st_mtime_ns,
-                    "st_ctime_ns": metadata.st_ctime_ns,
-                },
-            )
-
-        original_iter_subtree = SafeSourceRoot.iter_subtree
-
-        def windows_style_iter_subtree(self, relative_directory, **kwargs):
-            for entry in original_iter_subtree(self, relative_directory, **kwargs):
-                zeroed = tuple(
-                    (name, zero_index(metadata))
-                    for name, metadata in entry.files
-                )
-                yield safe_paths.SafeDirectoryEntry(
-                    entry.relative_path, entry.name, zeroed
-                )
-
-        manager = self._manager()
-        with mock.patch.object(
-            SafeSourceRoot, "iter_subtree", windows_style_iter_subtree
-        ):
-            record = self._wait(
-                manager,
-                manager.start(
-                    directory_ids=[directory_id], target_path=str(target)
-                )["operation_id"],
-            )
-        self.assertEqual(
-            record["state"],
-            "completed",
-            f"error_code={record.get('error_code')} details={record.get('details')}",
-        )
-        self.assertEqual(
-            (target / "alpha" / "nested" / "one.jpg").read_bytes(),
-            b"source",
-        )
 
     def test_only_top_level_name_conflicts_block_preflight(self) -> None:
         _source, _root, directory_id = self._source(
@@ -476,7 +415,6 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         moved_root = self.root / "moved-fallback-source-root"
 
         with (
-            mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False),
             mock.patch.object(safe_paths, "_HAS_DIR_FD", False),
         ):
             with SafeSourceRoot(source_root) as safe_root:
@@ -1202,48 +1140,33 @@ class GalleryDirectoryExportContractTest(unittest.TestCase):
         self.assertEqual(after, before)
 
 
-class SafeSourceRootDescriptorlessTest(unittest.TestCase):
-    """无描述符平台（Windows）回退模式：SafeSourceRoot.open 走纯路径校验。"""
+class SafeSourceRootFallbackTest(unittest.TestCase):
+    """验证缺少 dir_fd 操作时的路径校验，根目录仍由描述符锚定。"""
 
-    def test_descriptorless_mode_opens_and_validates_via_lstat(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = SafeSourceRoot(Path(tmp))
-            with mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False):
-                root.open()
-                self.assertTrue(root._descriptorless)
-                self.assertIsNone(root._root_fd)
-                # 幂等：重复 open 不再尝试描述符。
-                root.open()
-                root.close()
-                self.assertFalse(root._descriptorless)
-
-    def test_descriptorless_mode_rejects_non_directory(self) -> None:
+    def test_fallback_mode_rejects_non_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "file.txt"
             target.write_text("x", encoding="utf-8")
             root = SafeSourceRoot(target)
-            with mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False):
-                with self.assertRaises(UnsafeSourcePathError) as ctx:
-                    root.open()
-                self.assertEqual(ctx.exception.reason, "source_root_not_directory")
-
-    def test_descriptorless_mode_rejects_missing_root(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = SafeSourceRoot(Path(tmp) / "absent")
-            with mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False):
+            with mock.patch.object(safe_paths, "_HAS_DIR_FD", False):
                 with self.assertRaises(UnsafeSourcePathError) as ctx:
                     root.open()
                 self.assertEqual(ctx.exception.reason, "source_root_unavailable")
 
-    def test_descriptorless_open_binary_reports_missing_file(self) -> None:
-        # Windows 上扫描 sidecar（a.txt）与 rename 目标探测都会对不存在的
-        # 文件调用 open_binary：必须翻译为 UnsafeSourcePathError("file_missing")
-        # 而不是裸 FileNotFoundError，否则扫描线程直接崩溃。
+    def test_fallback_mode_rejects_missing_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = SafeSourceRoot(Path(tmp) / "absent")
+            with mock.patch.object(safe_paths, "_HAS_DIR_FD", False):
+                with self.assertRaises(UnsafeSourcePathError) as ctx:
+                    root.open()
+                self.assertEqual(ctx.exception.reason, "source_root_unavailable")
+
+    def test_fallback_open_binary_reports_missing_file(self) -> None:
+        # 缺失文件必须映射到 file_missing，不能让裸 FileNotFoundError 中断扫描。
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "keep.jpg").write_bytes(b"x")
             root = SafeSourceRoot(Path(tmp))
             with (
-                mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False),
                 mock.patch.object(safe_paths, "_HAS_DIR_FD", False),
             ):
                 root.open()
@@ -1255,14 +1178,13 @@ class SafeSourceRootDescriptorlessTest(unittest.TestCase):
                 handle.close()
                 root.close()
 
-    def test_descriptorless_exists_regular_treats_missing_parent_as_absent(self) -> None:
+    def test_fallback_exists_regular_treats_missing_parent_as_absent(self) -> None:
         # trash/rename 的目标探测会对父目录尚未创建的目标调用 exists_regular：
         # 父组件缺失必须是 parent_missing（视为不存在），不能是 unsafe_parent。
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "keep.jpg").write_bytes(b"x")
             root = SafeSourceRoot(Path(tmp))
             with (
-                mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False),
                 mock.patch.object(safe_paths, "_HAS_DIR_FD", False),
             ):
                 root.open()
@@ -1277,16 +1199,13 @@ class SafeSourceRootDescriptorlessTest(unittest.TestCase):
                 )
                 root.close()
 
-    def test_descriptorless_directory_probes_and_root_identity(self) -> None:
-        # 目录 trash 在目标目录尚未创建时探测 exists_directory：
-        # 父目录缺失 + allow_missing 必须返回 False；root_identity 在无描述符
-        # 平台退化为 lstat（此前裸用 root_fd 会直接 AssertionError）。
+    def test_fallback_directory_probes_and_root_identity(self) -> None:
+        # 父目录缺失时目录探测返回 False；根目录身份仍取自打开的描述符。
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "whole").mkdir()
             (Path(tmp) / "whole" / "a.jpg").write_bytes(b"x")
             root = SafeSourceRoot(Path(tmp))
             with (
-                mock.patch.object(safe_paths, "_DESCRIPTOR_ANCHORED", False),
                 mock.patch.object(safe_paths, "_HAS_DIR_FD", False),
             ):
                 root.open()

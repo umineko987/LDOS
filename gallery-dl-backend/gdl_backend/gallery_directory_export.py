@@ -671,9 +671,6 @@ class GalleryDirectoryExportService:
     ) -> tuple[int, _TargetFileSnapshot]:
         source_handle = safe_root.open_binary(source_relative)
         source_version = _file_version(os.fstat(source_handle.fileno()))
-        # Windows 的 DirEntry.stat() 来自 WIN32_FIND_DATA，没有文件索引，
-        # st_dev/st_ino 恒为 0，无法与 fstat 的真实身份比较；大小与时间戳
-        # 在两个 API 族之间一致，身份仅在枚举给出真实 st_ino 时才可比。
         expected_version = _file_version(expected_metadata)
         if not _file_versions_match(source_version, expected_version):
             source_handle.close()

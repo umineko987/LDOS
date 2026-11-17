@@ -1155,8 +1155,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if os.name != "nt":
-        os.umask(0o077)
+    os.umask(0o077)
     args = build_parser().parse_args(argv)
     reporter = Reporter(sys.stdout)
     try:

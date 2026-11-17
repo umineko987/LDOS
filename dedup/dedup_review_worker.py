@@ -416,7 +416,7 @@ def analyze_with_filters(core: Any, image_infos: list[dict[str, Any]], core_args
     if config is None:
         automatic, candidates = core.analyze_images(image_infos, core_args) if image_infos else ([], [])
         return automatic, candidates, []
-    from gdl_backend import review_filters
+    import review_filters
     options = config["options"]
     try:
         if options["filter_character"] and not references:
@@ -455,8 +455,7 @@ def analyze_with_filters(core: Any, image_infos: list[dict[str, Any]], core_args
 
 
 def main() -> int:
-    if os.name != "nt":
-        os.umask(0o077)
+    os.umask(0o077)
     started_at = time.perf_counter()
     parser = argparse.ArgumentParser(description="为聚合爬图批次生成 L0-L2 全图片审核清单")
     parser.add_argument("root", type=Path, nargs="?", help="旧批次图片根目录")
@@ -501,7 +500,7 @@ def run_analysis(args: Any, started_at: float, stack: ExitStack) -> int:
                     raise ValueError("图库图片路径包含链接")
             if not path.is_file():
                 raise ValueError("图库图片不存在")
-            from gdl_backend.gallery_safe_paths import SafeSourceRoot, held_file_disk_version
+            from review_safe_paths import SafeSourceRoot, held_file_disk_version
             safe = roots.get(image["source_id"])
             if safe is None:
                 safe = roots[image["source_id"]] = stack.enter_context(SafeSourceRoot(image["root_path"]))
@@ -636,9 +635,9 @@ def run_analysis(args: Any, started_at: float, stack: ExitStack) -> int:
             handle.seek(0)
             with Image.open(handle) as reference:
                 if getattr(reference, "n_frames", 1) != 1:
-                    from gdl_backend.review_filters import FilterConfigurationError
+                    from review_filters import FilterConfigurationError
                     raise FilterConfigurationError("filter_reference_invalid", "角色参考图必须是可解码的静态图片")
-                from gdl_backend.review_filter_models import rgb_image
+                from review_filter_models import rgb_image
                 references.append(rgb_image(reference))
     auto_groups, review_groups, filtered = analyze_with_filters(
         core, image_infos, core_args, selection.get("filter_config") if selection is not None else None, references,

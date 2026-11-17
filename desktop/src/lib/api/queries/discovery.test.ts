@@ -123,7 +123,7 @@ describe("discovery requests", () => {
       keyword: "猫",
       sites: sites.slice(0, DISCOVERY_MAX_SITES),
       limit: 20,
-      timeout_seconds: 180,
+      timeout_seconds: 45,
     });
   });
 });

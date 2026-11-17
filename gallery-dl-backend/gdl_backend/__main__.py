@@ -67,8 +67,7 @@ def _run_server(settings: AppSettings, parent_stream: BinaryIO | None = None) ->
 
 
 def main() -> None:
-    if os.name != "nt":
-        os.umask(0o077)
+    os.umask(0o077)
     parser = argparse.ArgumentParser(description="gallery-dl + native proxy backend")
     parser.add_argument("--config", help="JSON 配置文件路径")
     parser.add_argument("--host", help="覆盖监听地址")

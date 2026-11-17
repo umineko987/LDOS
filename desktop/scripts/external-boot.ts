@@ -1,4 +1,4 @@
-// SvelteKit 把启动代码写成页面里的内联 <script>，而 Tauri 的 CSP 是 `script-src 'self'`。
+// SvelteKit 把启动代码写成页面里的内联 <script>，而桌面 CSP 是 `script-src 'self'`。
 // 这里把内联脚本改写成同源的外部经典脚本：
 // - 构建：externalize-boot.mjs 在 adapter 写完 dist 后，把脚本落成 dist 里和 HTML 同目录的文件；
 // - 开发：Vite 中间件改写 HTML 响应（同时补上 devCsp 头），脚本从内存里按哈希提供。
@@ -42,12 +42,19 @@ export function extractInlineScripts(
   return { html: rewritten, scripts };
 }
 
+export function insertCspMeta(html: string, policy: string): string {
+  const head = /<head(?:\s[^>]*)?>/i;
+  if (!head.test(html)) throw new Error("HTML has no head for the production CSP");
+  const escaped = policy.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return html.replace(head, (opening) => `${opening}<meta http-equiv="Content-Security-Policy" content="${escaped}">`);
+}
+
 // 脚本和页面放在同一目录：开发模式的启动代码用 `./node_modules/...` 这样的相对 import()。
 const BOOT_FILE = /\/(boot\.[0-9a-f]{12}\.js)$/;
 
 /**
- * 开发服务器：给 HTML 响应加上 Tauri 开发窗口的 CSP（devCsp），改写其中的内联脚本，
- * 并从内存提供抽出的脚本。这样在普通浏览器里 `npm run dev` 也和 Tauri 窗口受同样的约束。
+ * 开发服务器：给 HTML 响应加上 csp.json 的 development 策略，改写其中的内联脚本，
+ * 并从内存提供抽出的脚本。这样浏览器与 mygo 开发窗口受同样的约束。
  */
 export function devCsp(policy: string): Plugin {
   const served = new Map<string, string>();

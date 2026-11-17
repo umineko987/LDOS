@@ -69,10 +69,10 @@ const connections = await mockEvents(page, [                      // 第一次�
 
 页面脚本运行前用 `page.addInitScript()` 改环境：
 
-- **Tauri 宿主**（`boot.spec.ts`）：给 `window` 设上 `isTauri: true` 和 `__TAURI_INTERNALS__.invoke`，按命令名返回结果。
-  平台适配器只认这两个全局量，所以不用真的起 Tauri；宿主状态放在 `window` 上，用例里用 `page.evaluate()` 改。
+- **MyGo 宿主**（`boot.spec.ts`）：给 `window.mygo` 设置 `call(method, ...args)`，按 `Host.BackendStatus`、`Host.RuntimeMetadata` 等完整 Go 方法名返回结果。
+  页面实际执行 `mygo-runtime 0.9.1` 的 `isMyGo()` 与 CLI 生成的 Host 绑定；宿主状态放在 `window` 上，用例里用 `page.evaluate()` 改。
 - **已就绪的桌面宿主**（`fixtures/exports.ts` 的 `fakeDesktopHost()`）：后端直接就绪，选目录返回给定路径，
-  其余命令（例如 `reveal_in_file_manager`）记在 `window.__hostCalls`，用 `hostCalls(page)` 读。
+  其余方法（例如 `Host.RevealInFileManager`）以 `{ command: method, args: [...] }` 记在 `window.__hostCalls`，用 `hostCalls(page)` 读。
 - **GPU**（`gfx.spec.ts` 的 `stubGpu()`）：无头 Chromium 的 WebGL2 是 SwiftShader（软件实现）。
   改掉 `UNMASKED_RENDERER_WEBGL` 返回的设备名，模拟有硬件加速或只有 llvmpipe；或者让 `getContext("webgl2")` 返回 `null`，模拟没有 WebGL2。
 
@@ -96,7 +96,7 @@ no_proxy=localhost,127.0.0.1,::1 NO_PROXY=localhost,127.0.0.1,::1 npm run test:e
 - `golden/setup.ts`（globalSetup）在系统临时目录里建数据目录、配置和 8 张生成的 PNG（含像素相同和缩小的近重复），
   在空闲端口上启动 `python -m gdl_backend --config …`（和桌面宿主开发模式同一个入口），结束时关掉后端、删掉临时目录。
   不碰 `~/.config` 和真实数据目录，不联网，不要 HF token。
-- 页面按桌面模式连后端：用例模拟 Tauri 宿主，`runtime_metadata` 返回真实后端的 `apiOrigin`，选目录按队列返回素材和导出目录。
+- 页面按桌面模式连后端：用例模拟 MyGo 宿主，`Host.RuntimeMetadata` 返回真实后端的 `apiOrigin`，选目录按队列返回素材和导出目录。
 - 模型是替身（`golden/fakes/`）：去重和打标跑真实的 worker / CLI 和后端流水线，只把推理换成按像素判断——
   完成度过滤按灰度 / 近白判黑白和草稿，WD 打标按底色给 `*_theme`。模型文件是占位，探测脚本直接报可用。
 - 解释器默认用 `scripts/setup-linux.sh` 建的两个虚拟环境（`gallery-dl-backend/.venv`、`.venv`），

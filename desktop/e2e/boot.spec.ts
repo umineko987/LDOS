@@ -10,21 +10,20 @@ declare global {
   }
 }
 
-/** 模拟 Tauri 宿主：只实现启动门用到的两个命令，状态由测试改 window.__bootState。 */
-async function fakeTauriHost(page: Page) {
+/** 模拟 MyGo 宿主：运行真实生成绑定，mygo.call 按 Host 方法名返回可变启动状态。 */
+async function fakeMyGoHost(page: Page) {
   await page.addInitScript(() => {
     window.__bootState = { state: "starting" };
     window.__invoked = [];
     Object.assign(window, {
-      isTauri: true,
-      __TAURI_INTERNALS__: {
-        invoke: async (command: string) => {
-          window.__invoked?.push(command);
-          if (command === "backend_status") return window.__bootState;
-          if (command === "runtime_metadata") {
+      mygo: {
+        call: async (method: string) => {
+          window.__invoked?.push(method);
+          if (method === "Host.BackendStatus") return window.__bootState;
+          if (method === "Host.RuntimeMetadata") {
             return { apiOrigin: location.origin, backendVersion: "0.5.2", configPath: "/private/config.json" };
           }
-          throw new Error(`unexpected command ${command}`);
+          throw new Error(`unexpected method ${method}`);
         },
       },
     });
@@ -37,7 +36,7 @@ const setBackend = (page: Page, state: { state: string; code?: string }) =>
   }, state);
 
 test("宿主报告启动中时显示启动门，就绪且 /healthz 通过后进入外壳", async ({ page }) => {
-  await fakeTauriHost(page);
+  await fakeMyGoHost(page);
   await page.goto("/");
 
   const gate = page.getByTestId("boot-screen");
@@ -48,11 +47,11 @@ test("宿主报告启动中时显示启动门，就绪且 /healthz 通过后进�
   await setBackend(page, { state: "ready" });
   await expect(page.locator("[data-shell]")).toBeVisible();
   await expect(gate).toHaveCount(0);
-  expect(await page.evaluate(() => window.__invoked)).toContain("runtime_metadata");
+  expect(await page.evaluate(() => window.__invoked)).toContain("Host.RuntimeMetadata");
 });
 
 test("后端启动失败时显示宿主给的原因，恢复后自动进入", async ({ page }) => {
-  await fakeTauriHost(page);
+  await fakeMyGoHost(page);
   await page.goto("/");
   await setBackend(page, { state: "failed", code: "backend_start_timeout" });
 

@@ -12,9 +12,9 @@ import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "gallery-dl-backend"))
-from gdl_backend import review_filters as filters
-from gdl_backend import review_filter_models as models
+sys.path.insert(0, str(ROOT / "dedup"))
+import review_filters as filters
+import review_filter_models as models
 
 
 def options(**changes):
@@ -97,6 +97,22 @@ class FilterInferenceTests(unittest.TestCase):
             with mock.patch.object(filters, "FilterModels", side_effect=error), self.assertRaises(filters.FilterConfigurationError):
                 filters.require_filter_capabilities(options(filter_monochrome=True), Path("models"))
 
+    def test_unavailable_models_report_only_enabled_filters_and_hide_native_errors(self):
+        enabled = options(filter_monochrome=True, filter_sketch=True, filter_character=True)
+        for error, expected in ((ImportError("private dependency path"), "缺少 ONNX"),
+                                (RuntimeError("private model path"), "过滤模型缺失")):
+            with self.subTest(error=type(error).__name__), mock.patch.object(filters, "FilterModels", side_effect=error) as load:
+                with self.assertRaises(filters.FilterConfigurationError) as caught:
+                    filters.require_filter_capabilities(enabled, Path("models"))
+                load.assert_called_once_with(Path("models"), ["completeness", "ccip"])
+                self.assertEqual(caught.exception.code, "review_filter_unavailable")
+                self.assertEqual([entry["option"] for entry in caught.exception.details["filters"]], list(enabled))
+                self.assertIn(expected, str(caught.exception))
+                self.assertNotIn("private", str(caught.exception))
+        with mock.patch.object(filters, "FilterModels") as load, self.assertRaises(filters.FilterConfigurationError):
+            filters.require_filter_capabilities(options(filter_sketch=True))
+        load.assert_not_called()
+
     def test_monochrome_and_ccip_preprocessing_white_alpha_and_exact_normalization(self):
         transparent = Image.new("RGBA", (4, 6), (255, 0, 0, 0))
         monochrome = models.encode_image(transparent)
@@ -162,6 +178,24 @@ class FilterInferenceTests(unittest.TestCase):
         feat.run.return_value = [np.zeros((1, 768))]
         with self.assertRaises(RuntimeError):
             runtime.feature(image)
+
+    def test_metric_chunks_reference_sets_without_changing_order_or_values(self):
+        runtime = models.FilterModels.__new__(models.FilterModels)
+        runtime.np = np
+        metric = mock.Mock()
+        runtime.sessions = {"ccip_metric": metric}
+        references = [np.full(768, index / 100, dtype=np.float32) for index in range(65)]
+        def distances(_outputs, inputs):
+            batch = inputs["input"]
+            self.assertEqual(batch.dtype, np.float32)
+            result = np.zeros((len(batch), len(batch)), dtype=np.float32)
+            result[0, 1:] = batch[1:, 0]
+            return [result]
+        metric.run.side_effect = distances
+        np.testing.assert_array_equal(runtime.distances(np.ones(768), references),
+                                      np.array([reference[0] for reference in references]))
+        self.assertEqual([call.args[1]["input"].shape for call in metric.run.call_args_list],
+                         [(33, 768), (33, 768), (2, 768)])
 
     def test_explicit_prepare_only_downloads_requested_pinned_models_and_offline_checks_never_download(self):
         with tempfile.TemporaryDirectory() as directory:

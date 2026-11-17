@@ -129,10 +129,11 @@ export function discoverySitesQuery(api: Api) {
 
 // 生成的 schema 把带默认值的字段标成必填；这里照后端（gdl_backend/schemas.py）的默认值填上。
 const TIMEOUT_SECONDS = 180;
+const SEARCH_TIMEOUT_SECONDS = 45;
 const CRAWL_DEFAULTS = { concurrency: 20, max_tasks: 10_000, priority: 0, timeout_seconds: TIMEOUT_SECONDS } as const;
 const SOURCE_DEFAULTS = { priority: 0, timeout_seconds: TIMEOUT_SECONDS } as const;
 
-/** 搜索可能要几十秒（逐站点超时 180s），由按钮触发，用 createMutation 而不是查询。 */
+/** 搜索由按钮触发，每个站点在总预算内完成或返回超时。 */
 export async function searchDiscovery(
   api: Api,
   { keyword, sites, limit = 20 }: DiscoverySearch,
@@ -145,7 +146,7 @@ export async function searchDiscovery(
         keyword: keyword.trim(),
         sites: [...sites].slice(0, DISCOVERY_MAX_SITES),
         limit,
-        timeout_seconds: TIMEOUT_SECONDS,
+        timeout_seconds: SEARCH_TIMEOUT_SECONDS,
       },
       signal,
     }),

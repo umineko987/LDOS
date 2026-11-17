@@ -149,7 +149,7 @@
     <h2 id="diag-environment" class="text-sm font-semibold">{m.diag_section_environment()}</h2>
     <dl class="grid grid-cols-[180px_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
       <dt class="text-fg2">{m.diag_mode()}</dt>
-      <dd data-testid="diag-mode">{platform.mode === "tauri" ? m.diag_mode_tauri() : m.diag_mode_browser()}</dd>
+      <dd data-testid="diag-mode">{platform.mode === "mygo" ? "MyGo" : m.diag_mode_browser()}</dd>
       <dt class="text-fg2">{m.diag_api_origin()}</dt>
       <dd class="font-mono text-xs leading-5">{api.origin}</dd>
     </dl>

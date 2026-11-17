@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble and verify the relocatable LDOS desktop Python backend."""
+"""Build and verify Linux mygo packages with a native Go business backend."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
@@ -34,8 +33,7 @@ from third_party_notices import (
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = ROOT / "desktop" / "release" / "runtime-lock.json"
-DEFAULT_OUTPUT = ROOT / "desktop" / "src-tauri" / "release" / "backend"
-TAURI_RELEASE_CONFIG = Path("src-tauri") / "tauri.release.conf.json"
+DEFAULT_OUTPUT = ROOT / "desktop" / "resources" / "backend"
 RELEASE_BASE_URL = (
     "https://github.com/astral-sh/python-build-standalone/releases/download"
 )
@@ -44,7 +42,7 @@ FILES_NAME = "release-files.sha256"
 LINUX_TORCHVISION_RPATH = (
     "$ORIGIN:$ORIGIN/../torchvision.libs:$ORIGIN/../torch/lib"
 )
-BACKEND_SOURCE = ROOT / "gallery-dl-backend" / "gdl_backend"
+EXECUTORS_SOURCE = ROOT / "backend" / "executors" / "ldos_gallery"
 GALLERY_SOURCE = ROOT / "gallery-dl-codeberg"
 FRONTEND_MANIFEST = ROOT / "desktop" / "dist" / "frontend-manifest.json"
 
@@ -116,8 +114,6 @@ def load_lock() -> dict[str, Any]:
             not target
             or len(item.get("sha256", "")) != 64
             or len(item.get("metadata_sha256", "")) != 64
-            # 各平台的 CPython LICENSE.txt 并不相同：Windows 构建在 PSF 文本后
-            # 追加了 Microsoft Distributable Code 附加条款，哈希按 target 锁定。
             or len(item.get("python_license_sha256", "")) != 64
             or len(resource.get("sha256", "")) != 64
             or len(resource.get("binary_sha256", "")) != 64
@@ -135,8 +131,6 @@ def host_target() -> str:
         raise ReleaseError(f"unsupported release host architecture: {machine}")
     if sys.platform.startswith("linux"):
         return "linux-x86_64"
-    if os.name == "nt":
-        return "windows-x86_64"
     raise ReleaseError(f"unsupported release host: {sys.platform}")
 
 
@@ -144,10 +138,7 @@ def default_cache_dir() -> Path:
     configured = os.environ.get("LDOS_RELEASE_CACHE")
     if configured:
         return Path(configured).expanduser().resolve()
-    if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    else:
-        base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     return base / "ldos" / "release"
 
 
@@ -272,16 +263,6 @@ def install_mihomo(
     if archive.name.endswith(".gz"):
         with gzip.open(archive, "rb") as source, destination.open("wb") as output:
             shutil.copyfileobj(source, output)
-    elif archive.name.endswith(".zip"):
-        member = resource.get("member", "")
-        with zipfile.ZipFile(archive) as bundle:
-            if (
-                member not in bundle.namelist()
-                or bundle.getinfo(member).file_size > 100 * 1024 * 1024
-            ):
-                raise ReleaseError("mihomo archive does not contain the locked executable")
-            with bundle.open(member) as source, destination.open("wb") as output:
-                shutil.copyfileobj(source, output)
     else:
         raise ReleaseError("unsupported mihomo archive")
     actual = sha256_file(destination)
@@ -290,8 +271,7 @@ def install_mihomo(
         raise ReleaseError(
             f"mihomo executable hash mismatch: expected {resource['binary_sha256']}, got {actual}"
         )
-    if os.name != "nt":
-        destination.chmod(destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    destination.chmod(destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return destination
 
 
@@ -521,19 +501,19 @@ def tracked_files(repository: Path, pathspec: str) -> list[str]:
     return [item.decode("utf-8") for item in output.split(b"\0") if item]
 
 
-def copy_backend_sources(app: Path) -> None:
-    destination = app / "gdl_backend"
-    for relative in tracked_files(ROOT, "gallery-dl-backend/gdl_backend"):
-        source = ROOT / relative
-        package_relative = Path(relative).relative_to("gallery-dl-backend")
-        target = app / package_relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-    if not all((destination / name).is_file() for name in ("__main__.py", "review_filters.py", "review_filter_models.py")):
-        raise ReleaseError("backend source projection is incomplete")
-    if (destination / "webui_dist").exists():
-        raise ReleaseError("desktop backend must not contain a second frontend")
+def build_backend(destination: Path) -> None:
+    run(["node", ROOT / "desktop/scripts/build-backend.mjs", destination])
+    if not destination.is_file() or not os.access(destination, os.X_OK):
+        raise ReleaseError("native backend build did not produce an executable")
 
+
+def copy_executor_sources(app: Path) -> None:
+    destination = app / "executors" / "ldos_gallery"
+    destination.mkdir(parents=True)
+    for source in sorted(EXECUTORS_SOURCE.glob("*.py")):
+        shutil.copy2(source, destination / source.name)
+    if not all((destination / name).is_file() for name in ("__init__.py", "worker_entry.py", "worker_patches.py", "resolve.py")):
+        raise ReleaseError("gallery executor projection is incomplete")
 
 def copy_application_scripts(app: Path, lock: dict[str, Any]) -> None:
     for relative in lock["application_scripts"]:
@@ -667,8 +647,9 @@ def write_release_manifest(
             "license_sha256": sha256_file(GALLERY_SOURCE / "LICENSE"),
         },
         "application": {
-            "backend": "app/gdl_backend",
-            "worker": "-m gdl_backend.worker_entry",
+            "backend": "bin/ldos-backend",
+            "executors": "app/executors",
+            "worker": "-m ldos_gallery.worker_entry",
             "dedup_worker": "app/dedup_review_worker.py",
             "atlas_worker": "app/atlas_worker.py",
             "tagger_cli": "app/tagger/cli.py",
@@ -781,8 +762,15 @@ def verify_tree(
     if not python.is_file():
         raise ReleaseError("controlled Python executable is missing")
     app = root / "app"
-    if not (app / "gdl_backend" / "worker_entry.py").is_file():
-        raise ReleaseError("backend worker package is missing")
+    backend = root / "bin" / "ldos-backend"
+    if not backend.is_file() or not os.access(backend, os.X_OK):
+        raise ReleaseError("native backend executable is missing or not executable")
+    if manifest.get("application", {}).get("backend") != "bin/ldos-backend":
+        raise ReleaseError("release entrypoint is not the native backend")
+    if not (app / "executors" / "ldos_gallery" / "worker_entry.py").is_file():
+        raise ReleaseError("gallery executor package is missing")
+    if any(path.name == "gdl_backend" for path in root.rglob("gdl_backend")):
+        raise ReleaseError("release tree contains the retired Python business backend")
     if not (app / "dedup_review_worker.py").is_file():
         raise ReleaseError("dedup worker is missing")
     if not (app / "atlas_worker.py").is_file():
@@ -803,7 +791,7 @@ def verify_tree(
         raise ReleaseError("bundled mihomo executable is missing or invalid")
     if manifest.get("target", "").startswith("linux") and not os.access(mihomo_binary, os.X_OK):
         raise ReleaseError("bundled mihomo executable lacks execute permission")
-    if (app / "gdl_backend" / "webui_dist").exists():
+    if any(app.rglob("webui_dist")):
         raise ReleaseError("release tree contains a second frontend")
     forbidden_suffixes = {".pt", ".onnx", ".ckpt", ".safetensors"}
     if any(
@@ -877,6 +865,8 @@ def _runtime_environment(root: Path, data_root: Path, python: Path) -> dict[str,
             "LDOS_DESKTOP_RESOURCE_ROOT": os.fspath(root),
             "LDOS_DESKTOP_DATA_ROOT": os.fspath(data_root),
             "LDOS_DESKTOP_PYTHON": os.fspath(python),
+            "LDOS_DESKTOP_ORIGIN": "mygo://localhost",
+            "PYTHON": os.fspath(python),
         }
     )
     return env
@@ -914,18 +904,15 @@ def verify_runtime(root: Path) -> dict[str, Any]:
         temporary_root = Path(temporary)
         data_root = temporary_root / "data"
         config_root = temporary_root / "config"
-        data_root.mkdir()
-        config_root.mkdir()
+        data_root.mkdir(mode=0o700)
+        config_root.mkdir(mode=0o700)
         env = _runtime_environment(root, data_root, python)
         import_code = """
 import json, os, sys
-import cv2, fastapi, onnxruntime, PIL, torch, torchvision, uvicorn
-import dedup_core, dedup_review_worker, gdl_backend
-from gdl_backend import review_filter_models
-from gdl_backend.config import AppSettings
-from gdl_backend.tagger_service import TaggerService
-catalog = TaggerService(AppSettings.load()).model_catalog()
-if not any(entry['key'] == 'wd-vit-v3' for entry in catalog):
+import cv2, onnxruntime, PIL, torch, torchvision
+import dedup_core, dedup_review_worker, review_filter_models
+from tagger.specs import SPECS
+if 'wd-vit-v3' not in SPECS:
     raise SystemExit('packaged tagger catalog is incomplete')
 expected = os.environ['LDOS_DESKTOP_PYTHON']
 if not os.path.samefile(sys.executable, expected):
@@ -952,7 +939,7 @@ print(json.dumps({
                 python,
                 "-B",
                 "-m",
-                "gdl_backend.worker_entry",
+                "ldos_gallery.worker_entry",
                 "--marker",
                 "release-smoke",
                 "--gallery-root",
@@ -960,7 +947,7 @@ print(json.dumps({
                 "--",
                 "--version",
             ],
-            cwd=app,
+            cwd=app / "executors",
             env=env,
             capture=True,
         )
@@ -996,19 +983,21 @@ print(json.dumps({
                     "runtime_dir": "/stale/runtime",
                     "database_path": "/stale/backend.sqlite3",
                     "server": {"host": "127.0.0.1", "port": port},
-                    "gallery": {"python_executable": "/stale/python"},
+                    "gallery": {"python_executable": "/stale/python", "migrate_default_auth": False},
                     "proxy": {"enabled": False, "auto_start": False},
                     "dedup": {"enabled": False, "python_executable": "/stale/python"},
+                    "tagger": {"enabled": False},
                 }
             )
             + "\n",
             encoding="utf-8",
         )
+        config_path.chmod(0o600)
         env["GDL_BACKEND_PARENT_PIPE"] = "1"
         log_path = temporary_root / "backend.log"
         with log_path.open("w+b") as log:
             process = subprocess.Popen(
-                [python, "-B", "-m", "gdl_backend", "--config", config_path],
+                [root / "bin/ldos-backend", "--config", config_path, "--executors-dir", app / "executors"],
                 cwd=app,
                 env=env,
                 stdin=subprocess.PIPE,
@@ -1035,29 +1024,39 @@ print(json.dumps({
                     ):
                         time.sleep(0.1)
                 if health is None or health.get("ok") is not True:
-                    raise ReleaseError("packaged FastAPI did not reach healthz")
+                    raise ReleaseError("packaged native backend did not reach healthz")
                 ready_status, _ = _http_json(
-                    opener, f"http://127.0.0.1:{port}/readyz", {200, 503}
+                    opener, f"http://127.0.0.1:{port}/readyz", {200}
                 )
                 _, root_payload = _http_json(
                     opener, f"http://127.0.0.1:{port}/", {200}
                 )
+                doctor = json.loads(run(
+                    [root / "bin/ldos-backend", "--config", config_path, "--doctor", "--json"],
+                    cwd=app, env=env, capture=True,
+                ))
+                if not isinstance(doctor, dict) or doctor.get("ready") is not True:
+                    raise ReleaseError("native doctor did not report a ready runtime")
+                if not (data_root / "runtime/backend.sqlite3").is_file():
+                    raise ReleaseError("native backend did not rebase the packaged database")
                 if "ui" in root_payload:
                     raise ReleaseError("desktop backend exposed a second frontend")
                 try:
-                    opener.open(f"http://127.0.0.1:{port}/ui/", timeout=1)
+                    with opener.open(f"http://127.0.0.1:{port}/ui/", timeout=1):
+                        raise ReleaseError("desktop backend mounted /ui unexpectedly")
                 except urllib.error.HTTPError as error:
+                    error.close()
                     if error.code != 404:
                         raise
-                else:
-                    raise ReleaseError("desktop backend mounted /ui unexpectedly")
             except Exception as error:
                 if process.poll() is None:
                     process.kill()
                 process.wait(timeout=10)
                 log.flush()
+                if process.stdin is not None:
+                    process.stdin.close()
                 detail = log_path.read_text(encoding="utf-8", errors="replace")
-                raise ReleaseError(f"packaged FastAPI smoke failed: {error}\n{detail}") from error
+                raise ReleaseError(f"packaged native backend smoke failed: {error}\n{detail}") from error
             if process.stdin is None:
                 raise ReleaseError("parent pipe was not created")
             process.stdin.close()
@@ -1066,11 +1065,11 @@ print(json.dumps({
             except subprocess.TimeoutExpired as error:
                 process.kill()
                 process.wait(timeout=10)
-                raise ReleaseError("packaged FastAPI ignored parent-pipe shutdown") from error
+                raise ReleaseError("packaged native backend ignored parent-pipe shutdown") from error
             if return_code != 0:
                 log.flush()
                 detail = log_path.read_text(encoding="utf-8", errors="replace")
-                raise ReleaseError(f"packaged FastAPI shutdown failed ({return_code})\n{detail}")
+                raise ReleaseError(f"packaged native backend shutdown failed ({return_code})\n{detail}")
     return {
         "target": manifest["target"],
         "python_sha256": sha256_file(python),
@@ -1088,11 +1087,11 @@ def extract_bundle(bundle: Path, destination: Path) -> Path:
     bundle = bundle.resolve()
     destination.mkdir(parents=True, exist_ok=True)
     lower_name = bundle.name.lower()
-    if lower_name.endswith(".deb"):
+    if lower_name.endswith(".tar.gz"):
+        extract_tar_archive(bundle, destination, "mygo bundle")
+    elif lower_name.endswith(".deb"):
         extract_deb(bundle, destination)
     elif lower_name.endswith(".appimage"):
-        if os.name == "nt":
-            raise ReleaseError("AppImage extraction requires Linux")
         bundle.chmod(bundle.stat().st_mode | stat.S_IXUSR)
         run([bundle, "--appimage-extract"], cwd=destination, capture=True)
         # --appimage-extract 把 AppDir 解到 squashfs-root/；以它为根，AppRun 和 usr/lib
@@ -1101,15 +1100,6 @@ def extract_bundle(bundle: Path, destination: Path) -> Path:
         if not (app_dir / "AppRun").is_file():
             raise ReleaseError(f"{bundle.name} did not extract to squashfs-root/AppRun")
         return app_dir
-    elif lower_name.endswith(".exe"):
-        seven_zip = shutil.which("7z") or shutil.which("7z.exe")
-        if seven_zip is None:
-            raise ReleaseError("7z is required to inspect an NSIS installer")
-        run([seven_zip, "x", "-y", f"-o{destination}", bundle], capture=True)
-        nested_archives = sorted(destination.rglob("*.7z"))
-        for index, archive in enumerate(nested_archives):
-            nested = destination / f"nested-{index}"
-            run([seven_zip, "x", "-y", f"-o{nested}", archive], capture=True)
     else:
         raise ReleaseError(f"unsupported desktop bundle: {bundle.name}")
     return destination
@@ -1240,8 +1230,7 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
         python = staging / lock["targets"][target]["python"]
         if not python.is_file():
             raise ReleaseError(f"runtime Python is missing: {python}")
-        if os.name != "nt":
-            python.chmod(python.stat().st_mode | stat.S_IXUSR)
+        python.chmod(python.stat().st_mode | stat.S_IXUSR)
         install_requirements(python, lock, staging)
         make_linux_wheels_relocatable(staging / "runtime", lock, target)
         remove_generated_launchers(staging / "runtime", target)
@@ -1249,7 +1238,8 @@ def assemble(target: str, output: Path, cache_dir: Path) -> dict[str, Any]:
         remove_stale_record_entries(staging / "runtime")
         app = staging / "app"
         app.mkdir()
-        copy_backend_sources(app)
+        build_backend(staging / "bin" / "ldos-backend")
+        copy_executor_sources(app)
         copy_application_scripts(app, lock)
         copy_gallery_source(app)
         install_mihomo(mihomo_archive, staging, lock, target)
@@ -1348,68 +1338,40 @@ def frontend_build_commands(npm: str) -> list[list[str]]:
     复用下载到的 canonical dist，不重新生成。"""
     if os.environ.get("LDOS_PREBUILT_FRONTEND"):
         return []
-    return [[npm, "run", "build"]]
+    return [[npm, "run", "build:web"]]
 
 
 def build_release(cache_dir: Path) -> dict[str, Any]:
     ensure_clean_tracked_checkout()
     desktop = ROOT / "desktop"
-    npm = "npm.cmd" if os.name == "nt" else "npm"
-    run([npm, "ci"], cwd=desktop)
-    for command in frontend_build_commands(npm):
+    run(["npm", "ci"], cwd=desktop)
+    run(["npm", "run", "generate"], cwd=desktop)
+    for command in frontend_build_commands("npm"):
         run(command, cwd=desktop)
     target = host_target()
     assemble(target, DEFAULT_OUTPUT, cache_dir)
     runtime_result = verify_runtime(DEFAULT_OUTPUT)
-    tauri = desktop / "src-tauri"
-    run(["cargo", "fmt", "--check"], cwd=tauri)
-    run(["cargo", "test", "--locked"], cwd=tauri)
-    run(
-        [
-            npm,
-            "run",
-            "tauri",
-            "--",
-            "build",
-            "--ci",
-            "--config",
-            os.fspath(TAURI_RELEASE_CONFIG),
-            "--",
-            "--locked",
-        ],
-        cwd=desktop,
-        env=tauri_bundle_env(target),
-    )
-    bundle_root = tauri / "target" / "release" / "bundle"
-    patterns = (
-        ("deb/*.deb", "appimage/*.AppImage")
-        if target == "linux-x86_64"
-        else ("nsis/*.exe",)
-    )
-    bundles: list[Path] = []
-    for pattern in patterns:
-        matches = sorted(bundle_root.glob(pattern))
-        if len(matches) != 1:
-            raise ReleaseError(
-                f"expected one {pattern} bundle, found {len(matches)}"
-            )
-        bundles.extend(matches)
+    # mygo copies resources/ beside the Linux executable before creating archives.
+    shutil.copy2(FRONTEND_MANIFEST, desktop / "resources" / FRONTEND_MANIFEST.name)
+    run(["go", "test", "./src-mygo/..."], cwd=desktop)
+    run(["npm", "run", "mygo", "--", "build", "-platform", "linux/amd64", "-skip-build-command"], cwd=desktop)
+    bundle_root = desktop / "build" / "linux-amd64"
+    verify_bundle_tree(bundle_root)
+    bundles = sorted(bundle_root.glob("*.tar.gz"))
+    if len(bundles) != 1:
+        raise ReleaseError(f"expected one Linux mygo archive, found {len(bundles)}")
     bundle_results = [verify_bundle(bundle) for bundle in bundles]
     ensure_clean_tracked_checkout()
-    return {
-        "target": target,
-        "runtime": runtime_result,
-        "bundles": bundle_results,
-    }
+    return {"target": target, "runtime": runtime_result, "bundles": bundle_results}
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     assemble_parser = subparsers.add_parser("assemble")
-    assemble_parser.add_argument("--target", default=host_target())
+    assemble_parser.add_argument("--target", choices=["linux-x86_64"], default=host_target())
     assemble_parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     assemble_parser.add_argument("--cache-dir", type=Path, default=default_cache_dir())
-    build_parser = subparsers.add_parser("build")
+    build_parser = subparsers.add_parser("build", help="build and verify a Linux mygo archive with native backend resources")
     build_parser.add_argument("--cache-dir", type=Path, default=default_cache_dir())
     verify_parser = subparsers.add_parser("verify-tree")
     verify_parser.add_argument("--tree", type=Path, default=DEFAULT_OUTPUT)

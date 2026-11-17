@@ -207,6 +207,38 @@ describe("crawl queries", () => {
     expect(Object.fromEntries(url.searchParams)).toEqual({ view: "tasks", limit: "100", offset: "200" });
   });
 
+  it("活动批次持续核对，最终状态停止轮询", () => {
+    const { api } = apiReturning(BATCH);
+    const poll = crawlBatchQuery(api, "batch-1").refetchInterval;
+    if (typeof poll !== "function") throw new Error("missing batch refresh");
+    for (const status of ["queued", "running", "cancelling"]) {
+      expect(poll({ state: { data: sanitizeBatch({ ...BATCH, status }) } } as never)).toBe(2_000);
+    }
+    for (const status of ["succeeded", "completed_with_errors", "cancelled", "paused"]) {
+      expect(poll({ state: { data: sanitizeBatch({ ...BATCH, status }) } } as never)).toBe(false);
+    }
+  });
+
+  it("批次已结束但任务页仍旧时继续刷新，直到任务全部终结", () => {
+    const { api } = apiReturning({ items: [] });
+    const poll = crawlTasksQuery(api, "batch-1", 100, "succeeded").refetchInterval;
+    if (typeof poll !== "function") throw new Error("missing task refresh");
+    for (const status of ["queued", "held", "starting", "running", "cancelling"]) {
+      const page = sanitizeCrawlTaskPage({ items: [{ id: "task-1", status }] }, 100);
+      expect(poll({ state: { data: page } } as never)).toBe(2_000);
+    }
+    const page = sanitizeCrawlTaskPage({ items: ["succeeded", "failed", "cancelled"].map((status) => ({ id: status, status })) }, 100);
+    expect(poll({ state: { data: page } } as never)).toBe(false);
+  });
+
+  it("当前页已完成或尚未规划出任务时，运行中的批次仍刷新", () => {
+    const { api } = apiReturning({ items: [] });
+    const poll = crawlTasksQuery(api, "batch-1", 0, "running").refetchInterval;
+    if (typeof poll !== "function") throw new Error("missing task refresh");
+    for (const items of [[], [{ id: "task-1", status: "succeeded" }]]) {
+      expect(poll({ state: { data: sanitizeCrawlTaskPage({ items }, 0) } } as never)).toBe(2_000);
+    }
+  });
   it("key 工厂按批次和页偏移区分", () => {
     expect(crawlKeys.taskPage("b", 100)).toEqual(["crawls", "tasks", "b", 100]);
     expect(crawlKeys.detail("b")).toEqual(["crawls", "detail", "b"]);

@@ -1,4 +1,4 @@
-// 宿主（Tauri）返回值的消毒，从旧版 core/runtime/sanitize.ts 移植。
+// 宿主返回值的消毒，从旧版 core/runtime/sanitize.ts 移植。
 // 宿主可能附带配置路径之类的私有字段，这里只取白名单字段，文案由界面按语言给出。
 
 import { isPlainRecord } from "#lib/api/sanitize.ts";

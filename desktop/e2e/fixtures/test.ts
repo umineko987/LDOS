@@ -4,13 +4,13 @@ import { expect, test as base } from "@playwright/test";
 import { mockHealthyBackend } from "./api";
 import { mockQuietRealtime } from "./jobs";
 
-const tauriConfig = JSON.parse(
-  readFileSync(new URL("../../src-tauri/tauri.conf.json", import.meta.url), "utf8"),
-) as { app: { security: { csp: string; devCsp: string } } };
+const csp = JSON.parse(
+  readFileSync(new URL("../../csp.json", import.meta.url), "utf8"),
+) as { production: string; development: string };
 
-/** Tauri 开发窗口的 CSP；开发服务器自己给 HTML 加上它（见 scripts/external-boot.ts）。 */
-export const DEV_CSP = tauriConfig.app.security.devCsp;
-export const PRODUCTION_CSP = tauriConfig.app.security.csp;
+/** mygo 与浏览器测试共用的 CSP；开发服务器会给 HTML 加上 development 策略。 */
+export const DEV_CSP = csp.development;
+export const PRODUCTION_CSP = csp.production;
 
 declare global {
   interface Window {

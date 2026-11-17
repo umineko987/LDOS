@@ -46,8 +46,8 @@ def image_info(path: Path, rank: int) -> dict:
 class ReviewManifestTests(unittest.TestCase):
     def test_selected_roots_use_only_snapshotted_files_and_preserve_asset_ids(self):
         from PIL import Image
-        with patch.object(sys, "path", [str(ROOT / "gallery-dl-backend"), *sys.path]):
-            from gdl_backend.gallery_safe_paths import SafeSourceRoot
+        with patch.object(sys, "path", [str(ROOT / "dedup"), *sys.path]):
+            from review_safe_paths import SafeSourceRoot, held_file_disk_version
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 selected = []
@@ -56,11 +56,11 @@ class ReviewManifestTests(unittest.TestCase):
                     source.mkdir()
                     Image.new("RGB", (32, 32), "red").save(source / "selected.png")
                     Image.new("RGB", (32, 32), "blue").save(source / "not-selected.png")
-                    with SafeSourceRoot(source) as safe:
+                    with SafeSourceRoot(source) as safe, safe.open_binary("selected.png") as handle:
                         selected.append({"asset_id": f"asset-{n}", "source_id": f"source-{n}",
                                          "root_path": str(source), "relative_path": "selected.png",
                                          "root_identity": list(safe.root_identity()),
-                                         "disk_version": safe.disk_version("selected.png")})
+                                         "disk_version": held_file_disk_version(handle)})
                 input_path, output = root / "input.json", root / "manifest.json"
                 input_path.write_text(json.dumps({"review_id": "gallery-review", "images": selected}))
                 args = ["worker", "--input", str(input_path), "--output", str(output),

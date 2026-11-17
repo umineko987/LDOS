@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import getpass
 import os
 import secrets
-import subprocess
 from pathlib import Path
 from typing import IO
 
@@ -27,33 +25,6 @@ def reject_symlink_path(path: Path) -> None:
     _reject_symlink(Path(path))
 
 
-def _apply_windows_acl(path: Path) -> None:
-    username = os.environ.get("USERNAME") or getpass.getuser()
-    domain = os.environ.get("USERDOMAIN")
-    identity = f"{domain}\\{username}" if domain and username else username
-    if not identity:
-        raise PermissionError("无法识别当前 Windows 用户，未放宽敏感路径权限")
-    inherit = "(OI)(CI)" if path.is_dir() else ""
-    grants = (
-        f"{identity}:{inherit}(F)",
-        f"*S-1-5-18:{inherit}(F)",
-        f"*S-1-5-32-544:{inherit}(F)",
-    )
-    try:
-        result = subprocess.run(
-            ["icacls.exe", str(path), "/inheritance:r", "/grant:r", *grants],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=5,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise PermissionError(f"设置 Windows 敏感路径 ACL 失败: {path}") from exc
-    if result.returncode != 0:
-        raise PermissionError(f"设置 Windows 敏感路径 ACL 失败: {path}")
-
-
 def secure_private_path(path: Path) -> None:
     """把应用管理目录/文件限制为当前用户；绝不跟随路径组件符号链接。"""
 
@@ -66,8 +37,6 @@ def secure_private_path(path: Path) -> None:
         os.chmod(path, mode)
     except OSError as exc:
         raise PermissionError(f"无法收紧应用管理路径权限: {path}") from exc
-    if os.name == "nt":
-        _apply_windows_acl(path)
 
 
 def ensure_private_directory(path: Path, *, repair_existing: bool = True) -> Path:
@@ -109,12 +78,7 @@ def open_private_binary(path: Path, *, append: bool = False) -> IO[bytes]:
     flags |= int(getattr(os, "O_NOFOLLOW", 0))
     try:
         descriptor = os.open(path, flags, PRIVATE_FILE_MODE)
-        if hasattr(os, "fchmod"):
-            os.fchmod(descriptor, PRIVATE_FILE_MODE)
-        else:
-            os.chmod(path, PRIVATE_FILE_MODE)
-        if os.name == "nt":
-            _apply_windows_acl(path)
+        os.fchmod(descriptor, PRIVATE_FILE_MODE)
     except (OSError, PermissionError) as exc:
         if "descriptor" in locals():
             os.close(descriptor)
@@ -139,8 +103,6 @@ def write_private_text(path: Path, text: str, *, encoding: str = "utf-8") -> Non
         created = True
         with os.fdopen(descriptor, "w", encoding=encoding, newline="\n") as handle:
             handle.write(text)
-        if os.name == "nt":
-            _apply_windows_acl(temporary)
         _reject_symlink(path)
         os.replace(temporary, path)
         created = False

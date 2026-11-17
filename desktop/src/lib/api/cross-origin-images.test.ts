@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-// 图片都来自另一个源上的本地后端（桌面里页面是 tauri://localhost）。不带 crossorigin 的 <img> 请求没有 Origin，
+// 图片都来自另一个源上的本地后端（桌面里页面是 mygo://localhost）。不带 crossorigin 的 <img> 请求没有 Origin，
 // 只有 Sec-Fetch-Site: cross-site，后端的 local_origin_guard 会回 403 forbidden_cross_site。
 // 带上 crossorigin="anonymous" 才会发 Origin，后端按 cors_origins 放行。mock 的 e2e 图片是同源的，抓不到这个问题。
 

@@ -25,24 +25,23 @@ const TIME = 1_760_000_000;
 declare global {
   interface Window {
     /** fakeDesktopHost 收到的宿主命令（不含启动门的两个）。 */
-    __hostCalls?: { command: string; args?: unknown }[];
+    __hostCalls?: { command: string; args: unknown[] }[];
   }
 }
 
-/** 模拟 Tauri 宿主：后端就绪，选目录给 `directory`，其余命令记在 window.__hostCalls。 */
+/** 模拟 MyGo 宿主：后端就绪，选目录给 `directory`，其余调用记在 window.__hostCalls。 */
 export async function fakeDesktopHost(page: Page, { directory }: { directory: string | null }): Promise<void> {
   await page.addInitScript((picked) => {
     window.__hostCalls = [];
     Object.assign(window, {
-      isTauri: true,
-      __TAURI_INTERNALS__: {
-        invoke: async (command: string, args?: unknown) => {
-          if (command === "backend_status") return { state: "ready" };
-          if (command === "runtime_metadata") return { apiOrigin: location.origin, backendVersion: "0.5.2" };
-          window.__hostCalls?.push({ command, args });
-          if (command === "select_directory") return picked;
-          if (command === "reveal_in_file_manager") return null;
-          throw new Error(`unexpected command ${command}`);
+      mygo: {
+        call: async (method: string, ...args: unknown[]) => {
+          if (method === "Host.BackendStatus") return { state: "ready" };
+          if (method === "Host.RuntimeMetadata") return { apiOrigin: location.origin, backendVersion: "0.5.2" };
+          window.__hostCalls?.push({ command: method, args });
+          if (method === "Host.SelectDirectory") return picked;
+          if (method === "Host.RevealInFileManager") return null;
+          throw new Error(`unexpected method ${method}`);
         },
       },
     });

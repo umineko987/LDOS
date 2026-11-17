@@ -62,6 +62,7 @@
     {#if view?.legacy}<Badge variant="outline" data-testid="network-accounts-legacy">{m.network_legacy()}</Badge>{/if}
   </div>
 
+  <p class="text-xs text-fg3">{m.network_accounts_proxy_hint()}</p>
   {#if query.error}
     <p class="text-sm text-danger" role="alert">{m.network_load_failed({ reason: apiErrorMessage(query.error) })}</p>
   {:else if view}

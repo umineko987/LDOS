@@ -67,7 +67,7 @@ test("kohya 布局：选目录、预览计划、开始导出，完成后在文�
   await expect(current.getByTestId("export-status")).toHaveText("完成");
 
   await current.getByTestId("export-reveal").click();
-  await expect.poll(() => hostCalls(page)).toContainEqual({ command: "reveal_in_file_manager", args: { path: "/home/me/train/12_alice" } });
+  await expect.poll(() => hostCalls(page)).toContainEqual({ command: "Host.RevealInFileManager", args: ["/home/me/train/12_alice"] });
 });
 
 test("黑名单默认取标签工作室存的，手动改过以后照用户的", async ({ page }) => {

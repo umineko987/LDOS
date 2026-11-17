@@ -38,8 +38,6 @@ COMPONENTS = {
 
 
 def _display_command(arguments: list[str]) -> str:
-    if os.name == "nt":
-        return subprocess.list2cmdline(arguments)
     return shlex.join(arguments)
 
 

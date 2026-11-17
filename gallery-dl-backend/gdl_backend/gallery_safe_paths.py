@@ -18,7 +18,7 @@ import threading
 import stat
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import BinaryIO
 
 
@@ -92,9 +92,6 @@ _OPEN_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NO_FOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _CLOSE_ON_EXEC = getattr(os, "O_CLOEXEC", 0)
 _HAS_DIR_FD = os.open in os.supports_dir_fd and os.stat in os.supports_dir_fd
-# Windows 的 CRT 无法以 O_RDONLY 打开目录（PermissionError），也没有 dir_fd 语义；
-# SafeSourceRoot 在此类平台退化为纯路径校验模式（见 SafeSourceRoot.open）。
-_DESCRIPTOR_ANCHORED = os.name == "posix"
 
 
 def validate_relative_path(relative_path: str, *, allow_root: bool = False) -> tuple[str, ...]:
@@ -107,7 +104,7 @@ def validate_relative_path(relative_path: str, *, allow_root: bool = False) -> t
     if "\\" in relative_path or "\x00" in relative_path:
         raise UnsafeSourcePathError(relative_path, "relative_path_invalid")
     pure = PurePosixPath(relative_path)
-    if pure.is_absolute():
+    if pure.is_absolute() or PureWindowsPath(relative_path).drive:
         raise UnsafeSourcePathError(relative_path, "relative_path_absolute")
     parts = pure.parts
     if not parts or any(part in {"", ".", ".."} for part in parts):
@@ -188,8 +185,6 @@ class SafeSourceRoot:
         self.path = Path(root_path)
         self._canonical = self.path.resolve(strict=False)
         self._root_fd: int | None = None
-        self._root_identity: tuple[int, int] | None = None
-        self._descriptorless = False
 
     def __enter__(self) -> "SafeSourceRoot":
         self.open()
@@ -199,23 +194,7 @@ class SafeSourceRoot:
         self.close()
 
     def open(self) -> None:
-        if self._root_fd is not None or self._descriptorless:
-            return
-        if not _DESCRIPTOR_ANCHORED:
-            # Windows 的 CRT 无法以描述符锚定目录（os.open 打开目录直接
-            # PermissionError，也不存在 dir_fd 语义）。此平台走文档化的
-            # 纯路径回退模式：reparse/目录类型校验仍然生效，仅失去描述符
-            # 级 TOCTOU 防护——与 _HAS_DIR_FD 回退分支的既定弱点一致。
-            if _is_reparse_path(self.path):
-                raise UnsafeSourcePathError("", "source_root_reparse_point")
-            try:
-                observed = self.path.lstat()
-            except OSError as error:
-                raise UnsafeSourcePathError("", "source_root_unavailable") from error
-            if not stat.S_ISDIR(observed.st_mode):
-                raise UnsafeSourcePathError("", "source_root_not_directory")
-            self._root_identity = (int(observed.st_dev), int(observed.st_ino))
-            self._descriptorless = True
+        if self._root_fd is not None:
             return
         if _is_reparse_path(self.path):
             raise UnsafeSourcePathError("", "source_root_reparse_point")
@@ -245,8 +224,6 @@ class SafeSourceRoot:
 
     def close(self) -> None:
         descriptor, self._root_fd = self._root_fd, None
-        self._root_identity = None
-        self._descriptorless = False
         if descriptor is not None:
             os.close(descriptor)
 
@@ -257,15 +234,9 @@ class SafeSourceRoot:
         return self._root_fd
 
     def root_identity(self) -> tuple[int, int]:
-        """根目录身份 (st_dev, st_ino)：描述符模式锚定在已打开的描述符，
-        无描述符平台保存 open 时的 lstat 身份并在每次路径操作前复核。"""
-        self.open()
-        if self._root_fd is not None:
-            metadata = os.fstat(self._root_fd)
-            return (int(metadata.st_dev), int(metadata.st_ino))
-        self._verify_fallback_root("")
-        assert self._root_identity is not None
-        return self._root_identity
+        """Return the identity of the directory held by the root descriptor."""
+        metadata = os.fstat(self.root_fd)
+        return (int(metadata.st_dev), int(metadata.st_ino))
 
     @contextlib.contextmanager
     def _parent_fd(
@@ -315,13 +286,8 @@ class SafeSourceRoot:
             raise UnsafeSourcePathError(
                 relative_path, "source_root_changed"
             ) from error
-        if self._descriptorless:
-            opened_identity = self._root_identity
-            if opened_identity is None:
-                raise UnsafeSourcePathError(relative_path, "source_root_changed")
-        else:
-            opened_root = os.fstat(self.root_fd)
-            opened_identity = (int(opened_root.st_dev), int(opened_root.st_ino))
+        opened_root = os.fstat(self.root_fd)
+        opened_identity = (int(opened_root.st_dev), int(opened_root.st_ino))
         if (
             _is_reparse_path(self.path)
             or not stat.S_ISDIR(observed_root.st_mode)

@@ -79,12 +79,9 @@ class ModelSetupManager:
             return 0
 
     def _source_python_fallback(self) -> Path | None:
-        relative = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
-        candidate = self._settings.dedup.core_script.parent / ".venv" / relative
+        candidate = self._settings.dedup.core_script.parent / ".venv" / "bin/python"
         try:
-            available = candidate.is_file() and (
-                os.name == "nt" or os.access(candidate, os.X_OK)
-            )
+            available = candidate.is_file() and os.access(candidate, os.X_OK)
         except OSError:
             available = False
         return candidate if available else None

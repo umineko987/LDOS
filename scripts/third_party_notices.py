@@ -9,13 +9,10 @@ import re
 import shutil
 import subprocess
 import sys
-import tomllib
-import urllib.parse
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-TAURI = ROOT / "desktop" / "src-tauri"
 NOTICE_JSON = Path("licenses/third-party-components.json")
 NOTICE_MD = Path("licenses/THIRD-PARTY-NOTICES.md")
 LICENSE_NAMES = re.compile(
@@ -23,7 +20,6 @@ LICENSE_NAMES = re.compile(
 )
 TARGET_TRIPLES = {
     "linux-x86_64": "x86_64-unknown-linux-gnu",
-    "windows-x86_64": "x86_64-pc-windows-msvc",
 }
 
 
@@ -65,133 +61,50 @@ def _relative_files(files: list[Path], tree: Path) -> list[str]:
     return [path.relative_to(tree).as_posix() for path in files]
 
 
-def _cargo_components(tree: Path, target: str) -> list[dict[str, Any]]:
-    triple = TARGET_TRIPLES[target]
-    metadata = json.loads(
-        _run(
-            [
-                "cargo",
-                "metadata",
-                "--locked",
-                "--format-version",
-                "1",
-                "--filter-platform",
-                triple,
-            ],
-            cwd=TAURI,
-        )
-    )
-    packages = {package["id"]: package for package in metadata["packages"]}
-    nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
-    root_id = metadata["resolve"]["root"]
-    pending = [root_id]
-    included: set[str] = set()
-    while pending:
-        package_id = pending.pop()
-        if package_id in included:
-            continue
-        included.add(package_id)
-        for dependency in nodes[package_id]["deps"]:
-            if any(kind["kind"] != "dev" for kind in dependency["dep_kinds"]):
-                pending.append(dependency["pkg"])
-
-    cargo_lock = tomllib.loads((TAURI / "Cargo.lock").read_text(encoding="utf-8"))
-    checksums = {
-        (item["name"], item["version"], item.get("source")): item.get("checksum")
-        for item in cargo_lock["package"]
-    }
-    components: list[dict[str, Any]] = []
-    for package_id in sorted(included):
-        package = packages[package_id]
-        if package_id == root_id:
-            continue
-        license_name = package.get("license")
-        source = package.get("source")
-        if not license_name or not source:
-            raise NoticeError(
-                f"Cargo package lacks license/source metadata: {package_id}"
-            )
-        if source.startswith("registry+"):
-            source_url = (
-                "https://crates.io/crates/"
-                f"{urllib.parse.quote(package['name'])}/{urllib.parse.quote(package['version'])}"
-            )
-        elif source.startswith("git+"):
-            source_url = source.removeprefix("git+").split("#", 1)[0]
-        else:
-            raise NoticeError(f"unsupported Cargo source: {source}")
-        source_dir = Path(package["manifest_path"]).parent
-        destination = (
-            tree
-            / "licenses"
-            / "cargo"
-            / _slug(f"{package['name']}-{package['version']}")
-        )
-        license_files = _copy_license_files(source_dir, destination)
-        if not license_files:
-            destination.mkdir(parents=True, exist_ok=True)
-            metadata_notice = destination / "DECLARED-LICENSE.txt"
-            metadata_notice.write_text(
-                "This crate archive has no standalone license file.\n"
-                f"Declared Cargo license: {license_name}\n"
-                f"Locked source: {source_url}\n",
-                encoding="utf-8",
-                newline="\n",
-            )
-            license_files = [metadata_notice]
-        components.append(
-            {
-                "ecosystem": "cargo",
-                "name": package["name"],
-                "version": package["version"],
-                "license": license_name,
-                "source": source_url,
-                "artifact_sha256": checksums.get(
-                    (package["name"], package["version"], source)
-                ),
-                "license_files": _relative_files(license_files, tree),
-            }
-        )
+def _go_components(tree: Path) -> list[dict[str, Any]]:
+    modules: dict[tuple[str, str], dict[str, Any]] = {}
+    decoder = json.JSONDecoder()
+    for project, package in ((ROOT / "backend", "./cmd/ldos-backend"), (ROOT / "desktop", "./src-mygo")):
+        output = _run(["go", "list", "-deps", "-json", package], cwd=project)
+        while output.strip():
+            entry, end = decoder.raw_decode(output.lstrip())
+            output = output.lstrip()[end:]
+            module = entry.get("Module")
+            if not module or module.get("Main"):
+                continue
+            if module.get("Replace"):
+                raise NoticeError(f"release Go module uses a replacement: {module['Path']}")
+            modules[(module["Path"], module["Version"])] = module
+    components = []
+    for (name, version), module in sorted(modules.items()):
+        destination = tree / "licenses" / "go" / _slug(f"{name}-{version}")
+        files = _copy_license_files(Path(module["Dir"]), destination)
+        if not files:
+            raise NoticeError(f"Go module has no bundled license file: {name}@{version}")
+        components.append({
+            "ecosystem": "go", "name": name, "version": version,
+            "license": "See bundled license files",
+            "source": f"https://pkg.go.dev/{name}@{version}",
+            "license_files": _relative_files(files, tree),
+        })
+    version = _run(["go", "env", "GOVERSION"], cwd=ROOT)
+    goroot = Path(_run(["go", "env", "GOROOT"], cwd=ROOT))
+    files = _copy_license_files(goroot, tree / "licenses" / "go" / version)
+    if not files:
+        raise NoticeError("Go standard-library license evidence is missing")
+    components.append({
+        "ecosystem": "runtime", "name": "Go standard library", "version": version,
+        "license": "BSD-3-Clause", "source": f"https://go.dev/dl/#{version}",
+        "license_files": _relative_files(files, tree),
+    })
     return components
-
-
-def _rust_component(tree: Path) -> dict[str, Any]:
-    toolchain = tomllib.loads(
-        (ROOT / "rust-toolchain.toml").read_text(encoding="utf-8")
-    )
-    version = toolchain["toolchain"]["channel"]
-    actual = _run(["rustc", "--version"], cwd=ROOT)
-    if not actual.startswith(f"rustc {version} "):
-        raise NoticeError(f"locked Rust {version} is not active: {actual}")
-    sysroot = Path(_run(["rustc", "--print", "sysroot"], cwd=ROOT))
-    source_files = [
-        sysroot / "share" / "doc" / "rust" / "COPYRIGHT.html",
-        sysroot / "share" / "doc" / "rust" / "COPYRIGHT-library.html",
-    ]
-    if not all(path.is_file() for path in source_files):
-        raise NoticeError("Rust standard-library license evidence is missing")
-    destination = tree / "licenses" / "rust" / f"rust-{version}"
-    destination.mkdir(parents=True, exist_ok=True)
-    copied = []
-    for path in source_files:
-        target = destination / path.name
-        shutil.copyfile(path, target)
-        copied.append(target)
-    return {
-        "ecosystem": "runtime",
-        "name": "Rust standard library",
-        "version": version,
-        "license": "Apache-2.0 OR MIT",
-        "source": f"https://github.com/rust-lang/rust/tree/{version}",
-        "license_files": _relative_files(copied, tree),
-    }
 
 
 def _npm_components(tree: Path) -> list[dict[str, Any]]:
     lock = json.loads(
         (ROOT / "desktop" / "package-lock.json").read_text(encoding="utf-8")
     )
-    package_paths = ("node_modules/@tauri-apps/api", "node_modules/svelte")
+    package_paths = ("node_modules/mygo-runtime", "node_modules/svelte")
     components: list[dict[str, Any]] = []
     for package_path in package_paths:
         item = lock["packages"][package_path]
@@ -405,9 +318,8 @@ def generate(
     if target not in TARGET_TRIPLES:
         raise NoticeError(f"unsupported notice target: {target}")
     licenses = tree / "licenses"
-    shutil.rmtree(licenses / "cargo", ignore_errors=True)
+    shutil.rmtree(licenses / "go", ignore_errors=True)
     shutil.rmtree(licenses / "npm", ignore_errors=True)
-    shutil.rmtree(licenses / "rust", ignore_errors=True)
     components = [
         {
             "ecosystem": "build-provenance",
@@ -441,9 +353,8 @@ def generate(
                 "license_files": [mihomo["license_file"]],
             }
         )
-    components.append(_rust_component(tree))
+    components.extend(_go_components(tree))
     components.extend(_npm_components(tree))
-    components.extend(_cargo_components(tree, target))
     components.extend(_python_components(tree, python))
     components.sort(
         key=lambda item: (item["ecosystem"], item["name"].lower(), item["version"])

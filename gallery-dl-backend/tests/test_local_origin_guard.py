@@ -144,6 +144,14 @@ class LocalOriginGuardTests(unittest.TestCase):
                     "forbidden_cross_site",
                 )
 
+    def test_mygo_origins_require_explicit_configuration(self) -> None:
+        for origin in ("mygo://localhost", "http://mygo.localhost"):
+            with self.subTest(origin=origin):
+                response = self.client.get("/healthz", headers={"Origin": origin})
+                self.assertEqual(response.status_code, 403, response.text)
+                self.assertEqual(response.json()["error"]["code"], "forbidden_cross_site")
+                self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+
     def test_allows_same_origin_and_none_fetch_site(self) -> None:
         host = f"127.0.0.1:{self.settings.server.port}"
         for fetch_site in ("same-origin", "none", None):

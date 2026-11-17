@@ -5,7 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vitest/config";
 
 import packageJson from "./package.json" with { type: "json" };
-import tauriConfig from "./src-tauri/tauri.conf.json" with { type: "json" };
+import csp from "./csp.json" with { type: "json" };
 import { devCsp } from "./scripts/external-boot.ts";
 
 export default defineConfig({
@@ -16,13 +16,13 @@ export default defineConfig({
     paraglideVitePlugin({ project: "./project.inlang" }),
     tailwindcss(),
     sveltekit({
-      // Tauri 从 dist/ 加载；hash 路由下 SvelteKit 只产出一个 index.html，路由全部走 location.hash。
+      // mygo 从 dist/ 加载；hash 路由下 SvelteKit 只产出一个 index.html，路由全部走 location.hash。
       adapter: adapter({ pages: "dist", assets: "dist" }),
       router: { type: "hash" },
       // 桌面应用随安装包更新，不需要轮询新版本；版本号固定，构建产物可复现。
       version: { name: packageJson.version, pollInterval: 0 },
     }),
-    devCsp(tauriConfig.app.security.devCsp),
+    devCsp(csp.development),
   ],
   server: {
     host: "localhost",

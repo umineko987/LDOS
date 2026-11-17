@@ -419,6 +419,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/danbooru/browse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Browse Danbooru posts or ordered collections */
+        post: operations["browse_danbooru"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/danbooru/media/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve a bounded local Danbooru preview */
+        get: operations["preview_danbooru"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasets": {
         parameters: {
             query?: never;
@@ -658,6 +692,23 @@ export interface paths {
          * @description 开一个爬取批次；批次结束、图库注册好来源后自动挂成这个数据集的根目录。
          */
         post: operations["create_dataset_crawl_api_v1_datasets__dataset_id__crawls_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/danbooru/collect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collect preview-selected Danbooru posts */
+        post: operations["collect_danbooru"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3193,6 +3244,63 @@ export interface components {
             url?: string | null;
         } & {
             [key: string]: unknown;
+        };
+        DanbooruBrowseRequest: {
+            /** @default false */
+            count?: boolean;
+            cursor?: string;
+            dataset_id: string;
+            /** @enum {string} */
+            kind: "search" | "pool" | "favorite_group" | "favorites";
+            /** @default 48 */
+            limit?: number;
+            query?: string;
+            reference?: string;
+        };
+        DanbooruBrowseResponse: {
+            items: components["schemas"]["DanbooruPost"][];
+            next_cursor: string;
+            source: components["schemas"]["DanbooruSource"];
+            total: number | null;
+            warnings: string[];
+        };
+        DanbooruCollectRequest: {
+            tokens: string[];
+        };
+        DanbooruCollectResponse: {
+            batch_id: string | null;
+            queued_count: number;
+            reused_count: number;
+            skipped_count: number;
+        };
+        DanbooruPost: {
+            downloadable: boolean;
+            file_ext: string;
+            file_size: number;
+            height: number;
+            id: string;
+            in_dataset: boolean;
+            local_asset_id: string | null;
+            preview_url: string;
+            rating: string;
+            sample_url: string;
+            score: number;
+            source_url: string;
+            tags: {
+                [key: string]: string[];
+            };
+            title: string;
+            token: string;
+            unavailable_reason: string;
+            url: string;
+            width: number;
+        };
+        DanbooruSource: {
+            id: string;
+            /** @enum {string} */
+            kind: "search" | "pool" | "favorite_group" | "favorites";
+            name: string;
+            url: string;
         };
         /** DatasetCrawlListResponse */
         DatasetCrawlListResponse: {
@@ -7923,6 +8031,73 @@ export interface operations {
             };
         };
     };
+    browse_danbooru: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DanbooruBrowseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DanbooruBrowseResponse"];
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: {
+                            code: string;
+                            details: unknown;
+                            message: string;
+                            request_id: string;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    preview_danbooru: {
+        parameters: {
+            query?: {
+                size?: "preview" | "sample";
+            };
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/gif": string;
+                    "image/jpeg": string;
+                    "image/png": string;
+                    "image/webp": string;
+                };
+            };
+        };
+    };
     list_datasets_api_v1_datasets_get: {
         parameters: {
             query?: never;
@@ -8534,6 +8709,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    collect_danbooru: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DanbooruCollectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DanbooruCollectResponse"];
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: {
+                            code: string;
+                            details: unknown;
+                            message: string;
+                            request_id: string;
+                        };
+                    };
                 };
             };
         };
