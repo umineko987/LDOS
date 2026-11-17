@@ -227,9 +227,14 @@ class TaggerRunner:
             if adapter.fingerprint != described:
                 raise TaggerAdapterError(f"{adapter.spec.key} 的 describe() 与 load() 指纹不一致")
 
+        batch_size = min([
+            self.batch_size,
+            *(adapter.max_batch_size for adapter, needed in zip(adapters, missing)
+              if needed and adapter.max_batch_size is not None),
+        ])
         total = len(union)
         on_progress and on_progress("inferring", 0, total)
-        window = self.batch_size * 3
+        window = batch_size * 3
         with ThreadPoolExecutor(max_workers=self.decode_workers) as pool:
             futures: dict[int, object] = {}
             submitted = 0
@@ -244,7 +249,7 @@ class TaggerRunner:
             for _ in range(min(window, total)):
                 submit_next()
             while consumed < total:
-                positions = union[consumed:consumed + self.batch_size]
+                positions = union[consumed:consumed + batch_size]
                 batch = []
                 for position in positions:
                     future = futures.pop(position)

@@ -107,9 +107,9 @@ test("建数据集、导入、清洗、去重、打标、校对、导出，导�
 
   // 打标：还没有分数，先跑一遍（假模型按底色给 *_theme），再把结果写成 caption。
   await rail(page).locator('[data-stage="tag"]').click();
-  await expect(page.getByTestId("tag-scores")).toContainText("4 张里有 4 张还没有打标分数");
+  await expect(page.getByTestId("tag-scores")).toContainText("4 张里有 4 张待打标");
   await page.getByTestId("tag-run").click();
-  await expect(page.getByTestId("tag-scores")).toContainText("4 张都有打标分数");
+  await expect(page.getByTestId("tag-scores")).toContainText("已生成 4 张的打标结果");
   await expect(page.getByTestId("tag-changed")).toHaveAttribute("data-count", "4");
   await page.getByTestId("tag-write").click();
   const write = page.getByTestId("tag-write-dialog");

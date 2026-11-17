@@ -513,6 +513,42 @@ def fake_transformers(num_classes: int) -> types.ModuleType:
     return module
 
 
+class PixaiCpuRuntimeTests(unittest.TestCase):
+    def test_bounds_cpu_threads_and_restores_callers_setting(self) -> None:
+        import os
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, spec = make_pixai_bundle(root)
+            for threads, expected in ((16, [8, 16]), (2, [])):
+                with self.subTest(threads=threads), \
+                        mock.patch.dict(os.environ, {}, clear=True), \
+                        mock.patch.dict(sys.modules, {"transformers": fake_transformers(4)}), \
+                        mock.patch.object(torch, "get_num_threads", return_value=threads), \
+                        mock.patch.object(torch, "set_num_threads") as setting:
+                    adapter = adapters.PixaiHfAdapter(spec, root / "models")
+                    adapter.load()
+                    adapter.close()
+                    adapter.close()
+                    self.assertEqual(setting.call_args_list, [mock.call(value) for value in expected])
+
+    def test_explicit_thread_environment_is_preserved(self) -> None:
+        import os
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, spec = make_pixai_bundle(root)
+            for key in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+                with self.subTest(key=key), \
+                        mock.patch.dict(os.environ, {key: "12"}, clear=True), \
+                        mock.patch.dict(sys.modules, {"transformers": fake_transformers(4)}), \
+                        mock.patch.object(torch, "set_num_threads") as setting:
+                    adapter = adapters.PixaiHfAdapter(spec, root / "models")
+                    adapter.load()
+                    adapter.close()
+                    setting.assert_not_called()
+
+
 def refuse_inference_session(*args, **kwargs):
     raise AssertionError("describe() 不能创建推理 session")
 

@@ -127,7 +127,7 @@ describe("candidatesQuery", () => {
 });
 
 describe("写操作", () => {
-  it("runTagStage 和 cancelTagger", async () => {
+  it.each(["wd-vit-v3", "pixai-tagger-v1"])("%s 通过 tag 阶段运行并可取消", async (model) => {
     const run = {
       run_id: "r1",
       dataset_id: "d1",
@@ -144,9 +144,9 @@ describe("写操作", () => {
     const { api, requests } = fakeApi((request) =>
       request.url.endsWith("/cancel") ? { status: 200, body: { cancelled: true } } : { status: 202, body: run },
     );
-    await expect(runTagStage(api, "d1", { models: ["wd"] })).resolves.toEqual(run);
+    await expect(runTagStage(api, "d1", { models: [model] })).resolves.toEqual(run);
     expect(new URL(requests[0]!.request.url).pathname).toBe("/api/v1/datasets/d1/stages/tag/run");
-    expect(requests[0]!.body).toEqual({ models: ["wd"] });
+    expect(requests[0]!.body).toEqual({ models: [model] });
     await cancelTagger(api);
     expect(new URL(requests[1]!.request.url).pathname).toBe("/api/v1/tagger/cancel");
   });

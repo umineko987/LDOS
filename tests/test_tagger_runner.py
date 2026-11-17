@@ -33,6 +33,7 @@ class FakeAdapter:
 
     SCORES = np.array([0.9, 0.34, 0.9], dtype=np.float32)
     vocabulary = Vocabulary(["solo", "long_hair", "hero"], ["general", "general", "character"])
+    max_batch_size = None
 
     def __init__(self, spec: TaggerModelSpec, model_dir: Path):
         self.spec = spec
@@ -178,6 +179,64 @@ class TaggerRunnerTests(unittest.TestCase):
         self.runner.batch_size = 2
         self.runner.run(self.files(), self.policy)
         self.assertEqual([adapter.batch_sizes for adapter in self.adapters], [[2, 1], [2, 1]])
+
+    def test_serial_adapter_checkpoints_survive_interruption_and_resume(self) -> None:
+        from adapters import PixaiHfAdapter
+        from runner import file_sha256
+
+        class SerialAdapter(FakeAdapter):
+            max_batch_size = PixaiHfAdapter.max_batch_size
+
+        self.runner.specs = self.specs[:1]
+        self.runner.adapter_factory = SerialAdapter
+        self.runner.batch_size = 8
+        completed = []
+
+        def interrupt(stage, done, total):
+            if stage == "inferring":
+                completed.append(done)
+                if done >= 1:
+                    raise InterruptedError("cancelled")
+
+        with self.assertRaises(InterruptedError):
+            self.runner.run(self.files(), self.policy, write_captions=False, on_progress=interrupt)
+        self.assertEqual(completed, [0, 1])
+        fingerprint = f"fake-{self.specs[0].key}-{self.specs[0].revision}"
+        self.assertIsNotNone(self.cache.get_scores(fingerprint, file_sha256(self.files()[0])))
+        self.assertIsNone(self.cache.get_scores(fingerprint, file_sha256(self.files()[1])))
+
+        completed.clear()
+        stats = self.runner.run(
+            self.files(), SelectionPolicy(thresholds={}, categories=("character",)), write_captions=False,
+            on_progress=lambda stage, done, total: completed.append(done) if stage == "inferring" else None,
+        )
+        self.assertEqual(completed, [0, 1, 2])
+        model = stats.per_model[self.specs[0].key]
+        self.assertEqual((model.inferred, model.score_cache_hits), (2, 1))
+        self.assertEqual(list(self.images.glob("*.txt")), [])
+
+    def test_cached_serial_model_does_not_reduce_other_models_batch(self) -> None:
+        from adapters import PixaiHfAdapter
+        from runner import file_sha256
+
+        first, second = self.specs
+        self.cache.put_scores(
+            f"fake-{second.key}-{second.revision}",
+            [(file_sha256(path), FakeAdapter.SCORES) for path in self.files()],
+        )
+
+        def factory(spec, model_dir):
+            adapter = FakeAdapter(spec, model_dir)
+            if spec.key != first.key:
+                adapter.max_batch_size = PixaiHfAdapter.max_batch_size
+            self.adapters.append(adapter)
+            return adapter
+
+        self.adapters.clear()
+        self.runner.adapter_factory = factory
+        self.runner.run(self.files(), self.policy, write_captions=False)
+        self.assertEqual(self.adapters[0].batch_sizes, [2, 1])
+        self.assertEqual(self.adapters[1].batch_sizes, [])
 
     def test_second_run_hits_score_cache_and_selected(self) -> None:
         self.runner.run(self.files(), self.policy)

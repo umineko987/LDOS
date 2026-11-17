@@ -326,6 +326,7 @@
 
         <section class="flex flex-col gap-2">
           {@render section(m.tag_categories())}
+          <p class="text-2xs text-fg3">{m.tag_categories_hint()}</p>
           <div class="flex flex-wrap gap-x-3 gap-y-1.5" data-testid="tag-categories">
             {#each options as category (category)}
               <label class="flex cursor-pointer items-center gap-1.5 text-xs">
@@ -412,16 +413,17 @@
             {/if}
           </span>
           <Button
-            variant={stats?.missing_scores ? "default" : "ghost"}
+            variant={!stats || stats.missing_scores ? "default" : "ghost"}
             size="sm"
             disabled={starting || !selected.length}
             onclick={runTagger}
             data-testid="tag-run"
           >
-            {stats?.missing_scores ? m.tag_run() : m.tag_run_again()}
+            {!stats || stats.missing_scores ? m.tag_run() : m.tag_run_again()}
           </Button>
         {/if}
       </section>
+      <p class="-mt-3 text-2xs text-fg3">{m.tag_run_hint()}</p>
       {#if interrupted && !tagging}
         <p class="-mt-3 text-2xs text-warn" role="status" data-testid="tag-interrupted">{m.tag_run_interrupted()}</p>
       {/if}

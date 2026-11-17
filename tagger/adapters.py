@@ -8,6 +8,7 @@ WD 系列 ONNX：激活函数已烘焙进计算图，输出即概率，直接透
 from __future__ import annotations
 
 import hashlib
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Sequence
@@ -47,6 +48,7 @@ class TaggerAdapter(ABC):
 
     adapter_name: str
     model_dir: Path
+    max_batch_size: int | None = None  # Upper bound for one cache/progress checkpoint.
 
     def describe(self) -> None:
         if not installed(self.spec, self.model_dir):
@@ -236,6 +238,8 @@ class PixaiHfAdapter(TaggerAdapter):
     """
 
     adapter_name = "pixai_hf"
+    # CPU inference is serial; checkpoint every image instead of buffering eight.
+    max_batch_size = 1
 
     def __init__(self, spec: TaggerModelSpec, model_dir: Path):
         if spec.adapter != "pixai_hf":
@@ -246,6 +250,7 @@ class PixaiHfAdapter(TaggerAdapter):
         self._model = None
         self._processor = None
         self.fingerprint = ""
+        self._previous_threads: int | None = None
 
     def _read_vocabulary(self, path: Path) -> Vocabulary:
         return load_pixai_config(path / "config.json")
@@ -253,11 +258,20 @@ class PixaiHfAdapter(TaggerAdapter):
     def load(self) -> None:
         self.describe()
         try:
+            import torch
             from transformers import AutoImageProcessor, AutoModel
         except ImportError as error:
             raise TaggerAdapterError(
                 f"缺少 transformers 依赖，请安装 tagger-torch 组: {error}"
             ) from error
+
+        # The CPU-only PixAI path slows down with excessive intra-op threads.
+        # Keep explicit operator settings, and restore the process setting on close.
+        if not any(name in os.environ for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS")):
+            threads = torch.get_num_threads()
+            if threads > 8:
+                self._previous_threads = threads
+                torch.set_num_threads(8)
 
         path = bundle_path(self.model_dir, self.spec.key)
         self._model = AutoModel.from_pretrained(
@@ -289,6 +303,11 @@ class PixaiHfAdapter(TaggerAdapter):
     def close(self) -> None:
         self._model = None
         self._processor = None
+        if self._previous_threads is not None:
+            import torch
+
+            torch.set_num_threads(self._previous_threads)
+            self._previous_threads = None
 
 
 class ClOnnxAdapter(TaggerAdapter):
