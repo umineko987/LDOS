@@ -161,6 +161,11 @@ compile_lock \
     cpu \
     --group "$backend_pyproject:dedup-cpu"
 compile_lock \
+    tagger-cpu \
+    "$root_dir/requirements-tagger-cpu.txt" \
+    cpu \
+    --group "$backend_pyproject:tagger-torch"
+compile_lock \
     dedup-cuda \
     "$root_dir/requirements-dedup-cuda.txt" \
     cu128 \

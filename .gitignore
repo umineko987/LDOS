@@ -99,13 +99,15 @@ skills-lock.json
 /*_Clash_*.yml
 /subscriptions/
 
-# Keep development notes local; publish README and legal notices only
+# Keep development notes local; publish READMEs, legal notices and the two development guides
 *.[mM][dD]
 ![Rr][Ee][Aa][Dd][Mm][Ee]*.[mM][dD]
 ![Ll][Ii][Cc][Ee][Nn][Ss][Ee]*.[mM][dD]
 ![Nn][Oo][Tt][Ii][Cc][Ee]*.[mM][dD]
 !THIRD-PARTY-NOTICES*.[mM][dD]
-/docs/
+/docs/*
+!/docs/development.md
+!/docs/development.en.md
 
 # Tagger local models and result cache
 tagger/.models/

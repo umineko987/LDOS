@@ -29,7 +29,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: backend/go.mod
+          go-version-file: desktop/go.mod
           cache-dependency-path: backend/go.sum
       - name: Run native backend race tests
         working-directory: backend
@@ -42,7 +42,7 @@ jobs:
         run: go build ./cmd/ldos-backend
 
   linux-cpu:
-    name: Linux CPU / Python 3.14
+    name: Linux CPU / managed Python
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -54,21 +54,17 @@ jobs:
       - name: Set up Go for the native service
         uses: actions/setup-go@v6
         with:
-          go-version-file: backend/go.mod
+          go-version-file: desktop/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-          cache: pip
-          cache-dependency-path: |
-            desktop/release/requirements-executors.txt
-            gallery-dl-backend/requirements-test.txt
-            requirements-dedup-cpu.txt
-
       - name: Deploy clean locked CPU environments
-        run: ./scripts/setup-linux.sh --python python --device cpu --skip-models --skip-mihomo
+        run: ./scripts/setup-linux.sh --device cpu --skip-mihomo
+
+      - name: Verify locked interpreter and real CPU inference
+        run: |
+          .venv/bin/python -c 'import json, platform; assert platform.python_version() == json.load(open("desktop/release/runtime-lock.json"))["distribution"]["python_version"]'
+          .venv/bin/python dedup/dedup_core.py --prepare-models --model-dir "$PWD/.models" --device cpu
+          .venv/bin/python scripts/run-real-model-smoke.py --base-images 2 --workers 1 --torch-threads 2 --torch-interop-threads 1
 
       - name: Install locked test tools in both environments
         shell: bash
@@ -117,7 +113,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "24.13.0"
+          node-version-file: desktop/.node-version
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 

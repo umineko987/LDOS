@@ -62,8 +62,14 @@ esac
 
 case "$(uname -m)" in
     x86_64|amd64)
-        asset="mihomo-linux-amd64-compatible-${version}.gz"
-        archive_sha256="70d01cfb8cb7bf7a92fd1af16cb4b9553d90bb4eecde3b5c4849103e27c80ddb"
+        read -r version asset archive_sha256 < <(python3 - "$project_dir/../desktop/release/runtime-lock.json" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    lock = json.load(source)
+item = lock["targets"]["linux-x86_64"]["mihomo"]
+print("v" + lock["mihomo"]["version"], item["archive"], item["sha256"])
+PY
+        )
         ;;
     aarch64|arm64)
         asset="mihomo-linux-arm64-${version}.gz"

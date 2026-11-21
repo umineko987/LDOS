@@ -9,10 +9,11 @@ backend_venv="$backend_dir/.venv"
 dedup_venv="$root_dir/.venv"
 model_dir="$root_dir/.models"
 device="cpu"
-python_cmd="${PYTHON:-python3}"
+python_cmd=""
 proxy_mode="environment"
 proxy_url=""
-skip_models=0
+skip_models=1
+tagger_torch=0
 skip_mihomo=0
 skip_submodule=0
 skip_backend_deps=0
@@ -23,10 +24,12 @@ usage() {
 用法：./scripts/setup-linux.sh [选项]
 
   --device cpu|cuda       去重设备，Linux 无 GPU 部署使用 cpu（默认）
-  --python PATH           创建两个 venv 所用的 Python（默认 python3 或 $PYTHON）
+  --python PATH           显式使用自选 Python 3.11–3.14（默认下载发行锁中的解释器）
   --proxy URL             本次 git/pip/Mihomo/模型下载使用的 HTTP(S) 代理
   --no-proxy              明确关闭本次安装的全部代理环境变量
-  --skip-models           跳过 SSCD/DINOv2 下载与校验
+  --with-models           下载或校验 SSCD/DINOv2 权重
+  --skip-models           不下载权重（默认）
+  --tagger-torch          安装 CPU 版 Canary/PixAI 附加依赖
   --skip-mihomo           跳过 Mihomo 安装
   --skip-submodule        跳过 git submodule 初始化
   --skip-executor-deps    跳过 gallery-dl 执行器依赖安装（venv 仍会检查/创建）
@@ -40,7 +43,7 @@ fail_missing() {
     printf '错误：缺少系统依赖：%s\n' "$name" >&2
     printf 'Debian/Ubuntu：sudo apt install python3 python3-venv git curl ca-certificates gzip coreutils\n' >&2
     printf 'Arch Linux：sudo pacman -S python git curl ca-certificates gzip coreutils\n' >&2
-    printf '另需 Go 1.26+，并将 go 放入 PATH。\n' >&2
+    printf '另需 Go 1.27.3，并将 go 放入 PATH。\n' >&2
     printf '安装器不会自动运行 sudo。\n' >&2
     exit 1
 }
@@ -90,7 +93,9 @@ while [[ $# -gt 0 ]]; do
             proxy_mode="disabled"
             shift
             ;;
+        --with-models) skip_models=0; shift ;;
         --skip-models) skip_models=1; shift ;;
+        --tagger-torch) tagger_torch=1; shift ;;
         --skip-mihomo) skip_mihomo=1; shift ;;
         --skip-submodule) skip_submodule=1; shift ;;
         --skip-executor-deps|--skip-backend-deps) skip_backend_deps=1; shift ;;
@@ -126,18 +131,6 @@ fi
 if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
     fail_missing "sha256sum 或 shasum"
 fi
-command -v "$python_cmd" >/dev/null 2>&1 || fail_missing "$python_cmd"
-
-python_version="$($python_cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" || fail_missing "$python_cmd"
-"$python_cmd" - <<'PY' || {
-import sys
-if not (sys.version_info >= (3, 11) and sys.version_info < (3, 15)):
-    raise SystemExit(1)
-PY
-    printf '错误：支持 Python >= 3.11 且 < 3.15，当前为 %s。\n' "$python_version" >&2
-    exit 1
-}
-"$python_cmd" -m venv --help >/dev/null 2>&1 || fail_missing "Python venv 模块"
 
 case "$proxy_mode" in
     explicit)
@@ -152,6 +145,30 @@ case "$proxy_mode" in
         ;;
 esac
 
+if [[ $tagger_torch -eq 1 && "$device" != cpu ]]; then
+    printf '错误：--tagger-torch 仅提供 CPU 锁。\n' >&2
+    exit 1
+fi
+if [[ -z "$python_cmd" ]]; then
+    command -v python3 >/dev/null || fail_missing python3
+    python_cmd="$(python3 "$script_dir/managed-python.py")" || stage_failed "受管 Python"
+fi
+command -v "$python_cmd" >/dev/null || fail_missing "$python_cmd"
+python_version="$("$python_cmd" -c 'import platform; print(platform.python_version())')"
+"$python_cmd" -c 'import sys; sys.exit(not ((3, 11) <= sys.version_info < (3, 15)))' || {
+    printf '错误：自选解释器须为 Python 3.11–3.14，当前为 %s。\n' "$python_version" >&2
+    exit 1
+}
+base_python="$("$python_cmd" -I -c 'import sys; print(sys._base_executable)')"
+for venv_path in "$backend_venv" "$dedup_venv"; do
+    [[ -e "$venv_path" || -L "$venv_path" ]] || continue
+    if [[ -L "$venv_path" || ! -f "$venv_path/pyvenv.cfg" ]] ||
+       ! grep -iqx 'include-system-site-packages = false' "$venv_path/pyvenv.cfg" ||
+       ! "$venv_path/bin/python" -I -c 'import os, sys; sys.exit(sys.prefix == sys.base_prefix or not os.path.samefile(sys._base_executable, sys.argv[1]))' "$base_python"; then
+        printf '错误：现有环境 %s 与所选解释器不匹配或未隔离；请先移走该环境再重试。未覆盖。\n' "$venv_path" >&2
+        exit 1
+    fi
+done
 printf 'LDOS Linux 安装：device=%s，Python=%s，下载代理=%s\n' \
     "$device" "$python_version" "$(proxy_description)"
 
@@ -165,7 +182,7 @@ fi
     exit 1
 }
 
-printf '构建 Go 业务后端（需要 Go 1.26+）。\n'
+printf '构建 Go 业务后端（推荐 Go 1.27.3）。\n'
 mkdir -p "$root_dir/backend/build"
 (cd "$root_dir/backend" && CGO_ENABLED=0 go build -trimpath -o build/ldos-backend ./cmd/ldos-backend) || stage_failed "Go 后端构建"
 
@@ -194,7 +211,7 @@ if [[ $skip_dedup_deps -eq 0 ]]; then
     "$dedup_python" -m pip uninstall -y opencv-python opencv-contrib-python opencv-contrib-python-headless >/dev/null 2>&1 || true
 
     if [[ "$device" == "cpu" ]]; then
-        cpu_clean="$($dedup_python - <<'PY'
+        cpu_clean="$("$dedup_python" - <<'PY'
 import importlib.metadata as metadata
 try:
     import torch
@@ -227,9 +244,11 @@ PY
                 "$dedup_python" -m pip uninstall -y "${cuda_packages[@]}" || stage_failed "CUDA 依赖清理"
             fi
         fi
+        cpu_lock="$root_dir/requirements-dedup-cpu.txt"
+        [[ $tagger_torch -eq 0 ]] || cpu_lock="$root_dir/requirements-tagger-cpu.txt"
         "$dedup_python" -m pip install --disable-pip-version-check --no-input \
             --require-hashes --only-binary=:all: \
-            -r "$root_dir/requirements-dedup-cpu.txt" || stage_failed "CPU 锁定依赖安装"
+            -r "$cpu_lock" || stage_failed "CPU 锁定依赖安装"
     else
         "$dedup_python" -m pip install --disable-pip-version-check --no-input \
             --require-hashes --only-binary=:all: \
@@ -352,8 +371,6 @@ data["dedup"]["python_executable"] = os.path.relpath(
     os.path.abspath(dedup_python),
     start=Path(destination).parent,
 )
-data["dedup"]["worker_script"] = "../dedup_review_worker.py"
-data["dedup"]["core_script"] = "../dedup_core.py"
 data["dedup"]["model_dir"] = "../.models"
 data["dedup"]["device"] = device
 path = Path(destination)
@@ -371,10 +388,10 @@ chmod 0600 "$config_path"
 
 if [[ $skip_models -eq 0 ]]; then
     export TORCH_HOME="$model_dir/torch"
-    "$dedup_python" "$root_dir/dedup_core.py" --prepare-models \
+    "$dedup_python" "$root_dir/dedup/dedup_core.py" --prepare-models \
         --model-dir "$model_dir" --device "$device" || stage_failed "SSCD/DINOv2 模型下载与校验"
 else
-    printf '跳过模型下载；启用去重的 readyz 会保持 not ready，完整重跑时移除 --skip-models。\n'
+    printf '未请求模型下载；可在应用中安装或重跑时添加 --with-models。\n'
 fi
 
 printf '\n安装步骤完成。运行快速诊断：\n  ./scripts/doctor.sh\n启动服务：\n  ./scripts/run.sh\n'

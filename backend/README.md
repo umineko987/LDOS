@@ -49,7 +49,7 @@ go build -trimpath -o build/ldos-backend ./cmd/ldos-backend
 
 全部业务默认启用，不需要 `--allow-incomplete` 或 `--enable-tasks`；这两个旧参数仅兼容解析。`/healthz` 表示进程可响应，`/readyz` 根据数据库、调度器、执行器、代理与配置启用的模型报告实际就绪状态。原生 `/openapi.json`、`/docs` 和 `/redoc` 可用于检查接口。
 
-执行器依赖锁为 `desktop/release/requirements-executors.txt`；模型环境继续使用 `requirements-dedup-*.txt`。详见 [执行器说明](executors/README.md) 与 [桌面构建和发布](../README.md#构建与运行)。
+执行器依赖锁为 `desktop/release/requirements-executors.txt`；模型环境继续使用 `requirements-dedup-*.txt`。详见 [执行器说明](executors/README.md) 与 [桌面构建和发布](../docs/development.md#构建与运行)。
 
 ## 验证
 

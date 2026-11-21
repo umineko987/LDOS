@@ -27,6 +27,29 @@ class SetupConfigurationTests(unittest.TestCase):
             text=True, capture_output=True, env=env, timeout=10, check=False,
         )
 
+    @unittest.skipUnless((3, 11) <= sys.version_info < (3, 15), "custom Python profile")
+    def test_existing_nonisolated_venv_is_not_modified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            installer = scripts / "setup-linux.sh"
+            shutil.copy(ROOT / "scripts/setup-linux.sh", installer)
+            # Only the presence of Go should be checked before the venv guard.
+            (scripts / "go").symlink_to("/bin/false")
+            venv = root / ".venv"
+            subprocess.run([sys.executable, "-m", "venv", "--without-pip",
+                            "--system-site-packages", str(venv)], check=True)
+            config = venv / "pyvenv.cfg"
+            original = config.read_bytes()
+            result = subprocess.run([installer, "--python", sys.executable, "--skip-submodule"],
+                                    env={**os.environ, "PATH": f"{scripts}:{os.environ['PATH']}"},
+                                    capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("未覆盖", result.stderr)
+            self.assertEqual(config.read_bytes(), original)
+            self.assertFalse((root / "gallery-dl-backend/.venv").exists())
+
     def test_fresh_install_allows_manual_proxy_start_without_auto_start(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             backend = Path(tmp)
