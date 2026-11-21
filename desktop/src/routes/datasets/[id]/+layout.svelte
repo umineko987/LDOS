@@ -91,7 +91,7 @@
   ]);
 </script>
 
-<DatasetHeader {dataset}>
+<DatasetHeader {dataset} showExport={current !== "export"}>
   <StageRail {id} {current} {stages} />
 </DatasetHeader>
 

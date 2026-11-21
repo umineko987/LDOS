@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DownloadIcon from "@lucide/svelte/icons/download";
   import EllipsisIcon from "@lucide/svelte/icons/ellipsis";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
@@ -7,6 +8,7 @@
   import { toast } from "svelte-sonner";
 
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { useApi } from "#lib/api/context.ts";
   import { apiErrorMessage } from "#lib/api/messages.ts";
   import { datasetKeys, deleteDataset, updateDataset, type DatasetDetail } from "#lib/api/queries/datasets.ts";
@@ -20,7 +22,7 @@
   import DatasetDialog from "./dataset-dialog.svelte";
 
   // 数据集标题栏：名称 · 类型 · 触发词（点击编辑），右侧菜单里是编辑和删除。阶段轨道放在 children。
-  let { dataset, children }: { dataset: DatasetContext; children?: Snippet } = $props();
+  let { dataset, showExport, children }: { dataset: DatasetContext; showExport: boolean; children?: Snippet } = $props();
 
   const api = useApi();
   const client = useQueryClient();
@@ -90,6 +92,11 @@
         </button>
       </span>
       <div class="ml-auto flex items-center gap-2">
+        {#if showExport}
+          <Button variant="outline" size="sm" href={resolve("/datasets/[id]/export", { id: dataset.id })} data-testid="dataset-export-direct">
+            <DownloadIcon data-icon="inline-start" />{m.dataset_export_direct()}
+          </Button>
+        {/if}
         <DropdownMenu.Root bind:open={menuOpen}>
           <DropdownMenu.Trigger>
             {#snippet child({ props })}

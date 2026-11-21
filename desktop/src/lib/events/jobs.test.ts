@@ -84,8 +84,11 @@ describe("jobLink", () => {
     expect(jobLink(job({ kind: "tagger.prepare", ref: { dataset_id: "d1" } }))).toBe("/datasets/d1/tag");
     expect(jobLink(job({ kind: "tagger.tag", ref: { dataset_id: "d1" } }))).toBe("/datasets/d1/tag");
     // caption 任务的 batch_id 是 caption 批次，不是采集批次。
-    expect(jobLink(job({ kind: "captions.write", ref: { dataset_id: "d1", batch_id: "c" } }))).toBe("/datasets/d1/review");
-    expect(jobLink(job({ kind: "captions.undo", ref: { dataset_id: "d1" } }))).toBe("/datasets/d1/review");
+    expect(jobLink(job({ kind: "captions.write", ref: { dataset_id: "d1", batch_id: "c" } }))).toBe("/datasets/d1/tag");
+    expect(jobLink(job({ kind: "captions.undo", ref: { dataset_id: "d1" } }))).toBe("/datasets/d1/tag");
+    expect(jobLink(job({ kind: "captions.write", ref: { source_id: "s 1", batch_id: "c" } }))).toBe("/library/s%201/review");
+    expect(jobLink(job({ kind: "captions.undo", ref: { source_id: "s1" } }))).toBe("/library/s1/review");
+    expect(jobLink(job({ kind: "captions.write", ref: { batch_id: "c" } }))).toBeNull();
     expect(jobLink(job({ kind: "atlas.run", ref: { dataset_id: "d1" } }))).toBe("/datasets/d1/atlas");
     expect(jobLink(job({ kind: "dataset.export", ref: { dataset_id: "d1" } }))).toBe("/datasets/d1/export");
     expect(jobLink(job({ kind: "dataset.hashing", ref: { dataset_id: "d1" } }))).toBe("/datasets/d1/collect");

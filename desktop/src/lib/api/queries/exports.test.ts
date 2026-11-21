@@ -1,5 +1,5 @@
-import { QueryClient } from "@tanstack/svelte-query";
-import { describe, expect, it } from "vitest";
+import { QueryClient, QueryObserver } from "@tanstack/svelte-query";
+import { describe, expect, it, vi } from "vitest";
 
 import { createApi } from "../client.ts";
 import { datasetKeys } from "./datasets.ts";
@@ -18,6 +18,7 @@ import {
   type DatasetExport,
   type ExportPlan,
 } from "./exports.ts";
+import { libraryKeys, librarySourcesQuery } from "./library.ts";
 
 type Reply = { status: number; body?: unknown };
 
@@ -72,6 +73,7 @@ function record(overrides: Partial<DatasetExport> = {}): DatasetExport {
     resumable: false,
     error_code: null,
     error_details: null,
+    gallery_warning: null,
     created_at: 1,
     updated_at: 1,
     started_at: 1,
@@ -124,6 +126,37 @@ describe("datasetExportsQuery", () => {
     expect(interval({ state: { data: [record({ status: "succeeded" })] } })).toBe(false);
     expect(interval({ state: { data: undefined } })).toBe(false);
   });
+
+  it("refreshes the gallery source list when an active export succeeds without SSE", async () => {
+    let status: DatasetExport["status"] = "running";
+    const source = { source_id: "copy", display_name: "10_miku", asset_count: 4 };
+    const { api, requests } = fakeApi((request) => ({
+      status: 200,
+      body: new URL(request.url).pathname === "/api/v1/gallery/sources"
+        ? { sources: status === "succeeded" ? [source] : [] }
+        : { items: [record({ status })] },
+    }));
+    const client = newClient();
+    const library = { ...librarySourcesQuery(api), staleTime: Infinity };
+    await client.fetchQuery(library);
+    const unsubscribe = new QueryObserver(client, library).subscribe(() => {});
+    try {
+      const history = datasetExportsQuery(api, "d1");
+      await client.fetchQuery(history);
+      status = "failed";
+      await client.fetchQuery(history);
+      expect(requests.filter(({ request }) => new URL(request.url).pathname === "/api/v1/gallery/sources")).toHaveLength(1);
+
+      status = "running";
+      await client.fetchQuery(history);
+      status = "succeeded";
+      await client.fetchQuery(history);
+      await vi.waitFor(() => expect(client.getQueryData(libraryKeys.sources())).toEqual([source]));
+    } finally {
+      unsubscribe();
+      client.clear();
+    }
+  });
 });
 
 describe("预览 / 开始 / 取消 / 续传", () => {
@@ -172,7 +205,10 @@ describe("缓存", () => {
   it("upsert：没有列表时建一个；新记录插到最前；已有记录原位替换", () => {
     const client = newClient();
     const key = exportKeys.list("d1");
+    const sourcesKey = libraryKeys.sources();
+    client.setQueryData(sourcesKey, []);
     upsertExport(client, record({ export_id: "e1" }));
+    expect(client.getQueryState(sourcesKey)?.isInvalidated).toBe(true);
     expect(client.getQueryData<DatasetExport[]>(key)!.map((item) => item.export_id)).toEqual(["e1"]);
     upsertExport(client, record({ export_id: "e2" }));
     upsertExport(client, record({ export_id: "e1", status: "succeeded" }));

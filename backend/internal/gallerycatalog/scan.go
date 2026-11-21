@@ -40,11 +40,21 @@ func captionState(data []byte, exists, readOK, conflict bool) string {
 }
 
 func (s *Service) Scan(ctx context.Context, sourceID string) (Row, error) {
+	return s.scan(ctx, sourceID, nil)
+}
+
+func (s *Service) scan(ctx context.Context, sourceID string, validate func(context.Context) error) (Row, error) {
 	release, e := s.LockSources(ctx, sourceID)
 	if e != nil {
 		return nil, e
 	}
-	stats, e := s.scanLocked(ctx, sourceID)
+	if validate != nil {
+		if e := validate(ctx); e != nil {
+			release()
+			return nil, e
+		}
+	}
+	stats, e := s.scanTreeLocked(ctx, sourceID, validate)
 	release()
 	if e == nil && !truth(stats, "offline") {
 		s.mu.Lock()
@@ -58,6 +68,10 @@ func (s *Service) Scan(ctx context.Context, sourceID string) (Row, error) {
 	return stats, e
 }
 func (s *Service) scanLocked(ctx context.Context, sourceID string) (Row, error) {
+	return s.scanTreeLocked(ctx, sourceID, nil)
+}
+
+func (s *Service) scanTreeLocked(ctx context.Context, sourceID string, validate func(context.Context) error) (Row, error) {
 	source, e := s.Source(ctx, sourceID)
 	if e != nil {
 		return nil, e
@@ -200,6 +214,11 @@ func (s *Service) scanLocked(ctx context.Context, sourceID string) (Row, error) 
 		}
 		return sorted[i] < sorted[j]
 	})
+	if validate != nil {
+		if e = validate(ctx); e != nil {
+			return nil, e
+		}
+	}
 	e = s.commitScan(ctx, source, sorted, assets, stats)
 	if e != nil {
 		return nil, e
@@ -359,31 +378,42 @@ func (s *Service) commitScan(ctx context.Context, source Row, dirs []string, ass
 		return refreshCountsTx(ctx, tx, sid)
 	})
 }
+
+type scanOperation struct {
+	row  Row
+	done chan struct{}
+}
+
 func (s *Service) StartScan(ctx context.Context, sourceID string) (Row, error) {
+	scan, _, err := s.startScan(ctx, sourceID, nil)
+	return scan, err
+}
+
+func (s *Service) startScan(ctx context.Context, sourceID string, validate func(context.Context) error) (Row, *scanOperation, error) {
 	source, e := s.Source(ctx, sourceID)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	s.mu.Lock()
 	if s.stopping {
 		s.mu.Unlock()
-		return nil, failure("service_stopping", 503)
+		return nil, nil, failure("service_stopping", 503)
 	}
-	if str(s.scans[sourceID], "state") == "running" {
+	if op := s.scans[sourceID]; op != nil && str(op.row, "state") == "running" {
 		s.mu.Unlock()
-		return nil, failure("scan_in_progress", 409)
+		return nil, op, failure("scan_in_progress", 409)
 	}
-	op := Row{"operation_id": id(), "source_id": sourceID, "state": "running", "started_at": now(), "finished_at": nil, "error_code": "", "stats": nil}
+	row := Row{"operation_id": id(), "source_id": sourceID, "state": "running", "started_at": now(), "finished_at": nil, "error_code": "", "stats": nil}
+	op := &scanOperation{row: row, done: make(chan struct{})}
 	s.scans[sourceID] = op
-	result := clone(op)
 	s.wg.Add(1)
 	s.mu.Unlock()
 	if s.jobs != nil {
-		_, _ = s.jobs.Start("gallery.scan", "扫描 "+str(source, "display_name"), activity.StartOptions{ID: "scan:" + sourceID, Ref: map[string]string{"source_id": sourceID, "operation_id": str(op, "operation_id")}})
+		_, _ = s.jobs.Start("gallery.scan", "扫描 "+str(source, "display_name"), activity.StartOptions{ID: "scan:" + sourceID, Ref: map[string]string{"source_id": sourceID, "operation_id": str(row, "operation_id")}})
 	}
 	go func() {
 		defer s.wg.Done()
-		stats, e := s.Scan(s.ctx, sourceID)
+		stats, e := s.scan(s.ctx, sourceID, validate)
 		state, code := "succeeded", ""
 		if e != nil {
 			state = "failed"
@@ -393,13 +423,12 @@ func (s *Service) StartScan(ctx context.Context, sourceID string) (Row, error) {
 			}
 		}
 		s.mu.Lock()
-		if str(s.scans[sourceID], "operation_id") == str(op, "operation_id") {
-			s.scans[sourceID] = Row{"operation_id": op["operation_id"], "source_id": sourceID, "state": state, "started_at": op["started_at"], "finished_at": now(), "error_code": code, "stats": stats}
-		}
-		s.mu.Unlock()
+		op.row = Row{"operation_id": row["operation_id"], "source_id": sourceID, "state": state, "started_at": row["started_at"], "finished_at": now(), "error_code": code, "stats": stats}
 		s.finishJob("scan:"+sourceID, e, int(num(stats, "asset_count")))
+		close(op.done)
+		s.mu.Unlock()
 	}()
-	return result, nil
+	return clone(row), op, nil
 }
 func (s *Service) GetScan(ctx context.Context, sourceID string) (Row, error) {
 	if _, e := s.Source(ctx, sourceID); e != nil {
@@ -408,7 +437,7 @@ func (s *Service) GetScan(ctx context.Context, sourceID string) (Row, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if r := s.scans[sourceID]; r != nil {
-		return clone(r), nil
+		return clone(r.row), nil
 	}
 	return Row{"operation_id": nil, "source_id": sourceID, "state": "idle", "started_at": nil, "finished_at": nil, "error_code": "", "stats": nil}, nil
 }

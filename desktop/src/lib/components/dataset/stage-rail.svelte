@@ -6,7 +6,7 @@
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
 
-  // 阶段轨道：六段 采集 → 导出，每段显示这段的输出（= 下一段的输入）、去掉的张数和状态；
+  // 阶段轨道：五段 采集 → 导出，每段显示这段的输出（= 下一段的输入）、去掉的张数和状态；
   // 地图是旁边的辅助入口。金色圆点在当前段之间平移（NavDot：只动 transform，180ms）。
   let { id, current, stages }: { id: string; current: Stage | null; stages: readonly RailStage[] } = $props();
 
@@ -15,7 +15,6 @@
     clean: m.stage_clean,
     dedup: m.stage_dedup,
     tag: m.stage_tag,
-    review: m.stage_review,
     export: m.stage_export,
     atlas: m.stage_atlas,
   };

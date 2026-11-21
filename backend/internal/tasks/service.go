@@ -170,31 +170,54 @@ func (r *Create) validate() error {
 	return nil
 }
 
+// EnqueuePlan holds a validated, new task while its URL is being resolved.
+// Replays return the existing row instead and never need a resolver.
+type EnqueuePlan struct {
+	service *Service
+	body    Create
+	key     string
+}
+
+func (p *EnqueuePlan) URL() string { return p.body.URL }
+
 func (s *Service) Enqueue(ctx context.Context, body Create, idempotencyKey *string) (map[string]any, bool, error) {
-	if err := body.validate(); err != nil {
+	plan, existing, err := s.PrepareEnqueue(ctx, body, idempotencyKey)
+	if err != nil || existing != nil {
+		return existing, false, err
+	}
+	info, err := s.deps.Resolve(ctx, plan.URL())
+	if err != nil {
 		return nil, false, err
+	}
+	return plan.EnqueueResolved(ctx, info)
+}
+
+func (s *Service) PrepareEnqueue(ctx context.Context, body Create, idempotencyKey *string) (*EnqueuePlan, map[string]any, error) {
+	if err := body.validate(); err != nil {
+		return nil, nil, err
 	}
 	key := ""
 	if idempotencyKey != nil {
 		if utf8.RuneCountInString(*idempotencyKey) > 200 {
-			return nil, false, &Error{422, "invalid_idempotency_key", "Idempotency-Key 过长"}
+			return nil, nil, &Error{422, "invalid_idempotency_key", "Idempotency-Key 过长"}
 		}
 		key = strings.TrimSpace(*idempotencyKey)
 		if key == "" {
-			return nil, false, &Error{422, "invalid_idempotency_key", "Idempotency-Key 为空"}
+			return nil, nil, &Error{422, "invalid_idempotency_key", "Idempotency-Key 为空"}
 		}
 		existing, err := s.db.GetTaskByIdempotency(ctx, key)
 		if err != nil || existing != nil {
-			return existing, false, err
+			return nil, existing, err
 		}
 	}
 	if err := s.validateTarget(ctx, body.URL); err != nil {
-		return nil, false, invalid(err.Error())
+		return nil, nil, invalid(err.Error())
 	}
-	info, err := s.deps.Resolve(ctx, body.URL)
-	if err != nil {
-		return nil, false, err
-	}
+	return &EnqueuePlan{service: s, body: body, key: key}, nil, nil
+}
+
+func (plan *EnqueuePlan) EnqueueResolved(ctx context.Context, info SiteInfo) (map[string]any, bool, error) {
+	s, body, key := plan.service, plan.body, plan.key
 	site := info.Site
 	if body.Site != nil {
 		site = canonicalSite(*body.Site)

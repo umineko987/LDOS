@@ -1493,6 +1493,92 @@ export interface paths {
         patch: operations["patch_gallery_source_api_v1_gallery_sources__source_id__patch"];
         trace?: never;
     };
+    "/api/v1/gallery/sources/{source_id}/caption-batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Gallery Source Caption Batches */
+        get: operations["list_gallery_source_caption_batches_api_v1_gallery_sources__source_id__caption_batches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gallery/sources/{source_id}/captions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Gallery Source Captions */
+        get: operations["list_gallery_source_captions_api_v1_gallery_sources__source_id__captions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gallery/sources/{source_id}/captions/ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Gallery Source Caption Ops */
+        post: operations["run_gallery_source_caption_ops_api_v1_gallery_sources__source_id__captions_ops_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gallery/sources/{source_id}/captions/{asset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Edit Gallery Source Caption */
+        put: operations["edit_gallery_source_caption_api_v1_gallery_sources__source_id__captions__asset_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gallery/sources/{source_id}/kept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Kept Gallery Assets */
+        get: operations["list_gallery_kept"];
+        /** Set Kept Gallery Assets */
+        put: operations["set_gallery_kept"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/gallery/sources/{source_id}/reconciliation/retry": {
         parameters: {
             query?: never;
@@ -2530,7 +2616,7 @@ export interface components {
             /** Conflicts */
             conflicts: components["schemas"]["CaptionReportItem"][];
             /** Dataset Id */
-            dataset_id: string;
+            dataset_id: string | null;
             /** Dry Run */
             dry_run: boolean;
             /** Failed */
@@ -2539,6 +2625,7 @@ export interface components {
             samples: components["schemas"]["CaptionDiffSample"][];
             /** Skipped */
             skipped: components["schemas"]["CaptionReportItem"][];
+            source_id?: string | null;
             stats: components["schemas"]["CaptionWriteStats"];
         };
         /** CaptionBatchSummary */
@@ -2552,7 +2639,7 @@ export interface components {
             /** Created At */
             created_at: number;
             /** Dataset Id */
-            dataset_id: string;
+            dataset_id: string | null;
             /**
              * Kind
              * @enum {string}
@@ -2562,6 +2649,7 @@ export interface components {
             params: {
                 [key: string]: unknown;
             };
+            source_id?: string | null;
             /** Stats */
             stats: {
                 [key: string]: unknown;
@@ -2728,9 +2816,10 @@ export interface components {
             /** Conflicts */
             conflicts: components["schemas"]["CaptionReportItem"][];
             /** Dataset Id */
-            dataset_id: string;
+            dataset_id: string | null;
             /** Failed */
             failed: components["schemas"]["CaptionReportItem"][];
+            source_id?: string | null;
             stats: components["schemas"]["CaptionUndoStats"];
             /** Undone */
             undone: boolean;
@@ -3367,7 +3456,7 @@ export interface components {
              * Stage
              * @enum {string}
              */
-            stage: "collect" | "clean" | "dedup" | "tag" | "review" | "export";
+            stage: "collect" | "clean" | "dedup" | "tag" | "export";
         };
         /** DatasetDecisionResponse */
         DatasetDecisionResponse: {
@@ -3452,6 +3541,8 @@ export interface components {
             finished_at: number | null;
             /** Folder Name */
             folder_name: string;
+            /** @description Gallery registration or indexing warning after a successful file export. */
+            gallery_warning?: string | null;
             /** Image Bytes */
             image_bytes: number;
             /** Job Id */
@@ -3650,7 +3741,7 @@ export interface components {
              * Stage
              * @enum {string}
              */
-            stage: "collect" | "clean" | "dedup" | "tag" | "review" | "export";
+            stage: "collect" | "clean" | "dedup" | "tag" | "export";
             /** Stale */
             stale: boolean;
             /**
@@ -3686,7 +3777,7 @@ export interface components {
              * Stage
              * @enum {string}
              */
-            stage: "collect" | "clean" | "dedup" | "tag" | "review" | "export";
+            stage: "collect" | "clean" | "dedup" | "tag" | "export";
         };
         /** DatasetMemberPageResponse */
         DatasetMemberPageResponse: {
@@ -3813,7 +3904,7 @@ export interface components {
              * Stage
              * @enum {string}
              */
-            stage: "collect" | "clean" | "dedup" | "tag" | "review" | "export";
+            stage: "collect" | "clean" | "dedup" | "tag" | "export";
             /** Stale */
             stale: boolean;
         };
@@ -4860,6 +4951,13 @@ export interface components {
             source_roots?: {
                 [key: string]: string;
             };
+        };
+        GalleryCaptionListResponse: {
+            dataset_id?: null;
+            etag: string;
+            items: components["schemas"]["CaptionItem"][];
+            source_id: string;
+            trigger_word: string;
         };
         /** GalleryDirectoryAncestorResponse */
         GalleryDirectoryAncestorResponse: {
@@ -8965,7 +9063,7 @@ export interface operations {
     list_dataset_members_api_v1_datasets__dataset_id__members_get: {
         parameters: {
             query?: {
-                stage?: ("collect" | "clean" | "dedup" | "tag" | "review" | "export") | null;
+                stage?: ("collect" | "clean" | "dedup" | "tag" | "export") | null;
                 decision?: ("excluded" | "approved" | "undecided" | "kept") | null;
                 query?: string | null;
                 cursor?: string | null;
@@ -9098,7 +9196,7 @@ export interface operations {
     list_dataset_stage_runs_api_v1_datasets__dataset_id__stage_runs_get: {
         parameters: {
             query?: {
-                stage?: ("collect" | "clean" | "dedup" | "tag" | "review" | "export") | null;
+                stage?: ("collect" | "clean" | "dedup" | "tag" | "export") | null;
                 limit?: number;
             };
             header?: never;
@@ -10542,6 +10640,225 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GallerySourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_gallery_source_caption_batches_api_v1_gallery_sources__source_id__caption_batches_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptionBatchListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_gallery_source_captions_api_v1_gallery_sources__source_id__captions_get: {
+        parameters: {
+            query?: {
+                directory_id?: string;
+            };
+            header?: {
+                "if-none-match"?: string | null;
+            };
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryCaptionListResponse"];
+                };
+            };
+            /** @description If-None-Match 与当前 ETag 相同，没有响应体 */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_gallery_source_caption_ops_api_v1_gallery_sources__source_id__captions_ops_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptionOpsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptionBatchResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_gallery_source_caption_api_v1_gallery_sources__source_id__captions__asset_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptionEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptionEditResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_gallery_kept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        asset_ids: string[];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_gallery_kept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    asset_ids: string[];
+                    kept: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        updated: number;
+                    };
                 };
             };
             /** @description Validation Error */

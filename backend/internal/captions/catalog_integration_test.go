@@ -11,16 +11,7 @@ import (
 	"ldos/backend/internal/gallerycatalog"
 )
 
-func TestNativeCatalogGuardsAndSearchIndex(t *testing.T) {
-	f := newFixture(t)
-	f.put("a", ptr("original"))
-	must(t, os.WriteFile(filepath.Join(f.root, "a.png"), []byte("image"), 0600))
-	f.exec(`INSERT INTO gallery_sources(id,kind,display_name,root_path,canonical_root_key,created_at,updated_at) VALUES('source','imported','Source',?,?,1,1)`, f.root, f.root)
-	f.exec(`INSERT INTO gallery_directories(id,source_id,relative_path,name,sort_key,created_at,updated_at) VALUES('root','source','','Source','',1,1)`)
-	f.exec(`INSERT INTO gallery_assets(id,source_id,directory_id,relative_path,name,extension,sort_key,size_bytes,modified_ns,txt_relative_path,txt_state,created_at,updated_at) VALUES('a','source','root','a.png','a.png','.png','a',5,1,'a.txt','normal',1,1)`)
-	cat, e := gallerycatalog.New(context.Background(), gallerycatalog.Dependencies{Store: f.db, Settings: config.Settings{RuntimeDir: filepath.Join(f.root, "runtime")}})
-	must(t, e)
-	defer cat.Stop()
+func catalogCaptionDeps(deps Dependencies, cat *gallerycatalog.Service) Dependencies {
 	convert := func(r gallerycatalog.Row) Annotation {
 		a := Annotation{AssetID: Text(r["asset_id"]), State: Text(r["txt_state"]), DiskVersion: Text(r["disk_version"]), TXTVersion: Number(r["txt_version"]), Error: Text(r["error"])}
 		if r["content"] != nil {
@@ -29,7 +20,6 @@ func TestNativeCatalogGuardsAndSearchIndex(t *testing.T) {
 		}
 		return a
 	}
-	deps := f.s.deps
 	deps.ReadAnnotations = func(ctx context.Context, ids []string) (map[string]Annotation, error) {
 		rows, e := cat.ReadAnnotations(ctx, ids)
 		out := map[string]Annotation{}
@@ -46,6 +36,20 @@ func TestNativeCatalogGuardsAndSearchIndex(t *testing.T) {
 		}
 		return convert(r), e
 	}
+	deps.WithSources = cat.WithSources
+	return deps
+}
+func TestNativeCatalogGuardsAndSearchIndex(t *testing.T) {
+	f := newFixture(t)
+	f.put("a", ptr("original"))
+	must(t, os.WriteFile(filepath.Join(f.root, "a.png"), []byte("image"), 0600))
+	f.exec(`INSERT INTO gallery_sources(id,kind,display_name,root_path,canonical_root_key,created_at,updated_at) VALUES('source','imported','Source',?,?,1,1)`, f.root, f.root)
+	f.exec(`INSERT INTO gallery_directories(id,source_id,relative_path,name,sort_key,created_at,updated_at) VALUES('root','source','','Source','',1,1)`)
+	f.exec(`INSERT INTO gallery_assets(id,source_id,directory_id,relative_path,name,extension,sort_key,size_bytes,modified_ns,txt_relative_path,txt_state,created_at,updated_at) VALUES('a','source','root','a.png','a.png','.png','a',5,1,'a.txt','normal',1,1)`)
+	cat, e := gallerycatalog.New(context.Background(), gallerycatalog.Dependencies{Store: f.db, Settings: config.Settings{RuntimeDir: filepath.Join(f.root, "runtime")}})
+	must(t, e)
+	defer cat.Stop()
+	deps := catalogCaptionDeps(f.s.deps, cat)
 	must(t, f.s.Stop())
 	f.s, e = New(context.Background(), deps)
 	must(t, e)

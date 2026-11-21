@@ -9,10 +9,14 @@ import (
 	"strings"
 )
 
-const CurrentSchemaVersion = 18
+const CurrentSchemaVersion = 19
+const captionOwnerSchemaVersion = 19
 
 //go:embed schema.sql
 var schemaSQL string
+
+//go:embed schema_captions.sql
+var captionTablesSQL string
 
 // additiveColumns includes both versioned migrations and the legacy same-version
 // additions (task backoff, caption write/undo journaling, address planning).
@@ -57,11 +61,14 @@ func (s *Store) initialize(ctx context.Context) error {
 			return fmt.Errorf("unsupported SQLite schema_version %q", raw)
 		}
 		// DDL and the final marker share one transaction. Missing FTS5 is fatal,
-		// never a reason to produce a task-only database marked as version 18.
+		// never a reason to produce a task-only database marked as current.
 		if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
 			return fmt.Errorf("create complete SQLite schema (FTS5 required): %w", err)
 		}
 		if err := migrateLegacyRecords(ctx, tx, version); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, captionTablesSQL); err != nil {
 			return err
 		}
 		for _, col := range additiveColumns {
@@ -82,6 +89,17 @@ func (s *Store) initialize(ctx context.Context) error {
 					return err
 				}
 			}
+		}
+		if version < captionOwnerSchemaVersion {
+			if err := migrateGalleryReview(ctx, tx); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS idx_caption_batches_dataset ON caption_batches(dataset_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_caption_batches_source ON caption_batches(source_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_caption_batch_items_asset ON caption_batch_items(asset_id);`); err != nil {
+			return err
 		}
 		if _, err = tx.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_dataset_export_jobs_dataset ON dataset_export_jobs(dataset_id, created_at)"); err != nil {
 			return err

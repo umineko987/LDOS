@@ -12,6 +12,13 @@ describe("apiErrorMessage", () => {
     expect(apiErrorMessage(new ApiError({ code: "http_error" }))).toBe("请求失败");
   });
 
+  it("图库无法核对来源或文件时给出具体原因，保留已有后端说明", () => {
+    expect(apiErrorMessage(new ApiError({ code: "target_path_changed" }))).toContain("目标文件与记录不符");
+    expect(apiErrorMessage(new ApiError({ code: "source_changed" }))).toContain("请检查图库来源路径");
+    expect(apiErrorMessage(new ApiError({ code: "trash_file_missing" }))).toContain("无法读取回收区文件");
+    expect(apiErrorMessage(new ApiError({ code: "source_changed", message: "详细原因" }))).toBe("详细原因");
+  });
+
   it("后端错误用后端文案，其余情况给通用说明", () => {
     expect(apiErrorMessage(new ApiError({ status: 409, code: "conflict", message: "操作冲突" }))).toBe("操作冲突");
     expect(apiErrorMessage(new ApiError({ status: 500, code: "backend_error" }))).toBe("发生了意外错误");

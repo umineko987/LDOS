@@ -8,9 +8,9 @@ import { taggerKeys } from "./tagger.ts";
 /**
  * 订阅 caption 相关事件，让 caption 列表、批次历史和打标候选失效（都带 ETag，没变时只是一次 304）：
  * - captions.updated：这个数据集的 caption 被写过；
- * - dataset.updated：成员或决定变了，review / tag 阶段的输入可能跟着变；
+ * - dataset.updated：成员或决定变了，tag 阶段的输入可能跟着变；
  * - resync：事件有断档，全部重拉。
- * 打标页和标签工作室各调一次；只能在组件初始化时调用。
+ * 打标页调用；只能在组件初始化时调用。
  */
 export function useCaptionEvents(id: () => string): void {
   const client = useQueryClient();

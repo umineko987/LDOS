@@ -59,7 +59,7 @@ type Service struct {
 	mu                sync.Mutex
 	started, stopping bool
 	wg                sync.WaitGroup
-	scans             map[string]Row
+	scans             map[string]*scanOperation
 	exports           map[string]*exportOperation
 	targets           map[string]string
 	idempotency       map[string]idempotentExport
@@ -75,7 +75,7 @@ func New(ctx context.Context, deps Dependencies) (*Service, error) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Service{db: deps.Store, settings: deps.Settings, jobs: deps.Jobs, ctx: ctx, cancel: cancel,
-		scans: map[string]Row{}, exports: map[string]*exportOperation{}, targets: map[string]string{}, idempotency: map[string]idempotentExport{}, locks: NewFilesystemLocks(), hashQueue: make(chan string, 8192), hashPending: map[string]bool{}}
+		scans: map[string]*scanOperation{}, exports: map[string]*exportOperation{}, targets: map[string]string{}, idempotency: map[string]idempotentExport{}, locks: NewFilesystemLocks(), hashQueue: make(chan string, 8192), hashPending: map[string]bool{}}
 	return s, nil
 }
 

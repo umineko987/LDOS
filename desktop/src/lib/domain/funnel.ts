@@ -5,7 +5,9 @@
 
 import type { DatasetStage, FunnelStage } from "#lib/api/queries/datasets.ts";
 
-export const DATASET_STAGES = ["collect", "clean", "dedup", "tag", "review", "export"] as const satisfies readonly DatasetStage[];
+export const DATASET_STAGES = ["collect", "clean", "dedup", "tag", "export"] as const satisfies readonly DatasetStage[];
+
+export type PipelineStage = (typeof DATASET_STAGES)[number];
 
 /**
  * 轨道上的状态：
@@ -18,7 +20,7 @@ export const DATASET_STAGES = ["collect", "clean", "dedup", "tag", "review", "ex
 export type RailStatus = "idle" | "running" | "done" | "stale" | "failed";
 
 export interface RailStage {
-  readonly stage: DatasetStage;
+  readonly stage: PipelineStage;
   readonly input: number;
   readonly output: number;
   /** 这一段去掉的张数（input − output）。 */
@@ -37,7 +39,7 @@ function railStatus(stage: FunnelStage | undefined): RailStatus {
   return "idle";
 }
 
-/** 按固定顺序给出六段；后端缺了某一段时补成空的 idle 段。 */
+/** 按固定顺序给出五段；后端缺了某一段时补成空的 idle 段。 */
 export function railStages(funnel: readonly FunnelStage[] | undefined): RailStage[] {
   const byStage = new Map((funnel ?? []).map((stage) => [stage.stage, stage]));
   const total = Math.max(1, byStage.get("collect")?.input ?? 0);
@@ -57,7 +59,7 @@ export function railStages(funnel: readonly FunnelStage[] | undefined): RailStag
 }
 
 /** 首页卡片点进去的阶段：第一段还没完成（未开始、运行中、需重跑、失败）的；全部完成时到导出。 */
-export function nextStage(stages: readonly RailStage[]): DatasetStage {
+export function nextStage(stages: readonly RailStage[]): PipelineStage {
   return stages.find((stage) => stage.status !== "done")?.stage ?? "export";
 }
 
@@ -66,7 +68,7 @@ export function attentionStages(stages: readonly RailStage[]): RailStage[] {
   return stages.filter((stage) => stage.status === "running" || stage.status === "stale" || stage.status === "failed");
 }
 
-/** 轨道上的 `[` / `]`：在六段和地图之间循环切换。 */
+/** 轨道上的 `[` / `]`：在五段和地图之间循环切换。 */
 export function adjacentStage<T extends string>(order: readonly T[], current: T | null, delta: 1 | -1): T {
   if (current === null || !order.includes(current)) return order[delta === 1 ? 0 : order.length - 1]!;
   const index = order.indexOf(current);
@@ -74,7 +76,7 @@ export function adjacentStage<T extends string>(order: readonly T[], current: T 
 }
 
 export interface OutputBar {
-  readonly stage: DatasetStage;
+  readonly stage: PipelineStage;
   readonly output: number;
   readonly stale: boolean;
   /** output 占成员总数的比例，0–1。 */
@@ -83,7 +85,7 @@ export interface OutputBar {
 
 /**
  * 首页卡片的迷你漏斗：列表接口只给每段 output 和 stale（没有运行状态），
- * 按固定顺序补齐六段，比例相对成员总数。
+ * 按固定顺序补齐五段，比例相对成员总数。
  */
 export function outputBars(
   memberCount: number,

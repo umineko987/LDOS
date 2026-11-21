@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ClipboardCheckIcon from "@lucide/svelte/icons/clipboard-check";
   import FolderPlusIcon from "@lucide/svelte/icons/folder-plus";
   import LinkIcon from "@lucide/svelte/icons/link";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
@@ -26,6 +27,7 @@
   import SourcePathDialog from "#lib/components/library/source-path-dialog.svelte";
   import PageHeader from "#lib/components/shell/page-header.svelte";
   import StatusDot from "#lib/components/status-dot.svelte";
+  import { galleryStudioPath } from "#lib/components/studio/gallery-studio-state.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Checkbox } from "#lib/components/ui/checkbox/index.ts";
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
@@ -251,6 +253,9 @@
             </div>
           </div>
           <div class="flex items-center gap-1">
+            <Button variant="ghost" size="xs" href={`#${galleryStudioPath(source.source_id)}`} data-testid="library-source-review">
+              <ClipboardCheckIcon data-icon="inline-start" />{m.studio_gallery_review()}
+            </Button>
             {#if source.availability === "offline"}
               <Button variant="outline" size="xs" onclick={() => relink(source)} data-testid="library-relink">
                 <LinkIcon />{m.library_relink()}

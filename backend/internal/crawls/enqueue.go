@@ -58,8 +58,18 @@ func directTwitterMedia(site, target string) bool {
 	u, e := url.Parse(target)
 	return e == nil && (strings.EqualFold(u.Hostname(), "pbs.twimg.com") || strings.EqualFold(u.Hostname(), "video.twimg.com"))
 }
+func (s *Service) resolveGroup(ctx context.Context, urls []string) ([]tasks.SiteInfo, error) {
+	if len(urls) == 1 {
+		info, err := s.deps.Resolve(ctx, urls[0])
+		return []tasks.SiteInfo{info}, err
+	}
+	return s.deps.ResolveBatch(ctx, urls)
+}
 func (s *Service) prepareChunk(ctx context.Context, batch, address map[string]any, policy scheduler.Policy, chunk []HashedUnit, offset int) ([]preparedTask, error) {
 	prepared := make([]preparedTask, 0, len(chunk))
+	var plans []*tasks.EnqueuePlan
+	var indices []int
+	var urls []string
 	settings := s.deps.Settings
 	policy.MaxConcurrency = max(1, min(integer(batch["concurrency"]), settings.Scheduler.MaxConcurrentTasks))
 	if options, ok := address["download_options"].(map[string]any); ok && options["eh"] != nil {
@@ -98,11 +108,29 @@ func (s *Service) prepareChunk(ctx context.Context, batch, address map[string]an
 			return nil, err
 		}
 		body := tasks.Create{URL: unit.URL, Site: &site, OutputDir: ptr(str(batch["output_dir"])), ProxyMode: ptr(str(address["proxy_mode"])), MaxAttempts: ptr(integer(address["max_attempts"])), Priority: integer(address["priority"]), CredentialsRef: credentialRequest.Reference, CookiesFile: cookie, ConfigFile: credentialRequest.ConfigFile, EHDownload: policy.EHDownload, ExtraArgs: args}
-		row, _, err := service.Enqueue(ctx, body, &key)
+		plan, row, err := service.PrepareEnqueue(ctx, body, &key)
 		if err != nil {
 			return nil, err
 		}
 		prepared = append(prepared, preparedTask{row, key, offset + index + 1, unit})
+		if plan != nil {
+			plans = append(plans, plan)
+			indices = append(indices, index)
+			urls = append(urls, plan.URL())
+		}
+	}
+	if len(plans) != 0 {
+		infos, err := s.resolveGroup(ctx, urls)
+		if err != nil {
+			return nil, err
+		}
+		for i, plan := range plans {
+			row, _, err := plan.EnqueueResolved(ctx, infos[i])
+			if err != nil {
+				return nil, err
+			}
+			prepared[indices[i]].row = row
+		}
 	}
 	return prepared, nil
 }

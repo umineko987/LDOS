@@ -191,6 +191,38 @@ func TestNativeGalleryDatasetReviewAndExportHandoff(t *testing.T) {
 	if !foundCaption {
 		t.Fatal("export omitted the edited caption")
 	}
+
+	// Final review operates on the auto-indexed copy, not the dataset roots.
+	out := valueString(exported["output_path"])
+	copySource, err := b.db.QueryRow(ctx, "SELECT id FROM gallery_sources WHERE root_path=?", out)
+	nativeOK(t, err)
+	if copySource == nil || copySource["id"] == sid || exported["gallery_warning"] != nil {
+		t.Fatalf("export was not handed off to a separate source: %v %v", copySource, exported)
+	}
+	copyAsset := gallerycatalog.AssetID(valueString(copySource["id"]), "a.png")
+	before, err := b.datasets.StageInputDigest(ctx, did, "export")
+	nativeOK(t, err)
+	op, err := b.gallery.Trash(ctx, gallerycatalog.Selection{AssetIDs: []string{copyAsset}})
+	nativeOK(t, err)
+	for _, name := range []string{"a.png", "a.txt"} {
+		if _, err := os.Stat(filepath.Join(out, name)); !os.IsNotExist(err) {
+			t.Fatalf("exported %s was not moved to trash: %v", name, err)
+		}
+		_, err := os.Stat(filepath.Join(images, name))
+		nativeOK(t, err)
+	}
+	after, err := b.datasets.StageInputDigest(ctx, did, "export")
+	nativeOK(t, err)
+	if after != before {
+		t.Fatal("reviewing the export changed the original dataset's inputs")
+	}
+	_, err = b.gallery.Undo(ctx, op.OperationID)
+	nativeOK(t, err)
+	caption, err := os.ReadFile(filepath.Join(out, "a.txt"))
+	nativeOK(t, err)
+	if string(caption) != "subject, cat, edited" {
+		t.Fatalf("restored wrong caption: %q", caption)
+	}
 }
 
 func TestNativeCompletedCrawlRegistersGalleryAndDatasetOnce(t *testing.T) {

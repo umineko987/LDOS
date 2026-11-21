@@ -8,6 +8,9 @@ func projectBatch(r Row) Row {
 	if r == nil {
 		return nil
 	}
+	if r["source_id"] == nil {
+		delete(r, "source_id")
+	}
 	r["batch_id"] = r["id"]
 	delete(r, "id")
 	r["params"] = object(r["params_json"])
@@ -25,7 +28,7 @@ func (s *Service) batch(ctx context.Context, id string) (Row, error) {
 func (s *Service) markWritten(ctx context.Context, batch, asset, version string) error {
 	return s.write(ctx, "UPDATE caption_batch_items SET write_state='written',after_version=? WHERE batch_id=? AND asset_id=? AND write_state='planned'", version, batch, asset)
 }
-func (s *Service) settle(ctx context.Context, batch string) (int, error) {
+func (s *Service) settle(ctx context.Context, owner captionOwner, batch string) (int, error) {
 	rows, e := s.deps.Store.QueryRows(ctx, "SELECT * FROM caption_batch_items WHERE batch_id=? AND write_state='planned' ORDER BY rowid", batch)
 	if e != nil {
 		return 0, e
@@ -34,6 +37,10 @@ func (s *Service) settle(ctx context.Context, batch string) (int, error) {
 	for _, r := range rows {
 		ids = append(ids, Text(r["asset_id"]))
 	}
+	ids, e = s.eligibleIDs(ctx, owner, ids)
+	if e != nil {
+		return 0, e
+	}
 	entries, e := s.read(ctx, ids)
 	if e != nil {
 		return 0, e
@@ -41,8 +48,8 @@ func (s *Service) settle(ctx context.Context, batch string) (int, error) {
 	claimed := 0
 	for _, r := range rows {
 		id := Text(r["asset_id"])
-		a := entries[id]
-		if a.Error != "" || (!editable(a.State)) {
+		a, ok := entries[id]
+		if !ok || a.Error != "" || !editable(a.State) {
 			continue
 		}
 		if a.Content != nil && *a.Content == Text(r["after_text"]) && (r["before_text"] == nil || *a.Content != Text(r["before_text"])) {
@@ -58,54 +65,64 @@ func (s *Service) settle(ctx context.Context, batch string) (int, error) {
 	return claimed, nil
 }
 func (s *Service) Recover(ctx context.Context) (int, error) {
-	rows, e := s.deps.Store.QueryRows(ctx, "SELECT id,dataset_id FROM caption_batches WHERE state='writing' ORDER BY created_at,rowid")
+	rows, e := s.deps.Store.QueryRows(ctx, "SELECT id,dataset_id,source_id FROM caption_batches WHERE state='writing' ORDER BY created_at,rowid")
 	if e != nil {
 		return 0, e
 	}
 	count := 0
 	for _, r := range rows {
-		unlock := s.lock(Text(r["dataset_id"]))
-		err := func() error {
-			defer unlock()
-			id := Text(r["id"])
-			if _, e = s.settle(ctx, id); e != nil {
-				return e
-			}
-			pending, e := s.deps.Store.QueryRows(ctx, "SELECT asset_id FROM caption_batch_items WHERE batch_id=? AND write_state='planned'", id)
-			if e != nil {
-				return e
-			}
-			if len(pending) > 0 {
-				return nil
-			}
-			b, e := s.batch(ctx, id)
-			if e != nil {
-				return e
-			}
-			if Number(b["changed_count"]) == 0 {
-				e = s.write(ctx, "DELETE FROM caption_batches WHERE id=?", id)
-			} else {
-				stats := b["stats"].(Row)
-				stats["written"] = b["changed_count"]
-				stats["interrupted"] = true
-				e = s.write(ctx, "UPDATE caption_batches SET state='complete',stats_json=? WHERE id=?", encode(stats), id)
-			}
-			if e == nil {
-				count++
-			}
-			return e
-		}()
+		owner := ownerOfBatch(r)
+		complete, err := withCaptionOwner(ctx, s, owner, func(ctx context.Context) (bool, error) {
+			return s.recoverBatch(ctx, owner, Text(r["id"]))
+		})
 		if err != nil {
 			return count, err
 		}
+		if complete {
+			count++
+		}
 	}
 	return count, nil
+}
+
+func (s *Service) recoverBatch(ctx context.Context, owner captionOwner, id string) (bool, error) {
+	if _, e := s.settle(ctx, owner, id); e != nil {
+		return false, e
+	}
+	pending, e := s.deps.Store.QueryRows(ctx, "SELECT asset_id FROM caption_batch_items WHERE batch_id=? AND write_state='planned'", id)
+	if e != nil || len(pending) > 0 {
+		return false, e
+	}
+	b, e := s.batch(ctx, id)
+	if e != nil || b == nil {
+		return false, e
+	}
+	if Number(b["changed_count"]) == 0 {
+		e = s.write(ctx, "DELETE FROM caption_batches WHERE id=?", id)
+	} else {
+		stats := b["stats"].(Row)
+		stats["written"] = b["changed_count"]
+		stats["interrupted"] = true
+		e = s.write(ctx, "UPDATE caption_batches SET state='complete',stats_json=? WHERE id=?", encode(stats), id)
+	}
+	return e == nil, e
 }
 func (s *Service) History(ctx context.Context, id string, limit int) ([]Row, error) {
 	if _, e := s.dataset(ctx, id); e != nil {
 		return nil, e
 	}
-	rows, e := s.deps.Store.QueryRows(ctx, "SELECT "+batchColumns+" FROM caption_batches b WHERE b.dataset_id=? ORDER BY b.created_at DESC,b.rowid DESC LIMIT ?", id, max(1, min(500, limit)))
+	return s.history(ctx, captionOwner{id: id}, limit)
+}
+
+func (s *Service) sourceHistory(ctx context.Context, id string, limit int) ([]Row, error) {
+	if e := s.ensureSource(ctx, id); e != nil {
+		return nil, e
+	}
+	return s.history(ctx, captionOwner{id: id, source: true}, limit)
+}
+
+func (s *Service) history(ctx context.Context, owner captionOwner, limit int) ([]Row, error) {
+	rows, e := s.deps.Store.QueryRows(ctx, "SELECT "+batchColumns+" FROM caption_batches b WHERE b."+owner.field()+"=? ORDER BY b.created_at DESC,b.rowid DESC LIMIT ?", owner.id, max(1, min(500, limit)))
 	if e != nil {
 		return nil, e
 	}
@@ -132,10 +149,14 @@ func (s *Service) Undo(ctx context.Context, id string) (Row, error) {
 	if b == nil {
 		return nil, Fail(404, "caption_batch_not_found", "caption 批次不存在")
 	}
-	dataset := Text(b["dataset_id"])
-	unlock := s.lock(dataset)
-	defer unlock()
-	b, e = s.batch(ctx, id)
+	owner := ownerOfBatch(b)
+	return withCaptionOwner(ctx, s, owner, func(ctx context.Context) (Row, error) {
+		return s.undoLocked(ctx, owner, id)
+	})
+}
+
+func (s *Service) undoLocked(ctx context.Context, owner captionOwner, id string) (Row, error) {
+	b, e := s.batch(ctx, id)
 	if e != nil {
 		return nil, e
 	}
@@ -146,7 +167,7 @@ func (s *Service) Undo(ctx context.Context, id string) (Row, error) {
 		return nil, Fail(409, "caption_batch_already_undone", "这个批次已经撤销过了")
 	}
 	if Text(b["state"]) == "writing" {
-		if _, e = s.settle(ctx, id); e != nil {
+		if _, e = s.settle(ctx, owner, id); e != nil {
 			return nil, e
 		}
 	}
@@ -167,6 +188,10 @@ func (s *Service) Undo(ctx context.Context, id string) (Row, error) {
 			ids = append(ids, aid)
 		}
 	}
+	ids, e = s.eligibleIDs(ctx, owner, ids)
+	if e != nil {
+		return nil, e
+	}
 	entries, e := s.read(ctx, ids)
 	if e != nil {
 		return nil, e
@@ -174,14 +199,18 @@ func (s *Service) Undo(ctx context.Context, id string) (Row, error) {
 	total := len(items) + len(failed)
 	restored := 0
 	job := "captions:undo:" + id
-	s.job("captions.undo", job, dataset, len(items))
+	s.job("captions.undo", job, owner, len(items))
 	for pos, r := range items {
 		if e = ctx.Err(); e != nil {
 			s.finishJob(job, true)
 			return nil, e
 		}
 		aid := Text(r["asset_id"])
-		a := entries[aid]
+		a, ok := entries[aid]
+		if !ok {
+			failed = append(failed, Row{"asset_id": aid, "reason": notInSource})
+			continue
+		}
 		if a.Error != "" || !editable(a.State) {
 			reason := a.Error
 			if reason == "" {
@@ -225,7 +254,7 @@ func (s *Service) Undo(ctx context.Context, id string) (Row, error) {
 	}
 	s.finishJob(job, !undone || e != nil)
 	if restored > 0 {
-		s.publish(dataset, id, "undo", restored)
+		s.publish(owner, id, "undo", restored)
 	}
-	return Row{"batch_id": id, "dataset_id": dataset, "undone": undone, "stats": stats, "conflicts": capReports(conflicts), "failed": capReports(failed)}, e
+	return owner.project(Row{"batch_id": id, "undone": undone, "stats": stats, "conflicts": capReports(conflicts), "failed": capReports(failed)}), e
 }

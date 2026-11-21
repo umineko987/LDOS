@@ -183,6 +183,9 @@ func (s *Service) planExport(ctx context.Context, id string, raw Record) (*expor
 	if e != nil {
 		return nil, e
 	}
+	if e = checkExportInput(ctx, s.deps.Store.QueryRow, id); e != nil {
+		return nil, e
+	}
 	o, e := s.normalizeExport(d, raw)
 	if e != nil {
 		return nil, e
@@ -238,22 +241,12 @@ func (s *Service) planExport(ctx context.Context, id string, raw Record) (*expor
 	offline := []string{}
 	badCaptions := []string{}
 	sources := map[string]bool{}
-	seenSources := map[string]bool{}
-	for _, m := range selected {
-		sid := str(m["source_id"])
-		if seenSources[sid] {
-			continue
-		}
-		seenSources[sid] = true
-		src, e := s.deps.Store.QueryRow(ctx, "SELECT * FROM gallery_sources WHERE id=?", sid)
-		if e != nil {
-			return nil, e
-		}
-		if src == nil || str(src["availability"]) != "available" {
-			offline = append(offline, sid)
-			continue
-		}
-		sources[sid] = true
+	roots, e := s.deps.Store.QueryRows(ctx, `SELECT DISTINCT s.id,s.availability,s.canonical_root_key,s.root_path FROM dataset_roots r JOIN gallery_sources s ON s.id=r.source_id WHERE r.dataset_id=?`, id)
+	if e != nil {
+		return nil, e
+	}
+	for _, src := range roots {
+		sid := str(src["id"])
 		base := str(src["canonical_root_key"])
 		if base == "" {
 			base = str(src["root_path"])
@@ -261,6 +254,15 @@ func (s *Service) planExport(ctx context.Context, id string, raw Record) (*expor
 		if _, ok := within(key, base); ok {
 			return nil, failure(409, "target_inside_source", "导出目录不能在图库来源里面", Record{"source_id": sid})
 		}
+		sources[sid] = str(src["availability"]) == "available"
+	}
+	seenSources := map[string]bool{}
+	for _, m := range selected {
+		sid := str(m["source_id"])
+		if !seenSources[sid] && !sources[sid] {
+			offline = append(offline, sid)
+		}
+		seenSources[sid] = true
 	}
 	used := map[string]bool{}
 	width := max(4, len(strconv.Itoa(len(selected))))

@@ -176,6 +176,9 @@ CREATE TABLE IF NOT EXISTS gallery_assets (
 );
 CREATE INDEX IF NOT EXISTS idx_gallery_assets_directory ON gallery_assets(directory_id, sort_key, name);
 CREATE INDEX IF NOT EXISTS idx_gallery_assets_lifecycle ON gallery_assets(source_id, lifecycle_state, dedup_visibility);
+CREATE TABLE IF NOT EXISTS gallery_asset_keeps (
+ asset_id TEXT PRIMARY KEY NOT NULL REFERENCES gallery_assets(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS gallery_reconciliation_events (
  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES gallery_sources(id) ON DELETE CASCADE,
  batch_id TEXT NOT NULL REFERENCES crawl_batches(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'pending',
@@ -261,18 +264,6 @@ CREATE TABLE IF NOT EXISTS dataset_stage_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_dataset_stage_runs_stage ON dataset_stage_runs(dataset_id, stage, created_at);
 CREATE INDEX IF NOT EXISTS idx_gallery_assets_content_sha256 ON gallery_assets(content_sha256) WHERE content_sha256 != '';
-CREATE TABLE IF NOT EXISTS caption_batches (
- id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE, kind TEXT NOT NULL,
- params_json TEXT NOT NULL DEFAULT '{}', stats_json TEXT NOT NULL DEFAULT '{}', created_at REAL NOT NULL, undone_at REAL,
- undo_stats_json TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL DEFAULT 'complete'
-);
-CREATE INDEX IF NOT EXISTS idx_caption_batches_dataset ON caption_batches(dataset_id, created_at);
-CREATE TABLE IF NOT EXISTS caption_batch_items (
- batch_id TEXT NOT NULL REFERENCES caption_batches(id) ON DELETE CASCADE, asset_id TEXT NOT NULL, before_text TEXT, before_version TEXT NOT NULL,
- after_text TEXT, after_version TEXT NOT NULL, tagger_tags_json TEXT, write_state TEXT NOT NULL DEFAULT 'written', undo_state TEXT,
- before_bom INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(batch_id, asset_id)
-);
-CREATE INDEX IF NOT EXISTS idx_caption_batch_items_asset ON caption_batch_items(asset_id);
 
 -- Precise provenance and retry state for preview-selected Danbooru imports.
 CREATE TABLE IF NOT EXISTS danbooru_import_items (

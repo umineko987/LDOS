@@ -135,7 +135,13 @@ func fixture(t *testing.T) (*Service, *store.Store, *control) {
 		return p, nil
 	}, Credentials: func(_ context.Context, _ string, r CredentialsRequest) (Credentials, error) {
 		return Credentials{Reference: text(r.Reference), CookiesFile: text(r.CookiesFile), ConfigFile: text(r.ConfigFile)}, nil
-	}, ValidateArgs: validateArgs, ValidateTarget: func(context.Context, string, string, scheduler.Policy) error { return nil }, Resolve: resolve, ProbeForTarget: func(context.Context, string) (proxypool.ProbeResult, error) {
+	}, ValidateArgs: validateArgs, ValidateTarget: func(context.Context, string, string, scheduler.Policy) error { return nil }, Resolve: resolve, ResolveBatch: func(ctx context.Context, urls []string) ([]tasks.SiteInfo, error) {
+		infos := make([]tasks.SiteInfo, len(urls))
+		for i, url := range urls {
+			infos[i], _ = resolve(ctx, url)
+		}
+		return infos, nil
+	}, ProbeForTarget: func(context.Context, string) (proxypool.ProbeResult, error) {
 		return proxypool.ProbeResult{Total: 2, Results: []proxypool.ProbeNode{{ID: "node-1", Healthy: true}, {ID: "node-2", Healthy: false}}}, nil
 	}, NotifyTasks: c.Notify, PollInterval: 5 * time.Millisecond})
 	good(t, err)
@@ -433,13 +439,17 @@ func TestPartialPlanningFailureDrainsThenRetryFillsGap(t *testing.T) {
 	s.deps.Discovery.Transport.Gallery = captureFunc(func(context.Context, gallery.CaptureRequest) (gallery.CaptureResult, error) {
 		return capturePixiv(101, 52), nil
 	})
-	resolve := s.deps.Resolve
+	resolve := s.deps.ResolveBatch
 	var calls atomic.Int64
-	s.deps.Resolve = func(ctx context.Context, url string) (tasks.SiteInfo, error) {
-		if calls.Add(1) == 53 {
-			return tasks.SiteInfo{}, errors.New("fixture prepare failure")
+	s.deps.ResolveBatch = func(ctx context.Context, urls []string) ([]tasks.SiteInfo, error) {
+		if len(urls) != 2 && len(urls) != enqueueChunkSize {
+			t.Fatalf("unexpected resolver group size %d", len(urls))
 		}
-		return resolve(ctx, url)
+		// Address admission, first 50 media, then the final two media.
+		if calls.Add(1) == 3 {
+			return nil, errors.New("fixture prepare failure")
+		}
+		return resolve(ctx, urls)
 	}
 	b := createBatch(t, s, batchRequest("https://www.pixiv.net/users/17", "https://www.pixiv.net/users/18"))
 	id := str(b["id"])
@@ -466,7 +476,11 @@ func TestPartialPlanningFailureDrainsThenRetryFillsGap(t *testing.T) {
 	good(t, s.RunOnce(ctx))
 	_, err = s.Retry(ctx, id, 1)
 	good(t, err)
+	beforeRetry := calls.Load()
 	good(t, s.RunOnce(ctx))
+	if n := calls.Load() - beforeRetry; n != 1 {
+		t.Fatalf("retry should only resolve the two missing media tasks, got %d resolver groups", n)
+	}
 	rows, err = s.ListTasks(ctx, id, str(a[0]["id"]), 100, 0)
 	good(t, err)
 	if len(rows) != 52 {
@@ -702,6 +716,35 @@ func TestCompletionHandoffRetriesAndRecovers(t *testing.T) {
 	good(t, s.RunOnce(ctx))
 	if calls != 3 {
 		t.Fatal("restart did not replay handoff")
+	}
+}
+
+func TestPrepareChunkResolvesOnlyNewTasksInOrder(t *testing.T) {
+	s, _, _ := fixture(t)
+	ctx := context.Background()
+	batch := createBatch(t, s, batchRequest("https://www.pixiv.net/users/17"))
+	address := batchAddresses(batch)[0]
+	policy, err := s.deps.PolicyFor(ctx, "pixiv")
+	good(t, err)
+	var units []Unit
+	for i := 0; i < 3; i++ {
+		units = append(units, Unit{Site: "pixiv", URL: fmt.Sprintf("https://www.pixiv.net/artworks/%d", 101+i)})
+	}
+	chunk := Deduplicate(units)
+	middle, err := s.prepareChunk(ctx, batch, address, policy, chunk[1:2], 1)
+	good(t, err)
+	old, _, err := s.deps.Tasks.Enqueue(ctx, tasks.Create{URL: units[1].URL}, &middle[0].key)
+	good(t, err)
+	s.deps.ResolveBatch = func(_ context.Context, urls []string) ([]tasks.SiteInfo, error) {
+		if !reflect.DeepEqual(urls, []string{units[0].URL, units[2].URL}) {
+			t.Fatalf("unexpected URLs: %v", urls)
+		}
+		return []tasks.SiteInfo{{Site: "pixiv", Extractor: "first"}, {Site: "pixiv", Extractor: "last"}}, nil
+	}
+	rows, err := s.prepareChunk(ctx, batch, address, policy, chunk, 0)
+	good(t, err)
+	if rows[0].row["extractor"] != "first" || rows[1].row["id"] != old["id"] || rows[2].row["extractor"] != "last" {
+		t.Fatalf("results lost input order: %+v", rows)
 	}
 }
 

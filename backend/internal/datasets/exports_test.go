@@ -63,7 +63,7 @@ func recoverService(t *testing.T, f *fixture) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	s, e := New(f.ctx, Dependencies{Store: db})
+	s, e := New(f.ctx, Dependencies{Store: db, RegisterExport: f.s.deps.RegisterExport})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -183,6 +183,11 @@ func TestExportSnapshotSurvivesRestartAndSkipsStaged(t *testing.T) {
 }
 func TestExportRecoversRenameBeforeSuccessRecord(t *testing.T) {
 	f := newFixture(t, map[string]string{"a.png": "image"})
+	var handoffs []string
+	f.s.deps.RegisterExport = func(_ context.Context, path string, _ *os.File) error {
+		handoffs = append(handoffs, path)
+		return nil
+	}
 	f.s.afterCommit = func(string) error { return errSimulatedCrash }
 	id := f.createExport(nil)
 	f.s.wg.Wait()
@@ -190,14 +195,29 @@ func TestExportRecoversRenameBeforeSuccessRecord(t *testing.T) {
 	if readFile(t, filepath.Join(f.target, "10_char_tok", "a.png")) != "image" {
 		t.Fatal("commit missing")
 	}
-	recoverService(t, f)
-	if _, e := f.s.ResumeExport(f.ctx, id); e != nil {
+	if len(handoffs) != 0 {
+		t.Fatalf("handoff before recovered terminal state: %v", handoffs)
+	}
+	output := filepath.Join(f.target, "10_char_tok")
+	if e := os.Remove(filepath.Join(output, "a.png")); e != nil {
 		t.Fatal(e)
 	}
+	recoverService(t, f)
 	f.wait(id, "succeeded")
+	missing(t, filepath.Join(output, "a.png"))
+	// A later restart must not feed historical successes back into gallery.
+	recoverService(t, f)
+	f.wait(id, "succeeded")
+	if !reflect.DeepEqual(handoffs, []string{output}) {
+		t.Fatalf("unexpected gallery handoffs: %v", handoffs)
+	}
 }
 func TestExportCancellationRollsBackAndDoesNotTouchSources(t *testing.T) {
 	f := newFixture(t, map[string]string{"a.png": "first", "b.png": "second"})
+	f.s.deps.RegisterExport = func(context.Context, string, *os.File) error {
+		t.Error("cancelled export was sent to gallery")
+		return nil
+	}
 	reached := make(chan struct{})
 	release := make(chan struct{})
 	f.s.afterItem = func(_ string, index int) error {
@@ -261,6 +281,11 @@ func TestExportShutdownKeepsPartialProgress(t *testing.T) {
 }
 func TestExportTargetConflictCanResume(t *testing.T) {
 	f := newFixture(t, map[string]string{"a.png": "image"})
+	handoffs := 0
+	f.s.deps.RegisterExport = func(context.Context, string, *os.File) error {
+		handoffs++
+		return nil
+	}
 	f.s.afterItem = func(string, int) error { return os.Mkdir(filepath.Join(f.target, "10_char_tok"), 0700) }
 	id := f.createExport(nil)
 	r := f.wait(id, "failed")
@@ -278,6 +303,9 @@ func TestExportTargetConflictCanResume(t *testing.T) {
 		t.Fatal(e)
 	}
 	f.wait(id, "succeeded")
+	if handoffs != 1 {
+		t.Fatalf("got %d gallery handoffs; want one successful attempt only", handoffs)
+	}
 }
 func TestExportPendingPartialPairIsRecopied(t *testing.T) {
 	f := newFixture(t, map[string]string{"a.png": "image", "b.png": "second"})
@@ -300,6 +328,27 @@ func TestExportPendingPartialPairIsRecopied(t *testing.T) {
 		t.Fatal("partial pending item reused")
 	}
 }
+func TestValidateTreeReadsCurrentEntries(t *testing.T) {
+	path := t.TempDir()
+	if err := os.WriteFile(filepath.Join(path, "a.png"), []byte("a"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := openDirectory(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+	if err := validateTree(t.Context(), dir, map[string]int64{"a.png": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "a.txt"), []byte("caption"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateTree(t.Context(), dir, map[string]int64{"a.png": 1, "a.txt": 7}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExportStagingTamperingRejected(t *testing.T) {
 	for _, kind := range []string{"unexpected", "hardlink", "symlink", "size"} {
 		t.Run(kind, func(t *testing.T) {
@@ -432,6 +481,100 @@ func TestExportDoesNotDeleteReplacedStagingOrTarget(t *testing.T) {
 		})
 	}
 }
+
+func TestExportDirectWithoutCompletedProcessing(t *testing.T) {
+	f := newFixture(t, map[string]string{"a.png": "keep", "b.png": "excluded", "c.png": "unreviewed and untagged"})
+	f.caption("a.png", "original, remove_me")
+	if _, e := f.s.Decide(f.ctx, f.dataset, "export", []string{"b.png"}, "exclude", ""); e != nil {
+		t.Fatal(e)
+	}
+	id := f.createExport(Record{"tag_blacklist": []string{"remove_me"}})
+	r := f.wait(id, "succeeded")
+	out := str(r["output_path"])
+	if got := readFile(t, filepath.Join(out, "a.png")); got != "keep" {
+		t.Fatal(got)
+	}
+	if got := readFile(t, filepath.Join(out, "a.txt")); got != "char_tok, original" {
+		t.Fatal(got)
+	}
+	missing(t, filepath.Join(out, "b.png"))
+	if got := readFile(t, filepath.Join(out, "c.png")); got != "unreviewed and untagged" {
+		t.Fatal(got)
+	}
+	if got := readFile(t, filepath.Join(out, "c.txt")); got != "char_tok" {
+		t.Fatal("default pin-trigger caption:", got)
+	}
+	missing(t, filepath.Join(f.root, "c.txt"))
+	if got := readFile(t, filepath.Join(f.root, "a.txt")); got != "original, remove_me" {
+		t.Fatal("source caption changed:", got)
+	}
+	if got := readFile(t, filepath.Join(f.root, "b.png")); got != "excluded" {
+		t.Fatal("excluded source image changed:", got)
+	}
+	runs, e := f.s.LatestStageRuns(f.ctx, f.dataset)
+	if e != nil || len(runs) != 1 || runs["export"]["status"] != "succeeded" {
+		t.Fatal(runs, e)
+	}
+	_, e = f.s.CreateExport(f.ctx, f.dataset, Record{"target_path": f.target})
+	assertCode(t, e, "export_target_exists")
+	if got := readFile(t, filepath.Join(out, "a.png")); got != "keep" {
+		t.Fatal("existing export changed:", got)
+	}
+}
+
+func TestExportBlocksWhileInputIsChanging(t *testing.T) {
+	f := newFixture(t, map[string]string{"a.png": "image"})
+	options := Record{"target_path": f.target}
+	plan, e := f.s.planExport(f.ctx, f.dataset, options)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, stage := range []string{"clean", "dedup"} {
+		t.Run(stage, func(t *testing.T) {
+			run, e := f.s.StartStageRun(f.ctx, f.dataset, stage)
+			if e != nil {
+				t.Fatal(e)
+			}
+			_, e = f.s.PreviewExport(f.ctx, f.dataset, options)
+			assertCode(t, e, "export_input_busy")
+			_, e = f.s.CreateExport(f.ctx, f.dataset, options)
+			assertCode(t, e, "export_input_busy")
+			assertCode(t, f.s.insertExport(f.ctx, "old-plan", plan), "export_input_busy")
+			if _, e = f.s.FinishStageRun(f.ctx, str(run["run_id"]), FinishStageRunOptions{Status: "failed"}); e != nil {
+				t.Fatal(e)
+			}
+		})
+	}
+	f.exec(`INSERT INTO crawl_batches(id,status,output_dir,concurrency,max_tasks,created_at,updated_at) VALUES('batch','running',?,1,100,1,1)`, f.root)
+	f.exec(`INSERT INTO dataset_crawls(dataset_id,batch_id,state,created_at,updated_at) VALUES(?,'batch','pending',1,1)`, f.dataset)
+	_, e = f.s.CreateExport(f.ctx, f.dataset, options)
+	assertCode(t, e, "export_input_busy")
+	entries, e := os.ReadDir(f.target)
+	if e != nil || len(entries) != 0 {
+		t.Fatal(entries, e)
+	}
+	f.exec(`UPDATE crawl_batches SET status='paused' WHERE id='batch'`)
+	if _, e = f.s.StartStageRun(f.ctx, f.dataset, "tag"); e != nil {
+		t.Fatal(e)
+	}
+	// Paused collection, failed processing runs and tag generation don't change the input.
+	f.wait(f.createExport(nil), "succeeded")
+}
+
+func TestExportRejectsDestinationInUnselectedSource(t *testing.T) {
+	f := newFixture(t, map[string]string{"a.png": "image"})
+	f.exec(`INSERT INTO gallery_sources(id,kind,display_name,root_path,canonical_root_key,created_at,updated_at) VALUES('empty','imported','Empty',?,?,1,1)`, f.target, f.target)
+	if _, _, e := f.s.AttachSource(f.ctx, f.dataset, "empty"); e != nil {
+		t.Fatal(e)
+	}
+	_, e := f.s.CreateExport(f.ctx, f.dataset, Record{"target_path": f.target})
+	assertCode(t, e, "target_inside_source")
+	entries, e := os.ReadDir(f.target)
+	if e != nil || len(entries) != 0 {
+		t.Fatal(entries, e)
+	}
+}
+
 func TestExportPreviewBoundariesPoliciesAndEmpty(t *testing.T) {
 	f := newFixture(t, map[string]string{"a.png": "image"})
 	for _, p := range []string{"relative", f.root, filepath.Join(f.root, "child")} {

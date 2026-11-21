@@ -101,6 +101,11 @@
     </p>
   {/if}
   {#if reason}<p class={cn("text-2xs", tone)} data-testid="export-error">{reason}</p>{/if}
+  {#if record.gallery_warning}
+    <p class="text-2xs text-warn" role="status" data-testid="export-gallery-warning">
+      {record.gallery_warning === "gallery_scan_failed" ? m.export_gallery_scan_warning() : m.export_gallery_registration_warning()}
+    </p>
+  {/if}
   {#if record.status === "interrupted" || (record.resumable && record.status === "failed")}
     <p class="text-2xs text-fg2">{m.export_resume_hint()}</p>
   {/if}

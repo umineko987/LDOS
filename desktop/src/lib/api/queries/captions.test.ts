@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createApi } from "../client.ts";
 import {
   applyCaptionEdit,
-  APPROVAL_PAGE_SIZE,
   assetContentPath,
   assetThumbnailPath,
   captionBatchesQuery,
@@ -12,17 +11,12 @@ import {
   captionOps,
   captionsFromTagger,
   captionsQuery,
-  decideReview,
-  DECISION_BATCH,
   editCaption,
   invalidateCaptions,
-  reviewApprovalsQuery,
-  setApproved,
   undoCaptionBatch,
   type CaptionList,
   type CaptionsSnapshot,
 } from "./captions.ts";
-import { datasetKeys } from "./datasets.ts";
 
 const LIST: CaptionList = {
   dataset_id: "d1",
@@ -131,7 +125,7 @@ describe("captionsQuery", () => {
   });
 });
 
-describe("captionBatchesQuery / reviewApprovalsQuery", () => {
+describe("captionBatchesQuery", () => {
   it("批次历史带 limit", async () => {
     const { api, requests } = fakeApi(() => ({ status: 200, body: { items: [] } }));
     await expect(newClient().fetchQuery(captionBatchesQuery(api, "d1", 5))).resolves.toEqual([]);
@@ -140,24 +134,6 @@ describe("captionBatchesQuery / reviewApprovalsQuery", () => {
     expect(url.searchParams.get("limit")).toBe("5");
   });
 
-  it("已校对集合翻完所有页", async () => {
-    const member = (asset_id: string) => ({ asset_id });
-    const { api, requests } = fakeApi((request) => {
-      const cursor = new URL(request.url).searchParams.get("cursor");
-      return cursor
-        ? { status: 200, body: { items: [member("c")], next_cursor: null, total: 3, limit: APPROVAL_PAGE_SIZE } }
-        : { status: 200, body: { items: [member("a"), member("b")], next_cursor: "2", total: 3, limit: APPROVAL_PAGE_SIZE } };
-    });
-    const ids = await newClient().fetchQuery(reviewApprovalsQuery(api, "d1"));
-    expect([...ids]).toEqual(["a", "b", "c"]);
-    const first = new URL(requests[0]!.request.url).searchParams;
-    expect(first.get("stage")).toBe("review");
-    expect(first.get("decision")).toBe("approved");
-    expect(first.get("limit")).toBe(String(APPROVAL_PAGE_SIZE));
-    expect(new URL(requests[1]!.request.url).searchParams.get("cursor")).toBe("2");
-    // 放在成员列表前缀下，决定变了时一起失效。
-    expect(captionKeys.approvals("d1").slice(0, 4)).toEqual([...datasetKeys.membersAll("d1")]);
-  });
 });
 
 describe("写操作", () => {
@@ -183,29 +159,9 @@ describe("写操作", () => {
     expect(pathname(requests[3]!.request)).toBe("/api/v1/caption-batches/b1/undo");
   });
 
-  it("decideReview 去重、分批，累计 updated", async () => {
-    const funnel = { dataset_id: "d1", member_count: 1, stages: [] };
-    const { api, requests } = fakeApi((_request, body) => ({
-      status: 200,
-      body: { updated: (body as { asset_ids: string[] }).asset_ids.length, funnel },
-    }));
-    const ids = Array.from({ length: DECISION_BATCH + 2 }, (_, index) => `a${index}`);
-    const result = await decideReview(api, "d1", [...ids, "a0"], "approve");
-    expect(result).toEqual({ updated: DECISION_BATCH + 2, funnel });
-    expect(requests).toHaveLength(2);
-    expect(requests[0]!.body).toMatchObject({ stage: "review", decision: "approve" });
-    expect(await decideReview(api, "d1", [], "clear")).toBeNull();
-  });
 });
 
 describe("缓存", () => {
-  it("setApproved 乐观地改集合", () => {
-    const client = newClient();
-    setApproved(client, "d1", ["a", "b"], true);
-    expect([...client.getQueryData<ReadonlySet<string>>(captionKeys.approvals("d1"))!]).toEqual(["a", "b"]);
-    setApproved(client, "d1", ["a"], false);
-    expect([...client.getQueryData<ReadonlySet<string>>(captionKeys.approvals("d1"))!]).toEqual(["b"]);
-  });
 
   it("applyCaptionEdit 把新 caption 写进列表，丢掉旧 ETag", () => {
     const client = newClient();

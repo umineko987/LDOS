@@ -86,7 +86,7 @@ const connections = await mockEvents(page, [                      // 第一次�
 
 ## 黄金路径（真实后端）
 
-`golden/pipeline.golden.ts` 在真实后端上走一遍 建数据集 → 导入文件夹 → 清洗 → 去重 → 打标 → 校对（标签工作室删标签）→ 导出，
+`golden/pipeline.golden.ts` 在真实后端上走一遍 建数据集 → 导入文件夹 → 清洗 → 去重 → 打标 → 导出，
 最后用 Node 检查导出目录里的图片和 caption。它用单独的配置，`npm run test:e2e` 不会跑到它。
 
 ```sh

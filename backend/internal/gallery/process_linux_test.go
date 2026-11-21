@@ -28,6 +28,10 @@ func TestMain(m *testing.M) {
 func runHelper() {
 	mode := os.Args[len(os.Args)-1]
 	for _, arg := range os.Args {
+		if arg == "--resolve-batch" {
+			runBatchResolveHelper()
+			return
+		}
 		if arg == "--resolve" && runResolveHelper(mode) {
 			return
 		}
@@ -293,7 +297,7 @@ func TestStaleWorkerExactIdentity(t *testing.T) {
 	if !matchesWorker([]byte(strings.Join(legacy, "\x00")+"\x00"), "exact-marker") {
 		t.Fatal("legacy orphan worker must remain eligible for exact-identity cleanup")
 	}
-	for _, flag := range []string{"--resolve", "--danbooru-auth"} {
+	for _, flag := range []string{"--resolve", "--resolve-batch", "--danbooru-auth"} {
 		resolved := append(append([]string(nil), valid[:7]...), flag, "--", "url")
 		if !matchesWorker([]byte(strings.Join(resolved, "\x00")), "exact-marker") {
 			t.Fatalf("valid %s worker rejected", flag)

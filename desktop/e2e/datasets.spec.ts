@@ -80,6 +80,8 @@ test("新建数据集，导入 24 张图的文件夹，排除 2 张后漏斗剩 
   await expect(card).toHaveCount(1);
   await expect(card).toContainText("角色 A");
   await expect(card.getByTestId("dataset-output")).toHaveText("22");
+  await expect(card.getByTestId("funnel-chart").locator("[data-stage]")).toHaveCount(5);
+  await expect(card.getByTestId("funnel-chart").locator('[data-stage="review"]')).toHaveCount(0);
 });
 
 test("哈希进度跟着 dataset.updated（reason=hashing）刷新，不轮询", async ({ page }) => {
@@ -187,6 +189,9 @@ test("[ 和 ] 在阶段之间切换，金色圆点跟到当前段", async ({ pag
   await backend.install(page);
   await page.goto(`/#/datasets/${id}/collect`);
   const rail = page.getByTestId("stage-rail");
+  await expect(rail.locator("a[data-stage]")).toHaveCount(6);
+  expect(await rail.locator("a[data-stage]").evaluateAll((links) => links.map((link) => link.getAttribute("data-stage"))))
+    .toEqual(["collect", "clean", "dedup", "tag", "export", "atlas"]);
   await expect(rail.locator('[data-stage="collect"]')).toHaveAttribute("aria-current", "page");
   await expect(rail.locator('[data-stage="collect"]')).toHaveAttribute("data-status", "done");
   await expect(rail.locator('[data-stage="clean"]')).toHaveAttribute("data-status", "idle");
@@ -204,6 +209,20 @@ test("[ 和 ] 在阶段之间切换，金色圆点跟到当前段", async ({ pag
   await expect
     .poll(() => dotOffset(rail.getByTestId("nav-dot"), rail.locator('[data-stage="export"] [data-dot-anchor]')))
     .toBeLessThan(1);
+  await page.keyboard.press("[");
+  await expect(page).toHaveURL(new RegExp(`#/datasets/${id}/tag$`));
+  await page.keyboard.press("]");
+  await expect(page).toHaveURL(new RegExp(`#/datasets/${id}/export$`));
+});
+
+test("旧复核地址进入同一数据集的导出页", async ({ page }) => {
+  const backend = new FakeDatasets();
+  const id = backend.add({ name: "旧链接", members: 3 });
+  await backend.install(page);
+  await page.goto(`/#/datasets/${id}/review`);
+  await expect(page).toHaveURL(new RegExp(`#/datasets/${id}/export$`));
+  await expect(page.getByRole("heading", { name: "旧链接" })).toBeVisible();
+  await expect(page.getByTestId("stage-rail").locator('[data-stage="export"]')).toHaveAttribute("aria-current", "page");
 });
 
 test("改触发词、删除数据集", async ({ page }) => {

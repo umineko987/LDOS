@@ -39,6 +39,7 @@ type itemNative struct {
 	TargetSourceID string       `json:"target_source_id,omitempty"`
 	SourceRoot     fileIdentity `json:"source_root"`
 	TargetRoot     fileIdentity `json:"target_root"`
+	BtrfsFSID      *[2]int32    `json:"btrfs_fsid,omitempty"`
 	Image          fileIdentity `json:"image"`
 	Caption        fileIdentity `json:"caption"`
 	TrashOperation string       `json:"trash_operation,omitempty"`
@@ -144,6 +145,12 @@ func (s *Service) prepareItems(ctx context.Context, items []operationItem, roots
 			}
 		} else if st.Mode&unix.S_IFMT != unix.S_IFREG {
 			return failure("unsafe_source_path", 409)
+		}
+		if kind == "trash" {
+			it.Native.BtrfsFSID, e = r.btrfsFSID()
+			if e != nil {
+				return e
+			}
 		}
 		it.Native.SourceRoot = r.identity
 		it.Native.TargetRoot = target.identity
@@ -833,6 +840,9 @@ func (s *Service) restoreOrPurge(ctx context.Context, trashOperationID string, p
 	defer close()
 	for i := range items {
 		it := &items[i]
+		if e := s.rebindTrashMount(ctx, roots[it.SourceID], it); e != nil {
+			return FileOperation{}, e
+		}
 		it.Origin, it.Target = it.Target, it.Origin
 		it.Native.TrashOperation = trashOperationID
 		it.Status = "planned"

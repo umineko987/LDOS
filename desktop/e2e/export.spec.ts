@@ -31,8 +31,8 @@ test("kohya 布局：选目录、预览计划、开始导出，完成后在文�
   await page.getByTestId("export-rename").getByRole("button", { name: "按序号" }).click();
   await expect(page.getByText("将建在 12_alice")).toBeVisible();
 
-  // 预览：不写文件，列出文件树和标注样例；预览前不能开始。
-  await expect(page.getByTestId("export-start")).toBeDisabled();
+  // 预览不是必需的，也不会写文件；它列出文件树和标注样例。
+  await expect(page.getByTestId("export-start")).toBeEnabled();
   await page.getByTestId("export-preview").click();
   const plan = page.getByTestId("export-plan");
   await expect(plan.getByTestId("export-plan-output")).toHaveText("/home/me/train/12_alice");
@@ -49,10 +49,10 @@ test("kohya 布局：选目录、预览计划、开始导出，完成后在文�
     include_captions: true,
   });
 
-  // 改了选项计划就过期，要重新预览。
+  // 改了选项计划就过期，但仍然可以直接开始。
   await page.getByTestId("export-repeats").fill("13");
   await expect(plan).toHaveAttribute("data-stale", "true");
-  await expect(page.getByTestId("export-start")).toBeDisabled();
+  await expect(page.getByTestId("export-start")).toBeEnabled();
   await page.getByTestId("export-repeats").fill("12");
   await expect(plan).not.toHaveAttribute("data-stale", "true");
 
@@ -68,6 +68,17 @@ test("kohya 布局：选目录、预览计划、开始导出，完成后在文�
 
   await current.getByTestId("export-reveal").click();
   await expect.poll(() => hostCalls(page)).toContainEqual({ command: "Host.RevealInFileManager", args: ["/home/me/train/12_alice"] });
+});
+
+test("从采集直接去导出，不跑中间阶段也不预览", async ({ page }) => {
+  const { id, exports } = await setup(page);
+  await page.goto(`/#/datasets/${id}/collect`);
+  await page.getByTestId("dataset-export-direct").click();
+  await expect(page.getByTestId("stage-rail").locator('[data-stage="clean"]')).toHaveAttribute("data-status", "idle");
+  await page.getByTestId("export-target").fill("/home/me/train");
+  await page.getByTestId("export-start").click();
+  await expect(page.getByTestId("export-current")).toBeVisible();
+  expect(exports.requests).toEqual([expect.objectContaining({ dry_run: false, target_path: "/home/me/train" })]);
 });
 
 test("黑名单默认取标签工作室存的，手动改过以后照用户的", async ({ page }) => {

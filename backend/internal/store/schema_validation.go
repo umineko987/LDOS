@@ -50,7 +50,8 @@ var requiredSchemaColumns = []struct{ table, columns string }{
 	{"dataset_crawls", "dataset_id batch_id state root_id error_code created_at updated_at"},
 	{"dataset_decisions", "dataset_id stage asset_id decision reason previous_decision previous_reason created_at updated_at"},
 	{"dataset_stage_runs", "id dataset_id stage status ref_id input_digest stats_json error_code created_at updated_at finished_at"},
-	{"caption_batches", "id dataset_id kind params_json stats_json created_at undone_at undo_stats_json state"},
+	{"gallery_asset_keeps", "asset_id"},
+	{"caption_batches", "id dataset_id source_id kind params_json stats_json created_at undone_at undo_stats_json state"},
 	{"caption_batch_items", "batch_id asset_id before_text before_version after_text after_version tagger_tags_json write_state undo_state before_bom"},
 }
 

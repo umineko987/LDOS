@@ -18,5 +18,11 @@ export function apiErrorMessage(error: unknown): string {
   if (!isApiError(error)) return m.api_error_unexpected();
   const message = Object.hasOwn(CLIENT_MESSAGES, error.code) ? CLIENT_MESSAGES[error.code] : undefined;
   if (message) return error.code === "http_error" && error.status ? m.api_error_http_status({ status: error.status }) : message();
-  return error.message === error.code ? m.api_error_unexpected() : error.message;
+  if (error.message !== error.code) return error.message;
+  switch (error.code) {
+    case "source_changed": return m.api_error_source_changed();
+    case "target_path_changed": return m.api_error_target_path_changed();
+    case "trash_file_missing": return m.api_error_trash_file_missing();
+    default: return m.api_error_unexpected();
+  }
 }

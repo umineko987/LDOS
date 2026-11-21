@@ -3,6 +3,7 @@
 package gallery
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -48,7 +49,8 @@ type EHDownloadOptions struct {
 // Callbacks run synchronously and must return promptly. OnStarted runs exactly
 // once after registration; an error terminates and reaps the worker before return.
 type Request struct {
-	resolve        bool // internal metadata lookup, never a download CLI invocation
+	resolve        bool   // internal metadata lookup, never a download CLI invocation
+	resolveInput   []byte // non-nil for a batch; sent over stdin, not argv
 	ID             string
 	URL            string
 	OutputDir      string
@@ -179,6 +181,10 @@ func (r *Runner) ValidateArgs(args []string) ([]string, error) {
 // environment and are never placed in the command visible through /proc.
 func (r *Runner) BuildCommand(marker string, req Request) ([]string, error) {
 	if req.resolve {
+		if req.resolveInput != nil {
+			return []string{r.settings.PythonExecutable, "-m", workerModule, "--marker", marker,
+				"--gallery-root", r.settings.RepoPath, "--resolve-batch", "--"}, nil
+		}
 		return []string{r.settings.PythonExecutable, "-m", workerModule, "--marker", marker,
 			"--gallery-root", r.settings.RepoPath, "--resolve", "--", req.URL}, nil
 	}
@@ -324,6 +330,9 @@ func (r *Runner) prepare(req Request, stall time.Duration) (*preparedProcess, er
 	env["PYTHONNOUSERSITE"], env["PYTHONSAFEPATH"] = "1", "1"
 	env["PYTHONDONTWRITEBYTECODE"] = "1"
 	p.cmd = exec.Command(command[0], command[1:]...)
+	if req.resolveInput != nil {
+		p.cmd.Stdin = bytes.NewReader(req.resolveInput)
+	}
 	p.cmd.Dir = r.settings.RepoPath
 	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	for key, value := range env {

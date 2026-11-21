@@ -482,14 +482,16 @@ func TestLegacySchemaAndTaskOracle(t *testing.T) {
 	s := openTestStore(t)
 	layout := schemaLayout(t, s)
 	wantLayout := expected["layout"].(map[string]any)
-	// New native collection tables are additive; every legacy table still has
-	// exactly the same layout as the Python fixture.
-	for _, name := range []string{"danbooru_import_items", "danbooru_collect_requests"} {
+	// Native tables are additive. Caption batch ownership intentionally changes
+	// in v19 and is checked separately by the caption migration test.
+	for _, name := range []string{"danbooru_import_items", "danbooru_collect_requests", "gallery_asset_keeps"} {
 		if _, ok := layout[name]; !ok {
-			t.Fatalf("missing native collection table %s", name)
+			t.Fatalf("missing native table %s", name)
 		}
 		delete(layout, name)
 	}
+	delete(layout, "caption_batches")
+	delete(wantLayout, "caption_batches")
 	if len(layout) != len(wantLayout) {
 		t.Fatalf("table count got %d want %d", len(layout), len(wantLayout))
 	}

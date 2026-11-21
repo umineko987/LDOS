@@ -1,4 +1,4 @@
-// 黄金路径：真实后端上 建数据集 → 导入 → 清洗 → 去重 → 打标 → 校对 → 导出，最后检查磁盘上的导出结果。
+// 黄金路径：真实后端上 建数据集 → 导入 → 清洗 → 去重 → 打标 → 导出，最后检查磁盘上的导出结果。
 // 后端、素材和替身见 setup.ts 与 fakes/；这里只模拟 MyGo 宿主（Host.RuntimeMetadata 指向真实后端，选目录按队列返回）。
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -49,7 +49,7 @@ const loadedImages = (scope: ReturnType<Page["locator"]>) =>
   scope.locator("img").evaluateAll((images) =>
     images.filter((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0).length);
 
-test("建数据集、导入、清洗、去重、打标、校对、导出，导出目录里是留下的图和改好的 caption", async ({ page }) => {
+test("建数据集、导入、清洗、去重、打标、导出，导出目录里是留下的图和写好的 caption", async ({ page }) => {
   const { apiOrigin, source, exportTarget } = goldenEnv();
   await desktopHost(page, apiOrigin);
   await page.goto("/");
@@ -111,6 +111,11 @@ test("建数据集、导入、清洗、去重、打标、校对、导出，导�
   await page.getByTestId("tag-run").click();
   await expect(page.getByTestId("tag-scores")).toContainText("已生成 4 张的打标结果");
   await expect(page.getByTestId("tag-changed")).toHaveAttribute("data-count", "4");
+  // 提高 general 阈值：保留 0.8 的颜色主题，不写入 0.6 的 simple background。
+  const general = page.getByTestId("tag-threshold-wd-vit-v3-general");
+  await general.getByRole("slider").press("End");
+  for (let step = 0; step < 20; step += 1) await page.keyboard.press("ArrowLeft");
+  await expect(general).toHaveAttribute("data-value", "0.79");
   await page.getByTestId("tag-write").click();
   const write = page.getByTestId("tag-write-dialog");
   await expect(write.getByTestId("tag-write-stats")).toHaveAttribute("data-changes", "4");
@@ -118,23 +123,8 @@ test("建数据集、导入、清洗、去重、打标、校对、导出，导�
   await expect(write).toBeHidden();
   await expect(page.locator("[data-sonner-toast]").filter({ hasText: "已写入 4 张 caption" })).toBeVisible();
 
-  // 校对：全选后从所有 caption 里删掉 simple background。
-  await rail(page).locator('[data-stage="review"]').click();
-  await expect(page.getByTestId("studio-count")).toHaveAttribute("data-count", "4");
-  await page.getByTestId("virtual-grid").locator('[data-index="0"]').click();
-  await page.keyboard.press("ControlOrMeta+a");
-  await expect(page.getByTestId("studio-selection")).toContainText("已选 4 张");
-  const row = page.getByTestId("studio-tags-all").locator('[data-tag="simple background"]');
-  await expect(row).toContainText("4/4");
-  await row.locator('[data-action="remove"]').click();
-  const op = page.getByTestId("studio-op-dialog");
-  await expect(op.getByTestId("studio-op-stats")).toHaveAttribute("data-changes", "4");
-  await op.getByTestId("studio-op-apply").click();
-  await expect(op).toBeHidden();
-  await expect(page.locator("[data-sonner-toast]").filter({ hasText: "已改写 4 张 caption" })).toBeVisible();
-
-  // 导出：kohya 布局、默认 10 次，选目录 → 预览 → 开始，等到完成。
-  await rail(page).locator('[data-stage="export"]').click();
+  // 导出：打标页直接进入导出；kohya 布局、默认 10 次，选目录 → 预览 → 开始，等到完成。
+  await page.getByRole("link", { name: "进入导出" }).click();
   await expect(page.getByTestId("export-trigger")).toHaveValue("golden_hero");
   await pickNext(page, exportTarget);
   await page.getByTestId("export-pick").click();
@@ -148,7 +138,7 @@ test("建数据集、导入、清洗、去重、打标、校对、导出，导�
   await expect(current).toHaveAttribute("data-status", "succeeded");
   await expect(current.getByTestId("export-status")).toHaveText("完成");
 
-  // 磁盘：留下的 4 张原样复制，caption 触发词在前、打标结果按底色、删掉的标签不在。
+  // 磁盘：留下的 4 张原样复制，caption 触发词在前、打标结果按底色、低于阈值的标签不在。
   const folder = join(exportTarget, "10_golden_hero");
   expect(readdirSync(folder).sort()).toEqual(["a.png", "a.txt", "b.png", "b.txt", "e.png", "e.txt", "f.png", "f.txt"]);
   for (const name of ["a", "b", "e", "f"]) {

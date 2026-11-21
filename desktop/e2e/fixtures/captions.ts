@@ -1,5 +1,4 @@
-// caption 接口的有状态模拟：全量列表（带 ETag / 304）、单张编辑、批量操作、从打标写入、批次历史和撤销，
-// 以及 review 阶段的校对决定（approve / clear）。写入都改内存里的状态，后续请求按新状态回答。
+// 数据集 caption 接口的有状态模拟：列表（ETag / 304）、编辑、批量操作、从打标写入、历史和撤销。
 //
 //   const datasets = new FakeDatasets();
 //   const id = datasets.add({ name: "studio", members: 12, trigger_word: "sks" });
@@ -11,7 +10,7 @@
 // 标签规则用前端的移植（src/lib/domain/captions.ts），它和后端 caption_tags.py 一致。
 // 版本号每次写入加一；带 expected_version / expected_versions 的写入对不上时报冲突。
 
-import type { Page, Request, Route } from "@playwright/test";
+import type { Page, Request } from "@playwright/test";
 
 import type { components } from "../../src/lib/api/schema";
 import {
@@ -63,8 +62,6 @@ export class FakeCaptions {
   /** 上一次从打标写进每张图的标签（merge 模式要用）。 */
   readonly previous = new Map<string, string[]>();
   readonly batches: Batch[] = [];
-  /** review 阶段已校对的图。 */
-  readonly approved = new Set<string>();
   /** 收到的写请求（按顺序），用例里可以检查请求体。 */
   readonly requests: { path: string; body: unknown }[] = [];
   /** 接下来这么多次撤销一张都恢复不了（像来源离线）：批次保持可撤销，可以重试。 */
@@ -96,7 +93,7 @@ export class FakeCaptions {
     return entry;
   }
 
-  /** review 阶段的输入：采集段没排除的成员。 */
+  /** 数据集打标输入：采集段没排除的成员。 */
   private inputs(datasetId: string) {
     const dataset = this.datasets.datasets.get(datasetId);
     if (!dataset) return null;
@@ -190,7 +187,7 @@ export class FakeCaptions {
     return { dataset_id: datasetId, dry_run: dryRun, batch_id: batchId, stats, samples, skipped, conflicts, failed: [] };
   }
 
-  /** 注册 caption 接口和 review 阶段的决定；在 `FakeDatasets.install` 之后、`page.goto()` 之前调用。 */
+  /** 在 `FakeDatasets.install` 之后、`page.goto()` 之前调用。 */
   async install(page: Page, tagger?: FakeTagger): Promise<void> {
     await mockApi(page, "get", "/api/v1/datasets/{dataset_id}/captions", (request) => {
       const id = idOf(request);
@@ -217,7 +214,7 @@ export class FakeCaptions {
       const inputs = this.inputs(id);
       if (!inputs) return missing();
       const member = inputs.members.find((item) => item.asset_id === assetId);
-      if (!member) return { status: 404, body: errorEnvelope("caption_not_found", "不在 review 阶段的输入里") };
+      if (!member) return { status: 404, body: errorEnvelope("caption_not_found", "不在数据集打标输入里") };
       const tags = parseCaption(body.text);
       const result = this.write(id, [assetId], () => tags, {
         dryRun: false,
@@ -330,35 +327,5 @@ export class FakeCaptions {
       this.batches[index] = { ...batch, summary: { ...batch.summary, undone_at: TIME + 1000, can_undo: false, undo_stats: stats } };
       return { body: { batch_id: batchId, dataset_id: batch.summary.dataset_id, undone: true, stats, conflicts, failed: [] } };
     });
-
-    // review 阶段的决定：只接管 stage=review 的请求，其余交给 FakeDatasets。
-    const membersPattern = /^\/api\/v1\/datasets\/[^/]+\/members$/;
-    await page.route(
-      (url) => membersPattern.test(url.pathname),
-      async (route: Route, request: Request) => {
-        const params = new URL(request.url()).searchParams;
-        if (request.method() !== "GET" || params.get("stage") !== "review" || params.get("decision") !== "approved") {
-          return route.fallback();
-        }
-        const inputs = this.inputs(idOf(request));
-        if (!inputs) return route.fulfill({ status: 404, json: missing().body });
-        const items = inputs.members.filter((member) => this.approved.has(member.asset_id));
-        await route.fulfill({ json: { items, total: items.length, limit: Number(params.get("limit") ?? 200), next_cursor: null } });
-      },
-    );
-    const decisionsPattern = /^\/api\/v1\/datasets\/[^/]+\/decisions$/;
-    await page.route(
-      (url) => decisionsPattern.test(url.pathname),
-      async (route: Route, request: Request) => {
-        const body = request.method() === "POST" ? (request.postDataJSON() as Schemas["DatasetDecisionRequest"]) : null;
-        if (!body || body.stage !== "review") return route.fallback();
-        this.requests.push({ path: "decisions", body });
-        for (const assetId of body.asset_ids) {
-          if (body.decision === "approve") this.approved.add(assetId);
-          else this.approved.delete(assetId);
-        }
-        await route.fulfill({ json: { funnel: this.datasets.funnel(idOf(request)), updated: body.asset_ids.length } });
-      },
-    );
   }
 }

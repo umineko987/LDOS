@@ -23,20 +23,20 @@ const FUNNEL: FunnelStage[] = [
   stage({ stage: "clean", input: 22, output: 20, excluded: 2, status: "succeeded" }),
   stage({ stage: "dedup", input: 20, output: 20, status: "succeeded", stale: true }),
   stage({ stage: "tag", input: 20, output: 20, status: "running" }),
-  stage({ stage: "review", input: 20, output: 20, status: "failed" }),
+  // 旧后端可能仍返回 review；不能再显示，也不能拦住进入导出。
+  { ...stage({ stage: "tag", input: 20, output: 20, status: "failed" }), stage: "review" } as unknown as FunnelStage,
   stage({ stage: "export", input: 20, output: 20, status: "cancelled" }),
 ];
 
 describe("railStages", () => {
   it("按固定顺序给出计数、去掉的张数和状态", () => {
     const stages = railStages(FUNNEL);
-    expect(stages.map((item) => item.stage)).toEqual([...DATASET_STAGES]);
+    expect(stages.map((item) => item.stage)).toEqual(["collect", "clean", "dedup", "tag", "export"]);
     expect(stages.map((item) => [item.output, item.removed, item.status])).toEqual([
       [22, 2, "done"],
       [20, 2, "done"],
       [20, 0, "stale"],
       [20, 0, "running"],
-      [20, 0, "failed"],
       [20, 0, "failed"],
     ]);
     expect(stages[0]!.ratio).toBeCloseTo(22 / 24);
@@ -44,7 +44,7 @@ describe("railStages", () => {
 
   it("后端缺段或没有数据时补空的 idle 段", () => {
     const stages = railStages([stage({ stage: "dedup", input: 3, output: 3 })]);
-    expect(stages).toHaveLength(6);
+    expect(stages).toHaveLength(5);
     expect(stages[0]).toEqual({ stage: "collect", input: 0, output: 0, removed: 0, status: "idle", ratio: 0 });
     expect(stages[2]).toMatchObject({ output: 3, status: "idle", ratio: 1 });
     expect(railStages(undefined).every((item) => item.status === "idle" && item.ratio === 0)).toBe(true);
@@ -64,7 +64,7 @@ describe("nextStage / attentionStages", () => {
   });
 
   it("列出运行中、需重跑和失败的段", () => {
-    expect(attentionStages(railStages(FUNNEL)).map((item) => item.stage)).toEqual(["dedup", "tag", "review", "export"]);
+    expect(attentionStages(railStages(FUNNEL)).map((item) => item.stage)).toEqual(["dedup", "tag", "export"]);
   });
 });
 
@@ -82,7 +82,7 @@ describe("adjacentStage", () => {
 });
 
 describe("outputBars", () => {
-  it("按固定顺序补齐六段，比例相对成员总数", () => {
+  it("按固定顺序补齐五段，比例相对成员总数", () => {
     const bars = outputBars(24, [
       { stage: "dedup", output: 18, stale: true },
       { stage: "collect", output: 22, stale: false },
@@ -90,7 +90,7 @@ describe("outputBars", () => {
     expect(bars.map((bar) => bar.stage)).toEqual([...DATASET_STAGES]);
     expect(bars[0]).toEqual({ stage: "collect", output: 22, stale: false, ratio: 22 / 24 });
     expect(bars[2]).toEqual({ stage: "dedup", output: 18, stale: true, ratio: 18 / 24 });
-    expect(bars[5]).toEqual({ stage: "export", output: 0, stale: false, ratio: 0 });
+    expect(bars[4]).toEqual({ stage: "export", output: 0, stale: false, ratio: 0 });
   });
 
   it("空数据集和异常计数不越界", () => {

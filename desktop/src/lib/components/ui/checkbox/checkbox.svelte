@@ -17,7 +17,7 @@
 	bind:ref
 	data-slot="checkbox"
 	class={cn(
-		"peer relative flex size-4 shrink-0 items-center justify-center rounded-sm border border-line2 bg-bg1 text-bg0 transition-colors data-checked:border-fg data-checked:bg-fg aria-invalid:border-destructive group-has-disabled/field:opacity-50 after:absolute after:-inset-x-3 after:-inset-y-2 disabled:cursor-not-allowed disabled:opacity-50",
+		"peer relative flex size-4 shrink-0 items-center justify-center rounded-sm border border-line2 bg-bg1 text-fg transition-colors data-[state=checked]:border-fg data-[state=checked]:bg-bg3 data-[state=indeterminate]:border-fg data-[state=indeterminate]:bg-bg3 aria-invalid:border-destructive group-has-disabled/field:opacity-50 after:absolute after:-inset-x-3 after:-inset-y-2 disabled:cursor-not-allowed disabled:opacity-50",
 		className
 	)}
 	bind:checked
@@ -29,10 +29,10 @@
 			data-slot="checkbox-indicator"
 			class="[&>svg]:size-3 grid place-content-center text-current transition-none"
 		>
-			{#if checked}
-				<CheckIcon  />
-			{:else if indeterminate}
+			{#if indeterminate}
 				<MinusIcon  />
+			{:else if checked}
+				<CheckIcon  />
 			{/if}
 		</div>
 	{/snippet}

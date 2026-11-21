@@ -1,5 +1,6 @@
 <script lang="ts">
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
+  import ClipboardCheckIcon from "@lucide/svelte/icons/clipboard-check";
   import FolderIcon from "@lucide/svelte/icons/folder";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import PencilIcon from "@lucide/svelte/icons/pencil";
@@ -41,6 +42,7 @@
   import { useScans } from "#lib/components/library/scans.svelte.ts";
   import Segmented from "#lib/components/segmented.svelte";
   import PageHeader from "#lib/components/shell/page-header.svelte";
+  import { galleryStudioPath } from "#lib/components/studio/gallery-studio-state.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Kbd } from "#lib/components/ui/kbd/index.ts";
@@ -314,6 +316,11 @@
     <Button variant="ghost" size="sm" onclick={scan} disabled={scanning || !source.data} data-testid="library-scan">
       {#if scanning}<LoaderCircleIcon class="animate-spin" />{m.library_scanning()}{:else}<RefreshCwIcon />{m.library_rescan()}{/if}
     </Button>
+    {#if source.data && directoryId}
+      <Button variant="outline" size="sm" href={`#${galleryStudioPath(sourceId, atRoot ? null : directoryId)}`} data-testid="library-review-link">
+        <ClipboardCheckIcon data-icon="inline-start" />{m.studio_gallery_review()}
+      </Button>
+    {/if}
     <Button variant="primary" size="sm" onclick={() => (addOpen = true)} disabled={datasetRoot === null} data-testid="library-add-to-dataset">
       <SquarePlusIcon />{m.library_add_to_dataset()}
     </Button>

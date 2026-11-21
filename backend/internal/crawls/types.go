@@ -35,6 +35,7 @@ type Dependencies struct {
 	// proxy-cache answers. It must never admit an unvalidated private target.
 	ValidateTarget func(context.Context, string, string, scheduler.Policy) error
 	Resolve        func(context.Context, string) (tasks.SiteInfo, error)
+	ResolveBatch   func(context.Context, []string) ([]tasks.SiteInfo, error)
 	ProbeForTarget func(context.Context, string) (proxypool.ProbeResult, error)
 	NotifyTasks    func()
 	// BatchComplete must be idempotent. It is called again after process recovery
@@ -77,7 +78,7 @@ type Service struct {
 }
 
 func New(ctx context.Context, deps Dependencies) (*Service, error) {
-	if ctx == nil || deps.Store == nil || deps.Discovery == nil || deps.Tasks == nil || deps.PolicyFor == nil || deps.Credentials == nil || deps.ValidateArgs == nil || deps.ValidateTarget == nil || deps.Resolve == nil || deps.ProbeForTarget == nil || deps.NotifyTasks == nil {
+	if ctx == nil || deps.Store == nil || deps.Discovery == nil || deps.Tasks == nil || deps.PolicyFor == nil || deps.Credentials == nil || deps.ValidateArgs == nil || deps.ValidateTarget == nil || deps.Resolve == nil || deps.ResolveBatch == nil || deps.ProbeForTarget == nil || deps.NotifyTasks == nil {
 		return nil, errors.New("crawls requires shared store, discovery, tasks, policy, credentials, validation, resolver, proxy probe and scheduler notification")
 	}
 	if deps.Discovery.Transport == nil || deps.Settings.RuntimeDir == "" || deps.Settings.DefaultOutputRoot == "" || len(deps.Settings.AllowedOutputRoots) == 0 {

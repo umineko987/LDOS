@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -460,7 +461,7 @@ func TestWithSourcesNestedScopeAndUnrelatedContext(t *testing.T) {
 	}
 }
 
-func TestSchemaRemainsV18(t *testing.T) {
+func TestCatalogUsesCurrentStoreSchema(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 	must(t, s.db.WriteTransaction(ctx, func(tx *sql.Tx) error {
@@ -468,7 +469,7 @@ func TestSchemaRemainsV18(t *testing.T) {
 		if e != nil {
 			return e
 		}
-		if str(row, "value") != "18" {
+		if str(row, "value") != strconv.Itoa(store.CurrentSchemaVersion) {
 			t.Errorf("schema drift %#v", row)
 		}
 		return nil

@@ -220,7 +220,7 @@ func (s *Service) summary(ctx context.Context, d Record, detail bool) (Record, e
 const memberColumns = `a.id AS asset_id,a.source_id,a.directory_id,a.relative_path,a.name,a.extension,a.sort_key,a.size_bytes,a.modified_ns,a.content_sha256,a.content_version,a.format,a.width,a.height,a.txt_relative_path,a.txt_size_bytes,a.txt_modified_ns,a.txt_version,a.txt_state,a.dedup_visibility,a.lifecycle_state`
 
 func memberPredicate() string {
-	p := `EXISTS(SELECT 1 FROM dataset_roots r WHERE r.dataset_id=? AND r.source_id=a.source_id AND (r.relative_path='' OR a.relative_path=r.relative_path OR substr(a.relative_path,1,length(r.relative_path)+1)=r.relative_path||'/')) AND ((a.lifecycle_state='active' AND a.dedup_visibility!='excluded') OR (a.lifecycle_state IN ('active','trashed') AND EXISTS(SELECT 1 FROM dataset_decisions d WHERE d.dataset_id=? AND d.asset_id=a.id AND d.decision='exclude')))`
+	p := `EXISTS(SELECT 1 FROM dataset_roots r WHERE r.dataset_id=? AND r.source_id=a.source_id AND (r.relative_path='' OR a.relative_path=r.relative_path OR substr(a.relative_path,1,length(r.relative_path)+1)=r.relative_path||'/')) AND ((a.lifecycle_state='active' AND a.dedup_visibility!='excluded') OR (a.lifecycle_state IN ('active','trashed') AND EXISTS(SELECT 1 FROM dataset_decisions d WHERE d.dataset_id=? AND d.asset_id=a.id AND d.stage!='review' AND d.decision='exclude')))`
 	for _, part := range []string{".ldos", "duplicates", "keep", "trashed", "trash"} {
 		p += ` AND ('/'||lower(a.relative_path)||'/') NOT LIKE '%/` + part + `/%'`
 	}
@@ -233,7 +233,7 @@ func (s *Service) MemberRows(ctx context.Context, id string) ([]Record, error) {
 	return s.deps.Store.QueryRows(ctx, "SELECT "+memberColumns+" FROM gallery_assets a WHERE "+memberPredicate()+" ORDER BY a.sort_key,a.name,a.id", id, id)
 }
 func (s *Service) ListDecisions(ctx context.Context, id string, assetIDs ...[]string) ([]Record, error) {
-	q := "SELECT stage,asset_id,decision,reason,updated_at FROM dataset_decisions WHERE dataset_id=?"
+	q := "SELECT stage,asset_id,decision,reason,updated_at FROM dataset_decisions WHERE dataset_id=? AND stage!='review'"
 	args := []any{id}
 	if len(assetIDs) > 0 {
 		ids := unique(assetIDs[0])

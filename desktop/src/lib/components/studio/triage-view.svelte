@@ -4,6 +4,7 @@
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import CircleCheckIcon from "@lucide/svelte/icons/circle-check";
   import ImageOffIcon from "@lucide/svelte/icons/image-off";
+  import Trash2Icon from "@lucide/svelte/icons/trash-2";
   import XIcon from "@lucide/svelte/icons/x";
 
   import { TAG_TEXT_CLASS } from "#lib/components/captions/tag-colors.ts";
@@ -28,6 +29,7 @@
     addInput = $bindable(null),
     onedit,
     onapprove,
+    ontrash,
     onstep,
   }: {
     item: { readonly asset_id: string; readonly name: string; readonly tags: readonly string[]; readonly text: string };
@@ -40,47 +42,43 @@
     src: string;
     saving: boolean;
     addInput?: HTMLInputElement | null;
-    onedit: (tags: string[]) => void;
+    onedit: (tags: string[]) => Promise<boolean> | void;
     onapprove: () => void;
+    ontrash?: () => void;
     onstep: (delta: number) => void;
   } = $props();
 
   let adding = $state("");
-  let failed = $state(false);
-
-  $effect(() => {
-    void src;
-    failed = false;
-  });
+  let failedSrc = $state<string | null>(null);
 
   const trigger = $derived(triggerWord.trim());
 
   function remove(tag: string) {
-    onedit(item.tags.filter((current) => current !== tag));
+    void onedit(item.tags.filter((current) => current !== tag));
   }
 
-  function submit(event: SubmitEvent) {
+  async function submit(event: SubmitEvent) {
     event.preventDefault();
+    if (saving) return;
     const tags = parseTagInput(adding);
-    adding = "";
     // 空着回车：离开输入框，接着用 Enter 校对。
     if (tags.length === 0) {
       addInput?.blur();
       return;
     }
     const next = dedupe([...item.tags, ...tags]);
-    if (next.length !== item.tags.length) onedit(next);
+    if (next.length === item.tags.length || (await onedit(next)) !== false) adding = "";
   }
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col" data-testid="studio-triage" data-asset={item.asset_id} data-approved={approved}>
   <div class="relative flex min-h-0 flex-1 items-center justify-center bg-bg0 p-4">
-    {#if failed}
+    {#if failedSrc === src}
       <div class="flex flex-col items-center gap-2 text-fg3" role="img" aria-label={item.name}>
         <ImageOffIcon class="size-6" />
       </div>
     {:else}
-      <img crossorigin="anonymous" {src} alt={item.name} class="max-h-full max-w-full object-contain" draggable="false" onerror={() => (failed = true)} />
+      <img crossorigin="anonymous" {src} alt={item.name} class="max-h-full max-w-full object-contain" draggable="false" onerror={(event) => (failedSrc = event.currentTarget.getAttribute("src"))} />
     {/if}
     {#if approved}
       <span class="absolute top-3 right-3 flex items-center gap-1 rounded-sm bg-bg0/80 px-1.5 py-0.5 text-2xs text-ok" data-testid="studio-triage-approved">
@@ -125,6 +123,7 @@
       <Input
         bind:ref={addInput}
         bind:value={adding}
+        disabled={saving}
         class="h-7 text-xs"
         placeholder={m.studio_triage_add()}
         aria-label={m.studio_triage_add()}
@@ -142,15 +141,20 @@
     <p class="line-clamp-2 font-mono text-2xs break-all text-fg3" data-testid="studio-triage-text">{item.text}</p>
 
     <div class="flex items-center gap-1.5">
-      <Button variant="ghost" size="sm" disabled={position <= 0} onclick={() => onstep(-1)} aria-label={m.studio_triage_prev()}>
+      <Button variant="ghost" size="sm" disabled={saving || position <= 0} onclick={() => onstep(-1)} aria-label={m.studio_triage_prev()}>
         <ChevronLeftIcon />
       </Button>
-      <Button variant="ghost" size="sm" disabled={position >= total - 1} onclick={() => onstep(1)} aria-label={m.studio_triage_next()}>
+      <Button variant="ghost" size="sm" disabled={saving || position >= total - 1} onclick={() => onstep(1)} aria-label={m.studio_triage_next()}>
         <ChevronRightIcon />
       </Button>
       <span class="ml-auto"></span>
-      <Button variant="primary" size="sm" onclick={onapprove} data-testid="studio-triage-approve">
-        <CheckIcon />{m.studio_triage_approve()} <Kbd>Enter</Kbd>
+      {#if ontrash}
+        <Button variant="outline" size="sm" disabled={saving} onclick={ontrash} data-testid="studio-gallery-trash">
+          <Trash2Icon data-icon="inline-start" />{m.studio_gallery_trash()} <Kbd>Del</Kbd>
+        </Button>
+      {/if}
+      <Button variant="primary" size="sm" disabled={saving} onclick={onapprove} data-testid="studio-triage-approve">
+        <CheckIcon data-icon="inline-start" />{ontrash ? m.studio_gallery_keep_next() : m.studio_triage_approve()} <Kbd>Enter</Kbd>
       </Button>
     </div>
   </div>

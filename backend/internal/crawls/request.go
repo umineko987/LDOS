@@ -346,15 +346,6 @@ func (s *Service) Create(ctx context.Context, body Request, idempotencyKey *stri
 			if err := s.deps.ValidateTarget(ctx, target, mode, policy); err != nil {
 				return nil, false, invalid(err.Error())
 			}
-			info, e := s.deps.Resolve(ctx, target)
-			if e != nil {
-				return nil, false, e
-			}
-			if info.Supported {
-				if spec, e := discoverydata.SearchSite(info.Site); e == nil && spec.Site != source.Site {
-					return nil, false, invalid("site 与 URL 提取器站点不一致")
-				}
-			}
 			if source.Site == "exhentai" && !ehGalleryRE.MatchString(target) {
 				return nil, false, invalid("EH 来源地址必须是具体画廊 /g/GID/TOKEN/")
 			}
@@ -364,6 +355,24 @@ func (s *Service) Create(ctx context.Context, body Request, idempotencyKey *stri
 			}
 			addressID := uuid.NewSHA1(id, []byte(fmt.Sprintf("%d:%d:%s", sourceOrder, addressOrder, target))).String()
 			addresses = append(addresses, map[string]any{"id": addressID, "site": source.Site, "source_order": sourceOrder, "address_order": addressOrder, "url": target, "label": text(a.Label), "address_type": text(a.AddressType), "proxy_mode": mode, "max_attempts": attempts, "priority": priority, "credentials_ref": nullable(creds.Reference), "cookies_file": nullable(creds.CookiesFile), "config_file": nullable(creds.ConfigFile), "download_options": download, "extra_args": args, "discovery_args": opt.DiscoveryExtraArgs, "timeout_seconds": timeout})
+		}
+	}
+	for start := 0; start < len(addresses); start += enqueueChunkSize {
+		group := addresses[start:min(start+enqueueChunkSize, len(addresses))]
+		urls := make([]string, len(group))
+		for i, a := range group {
+			urls[i] = str(a["url"])
+		}
+		infos, err := s.resolveGroup(ctx, urls)
+		if err != nil {
+			return nil, false, err
+		}
+		for i, info := range infos {
+			if info.Supported {
+				if spec, e := discoverydata.SearchSite(info.Site); e == nil && spec.Site != group[i]["site"] {
+					return nil, false, invalid("site 与 URL 提取器站点不一致")
+				}
+			}
 		}
 	}
 	batchID := id.String()

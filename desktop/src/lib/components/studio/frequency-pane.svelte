@@ -1,6 +1,7 @@
 <script lang="ts">
   import BanIcon from "@lucide/svelte/icons/ban";
   import XIcon from "@lucide/svelte/icons/x";
+  import type { Snippet } from "svelte";
 
   import { TAG_CATEGORY_LABEL, TAG_TEXT_CLASS } from "#lib/components/captions/tag-colors.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
@@ -18,12 +19,16 @@
     blacklist,
     ontoggle,
     onblacklist,
+    gallery = false,
+    settings,
   }: {
     table: FrequencyTable;
     query: ParsedQuery;
     blacklist: readonly string[];
     ontoggle: (tag: string, negate: boolean) => void;
     onblacklist: (tag: string) => void;
+    gallery?: boolean;
+    settings?: Snippet;
   } = $props();
 
   const GROUP_ROWS = 40;
@@ -113,7 +118,7 @@
   </div>
 
   <section class="flex flex-none flex-col gap-1.5 border-t border-line px-3 py-2.5" data-testid="studio-blacklist">
-    <h3 class="px-2 text-2xs font-medium text-fg3">{m.studio_blacklist()}</h3>
+    <h3 class="px-2 text-2xs font-medium text-fg3">{gallery ? m.studio_gallery_blacklist() : m.studio_blacklist()}</h3>
     {#if blacklist.length}
       <ul class="flex flex-wrap gap-1 px-1">
         {#each blacklist as tag (tag)}
@@ -142,4 +147,5 @@
       />
     </form>
   </section>
+  {@render settings?.()}
 </div>

@@ -137,6 +137,17 @@ func newBusinessRuntime(parent context.Context, settings *liveSettings, db *stor
 			r, err := task.runner.Resolve(ctx, target)
 			return tasks.SiteInfo{Site: r.Site, Subcategory: r.Subcategory, Extractor: r.Extractor, Supported: r.Supported, Host: r.Host}, err
 		},
+		ResolveBatch: func(ctx context.Context, targets []string) ([]tasks.SiteInfo, error) {
+			resolved, err := task.runner.ResolveBatch(ctx, targets)
+			if err != nil {
+				return nil, err
+			}
+			infos := make([]tasks.SiteInfo, len(resolved))
+			for i, info := range resolved {
+				infos[i] = tasks.SiteInfo(info)
+			}
+			return infos, nil
+		},
 		ProbeForTarget: pool.ProbeForTarget, NotifyTasks: task.scheduler.Notify, BatchComplete: b.batchFinished,
 	})
 	if err != nil {
@@ -144,6 +155,9 @@ func newBusinessRuntime(parent context.Context, settings *liveSettings, db *stor
 	}
 	b.datasets, err = datasets.New(ctx, datasets.Dependencies{Store: db, Settings: initial, Jobs: jobs, Events: events,
 		Catalog: datasetCatalog{b.gallery}, Images: datasetImages{b.gallery},
+		RegisterExport: func(ctx context.Context, path string, committed *os.File) error {
+			return datasetPeerError(b.gallery.RegisterDatasetExport(ctx, path, committed))
+		},
 		Crawls: datasets.CrawlCallback(func(ctx context.Context, raw json.RawMessage, key string) (string, error) {
 			request, err := crawls.DecodeRequest(raw)
 			if err != nil {

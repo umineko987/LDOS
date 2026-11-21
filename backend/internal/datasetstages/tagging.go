@@ -457,7 +457,7 @@ func (s *Service) CaptionsFromTagger(ctx context.Context, id string, o FromTagge
 			}
 		}
 	}
-	inputs, e := s.Inputs(ctx, id, "review", o.AssetIDs)
+	inputs, e := s.Inputs(ctx, id, "export", o.AssetIDs)
 	if e != nil {
 		return nil, e
 	}

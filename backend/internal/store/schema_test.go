@@ -72,7 +72,7 @@ func TestHistoricalAdditiveUpgrades(t *testing.T) {
 			equalJSON(t, after, before)
 			var got string
 			check(t, s.reader.QueryRow("SELECT value FROM meta WHERE key='schema_version'").Scan(&got))
-			if got != "18" {
+			if got != strconv.Itoa(CurrentSchemaVersion) {
 				t.Fatal(got)
 			}
 			check(t, s.reader.QueryRow("SELECT name FROM datasets WHERE id='data'").Scan(&got))
@@ -92,7 +92,7 @@ func TestHistoricalAdditiveUpgrades(t *testing.T) {
 }
 
 func TestRejectInvalidAndFutureVersions(t *testing.T) {
-	for _, version := range []string{"0", "-1", "19", "invalid"} {
+	for _, version := range []string{"0", "-1", strconv.Itoa(CurrentSchemaVersion + 1), "invalid"} {
 		t.Run(version, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "unsupported.sqlite")
 			db := rawDatabase(t, path)
@@ -165,7 +165,7 @@ func TestPreserveLegacyPoliciesAndReviewSnapshots(t *testing.T) {
 			check(t, err)
 			defer s.Close()
 			check(t, s.reader.QueryRow("SELECT value FROM meta WHERE key='schema_version'").Scan(&marker))
-			if marker != "18" {
+			if marker != strconv.Itoa(CurrentSchemaVersion) {
 				t.Fatal(marker)
 			}
 		})

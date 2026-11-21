@@ -9,6 +9,7 @@ import { queryOptions, type QueryClient } from "@tanstack/svelte-query";
 import { data, type Api } from "../client.ts";
 import type { components } from "../schema";
 import { datasetKeys } from "./datasets.ts";
+import { invalidateLibrary, libraryKeys } from "./library.ts";
 
 type Schemas = components["schemas"];
 
@@ -35,12 +36,18 @@ export function isActiveExport(status: ExportStatus): boolean {
 export function datasetExportsQuery(api: Api, id: string, limit = EXPORT_HISTORY_LIMIT) {
   return queryOptions({
     queryKey: exportKeys.list(id),
-    queryFn: async ({ signal }) =>
-      (
-        await data(
-          api.client.GET("/api/v1/datasets/{dataset_id}/exports", { params: { path: { dataset_id: id }, query: { limit } }, signal }),
-        )
-      ).items,
+    queryFn: async ({ signal, client, queryKey }) => {
+      const { items } = await data(
+        api.client.GET("/api/v1/datasets/{dataset_id}/exports", { params: { path: { dataset_id: id }, query: { limit } }, signal }),
+      );
+      // The backend finishes the gallery handoff before reporting success.
+      // Refresh cached sources even if polling picked up the completion without SSE.
+      const previous = client.getQueryData<DatasetExport[]>(queryKey);
+      if (previous?.some((prior) => isActiveExport(prior.status) && items.some((item) => item.export_id === prior.export_id && item.status === "succeeded"))) {
+        void invalidateLibrary(client);
+      }
+      return items;
+    },
     refetchInterval: (query) => (query.state.data?.some((item) => isActiveExport(item.status)) ? EXPORT_POLL_MS : false),
   });
 }
@@ -79,6 +86,11 @@ export function upsertExport(client: QueryClient, item: DatasetExport): void {
     if (index < 0) return [item, ...items];
     return items.map((existing, position) => (position === index ? item : existing));
   });
+  if (isActiveExport(item.status)) {
+    // A user may leave before the history observes completion. Mark the
+    // cached gallery stale now so its next mount fetches instead of reusing it.
+    void client.invalidateQueries({ queryKey: libraryKeys.all, refetchType: "none" });
+  }
 }
 
 export function invalidateExports(client: QueryClient, id: string): Promise<void> {

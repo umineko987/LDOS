@@ -218,7 +218,7 @@ func (s *Service) UpdateSource(ctx context.Context, sourceID, displayName string
 func (s *Service) sourceBusy(ctx context.Context, sourceID string) error {
 	s.mu.Lock()
 	scan := s.scans[sourceID]
-	running := str(scan, "state") == "running"
+	running := scan != nil && str(scan.row, "state") == "running"
 	s.mu.Unlock()
 	if running {
 		return failure("scan_in_progress", 409)

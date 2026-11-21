@@ -882,7 +882,10 @@
           },
           "dataset_id": {
             "title": "Dataset Id",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "dry_run": {
             "title": "Dry Run",
@@ -908,6 +911,12 @@
             },
             "title": "Skipped",
             "type": "array"
+          },
+          "source_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "stats": {
             "$ref": "#/components/schemas/CaptionWriteStats"
@@ -946,7 +955,10 @@
           },
           "dataset_id": {
             "title": "Dataset Id",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "kind": {
             "enum": [
@@ -961,6 +973,12 @@
             "additionalProperties": true,
             "title": "Params",
             "type": "object"
+          },
+          "source_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "stats": {
             "additionalProperties": true,
@@ -1460,7 +1478,10 @@
           },
           "dataset_id": {
             "title": "Dataset Id",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "failed": {
             "items": {
@@ -1468,6 +1489,12 @@
             },
             "title": "Failed",
             "type": "array"
+          },
+          "source_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "stats": {
             "$ref": "#/components/schemas/CaptionUndoStats"
@@ -3980,7 +4007,6 @@
               "clean",
               "dedup",
               "tag",
-              "review",
               "export"
             ],
             "title": "Stage",
@@ -4230,6 +4256,13 @@
           "folder_name": {
             "title": "Folder Name",
             "type": "string"
+          },
+          "gallery_warning": {
+            "description": "Gallery registration or indexing warning after a successful file export.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "image_bytes": {
             "minimum": 0.0,
@@ -4770,7 +4803,6 @@
               "clean",
               "dedup",
               "tag",
-              "review",
               "export"
             ],
             "title": "Stage",
@@ -4868,7 +4900,6 @@
               "clean",
               "dedup",
               "tag",
-              "review",
               "export"
             ],
             "title": "Stage",
@@ -5265,7 +5296,6 @@
               "clean",
               "dedup",
               "tag",
-              "review",
               "export"
             ],
             "title": "Stage",
@@ -8459,6 +8489,35 @@
           "asset"
         ],
         "title": "GalleryAssetEnvelopeResponse",
+        "type": "object"
+      },
+      "GalleryCaptionListResponse": {
+        "properties": {
+          "dataset_id": {
+            "type": "null"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CaptionItem"
+            },
+            "type": "array"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "trigger_word": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "trigger_word",
+          "etag",
+          "items"
+        ],
         "type": "object"
       },
       "GalleryDirectoryAncestorResponse": {
@@ -19043,7 +19102,6 @@
                     "clean",
                     "dedup",
                     "tag",
-                    "review",
                     "export"
                   ],
                   "type": "string"
@@ -19301,7 +19359,6 @@
                     "clean",
                     "dedup",
                     "tag",
-                    "review",
                     "export"
                   ],
                   "type": "string"
@@ -21837,6 +21894,348 @@
           }
         },
         "summary": "Patch Gallery Source"
+      }
+    },
+    "/api/v1/gallery/sources/{source_id}/caption-batches": {
+      "get": {
+        "operationId": "list_gallery_source_caption_batches_api_v1_gallery_sources__source_id__caption_batches_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptionBatchListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Gallery Source Caption Batches"
+      }
+    },
+    "/api/v1/gallery/sources/{source_id}/captions": {
+      "get": {
+        "operationId": "list_gallery_source_captions_api_v1_gallery_sources__source_id__captions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          },
+          {
+            "in": "query",
+            "name": "directory_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GalleryCaptionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "If-None-Match 与当前 ETag 相同，没有响应体"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Gallery Source Captions"
+      }
+    },
+    "/api/v1/gallery/sources/{source_id}/captions/ops": {
+      "post": {
+        "operationId": "run_gallery_source_caption_ops_api_v1_gallery_sources__source_id__captions_ops_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptionOpsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptionBatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Gallery Source Caption Ops"
+      }
+    },
+    "/api/v1/gallery/sources/{source_id}/captions/{asset_id}": {
+      "put": {
+        "operationId": "edit_gallery_source_caption_api_v1_gallery_sources__source_id__captions__asset_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptionEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptionEditResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Gallery Source Caption"
+      }
+    },
+    "/api/v1/gallery/sources/{source_id}/kept": {
+      "get": {
+        "operationId": "list_gallery_kept",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "asset_ids": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "asset_ids"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Kept Gallery Assets"
+      },
+      "put": {
+        "operationId": "set_gallery_kept",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "asset_ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "kept": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "asset_ids",
+                  "kept"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "updated": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "updated"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Kept Gallery Assets"
       }
     },
     "/api/v1/gallery/sources/{source_id}/reconciliation/retry": {

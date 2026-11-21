@@ -7,7 +7,7 @@ LDOS 的业务逻辑、SQLite 存储、调度、HTTP/SSE 和进程管理已迁�
 | 业务 | 原生实现 |
 | --- | --- |
 | 配置、来源校验、HTTP 错误、诊断、OpenAPI | `internal/config`、`httpapi`、`diagnostics` |
-| SQLite v18、FTS5、历史升级、共享单写入器 | `internal/store` |
+| SQLite v19、FTS5、历史升级、共享单写入器 | `internal/store` |
 | 活动、日志、SSE、任务、取消与重试 | `internal/activity`、`tasks`、`scheduler` |
 | 下载设置、站点策略、托管凭据 | `internal/downloads`、`policy`、`credentials` |
 | 代理来源、解析、租约、探活、冷却、Mihomo、认证转发与加密 DNS | `internal/proxy*`、`network` |

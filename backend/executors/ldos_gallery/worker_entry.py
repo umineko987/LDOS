@@ -18,6 +18,7 @@ def main() -> int:
     parser.add_argument("--marker", required=True)
     parser.add_argument("--gallery-root", required=True)
     parser.add_argument("--resolve", action="store_true")
+    parser.add_argument("--resolve-batch", action="store_true")
     parser.add_argument("--danbooru-auth", action="store_true")
     control = parser.parse_args(control_args)
 
@@ -26,13 +27,17 @@ def main() -> int:
         raise SystemExit(f"gallery-dl source not found: {gallery_root}")
     sys.path.insert(0, str(gallery_root))
 
-    if control.resolve:
-        if len(gallery_args) != 1:
-            raise SystemExit("resolve requires exactly one URL after '--'")
+    if control.resolve or control.resolve_batch:
         import json
 
         from .resolve import resolve
 
+        if control.resolve_batch:
+            urls = json.load(sys.stdin)
+            print(json.dumps([resolve(url, gallery_root) for url in urls], ensure_ascii=False))
+            return 0
+        if len(gallery_args) != 1:
+            raise SystemExit("resolve requires exactly one URL after '--'")
         print(json.dumps(resolve(gallery_args[0], gallery_root), ensure_ascii=False))
         return 0
 

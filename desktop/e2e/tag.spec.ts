@@ -81,11 +81,14 @@ test("拖阈值实时更新频率和改动数，预览后写入，toast 撤销",
   // 写完重新拉 caption：按同样的阈值已经没有要改的了。
   await expect(changed(page)).toHaveAttribute("data-count", "0");
   await expect(page.getByTestId("tag-no-changes")).toBeVisible();
+  const next = page.getByRole("link", { name: "进入导出" });
+  await expect(next).toHaveAttribute("href", /#\/datasets\/ds1\/export$/);
 
   await toast.getByRole("button", { name: "撤销" }).click();
   await expect(page.locator("[data-sonner-toast]").filter({ hasText: "已撤销，恢复了 6 张" })).toBeVisible();
   expect(captions.tags(assetId(11))).toEqual(["sks", "1girl", "solo"]);
   await expect(changed(page)).toHaveAttribute("data-count", "6");
+  await expect(next).toHaveCount(0);
 });
 
 test("待打标的图先开始打标；写入方式和类别影响预览", async ({ page }) => {

@@ -38,6 +38,10 @@ is added; diagnostic masking uses `internal/redaction.Text`.
   termination grace and bounded pipe drain. A nonzero exit, malformed/missing/null
   fields, unexpected fields or trailing output is an error, not unsupported=false.
   Cancellation/deadline and `ErrCaptureLimit` remain inspectable with `errors.Is`.
+- `ResolveBatch(ctx, urls)` uses the same supervisor and deadline for one group
+  of local lookups. URLs are a JSON array on stdin (`--resolve-batch --`); the
+  result must contain one valid `SiteInfo` per input in order. Crawl admission
+  and media planning group up to 50 URLs, with a 16 KiB capture budget per URL.
 - `ResolveDanbooruAuth(ctx, Request) (http.Header, error)` resolves the effective
   Danbooru account and Cookie headers offline using the worker's configuration
   precedence. Its secret-bearing response stays in private pipes, outside Capture
@@ -51,7 +55,7 @@ is added; diagnostic masking uses `internal/redaction.Text`.
   active IDs are rejected. The runner remains reusable after StopAll.
 - `TerminateStaleProcess(ctx, pid, marker, grace) (bool, error)` checks exact
   NUL-separated `-m ldos_gallery.worker_entry` and `--marker` arguments in /proc,
-  plus process-group leadership, before TERM/grace/KILL. The optional `--resolve` or `--danbooru-auth`
+  plus process-group leadership, before TERM/grace/KILL. The optional `--resolve`, `--resolve-batch` or `--danbooru-auth`
   control flag is recognized. Exact `gdl_backend.worker_entry` identity is accepted
   only to clean up orphaned pre-migration workers; new commands never use it.
 

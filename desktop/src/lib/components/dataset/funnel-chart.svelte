@@ -2,7 +2,7 @@
   import type { OutputBar } from "#lib/domain/funnel.ts";
   import { m } from "#lib/paraglide/messages.js";
 
-  // 首页卡片上的迷你漏斗：六根竖条，高度是这一段输出占成员总数的比例。
+  // 首页卡片上的迷你漏斗：五根竖条，高度是这一段输出占成员总数的比例。
   // 只用 transform: scaleY 画高度；需重跑的段用提示色。
   let { bars, height = 34 }: { bars: readonly OutputBar[]; height?: number } = $props();
 
@@ -11,7 +11,6 @@
     clean: m.stage_clean,
     dedup: m.stage_dedup,
     tag: m.stage_tag,
-    review: m.stage_review,
     export: m.stage_export,
   } as const;
 

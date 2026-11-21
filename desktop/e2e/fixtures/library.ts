@@ -31,6 +31,7 @@ interface FakeOperation {
   readonly operation_id: string;
   readonly created_at: number;
   readonly asset_ids: readonly string[];
+  readonly txt_paths: readonly string[];
   state: "trashed" | "restored" | "purged";
 }
 
@@ -304,11 +305,21 @@ export class FakeLibrary {
 
     await mockApi(page, "post", "/api/v1/gallery/file-operations/trash", (request) => {
       const body = this.record(request) as Schemas["GalleryTrashRequest"];
-      const ids = (body.asset_ids ?? []).filter((id) => this.assets.get(id)?.lifecycle_state === "active");
-      const operation: FakeOperation = { operation_id: `op${++this.sequence}`, created_at: TIME, asset_ids: ids, state: "trashed" };
+      const ids = [...new Set(body.asset_ids ?? [])];
+      if (ids.some((id) => !this.assets.has(id))) return notFound("asset");
+      if (ids.some((id) => this.assets.get(id)!.lifecycle_state !== "active")) {
+        return { status: 409, body: errorEnvelope("asset_not_active", "图片当前不在来源中") };
+      }
+      const txtPaths = ids.flatMap((id) => {
+        const asset = this.assets.get(id)!;
+        return asset.txt_relative_path && asset.txt_state !== "missing" && asset.txt_state !== "pair_conflict"
+          ? [asset.txt_relative_path]
+          : [];
+      });
+      const operation: FakeOperation = { operation_id: `op${++this.sequence}`, created_at: TIME, asset_ids: ids, txt_paths: txtPaths, state: "trashed" };
       this.operations.push(operation);
       this.setLifecycle(ids, "trashed");
-      return { body: { operation_id: operation.operation_id, kind: "trash" as const, item_count: ids.length, has_txt_count: ids.length, status: "committed" as const } };
+      return { body: { operation_id: operation.operation_id, kind: "trash" as const, item_count: ids.length, has_txt_count: operation.txt_paths.length, status: "committed" as const } };
     });
     const restore = (request: Request, index: number) => {
       this.record(request);
@@ -317,7 +328,7 @@ export class FakeLibrary {
       operation.state = "restored";
       this.setLifecycle(operation.asset_ids, "active");
       const count = operation.asset_ids.length;
-      return { body: { operation_id: `op${++this.sequence}`, kind: "restore" as const, item_count: count, has_txt_count: count, status: "committed" as const } };
+      return { body: { operation_id: `op${++this.sequence}`, kind: "restore" as const, item_count: count, has_txt_count: operation.txt_paths.length, status: "committed" as const } };
     };
     await mockApi(page, "post", "/api/v1/gallery/file-operations/{operation_id}/undo", (request) => restore(request, 5));
     await mockApi(page, "post", "/api/v1/gallery/trash/{operation_id}/restore", (request) => restore(request, 5));
@@ -329,7 +340,7 @@ export class FakeLibrary {
             operation_id: operation.operation_id,
             created_at: operation.created_at,
             item_count: operation.asset_ids.length,
-            has_txt_count: operation.asset_ids.length,
+            has_txt_count: operation.txt_paths.length,
             disk_usage_bytes: operation.asset_ids.length * 120_000,
             item_error_count: 0,
           })),
@@ -342,7 +353,7 @@ export class FakeLibrary {
       if (!operation) return { status: 409, body: errorEnvelope("trash_operation_not_found", "操作不存在") };
       operation.state = "purged";
       const count = operation.asset_ids.length;
-      return { body: { operation_id: operation.operation_id, kind: "purge" as const, item_count: count, has_txt_count: count, status: "committed" as const } };
+      return { body: { operation_id: operation.operation_id, kind: "purge" as const, item_count: count, has_txt_count: operation.txt_paths.length, status: "committed" as const } };
     });
     await mockApi(page, "delete", "/api/v1/gallery/trash", (request) => {
       this.record(request);

@@ -65,15 +65,21 @@ func (s *Service) projectExport(ctx context.Context, r Record) (Record, error) {
 	if e != nil {
 		return nil, e
 	}
-	var details, code any
-	if event != nil && str(r["status"]) == "failed" {
-		details = object(event["detail_json"])["details"]
+	var details, code, galleryWarning any
+	if event != nil {
+		result := object(event["detail_json"])["details"]
+		switch str(r["status"]) {
+		case "failed":
+			details = result
+		case "succeeded":
+			galleryWarning = object(result)["gallery_warning"]
+		}
 	}
 	if str(r["error_class"]) != "" {
 		code = r["error_class"]
 	}
 	folder := str(o["folder_name"])
-	return Record{"export_id": id, "dataset_id": r["dataset_id"], "status": r["status"], "target_path": r["target_path"], "folder_name": folder, "output_path": filepath.Join(str(r["target_path"]), folder), "options": o, "total_items": r["sample_count"], "staged_items": progress["staged"], "image_bytes": r["image_bytes"], "txt_bytes": r["txt_bytes"], "total_bytes": num(r["image_bytes"]) + num(r["txt_bytes"]), "copied_bytes": progress["bytes"], "error_code": code, "error_details": details, "resumable": resumable(r), "job_id": "dataset-export:" + id, "created_at": r["created_at"], "updated_at": r["updated_at"], "started_at": r["started_at"], "finished_at": r["finished_at"]}, nil
+	return Record{"export_id": id, "dataset_id": r["dataset_id"], "status": r["status"], "target_path": r["target_path"], "folder_name": folder, "output_path": filepath.Join(str(r["target_path"]), folder), "options": o, "total_items": r["sample_count"], "staged_items": progress["staged"], "image_bytes": r["image_bytes"], "txt_bytes": r["txt_bytes"], "total_bytes": num(r["image_bytes"]) + num(r["txt_bytes"]), "copied_bytes": progress["bytes"], "error_code": code, "error_details": details, "gallery_warning": galleryWarning, "resumable": resumable(r), "job_id": "dataset-export:" + id, "created_at": r["created_at"], "updated_at": r["updated_at"], "started_at": r["started_at"], "finished_at": r["finished_at"]}, nil
 }
 func (s *Service) reserveLocked(id, key string) (context.Context, error) {
 	if s.stopping || s.ctx.Err() != nil {
@@ -101,6 +107,21 @@ func (s *Service) release(id string) {
 	}
 	s.mu.Unlock()
 }
+func checkExportInput(ctx context.Context, query func(context.Context, string, ...any) (Record, error), id string) error {
+	// Clean and dedup can apply automatic exclusions before they finish. Tag
+	// generation only fills the cache; caption writes use the source locks.
+	r, e := query(ctx, `SELECT stage FROM dataset_stage_runs WHERE dataset_id=? AND status='running' AND stage IN ('clean','dedup')
+		UNION ALL SELECT 'collect' FROM dataset_crawls c JOIN crawl_batches b ON b.id=c.batch_id
+		WHERE c.dataset_id=? AND c.state='pending' AND b.status IN ('queued','running','cancelling') LIMIT 1`, id, id)
+	if e != nil {
+		return e
+	}
+	if r != nil {
+		return failure(409, "export_input_busy", "采集或整理任务正在改动数据集，请等待任务结束后再导出", Record{"stage": r["stage"]})
+	}
+	return nil
+}
+
 func (s *Service) CreateExport(ctx context.Context, id string, options Record) (Record, error) {
 	p, e := s.planExport(ctx, id, options)
 	if e != nil {
@@ -146,6 +167,11 @@ func (s *Service) insertExport(ctx context.Context, id string, p *exportPlan) er
 	t := now()
 	return s.deps.Store.WriteTransaction(ctx, func(tx *sql.Tx) error {
 		if e := requireTx(ctx, tx, p.datasetID); e != nil {
+			return e
+		}
+		if e := checkExportInput(ctx, func(ctx context.Context, q string, args ...any) (Record, error) {
+			return store.QueryRowTx(ctx, tx, q, args...)
+		}, p.datasetID); e != nil {
 			return e
 		}
 		_, e := tx.ExecContext(ctx, `INSERT INTO dataset_export_jobs(id,dataset_id,options_json,status,target_path,sample_count,image_bytes,txt_bytes,snapshot_digest,created_at,updated_at) VALUES(?,?,?,'queued',?,?,?,?,?,?,?)`, id, p.datasetID, jsonOptions, p.target, len(p.items), p.imageBytes, p.txtBytes, digest, t, t)
@@ -238,7 +264,7 @@ func (s *Service) CancelExport(ctx context.Context, id string) (Record, error) {
 	return s.GetExport(ctx, id)
 }
 func (s *Service) RecoverExports(ctx context.Context) (int, error) {
-	rows, e := s.deps.Store.QueryRows(ctx, "SELECT id FROM dataset_export_jobs WHERE dataset_id!='' AND status IN ('queued','running')")
+	rows, e := s.deps.Store.QueryRows(ctx, "SELECT * FROM dataset_export_jobs WHERE dataset_id!='' AND status IN ('queued','running')")
 	if e != nil {
 		return 0, e
 	}
@@ -246,18 +272,36 @@ func (s *Service) RecoverExports(ctx context.Context) (int, error) {
 	for _, r := range rows {
 		id := str(r["id"])
 		s.mu.Lock()
-		if s.workers[id] == nil {
-			e = s.finishExport(ctx, id, "interrupted", "export_interrupted", nil, nil)
-			if e == nil {
-				count++
-			}
+		if s.workers[id] != nil {
+			s.mu.Unlock()
+			continue
+		}
+		output, err := s.recoverCommittedExport(ctx, r)
+		if err == nil && output == nil {
+			err = s.finishExport(ctx, id, "interrupted", "export_interrupted", nil, nil)
+		}
+		if err == nil && output != nil {
+			err = s.resumeCommittedExportLocked(id, r, output)
 		}
 		s.mu.Unlock()
-		if e != nil {
-			return count, e
+		if err != nil {
+			return count, err
 		}
+		count++
 	}
 	return count, nil
+}
+func (s *Service) resumeCommittedExportLocked(id string, row Record, output *committedExport) error {
+	key := str(row["target_path"]) + "\x00" + portableName(str(output.stats["folder_name"]))
+	if _, err := s.reserveLocked(id, key); err != nil {
+		output.dir.Close()
+		return err
+	}
+	go func() {
+		defer s.release(id)
+		_ = s.finishCommittedExport(id, output)
+	}()
+	return nil
 }
 func (s *Service) exportEvent(ctx context.Context, id, kind string, detail Record) error {
 	j, e := jsonText(detail)
@@ -315,6 +359,14 @@ func (s *Service) finishExport(ctx context.Context, id, status, code string, sta
 		dataset = str(r["dataset_id"])
 		if _, e = tx.ExecContext(ctx, "UPDATE dataset_export_jobs SET status=?,error_class=?,updated_at=?,finished_at=? WHERE id=?", status, code, t, t, id); e != nil {
 			return e
+		}
+		if status == "succeeded" {
+			// Persist the commit journal with the terminal result. A DB failure
+			// after the rename leaves the job recoverable, not a copy failure.
+			if _, e = tx.ExecContext(ctx, `INSERT INTO dataset_export_events(job_id,ts,event_type,detail_json)
+				SELECT ?,?,'committed','{}' WHERE NOT EXISTS (SELECT 1 FROM dataset_export_events WHERE job_id=? AND event_type='committed')`, id, t, id); e != nil {
+				return e
+			}
 		}
 		detail := Record{"status": status, "error_code": code}
 		if len(details) > 0 {

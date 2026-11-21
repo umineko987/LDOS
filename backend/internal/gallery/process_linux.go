@@ -314,7 +314,7 @@ func matchesWorker(command []byte, marker string) bool {
 		switch args[i] {
 		case "--":
 			return matched
-		case "--resolve", "--danbooru-auth":
+		case "--resolve", "--resolve-batch", "--danbooru-auth":
 			if resolve {
 				return false
 			}

@@ -193,7 +193,7 @@ func TestCoreMembershipPaginationDecisionsAndStages(t *testing.T) {
 		t.Fatal(e)
 	}
 	stages := records(funnel["stages"])
-	if num(funnel["member_count"]) != 2 || num(stages[1]["excluded"]) != 1 || num(stages[5]["output"]) != 1 {
+	if num(funnel["member_count"]) != 2 || num(stages[1]["excluded"]) != 1 || len(stages) != 5 || stages[4]["stage"] != "export" || num(stages[4]["output"]) != 1 {
 		t.Fatal(funnel)
 	}
 	input, e := s.StageInput(ctx, id, "dedup")

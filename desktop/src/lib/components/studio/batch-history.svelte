@@ -11,9 +11,13 @@
   let {
     batches,
     onundo,
+    locked = false,
+    label = m.studio_history(),
   }: {
     batches: readonly CaptionBatchSummary[] | undefined;
     onundo: (batchId: string) => Promise<unknown>;
+    locked?: boolean;
+    label?: string;
   } = $props();
 
   const ROWS = 8;
@@ -32,6 +36,7 @@
   });
 
   async function undo(batchId: string) {
+    if (locked || pending !== null) return;
     pending = batchId;
     try {
       await onundo(batchId);
@@ -42,7 +47,7 @@
 </script>
 
 <section class="flex max-h-[40%] flex-none flex-col gap-1 border-t border-line px-4 py-2.5" data-testid="studio-history">
-  <h3 class="text-2xs font-medium text-fg3">{m.studio_history()}</h3>
+  <h3 class="text-2xs font-medium text-fg3">{label}</h3>
   {#if rows.length === 0}
     <p class="text-2xs text-fg3">{m.studio_history_empty()}</p>
   {:else}
@@ -65,7 +70,7 @@
               class="flex size-5 items-center justify-center rounded-sm text-fg3 hover:bg-bg3 hover:text-fg disabled:opacity-40"
               aria-label={m.studio_history_undo({ kind: KIND_LABEL[batch.kind]() })}
               title={m.captions_undo()}
-              disabled={pending !== null}
+              disabled={locked || pending !== null}
               data-action="undo"
               onclick={() => void undo(batch.batch_id)}
             >

@@ -59,12 +59,15 @@
     if (!open || !op) return;
     const requested = key;
     const body = op;
-    const timer = setTimeout(() => void run(body, requested), DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    const current = ++token;
+    const timer = setTimeout(() => void run(body, requested, current), DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+      token += 1;
+    };
   });
 
-  async function run(body: CaptionOp, requested: string) {
-    const current = ++token;
+  async function run(body: CaptionOp, requested: string, current: number) {
     error = null;
     try {
       const next = await preview(body);
@@ -104,7 +107,8 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="sm:max-w-[560px]" data-testid="studio-op-dialog">
+  <Dialog.Content class="sm:max-w-[560px]" data-testid="studio-op-dialog" showCloseButton={!applying}
+    escapeKeydownBehavior={applying ? "ignore" : "close"} interactOutsideBehavior={applying ? "ignore" : "close"}>
     <Dialog.Header>
       <Dialog.Title>{m.studio_op_title({ count: targets.length })}</Dialog.Title>
       <Dialog.Description>{m.studio_op_hint()}</Dialog.Description>
@@ -117,22 +121,24 @@
         void confirm();
       }}
     >
-      <Segmented options={kinds} value={draft.kind} onchange={(kind) => (draft.kind = kind)} label={m.studio_op_kind()} size="sm" data-testid="studio-op-kind" />
+      <fieldset disabled={applying} class="flex flex-col gap-3">
+        <legend class="sr-only">{m.studio_op_kind()}</legend>
+        <Segmented options={kinds} value={draft.kind} onchange={(kind) => (draft.kind = kind)} label={m.studio_op_kind()} size="sm" data-testid="studio-op-kind" />
 
-      {#if draft.kind === "replace"}
-        <div class="grid grid-cols-2 gap-2">
-          <Input bind:value={draft.from} placeholder={m.studio_op_from()} aria-label={m.studio_op_from()} data-testid="studio-op-from" />
-          <Input bind:value={draft.to} placeholder={m.studio_op_to()} aria-label={m.studio_op_to()} data-testid="studio-op-to" />
-        </div>
-      {:else}
-        <Input bind:value={draft.tags} placeholder={m.studio_op_tags()} aria-label={m.studio_op_tags()} data-testid="studio-op-tags" />
-        {#if draft.kind === "merge"}
-          <Input bind:value={draft.into} placeholder={m.studio_op_into()} aria-label={m.studio_op_into()} data-testid="studio-op-into" />
-        {:else if draft.kind === "add"}
-          <Segmented options={positions} value={draft.position} onchange={(position) => (draft.position = position)} label={m.studio_op_position()} />
+        {#if draft.kind === "replace"}
+          <div class="grid grid-cols-2 gap-2">
+            <Input bind:value={draft.from} placeholder={m.studio_op_from()} aria-label={m.studio_op_from()} data-testid="studio-op-from" />
+            <Input bind:value={draft.to} placeholder={m.studio_op_to()} aria-label={m.studio_op_to()} data-testid="studio-op-to" />
+          </div>
+        {:else}
+          <Input bind:value={draft.tags} placeholder={m.studio_op_tags()} aria-label={m.studio_op_tags()} data-testid="studio-op-tags" />
+          {#if draft.kind === "merge"}
+            <Input bind:value={draft.into} placeholder={m.studio_op_into()} aria-label={m.studio_op_into()} data-testid="studio-op-into" />
+          {:else if draft.kind === "add"}
+            <Segmented options={positions} value={draft.position} onchange={(position) => (draft.position = position)} label={m.studio_op_position()} />
+          {/if}
         {/if}
-      {/if}
-
+      </fieldset>
       <div class="flex flex-col gap-1.5" aria-live="polite">
         {#if !op}
           <p class="text-xs text-fg3">{m.studio_op_incomplete()}</p>
@@ -158,7 +164,7 @@
       </div>
 
       <Dialog.Footer>
-        <Button variant="ghost" onclick={() => (open = false)}>{m.common_cancel()}</Button>
+        <Button variant="ghost" disabled={applying} onclick={() => (open = false)}>{m.common_cancel()}</Button>
         <Button type="submit" variant="primary" disabled={!fresh || changes === 0 || applying} data-testid="studio-op-apply">
           {!fresh ? m.studio_op_waiting() : changes ? m.studio_op_apply({ count: changes }) : m.studio_op_nothing()}
         </Button>

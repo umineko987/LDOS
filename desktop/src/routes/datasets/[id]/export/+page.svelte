@@ -45,7 +45,7 @@
   import { usePlatform } from "#lib/platform/context.ts";
 
   // 导出段：把最终的图和标注复制成训练目录（kohya `{repeats}_{触发词}` 或平铺）。
-  // 先预览计划（dry_run，不写文件），确认后开始；进度看实时任务表，状态变化看 dataset.export.updated。
+  // 预览不写文件；直接开始时后端同样会校验导出计划。
   // 中断（后端重启）或目标名字被占用的导出可以续传。标题和阶段导航在 ../+layout.svelte。
   const api = useApi();
   const client = useQueryClient();
@@ -100,9 +100,11 @@
   const resumable = $derived(current ? null : (records.find((record) => record.resumable && record.status === "interrupted") ?? null));
   const pinned = $derived(current ?? resumable);
   const past = $derived(records.filter((record) => record.export_id !== pinned?.export_id));
-  const exporting = $derived(current !== null && isActiveExport(current.status));
+  const exporting = $derived(records.some((record) => isActiveExport(record.status)));
+  const canPreview = $derived(initialized && issue === null && !planning && !starting);
   const canStart = $derived(
-    fresh && plan !== null && !plan.target_exists && plan.blockers.length === 0 && plan.image_count > 0 && !starting && !exporting && issue === null,
+    canPreview && !acting && !exporting &&
+      (!fresh || (plan !== null && !plan.target_exists && plan.blockers.length === 0 && plan.image_count > 0)),
   );
 
   const ISSUES: Record<ExportFormIssue, () => string> = {
@@ -123,7 +125,7 @@
   }
 
   async function preview() {
-    if (issue || planning) return;
+    if (!canPreview) return;
     planning = true;
     planError = null;
     const key = requestKey;
@@ -142,6 +144,7 @@
   async function start() {
     if (!canStart) return;
     starting = true;
+    planError = null;
     try {
       const record = await startExport(api, id, request);
       // 页面自己给反馈：成功时不再弹通用的任务完成提示。
@@ -153,7 +156,7 @@
       toast(m.export_started());
     } catch (error) {
       toast.error(m.export_start_failed({ reason: apiErrorMessage(error) }));
-      // 目录变了、来源离线……让计划重新算一次。
+      // 导出开始时已重算；之前的预览不再代表当前状态。
       planKey = null;
     } finally {
       starting = false;
@@ -206,7 +209,7 @@
 
   const group = m.keys_group_export;
   useBindings("page", () => [
-    { id: "export.preview", label: m.export_preview, group, palette: true, when: () => issue === null && !planning, run: () => void preview() },
+    { id: "export.preview", label: m.export_preview, group, palette: true, when: () => canPreview, run: () => void preview() },
     { id: "export.start", label: m.export_start, group, palette: true, when: () => canStart, run: () => void start() },
     ...(platform.capabilities.selectDirectory
       ? [{ id: "export.pick", label: m.export_target_pick, group, palette: true, run: () => void pickTarget() }]
@@ -321,10 +324,10 @@
     {#if planError}<p class="text-xs text-danger" role="alert" data-testid="export-plan-error">{planError}</p>{/if}
 
     <div class="flex items-center gap-2">
-      <Button type="submit" variant="outline" disabled={issue !== null || planning} data-testid="export-preview">
+      <Button type="submit" variant="outline" disabled={!canPreview} data-testid="export-preview">
         {#if planning}<LoaderCircleIcon class="animate-spin" />{/if}{m.export_preview()}
       </Button>
-      <Button variant="primary" disabled={!canStart} onclick={start} data-testid="export-start">
+      <Button type="button" variant="primary" disabled={!canStart} onclick={start} data-testid="export-start">
         {#if starting}<LoaderCircleIcon class="animate-spin" />{/if}{m.export_start()}
       </Button>
     </div>

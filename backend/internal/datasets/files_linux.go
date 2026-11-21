@@ -209,7 +209,15 @@ func removeContents(dir *os.File) error {
 	return nil
 }
 func validateTree(ctx context.Context, dir *os.File, expected map[string]int64) error {
-	entries, e := dir.ReadDir(-1)
+	// On Btrfs a directory opened before the copies can omit the new entries.
+	// Open a fresh listing relative to the same pinned staging directory.
+	fd, e := unix.Openat(int(dir.Fd()), ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if e != nil {
+		return e
+	}
+	listing := os.NewFile(uintptr(fd), dir.Name())
+	defer listing.Close()
+	entries, e := listing.ReadDir(-1)
 	if e != nil {
 		return e
 	}

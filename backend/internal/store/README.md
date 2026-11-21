@@ -11,10 +11,10 @@ func (s *Store) Ping(ctx context.Context) error
 ```
 
 - One writer, serialized `BEGIN IMMEDIATE` transactions, WAL, foreign keys, busy timeout 10 seconds, synchronous NORMAL. Separate pooled readers are `mode=ro` and `query_only=ON`; detailed task reads use a consistent read transaction.
-- Creates every business table/index from the legacy v18 schema, including gallery FTS5, crawl/review, dataset/export and caption structures. Business services use the same serialized writer through `WriteTransaction`.
-- DDL, additive column upgrades, compatibility checks and the schema marker commit atomically. FTS5 failure, missing undocumented columns, invalid versions and versions newer than 18 fail without advancing the marker.
+- Schema v19 adds gallery-owned caption batches and persistent per-image keep decisions to the v18 gallery/dataset schema. Business services use the same serialized writer through `WriteTransaction`.
+- DDL, upgrades, compatibility checks and the schema marker commit atomically. FTS5 failure, missing required columns and unsupported versions fail without advancing the marker.
 - Legacy upgrades preserve data. For version `<8`, original site policies are retained in `meta` under `legacy_site_policy:*` while current policies are normalized. For version `<13`, gallery review rows remain intact and receive `legacy_gallery_review:*` markers. Review services treat those snapshots as read-only until reanalysis, so old decisions cannot move current files.
-- Existing database rows and tables are never deleted by initialization. New directories use 0700; existing parent permissions are retained. Database/WAL/SHM files use 0600. Existing symlinks in any path component or SQLite sidecar are rejected.
+- The v18 → v19 migration preserves dataset caption batches and undo journals, carries old review exclusions forward to export, and does not turn dataset approvals into gallery-wide keep flags. New directories use 0700; existing parent permissions are retained. Database/WAL/SHM files use 0600. Existing symlinks in path components or SQLite sidecars are rejected.
 - File databases only (`:memory:` is not supported by this API). Tests use `t.TempDir()`, never user runtime files. `Close` is idempotent.
 
 ## Task reads

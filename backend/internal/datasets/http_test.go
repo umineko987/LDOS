@@ -47,7 +47,8 @@ func TestHTTPRouteSurfaceAndErrorEnvelope(t *testing.T) {
 		call("GET", prefix+"/members"+query, "", 422)
 	}
 	call("POST", prefix+"/hashing", "", 202)
-	call("POST", prefix+"/decisions", `{"stage":"review","asset_ids":["a.png"],"decision":"approve"}`, 200)
+	call("POST", prefix+"/decisions", `{"stage":"review","asset_ids":["a.png"],"decision":"approve"}`, 422)
+	call("POST", prefix+"/decisions", `{"stage":"collect","asset_ids":["a.png"],"decision":"approve"}`, 200)
 	body, _ := json.Marshal(Record{"target_path": f.target, "folder_name": "http", "dry_run": "true", "include_captions": "false", "repeats": "12"})
 	preview := call("POST", prefix+"/exports", string(body), 200)
 	if preview["dry_run"] != true || preview["job"] != nil {

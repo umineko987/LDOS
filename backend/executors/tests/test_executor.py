@@ -42,11 +42,12 @@ class ExecutorTests(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
-    def worker(self, *args, gallery_root=GALLERY_ROOT):
+    def worker(self, *args, gallery_root=GALLERY_ROOT, stdin=None):
         return subprocess.run(
             [sys.executable, "-m", "ldos_gallery.worker_entry",
              "--marker", "executor-test", "--gallery-root", str(gallery_root), *args],
             capture_output=True, text=True, timeout=10, cwd=self.root, env=self.env,
+            input=stdin,
         )
 
     def test_static_known_urls_and_fallbacks(self):
@@ -90,6 +91,14 @@ class ExecutorTests(unittest.TestCase):
             supported=True, host="x.com",
         ))
         self.assertEqual(result.stderr, "")
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_resolve_batch_matches_individual_selection_in_order(self):
+        urls = ["https://x.com/example/status/123456789", "https://danbooru.donmai.us/posts/123",
+                "https://example.invalid/no-extractor", "https://x.com/example/status/123456789"]
+        result = self.worker("--resolve-batch", "--", stdin=json.dumps(urls))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), [resolve(url, GALLERY_ROOT) for url in urls])
         self.assertEqual(list(self.root.iterdir()), [])
 
     def test_entry_rejects_invalid_controls(self):

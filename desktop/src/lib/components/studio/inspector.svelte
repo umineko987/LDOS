@@ -27,6 +27,8 @@
     approved,
     batches,
     quickAdd = true,
+    locked = false,
+    historyLabel,
     addInput = $bindable(null),
     onop,
     onapprove,
@@ -41,6 +43,8 @@
     batches: readonly CaptionBatchSummary[] | undefined;
     /** 顶上的加标签输入框（逐张校对时由校对视图自己的输入框代替）。 */
     quickAdd?: boolean;
+    locked?: boolean;
+    historyLabel?: string;
     addInput?: HTMLInputElement | null;
     onop: (draft: Partial<OpDraft>) => void;
     onapprove: (approve: boolean) => void;
@@ -69,6 +73,7 @@
     aria-label={label}
     title={label}
     data-action={testid}
+    disabled={locked}
     {onclick}
   >
     <Icon class="size-3" />
@@ -111,6 +116,7 @@
           <Input
             bind:ref={addInput}
             bind:value={adding}
+            disabled={locked}
             class="h-7 text-xs"
             placeholder={m.studio_add_placeholder()}
             aria-label={m.studio_add_placeholder()}
@@ -147,17 +153,19 @@
       {/if}
 
       <div class="flex flex-wrap gap-1.5">
-        <Button variant="outline" size="sm" onclick={() => onop({ kind: "replace" })}>{m.studio_op_replace()}…</Button>
-        <Button variant="outline" size="sm" onclick={() => onop({ kind: "merge" })}>{m.studio_op_merge()}…</Button>
+        <Button variant="outline" size="sm" disabled={locked} onclick={() => onop({ kind: "replace" })}>{m.studio_op_replace()}…</Button>
+        <Button variant="outline" size="sm" disabled={locked} onclick={() => onop({ kind: "merge" })}>{m.studio_op_merge()}…</Button>
         {#if approved < summary.total}
-          <Button variant="outline" size="sm" onclick={() => onapprove(true)} data-testid="studio-approve">
+          <Button variant="outline" size="sm" disabled={locked} onclick={() => onapprove(true)} data-testid="studio-approve">
             {m.studio_approve()} <Kbd>A</Kbd>
           </Button>
         {:else}
-          <Button variant="ghost" size="sm" onclick={() => onapprove(false)} data-testid="studio-unapprove">{m.studio_unapprove()}</Button>
+          <Button variant="ghost" size="sm" disabled={locked} onclick={() => onapprove(false)} data-testid="studio-unapprove">
+            {m.studio_unapprove()}
+          </Button>
         {/if}
       </div>
     {/if}
   </div>
-  <BatchHistory {batches} {onundo} />
+  <BatchHistory {batches} {onundo} {locked} label={historyLabel} />
 </div>

@@ -56,7 +56,8 @@ func (b *businessRuntime) newPipeline(jobs *activity.Registry, events *activity.
 			row, err := b.datasets.Get(ctx, id)
 			return row, pipelinePeerError(err)
 		},
-		StageInput: stageInput, ReadAnnotations: b.readAnnotations, WriteAnnotation: b.writeAnnotation, Publish: publish, DatasetUpdated: b.datasets.PublishUpdated,
+		StageInput: stageInput, ReadAnnotations: b.readAnnotations, WriteAnnotation: b.writeAnnotation, WithSources: b.gallery.WithSources,
+		Publish: publish, DatasetUpdated: b.datasets.PublishUpdated,
 	})
 	if err != nil {
 		return err

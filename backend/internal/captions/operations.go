@@ -90,7 +90,7 @@ func diff(a, b []string) []string {
 	return out
 }
 func capReports(rows []Row) []Row { return rows[:min(200, len(rows))] }
-func (s *Service) execute(ctx context.Context, id string, p plan, kind string, params Row, dry bool, sampleLimit int) (Row, error) {
+func (s *Service) execute(ctx context.Context, owner captionOwner, p plan, kind string, params Row, dry bool, sampleLimit int) (Row, error) {
 	stats := map[string]int{"total": p.total, "changed": 0, "new": 0, "unchanged": 0, "skipped": len(p.skipped), "conflicts": len(p.conflicts), "written": 0, "failed": 0}
 	samples := []Row{}
 	writes := 0
@@ -103,7 +103,7 @@ func (s *Service) execute(ctx context.Context, id string, p plan, kind string, p
 			}
 		}
 	}
-	result := Row{"dataset_id": id, "dry_run": dry, "batch_id": nil, "stats": stats, "samples": samples, "skipped": capReports(p.skipped), "conflicts": capReports(p.conflicts), "failed": []Row{}}
+	result := owner.project(Row{"dry_run": dry, "batch_id": nil, "stats": stats, "samples": samples, "skipped": capReports(p.skipped), "conflicts": capReports(p.conflicts), "failed": []Row{}})
 	if dry || writes == 0 {
 		return result, nil
 	}
@@ -112,7 +112,8 @@ func (s *Service) execute(ctx context.Context, id string, p plan, kind string, p
 	}
 	batch := uuid.NewString()
 	e := s.deps.Store.WriteTransaction(ctx, func(tx *sql.Tx) error {
-		_, e := tx.ExecContext(ctx, "INSERT INTO caption_batches(id,dataset_id,kind,params_json,stats_json,created_at,state) VALUES(?,?,?,?,?,?,'writing')", batch, id, kind, encode(params), encode(stats), now())
+		dataset, source := owner.batchIDs()
+		_, e := tx.ExecContext(ctx, "INSERT INTO caption_batches(id,dataset_id,source_id,kind,params_json,stats_json,created_at,state) VALUES(?,?,?,?,?,?,?,'writing')", batch, dataset, source, kind, encode(params), encode(stats), now())
 		if e != nil {
 			return e
 		}
@@ -141,7 +142,7 @@ func (s *Service) execute(ctx context.Context, id string, p plan, kind string, p
 		return nil, e
 	}
 	job := "captions:" + batch
-	s.job("captions.write", job, id, writes)
+	s.job("captions.write", job, owner, writes)
 	failed := []Row{}
 	conflicts := slices.Clone(p.conflicts)
 	done := 0
@@ -173,7 +174,7 @@ func (s *Service) execute(ctx context.Context, id string, p plan, kind string, p
 		done++
 		s.progress(job, done, writes)
 	}
-	claimed, e := s.settle(ctx, batch)
+	claimed, e := s.settle(ctx, owner, batch)
 	if e != nil {
 		s.finishJob(job, true)
 		return nil, e
@@ -193,7 +194,7 @@ func (s *Service) execute(ctx context.Context, id string, p plan, kind string, p
 		e = s.write(ctx, "UPDATE caption_batches SET stats_json=?,state=? WHERE id=?", encode(stats), state, batch)
 		if stats["written"] > 0 {
 			result["batch_id"] = batch
-			s.publish(id, batch, kind, stats["written"])
+			s.publish(owner, batch, kind, stats["written"])
 		}
 	} else {
 		e = s.write(ctx, "DELETE FROM caption_batches WHERE id=?", batch)
@@ -204,6 +205,9 @@ func (s *Service) execute(ctx context.Context, id string, p plan, kind string, p
 	return result, e
 }
 func (s *Service) RunOps(ctx context.Context, id string, o OpsOptions) (Row, error) {
+	return s.runOps(ctx, captionOwner{id: id}, o)
+}
+func (s *Service) runOps(ctx context.Context, owner captionOwner, o OpsOptions) (Row, error) {
 	if e := ValidateIDs(o.AssetIDs, 1, 50000); e != nil {
 		return nil, e
 	}
@@ -223,23 +227,22 @@ func (s *Service) RunOps(ctx context.Context, id string, o OpsOptions) (Row, err
 		return nil, e
 	}
 	defer done()
-	unlock := s.lock(id)
-	defer unlock()
-	d, e := s.dataset(ctx, id)
-	if e != nil {
-		return nil, e
-	}
-	ids, e := s.selectIDs(ctx, id, o.AssetIDs)
-	if e != nil {
-		return nil, e
-	}
-	p, e := s.makePlan(ctx, ids, func(_ string, b []string) []string { return ApplyOps(b, o.Ops, Text(d["trigger_word"])) }, o.ExpectedVersions, nil)
-	if e != nil {
-		return nil, e
-	}
-	return s.execute(ctx, id, p, "ops", Row{"ops": o.Ops, "asset_count": len(ids)}, o.DryRun, o.SampleLimit)
+	return withCaptionOwner(ctx, s, owner, func(ctx context.Context) (Row, error) {
+		trigger, ids, e := s.selectForOwner(ctx, owner, o.AssetIDs)
+		if e != nil {
+			return nil, e
+		}
+		p, e := s.makePlan(ctx, ids, func(_ string, b []string) []string { return ApplyOps(b, o.Ops, trigger) }, o.ExpectedVersions, nil)
+		if e != nil {
+			return nil, e
+		}
+		return s.execute(ctx, owner, p, "ops", Row{"ops": o.Ops, "asset_count": len(ids)}, o.DryRun, o.SampleLimit)
+	})
 }
 func (s *Service) Edit(ctx context.Context, id, asset, text, expected string) (Row, error) {
+	return s.edit(ctx, captionOwner{id: id}, asset, text, expected)
+}
+func (s *Service) edit(ctx context.Context, owner captionOwner, asset, text, expected string) (Row, error) {
 	if expected == "" || len(expected) > 128 || utf8.RuneCountInString(text) > 1000000 || !utf8.ValidString(text) {
 		return nil, Fail(422, "validation_error", "caption 或版本无效")
 	}
@@ -248,12 +251,12 @@ func (s *Service) Edit(ctx context.Context, id, asset, text, expected string) (R
 		return nil, e
 	}
 	defer done()
-	unlock := s.lock(id)
-	defer unlock()
-	if _, e = s.dataset(ctx, id); e != nil {
-		return nil, e
-	}
-	ids, e := s.selectIDs(ctx, id, []string{asset})
+	return withCaptionOwner(ctx, s, owner, func(ctx context.Context) (Row, error) {
+		return s.editLocked(ctx, owner, asset, text, expected)
+	})
+}
+func (s *Service) editLocked(ctx context.Context, owner captionOwner, asset, text, expected string) (Row, error) {
+	_, ids, e := s.selectForOwner(ctx, owner, []string{asset})
 	if e != nil {
 		return nil, e
 	}
@@ -264,7 +267,7 @@ func (s *Service) Edit(ctx context.Context, id, asset, text, expected string) (R
 	if len(p.skipped) > 0 {
 		return nil, &Error{422, "caption_not_editable", "caption 当前不能编辑", p.skipped[0]}
 	}
-	result, e := s.execute(ctx, id, p, "edit", Row{"asset_id": asset}, false, 1)
+	result, e := s.execute(ctx, owner, p, "edit", Row{"asset_id": asset}, false, 1)
 	if e != nil {
 		return nil, e
 	}
@@ -301,7 +304,7 @@ func (s *Service) ApplyTagger(ctx context.Context, id string, o TaggerOptions) (
 	if e != nil {
 		return nil, e
 	}
-	ids, e := s.selectIDs(ctx, id, o.AssetIDs)
+	ids, e := s.selectDatasetIDs(ctx, id, o.AssetIDs)
 	if e != nil {
 		return nil, e
 	}
@@ -351,17 +354,38 @@ func (s *Service) ApplyTagger(ctx context.Context, id string, o TaggerOptions) (
 	}
 	params["mode"] = o.Mode
 	params["asset_count"] = len(ids)
-	return s.execute(ctx, id, p, "from_tagger", params, o.DryRun, o.SampleLimit)
+	return s.execute(ctx, captionOwner{id: id}, p, "from_tagger", params, o.DryRun, o.SampleLimit)
 }
 func (s *Service) Listing(ctx context.Context, id string) (string, []byte, error) {
 	d, e := s.dataset(ctx, id)
 	if e != nil {
 		return "", nil, e
 	}
-	members, e := s.deps.StageInput(ctx, id, "review")
+	members, e := s.deps.StageInput(ctx, id, "export")
 	if e != nil {
 		return "", nil, e
 	}
+	return s.listingSnapshot(ctx, captionOwner{id: id}, Text(d["trigger_word"]), members)
+}
+
+func (s *Service) sourceListing(ctx context.Context, source, directory string) (etag string, body []byte, err error) {
+	ctx, done, e := s.begin(ctx)
+	if e != nil {
+		return "", nil, e
+	}
+	defer done()
+	err = s.deps.WithSources(ctx, []string{source}, func(ctx context.Context) error {
+		members, e := s.sourceMembers(ctx, source, directory)
+		if e != nil {
+			return e
+		}
+		etag, body, e = s.listingSnapshot(ctx, captionOwner{id: source, source: true}, "", members)
+		return e
+	})
+	return
+}
+
+func (s *Service) listingSnapshot(ctx context.Context, owner captionOwner, trigger string, members []Row) (string, []byte, error) {
 	ids := []string{}
 	for _, r := range members {
 		ids = append(ids, Text(r["asset_id"]))
@@ -376,7 +400,7 @@ func (s *Service) Listing(ctx context.Context, id string) (string, []byte, error
 		p["name"] = r["name"]
 		items = append(items, p)
 	}
-	payload := Row{"dataset_id": id, "trigger_word": Text(d["trigger_word"]), "items": items}
+	payload := owner.project(Row{"trigger_word": trigger, "items": items})
 	body, e := json.Marshal(payload)
 	if e != nil {
 		return "", nil, e

@@ -50,6 +50,9 @@ type Dependencies struct {
 	Catalog  Catalog
 	Images   Images
 	Crawls   Crawls
+
+	// RegisterExport receives the final path and a borrowed descriptor for the durable copy.
+	RegisterExport func(context.Context, string, *os.File) error
 }
 
 type Error struct {
@@ -68,7 +71,7 @@ func failure(status int, code, message string, details ...Record) *Error {
 }
 func validation() *Error { return failure(422, "validation_error", "请求参数校验失败") }
 
-var Stages = [...]string{"collect", "clean", "dedup", "tag", "review", "export"}
+var Stages = [...]string{"collect", "clean", "dedup", "tag", "export"}
 
 func StageIndex(stage string) (int, error) {
 	for i, s := range Stages {

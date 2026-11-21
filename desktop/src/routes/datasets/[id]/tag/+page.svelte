@@ -1,10 +1,12 @@
 <script lang="ts">
+  import ArrowRightIcon from "@lucide/svelte/icons/arrow-right";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import LockIcon from "@lucide/svelte/icons/lock";
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { onDestroy } from "svelte";
   import { toast } from "svelte-sonner";
 
+  import { resolve } from "$app/paths";
   import { useApi } from "#lib/api/context.ts";
   import { apiErrorMessage } from "#lib/api/messages.ts";
   import {
@@ -378,6 +380,11 @@
         {m.tag_write()}
       </Button>
       <p class="flex items-center justify-center gap-1 text-2xs text-fg3"><Kbd>Ctrl</Kbd><Kbd>↵</Kbd></p>
+      {#if latestTagBatch(batches.data)}
+        <Button variant="outline" href={resolve("/datasets/[id]/export", { id })}>
+          {m.tag_next_stage()}<ArrowRightIcon data-icon="inline-end" />
+        </Button>
+      {/if}
     </div>
   </aside>
 

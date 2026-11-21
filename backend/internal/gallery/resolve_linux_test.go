@@ -2,6 +2,7 @@ package gallery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -70,6 +71,34 @@ func TestResolveCommandAndExecutorRoot(t *testing.T) {
 		if _, err := New(runner.settings, root); err == nil {
 			t.Fatalf("accepted missing or legacy executor root %q", root)
 		}
+	}
+}
+
+func runBatchResolveHelper() {
+	var urls []string
+	if err := json.NewDecoder(os.Stdin).Decode(&urls); err != nil {
+		panic(err)
+	}
+	var rows []SiteInfo
+	for _, url := range urls {
+		if url == "short" {
+			break
+		}
+		rows = append(rows, SiteInfo{Site: url})
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(rows); err != nil {
+		panic(err)
+	}
+}
+
+func TestResolveBatchProtocol(t *testing.T) {
+	runner, _ := newTestRunner(t)
+	infos, err := runner.ResolveBatch(context.Background(), []string{"first", "second"})
+	if err != nil || !reflect.DeepEqual(infos, []SiteInfo{{Site: "first"}, {Site: "second"}}) {
+		t.Fatalf("batch = %+v, %v", infos, err)
+	}
+	if infos, err = runner.ResolveBatch(context.Background(), []string{"first", "short"}); err == nil || infos != nil {
+		t.Fatalf("accepted partial response: %+v, %v", infos, err)
 	}
 }
 

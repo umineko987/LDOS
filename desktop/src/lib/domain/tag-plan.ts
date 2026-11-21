@@ -127,7 +127,7 @@ export interface TagFrequencyRow {
 }
 
 export interface TagPlan {
-  /** review 阶段输入里的 caption 数。 */
+  /** 打标阶段输入里的 caption 数。 */
   readonly total: number;
   /** 有打标结果、可以写的图。 */
   readonly planned: number;

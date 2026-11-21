@@ -1,6 +1,8 @@
 // 信息架构：侧栏分区、数据集阶段和“上一级”的规则。路由 ID 与 src/routes 的目录一一对应。
 
-export const STAGES = ["collect", "clean", "dedup", "tag", "review", "export", "atlas"] as const;
+import { DATASET_STAGES } from "#lib/domain/funnel.ts";
+
+export const STAGES = [...DATASET_STAGES, "atlas"] as const;
 
 export type Stage = (typeof STAGES)[number];
 

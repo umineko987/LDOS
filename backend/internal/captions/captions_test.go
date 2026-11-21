@@ -48,6 +48,9 @@ func newFixture(t *testing.T) *fixture {
 }
 func (f *fixture) service() *Service {
 	s, e := New(context.Background(), Dependencies{Store: f.db, StageInput: func(ctx context.Context, id, stage string) ([]Row, error) {
+		if stage != "export" {
+			f.t.Fatalf("captions requested retired or unexpected stage %q", stage)
+		}
 		if id != "d" {
 			return nil, Fail(404, "dataset_not_found", "missing")
 		}
@@ -60,7 +63,9 @@ func (f *fixture) service() *Service {
 			}
 		}
 		return out, nil
-	}, ReadAnnotations: f.read, WriteAnnotation: f.write})
+	}, ReadAnnotations: f.read, WriteAnnotation: f.write, WithSources: func(ctx context.Context, _ []string, fn func(context.Context) error) error {
+		return fn(ctx)
+	}})
 	must(f.t, e)
 	return s
 }

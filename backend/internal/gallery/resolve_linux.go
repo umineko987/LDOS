@@ -27,19 +27,51 @@ type SiteInfo struct {
 // earlier caller deadline wins; even an unbounded context gets ResolveTimeout.
 // Cancellation and errors return only after the worker has been reaped.
 func (r *Runner) Resolve(ctx context.Context, url string) (SiteInfo, error) {
-	ctx, cancel := context.WithTimeout(ctx, ResolveTimeout)
-	defer cancel()
-	result, err := r.Capture(ctx, CaptureRequest{
-		Request:        Request{ID: "resolve", URL: url, resolve: true},
-		MaxOutputBytes: MaxResolveOutputBytes,
-	})
+	output, err := r.resolveOutput(ctx, Request{ID: "resolve", URL: url, resolve: true}, 1)
 	if err != nil {
 		return SiteInfo{}, err
 	}
-	if result.ExitCode != 0 {
-		return SiteInfo{}, fmt.Errorf("gallery resolve exited %d: %s", result.ExitCode, result.Stderr)
+	return parseSiteInfo(output)
+}
+
+// ResolveBatch selects extractors in input order in one supervised worker.
+func (r *Runner) ResolveBatch(ctx context.Context, urls []string) ([]SiteInfo, error) {
+	input, err := json.Marshal(urls)
+	if err != nil {
+		return nil, err
 	}
-	return parseSiteInfo(result.Stdout)
+	output, err := r.resolveOutput(ctx, Request{ID: "resolve", resolve: true, resolveInput: input}, len(urls))
+	if err != nil {
+		return nil, err
+	}
+	var rows []json.RawMessage
+	if err := json.Unmarshal([]byte(output), &rows); err != nil {
+		return nil, fmt.Errorf("invalid gallery batch resolve JSON: %w", err)
+	}
+	if len(rows) != len(urls) {
+		return nil, fmt.Errorf("gallery batch resolve returned %d results for %d URLs", len(rows), len(urls))
+	}
+	infos := make([]SiteInfo, len(rows))
+	for i, row := range rows {
+		infos[i], err = parseSiteInfo(string(row))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return infos, nil
+}
+
+func (r *Runner) resolveOutput(ctx context.Context, req Request, count int) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, ResolveTimeout)
+	defer cancel()
+	result, err := r.Capture(ctx, CaptureRequest{Request: req, MaxOutputBytes: int64(count) * MaxResolveOutputBytes})
+	if err != nil {
+		return "", err
+	}
+	if result.ExitCode != 0 {
+		return "", fmt.Errorf("gallery resolve exited %d: %s", result.ExitCode, result.Stderr)
+	}
+	return result.Stdout, nil
 }
 
 func parseSiteInfo(output string) (SiteInfo, error) {

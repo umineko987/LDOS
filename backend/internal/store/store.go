@@ -35,7 +35,7 @@ type Store struct {
 	closeErr  error
 }
 
-// Open opens or creates a file database and atomically installs the complete v18
+// Open opens or creates a file database and atomically installs the complete
 // schema. Existing rows are preserved; incompatible or future versions fail.
 func Open(path string) (_ *Store, err error) {
 	if path == "" || path == ":memory:" {

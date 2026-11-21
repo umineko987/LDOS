@@ -28,40 +28,65 @@ func waitTick(ctx context.Context) error {
 }
 func (s *Service) runExport(ctx context.Context, id string) {
 	defer s.release(id)
-	stats, e := s.executeExport(ctx, id)
+	output, e := s.executeExport(ctx, id)
 	if errors.Is(e, errSimulatedCrash) {
 		return
 	}
+	if e == nil {
+		_ = s.finishCommittedExport(id, output)
+		return
+	}
 	finalCtx := context.Background()
-	status, code := "succeeded", ""
+	status, code := "failed", "copy_io_error"
 	var details Record
-	if e != nil {
-		status = "failed"
-		code = "copy_io_error"
-		var de *Error
-		if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
-			if s.ctx.Err() != nil {
-				status = "interrupted"
-				code = "export_interrupted"
-			} else {
-				status = "cancelled"
-				code = ""
-			}
-		} else if errors.As(e, &de) {
-			code = de.Code
-			details, _ = de.Details.(Record)
-		} else if errors.Is(e, os.ErrPermission) {
-			code = "target_not_writable"
+	var de *Error
+	if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
+		if s.ctx.Err() != nil {
+			status = "interrupted"
+			code = "export_interrupted"
+		} else {
+			status = "cancelled"
+			code = ""
 		}
-		if status == "cancelled" || status == "failed" && code != "copy_io_error" && code != "export_target_exists" {
-			_ = s.removeStaging(finalCtx, id)
+	} else if errors.As(e, &de) {
+		code = de.Code
+		details, _ = de.Details.(Record)
+	} else if errors.Is(e, os.ErrPermission) {
+		code = "target_not_writable"
+	}
+	if status == "cancelled" || status == "failed" && code != "copy_io_error" && code != "export_target_exists" {
+		_ = s.removeStaging(finalCtx, id)
+	}
+	_ = s.finishExport(finalCtx, id, status, code, nil, details)
+}
+
+type committedExport struct {
+	stats Record
+	dir   *os.File
+}
+
+func (s *Service) finishCommittedExport(id string, output *committedExport) error {
+	defer output.dir.Close()
+	var details Record
+	if register := s.deps.RegisterExport; register != nil {
+		// Once the rename is durable, cancellation no longer rolls it back. A
+		// service shutdown leaves this in flight for the next startup to retry.
+		err := register(s.ctx, str(output.stats["output_path"]), output.dir)
+		if s.ctx.Err() != nil {
+			return s.ctx.Err()
+		}
+		if err != nil {
+			warning := "gallery_registration_failed"
+			if errorCode(err) == "gallery_scan_failed" {
+				warning = "gallery_scan_failed"
+			}
+			details = Record{"gallery_warning": warning}
 		}
 	}
-	// The reservation stays held through terminal state persistence. Cancel and
-	// resume cannot overwrite a just-committed success with a stale state read.
-	_ = s.finishExport(finalCtx, id, status, code, stats, details)
+	return s.finishExport(context.Background(), id, "succeeded", "", output.stats, details)
 }
-func (s *Service) executeExport(ctx context.Context, id string) (Record, error) {
+
+func (s *Service) executeExport(ctx context.Context, id string) (*committedExport, error) {
 	row, e := s.exportRow(ctx, id)
 	if e != nil {
 		return nil, e
@@ -104,12 +129,12 @@ func (s *Service) executeExport(ctx context.Context, id string) (Record, error) 
 	if resumed {
 		actual, err := identityAt(target, staging)
 		if err != nil || actual != owned {
-			final, finalErr := identityAt(target, folder)
-			if finalErr == nil && final == owned {
-				if e = s.exportEvent(ctx, id, "committed", Record{"recovered": true}); e != nil {
-					return nil, e
-				}
-				return exportStats(id, o, row), nil
+			output, recoveryErr := s.openCommittedExport(ctx, target, row, o, owned)
+			if recoveryErr != nil {
+				return nil, recoveryErr
+			}
+			if output != nil {
+				return output, nil
 			}
 			if !errors.Is(err, unix.ENOENT) {
 				return nil, failure(409, "target_path_changed", "临时目录被替换")
@@ -143,7 +168,11 @@ func (s *Service) executeExport(ctx context.Context, id string) (Record, error) 
 	if e != nil {
 		return nil, e
 	}
-	defer dir.Close()
+	defer func() {
+		if dir != nil {
+			dir.Close()
+		}
+	}()
 	actual, e = identity(dir)
 	if e != nil {
 		return nil, e
@@ -229,15 +258,67 @@ func (s *Service) executeExport(ctx context.Context, id string) (Record, error) 
 		}
 		return nil, e
 	}
-	if e = s.exportEvent(context.Background(), id, "committed", Record{}); e != nil {
-		return nil, e
-	}
 	if s.afterCommit != nil {
 		if e = s.afterCommit(id); e != nil {
 			return nil, e
 		}
 	}
-	return exportStats(id, o, row), nil
+	output := &committedExport{stats: exportStats(id, o, row), dir: dir}
+	dir = nil // ownership passes through to the gallery handoff
+	return output, nil
+}
+
+// A surviving final directory with the journaled identity and commit intent
+// proves the rename happened. Recovery never recopies or validates its files:
+// a user may already have moved or trashed some of the exported images.
+func (s *Service) openCommittedExport(ctx context.Context, target *os.File, row, options Record, owned fileIdentity) (*committedExport, error) {
+	folder, id := str(options["folder_name"]), str(row["id"])
+	dir, err := openChildDirectory(target, folder)
+	if err != nil {
+		return nil, nil
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			dir.Close()
+		}
+	}()
+	actual, err := identity(dir)
+	if err != nil || actual != owned {
+		return nil, err
+	}
+	event, err := s.deps.Store.QueryRow(ctx, "SELECT event_type FROM dataset_export_events WHERE job_id=? AND event_type IN ('staging_created','commit_started') ORDER BY id DESC LIMIT 1", id)
+	if err != nil || str(event["event_type"]) != "commit_started" {
+		return nil, err
+	}
+	// If the process died just after rename, it may not have synced the parent.
+	if err = target.Sync(); err != nil {
+		return nil, err
+	}
+	committed = true
+	return &committedExport{stats: exportStats(id, options, row), dir: dir}, nil
+}
+
+func (s *Service) recoverCommittedExport(ctx context.Context, row Record) (*committedExport, error) {
+	owned, present, err := s.stagingIdentity(ctx, str(row["id"]))
+	if err != nil || !present {
+		return nil, err
+	}
+	options := object(row["options_json"])
+	expected, err := readIdentity(options["target_identity"])
+	if err != nil {
+		return nil, nil
+	}
+	target, err := openDirectory(str(row["target_path"]))
+	if err != nil {
+		return nil, nil
+	}
+	defer target.Close()
+	actual, err := identity(target)
+	if err != nil || actual != expected {
+		return nil, err
+	}
+	return s.openCommittedExport(ctx, target, row, options, owned)
 }
 func exportStats(id string, o, row Record) Record {
 	return Record{"export_id": id, "exported": num(row["sample_count"]), "image_bytes": num(row["image_bytes"]), "txt_bytes": num(row["txt_bytes"]), "layout": o["layout"], "folder_name": o["folder_name"], "output_path": filepath.Join(str(row["target_path"]), str(o["folder_name"]))}

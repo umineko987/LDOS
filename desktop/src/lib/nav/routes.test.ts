@@ -18,13 +18,14 @@ describe("nav routes", () => {
 
   it("识别数据集阶段", () => {
     expect(stageOf("/datasets/[id]/atlas")).toBe("atlas");
+    expect(stageOf("/datasets/[id]/review")).toBeNull();
     expect(stageOf("/datasets/[id]/unknown")).toBeNull();
     expect(stageOf("/jobs")).toBeNull();
     expect(stageOf(null)).toBeNull();
   });
 
   it("算出上一级", () => {
-    expect(parentPath("/datasets/[id]/review", { id: "d1" })).toBe("/");
+    expect(parentPath("/datasets/[id]/export", { id: "d1" })).toBe("/");
     expect(parentPath("/library/[sourceId]/[[directoryId]]", { sourceId: "s 1", directoryId: "7" })).toBe(
       "/library/s%201",
     );

@@ -18,7 +18,7 @@ type Kind = Schemas["DatasetSummaryResponse"]["kind"];
 type Member = Schemas["DatasetMemberResponse"];
 type Root = Schemas["DatasetRootResponse"];
 
-const STAGES: readonly Stage[] = ["collect", "clean", "dedup", "tag", "review", "export"];
+const STAGES: readonly Stage[] = ["collect", "clean", "dedup", "tag", "export"];
 const TIME = 1_760_000_000;
 
 /** 1×1 的灰色 PNG，缩略图和原图都用它。 */

@@ -1,4 +1,4 @@
-// 标签工作室（review 段）的纯逻辑：caption 索引和过滤、批量操作的表单、黑名单、校对游标、栏宽。
+// 标签工作室的纯逻辑：caption 索引和过滤、批量操作的表单、黑名单、校对游标、栏宽。
 
 import { dedupe, parseTagInput, type CaptionOp, type CaptionOpKind } from "./captions.ts";
 import { matchQuery, queryTags, type ParsedQuery, type QueryContext } from "./tag-query.ts";
@@ -21,7 +21,7 @@ export function indexCaptions<T extends StudioCaption>(items: readonly T[]): Ind
   return items.map((item) => ({ item, normalized: queryTags(item.tags) }));
 }
 
-/** 按查询过滤，保持原顺序；`approved` 是 review 阶段已校对的图。 */
+/** 按查询过滤，保持原顺序；`approved` 是已校对的图。 */
 export function filterCaptions<T extends StudioCaption>(
   indexed: readonly IndexedCaption<T>[],
   query: ParsedQuery,

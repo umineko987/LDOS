@@ -1,52 +1,61 @@
 import type { Page } from "@playwright/test";
 
-import { FakeCaptions } from "./fixtures/captions";
-import { FakeDatasets } from "./fixtures/datasets";
+import { errorEnvelope } from "./fixtures/api";
+import { FakeGalleryStudio } from "./fixtures/gallery-studio";
+import { FakeLibrary, type FakeSourceHandle } from "./fixtures/library";
 import { expect, test } from "./fixtures/test";
-
-// 校对段 = 标签工作室：查询过滤 → 选中 → 检查器里删标签（dry-run 差异 → 写入）→ toast 撤销；
-// 逐张校对：Enter 通过并下一张，T 加标签（单张写回），Z 撤销，Esc 回到网格。
 
 const TOTAL = 12;
 const WITH_HAT = 9;
+const WITH_HAT_TEXT = "sks, 1girl, hat, solo";
+const WITHOUT_HAT_TEXT = "sks, 1girl, long_hair";
 
-const assetId = (index: number) => `a2-${String(index + 1).padStart(3, "0")}`;
+let library: FakeLibrary;
+let studio: FakeGalleryStudio;
+let source: FakeSourceHandle;
+let rootAssets: string[];
 
-let captions: FakeCaptions;
+const review = () => `/#/library/${source.sourceId}/review`;
+const sourceApi = () => `/api/v1/gallery/sources/${source.sourceId}`;
+const count = (page: Page) => page.getByTestId("studio-count");
+const cell = (page: Page, index: number) => page.getByTestId("virtual-grid").locator(`[data-index="${index}"]`);
+const toast = (page: Page, text: string) => page.locator("[data-sonner-toast]").filter({ hasText: text });
 
-test.beforeEach(async ({ page }) => {
-  const datasets = new FakeDatasets();
-  datasets.add({ name: "studio", members: TOTAL, trigger_word: "sks" });
-  await datasets.install(page);
-  captions = new FakeCaptions(datasets);
-  for (let index = 0; index < TOTAL; index += 1) {
-    captions.set(assetId(index), index < WITH_HAT ? "sks, 1girl, hat, solo" : "sks, 1girl, long_hair");
-  }
-  await captions.install(page);
+async function enterSingle(page: Page) {
+  await cell(page, 0).click();
+  await page.keyboard.press("Enter");
+  return page.getByTestId("studio-triage");
+}
+
+function assetIds(directoryId: string) {
+  return [...library.assets.values()].filter((asset) => asset.directory_id === directoryId).map((asset) => asset.asset_id);
+}
+
+async function install(page: Page) {
+  await library.install(page);
+  await studio.install(page);
+}
+
+test.beforeEach(() => {
+  library = new FakeLibrary();
+  source = library.addSource({ name: "图库实拍", tree: { "": TOTAL } });
+  studio = new FakeGalleryStudio(library);
+  rootAssets = assetIds(source.rootId);
+  rootAssets.forEach((id, index) => studio.seed(id, index < WITH_HAT ? WITH_HAT_TEXT : WITHOUT_HAT_TEXT));
 });
 
-function count(page: Page) {
-  return page.getByTestId("studio-count");
-}
-
-function cell(page: Page, index: number) {
-  return page.getByTestId("virtual-grid").locator(`[data-index="${index}"]`);
-}
-
-test("查询过滤，全选后删掉 hat，预览差异再写入，toast 撤销", async ({ page }) => {
-  await page.goto("/#/datasets/ds1/review");
+test("来源内查询、全选、预览并写入批量标签，toast 可撤销", async ({ page }) => {
+  await install(page);
+  await page.goto(review());
   await expect(count(page)).toHaveAttribute("data-count", String(TOTAL));
-
-  // 频率表：触发词钉在最前，hat 出现在 9 张里。
-  await expect(page.getByTestId("studio-trigger")).toContainText("sks");
-  await expect(page.getByTestId("studio-frequency").locator('[data-tag="hat"]')).toHaveAttribute("data-count", String(WITH_HAT));
+  await expect(page.getByTestId("studio-gallery-scope")).toContainText("图库实拍");
+  const frequency = page.getByTestId("studio-frequency");
+  await expect(frequency.locator('[data-tag="hat"]')).toHaveAttribute("data-count", String(WITH_HAT));
 
   const query = page.getByTestId("studio-query");
   await query.fill("1girl -hat");
   await expect(count(page)).toHaveAttribute("data-count", String(TOTAL - WITH_HAT));
-  await expect(page.getByTestId("studio-frequency").locator('[data-tag="hat"]')).toHaveCount(0);
-
-  // 没选图时检查器针对全部结果。
+  await expect(frequency.locator('[data-tag="hat"]')).toHaveCount(0);
   await query.fill("1girl hat");
   await expect(count(page)).toHaveAttribute("data-count", String(WITH_HAT));
   const title = page.getByTestId("studio-inspector-title");
@@ -54,170 +63,262 @@ test("查询过滤，全选后删掉 hat，预览差异再写入，toast 撤销"
 
   await cell(page, 0).click();
   await page.keyboard.press("ControlOrMeta+a");
-  await expect(page.getByTestId("studio-selection")).toContainText(`已选 ${WITH_HAT} 张`);
   await expect(title).toHaveAttribute("data-scope", "selection");
   await expect(title).toHaveAttribute("data-count", String(WITH_HAT));
   const hatRow = page.getByTestId("studio-tags-all").locator('[data-tag="hat"]');
   await expect(hatRow).toContainText(`${WITH_HAT}/${WITH_HAT}`);
-
   await hatRow.locator('[data-action="remove"]').click();
+
   const dialog = page.getByTestId("studio-op-dialog");
   await expect(dialog.getByTestId("studio-op-tags")).toHaveValue("hat");
   await expect(dialog.getByTestId("studio-op-stats")).toHaveAttribute("data-changes", String(WITH_HAT));
   await expect(dialog.getByTestId("studio-op-samples").locator('[data-diff="removed"]').first()).toContainText("hat");
-  const preview = captions.requests.find((request) => request.path === "ops");
-  expect(preview?.body).toMatchObject({ ops: [{ op: "remove", tags: ["hat"] }], dry_run: true });
-  expect((preview?.body as { asset_ids: string[] }).asset_ids).toHaveLength(WITH_HAT);
-  expect(Object.keys((preview?.body as { expected_versions: Record<string, string> }).expected_versions)).toHaveLength(WITH_HAT);
-  expect(captions.tags(assetId(0))).toContain("hat");
+  const asset_ids = rootAssets.slice(0, WITH_HAT);
+  const ops = [{ op: "remove", tags: ["hat"] }];
+  const expected_versions = Object.fromEntries(asset_ids.map((id) => [id, "v1"]));
+  expect(studio.requests).toContainEqual({
+    method: "POST", path: `${sourceApi()}/captions/ops`, body: { asset_ids, ops, expected_versions, dry_run: true, sample_limit: 6 },
+  });
+  expect(studio.files(rootAssets[0]!)?.content).toBe(WITH_HAT_TEXT);
 
   await dialog.getByTestId("studio-op-apply").click();
   await expect(dialog).toBeHidden();
-  const toast = page.locator("[data-sonner-toast]").filter({ hasText: `已改写 ${WITH_HAT} 张 caption` });
-  await expect(toast).toBeVisible();
-  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl", "solo"]);
-  // 写完重新拉 caption：已经没有图带 hat 了，选择随之清空。
+  expect(studio.requests).toContainEqual({
+    method: "POST", path: `${sourceApi()}/captions/ops`, body: { asset_ids, ops, expected_versions, dry_run: false, sample_limit: 0 },
+  });
+  expect(studio.files(rootAssets[0]!)?.content).toBe("sks, 1girl, solo");
+  expect(studio.files(rootAssets.at(-1)!)?.content).toBe(WITHOUT_HAT_TEXT);
   await expect(count(page)).toHaveAttribute("data-count", "0");
   await expect(page.getByTestId("studio-selection")).toBeHidden();
-  await expect(page.getByTestId("studio-history").locator('[data-kind="ops"]')).toHaveAttribute("data-undone", "false");
+  const batch = page.getByTestId("studio-history").locator('[data-kind="ops"]');
+  await expect(batch).toHaveAttribute("data-undone", "false");
 
-  await toast.getByRole("button", { name: "撤销" }).click();
-  await expect(page.locator("[data-sonner-toast]").filter({ hasText: `已撤销，恢复了 ${WITH_HAT} 张` })).toBeVisible();
-  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl", "hat", "solo"]);
+  await toast(page, `已改写 ${WITH_HAT} 张 caption`).getByRole("button", { name: "撤销" }).click();
+  await expect(toast(page, `已撤销，恢复了 ${WITH_HAT} 张`)).toBeVisible();
   await expect(count(page)).toHaveAttribute("data-count", String(WITH_HAT));
-  await expect(page.getByTestId("studio-history").locator('[data-kind="ops"]')).toHaveAttribute("data-undone", "true");
+  await expect(batch).toHaveAttribute("data-undone", "true");
+  expect(studio.files(rootAssets[0]!)?.content).toBe(WITH_HAT_TEXT);
 
-  // A：只对选中的图记为已校对（不落到全部结果上），再按一次撤回。
+  // Grid Keep applies only to the selection, never to all search results.
+  const reviewed = page.getByTestId("studio-reviewed");
   await cell(page, 0).click();
   await page.keyboard.press("a");
-  await expect(page.getByTestId("studio-reviewed")).toHaveAttribute("data-count", "1");
-  await expect.poll(() => captions.approved.has(assetId(0))).toBe(true);
+  await expect(reviewed).toHaveAttribute("data-count", "1");
+  await expect(page.getByTestId("studio-gallery-undo")).toBeEnabled();
+  expect([...studio.kept]).toEqual([asset_ids[0]]);
   await page.keyboard.press("a");
-  await expect(page.getByTestId("studio-reviewed")).toHaveAttribute("data-count", "0");
-
-  // Esc：先清选择，没有选择时清空查询。
+  await expect(reviewed).toHaveAttribute("data-count", "0");
+  expect(studio.kept.size).toBe(0);
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("studio-selection")).toBeHidden();
+  await expect(query).toHaveValue("1girl hat");
   await page.keyboard.press("Escape");
   await expect(query).toHaveValue("");
   await expect(count(page)).toHaveAttribute("data-count", String(TOTAL));
 });
 
-test("Z 按批次一步步撤销到最早；有图暂时没恢复时 toast 带重试", async ({ page }) => {
-  await page.goto("/#/datasets/ds1/review");
+test("Z 撤销来源的批量写入；暂时失败的批次可重试", async ({ page }) => {
+  await install(page);
+  await page.goto(review());
   await expect(count(page)).toHaveAttribute("data-count", String(TOTAL));
-  const history = page.getByTestId("studio-history");
-  const ops = history.locator('[data-kind="ops"]');
+  const batches = page.getByTestId("studio-history").locator('[data-kind="ops"]');
 
-  async function removeFromAll(tag: string, changes: number) {
+  async function removeFromAll(tag: string) {
     await cell(page, 0).click();
     await page.keyboard.press("ControlOrMeta+a");
-    await expect(page.getByTestId("studio-selection")).toContainText(`已选 ${TOTAL} 张`);
-    // 9/12 张带的标签在“部分图有”一栏。
-    await page.getByTestId("studio-tags-partial").locator(`[data-tag="${tag}"]`).locator('[data-action="remove"]').click();
+    await page.getByTestId("studio-tags-partial").locator(`[data-tag="${tag}"] [data-action="remove"]`).click();
     const dialog = page.getByTestId("studio-op-dialog");
-    await expect(dialog.getByTestId("studio-op-stats")).toHaveAttribute("data-changes", String(changes));
+    await expect(dialog.getByTestId("studio-op-stats")).toHaveAttribute("data-changes", String(WITH_HAT));
     await dialog.getByTestId("studio-op-apply").click();
     await expect(dialog).toBeHidden();
   }
 
-  await removeFromAll("hat", WITH_HAT);
-  await removeFromAll("solo", WITH_HAT);
-  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl"]);
-  await expect(ops).toHaveCount(2);
+  await removeFromAll("hat");
+  await removeFromAll("solo");
+  await expect(batches).toHaveCount(2);
+  expect(studio.files(rootAssets[0]!)?.content).toBe("sks, 1girl");
+  await page.keyboard.press("z");
+  await expect(batches.first()).toHaveAttribute("data-undone", "true");
+  expect(studio.files(rootAssets[0]!)?.content).toBe("sks, 1girl, solo");
+  await page.keyboard.press("z");
+  await expect(batches.nth(1)).toHaveAttribute("data-undone", "true");
+  expect(studio.files(rootAssets[0]!)?.content).toBe(WITH_HAT_TEXT);
+  expect(studio.requests.filter(({ path }) => path.endsWith("/undo")).map(({ path }) => path)).toEqual([
+    "/api/v1/caption-batches/gallery-caption-2/undo", "/api/v1/caption-batches/gallery-caption-1/undo",
+  ]);
 
-  // 先撤后一批，再撤前一批：前一批写下的标签还在，照样能撤。
+  await removeFromAll("hat");
+  studio.undoOutages = 1;
   await page.keyboard.press("z");
-  await expect(ops.first()).toHaveAttribute("data-undone", "true");
-  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl", "solo"]);
-  await page.keyboard.press("z");
-  await expect(ops.nth(1)).toHaveAttribute("data-undone", "true");
-  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl", "hat", "solo"]);
-  expect(captions.requests.filter((request) => request.path === "undo")).toHaveLength(2);
-
-  // 来源离线：一张都没恢复，批次还能撤销；toast 里重试。
-  await removeFromAll("hat", WITH_HAT);
-  captions.undoOutages = 1;
-  await page.keyboard.press("z");
-  const incomplete = page.locator("[data-sonner-toast]").filter({ hasText: `${WITH_HAT} 张暂时没能恢复` });
+  const incomplete = toast(page, `${WITH_HAT} 张暂时没能恢复`);
   await expect(incomplete).toBeVisible();
-  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl", "solo"]);
-  await expect(ops.first()).toHaveAttribute("data-undone", "false");
+  expect(studio.files(rootAssets[0]!)?.content).toBe("sks, 1girl, solo");
+  await expect(batches.first()).toHaveAttribute("data-undone", "false");
   await incomplete.getByRole("button", { name: "重试" }).click();
-  await expect(ops.first()).toHaveAttribute("data-undone", "true");
-  expect(captions.tags(assetId(0))).toEqual(["sks", "1girl", "hat", "solo"]);
+  await expect(batches.first()).toHaveAttribute("data-undone", "true");
+  expect(studio.files(rootAssets[0]!)?.content).toBe(WITH_HAT_TEXT);
 });
 
-test("点频率表里的标签改查询，黑名单划线", async ({ page }) => {
-  await page.goto("/#/datasets/ds1/review");
+test("频率表查询、来源级触发词与黑名单、不带标签筛选", async ({ page }) => {
+  studio.seed(rootAssets.at(-1)!, null);
+  await install(page);
+  await page.goto(review());
   await expect(count(page)).toHaveAttribute("data-count", String(TOTAL));
+  const settings = page.getByTestId("studio-gallery-settings");
+  await settings.locator("summary").click();
+  await settings.getByLabel("触发词", { exact: true }).fill("sks");
+  await settings.getByRole("button", { name: "保存标签设置" }).click();
+  await expect(page.getByTestId("studio-trigger")).toContainText("sks");
+  await settings.locator("summary").click();
 
   const frequency = page.getByTestId("studio-frequency");
-  await frequency.locator('[data-tag="long_hair"] button').first().click();
-  await expect(page.getByTestId("studio-query")).toHaveValue("long_hair");
-  await expect(count(page)).toHaveAttribute("data-count", String(TOTAL - WITH_HAT));
-  await expect(frequency.locator('[data-tag="long_hair"]')).toHaveAttribute("data-state", "include");
-
-  await frequency.locator('[data-tag="long_hair"] button').first().click({ modifiers: ["Alt"] });
-  await expect(page.getByTestId("studio-query")).toHaveValue("-long_hair");
-  await expect(count(page)).toHaveAttribute("data-count", String(WITH_HAT));
-
-  await frequency.locator('[data-tag="solo"]').getByRole("button", { name: "把 solo 加进黑名单" }).click();
+  const longHair = frequency.locator('[data-tag="long_hair"] button').first();
+  const query = page.getByTestId("studio-query");
+  await longHair.click();
+  await expect(query).toHaveValue("long_hair");
+  await expect(count(page)).toHaveAttribute("data-count", String(TOTAL - WITH_HAT - 1));
+  await longHair.click({ modifiers: ["Alt"] });
+  await expect(query).toHaveValue("-long_hair");
+  await expect(count(page)).toHaveAttribute("data-count", String(WITH_HAT + 1));
+  const solo = frequency.locator('[data-tag="solo"]');
+  await solo.getByRole("button", { name: "把 solo 加进黑名单" }).click();
   await expect(page.getByTestId("studio-blacklist")).toContainText("solo");
-  await expect(frequency.locator('[data-tag="solo"]').getByRole("button", { name: "把 solo 移出黑名单" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(solo.getByRole("button", { name: "把 solo 移出黑名单" })).toHaveAttribute("aria-pressed", "true");
+
+  await query.fill("");
+  await page.getByTestId("studio-gallery-no-tags").click();
+  await expect(query).toHaveValue("untagged");
+  await expect(count(page)).toHaveAttribute("data-count", "1");
+  await expect(cell(page, 0)).toHaveAccessibleName("root-012.png");
+  await page.reload();
+  await expect(page.getByTestId("studio-trigger")).toContainText("sks");
+  await expect(page.getByTestId("studio-blacklist")).toContainText("solo");
+  expect(studio.requests).toEqual([]);
 });
 
-test("逐张校对：Enter 通过并下一张，T 加标签写回，Z 撤销，Esc 回网格", async ({ page }) => {
-  await page.goto("/#/datasets/ds1/review");
+test("逐张编辑使用版本，Z 按顺序撤销每次改动", async ({ page }) => {
+  await install(page);
+  await page.goto(review());
   await expect(count(page)).toHaveAttribute("data-count", String(TOTAL));
-
-  await cell(page, 0).click();
-  await page.keyboard.press("Enter");
-  const triage = page.getByTestId("studio-triage");
-  await expect(triage).toHaveAttribute("data-asset", assetId(0));
-  await expect(page.getByTestId("studio-triage-position")).toHaveText(`1 / ${TOTAL}`);
+  const triage = await enterSingle(page);
+  const current = rootAssets[0]!;
+  await expect(triage).toHaveAttribute("data-asset", current);
+  const region = page.getByRole("region", { name: "逐张校对" });
   await expect(page.getByTestId("studio-inspector-title")).toHaveAttribute("data-scope", "current");
 
-  // Enter：记为已校对，跳到下一张。
-  await page.keyboard.press("Enter");
-  await expect(triage).toHaveAttribute("data-asset", assetId(1));
-  await expect(page.getByTestId("studio-reviewed")).toHaveAttribute("data-count", "1");
-  await expect.poll(() => captions.approved.has(assetId(0))).toBe(true);
-
-  // T：聚焦输入框，加标签后回车写回这一张（带版本号）。
   await page.keyboard.press("t");
   const add = page.getByTestId("studio-triage-add");
   await expect(add).toBeFocused();
   await add.fill("smile");
   await add.press("Enter");
-  await expect(page.getByTestId("studio-triage-tags").locator('[data-tag="smile"]')).toBeVisible();
-  expect(captions.tags(assetId(1))).toEqual(["sks", "1girl", "hat", "solo", "smile"]);
-  const edit = captions.requests.find((request) => request.path === "edit");
-  expect(edit?.body).toMatchObject({ asset_id: assetId(1), text: "sks, 1girl, hat, solo, smile", expected_version: "v1" });
-
-  // × 删一个标签。
-  await page.getByTestId("studio-triage-tags").getByRole("button", { name: "删掉 solo" }).click();
-  await expect(page.getByTestId("studio-triage-tags").locator('[data-tag="solo"]')).toHaveCount(0);
-  expect(captions.tags(assetId(1))).toEqual(["sks", "1girl", "hat", "smile"]);
-
-  // Z 一步步撤销：删 solo → 加 smile → 通过第一张（回到第一张）。
+  const tags = page.getByTestId("studio-triage-tags");
+  await expect(tags.locator('[data-tag="smile"]')).toBeVisible();
+  expect(studio.requests).toContainEqual({
+    method: "PUT", path: `${sourceApi()}/captions/${current}`,
+    body: { text: `${WITH_HAT_TEXT}, smile`, expected_version: "v1" },
+  });
+  await tags.getByRole("button", { name: "删掉 solo" }).click();
+  await expect(tags.locator('[data-tag="solo"]')).toHaveCount(0);
+  expect(studio.files(current)?.content).toBe("sks, 1girl, hat, smile");
+  expect(studio.requests.at(-1)?.body).toMatchObject({ expected_version: "v2" });
+  await region.focus();
   await page.keyboard.press("z");
-  await expect(page.getByTestId("studio-triage-tags").locator('[data-tag="solo"]')).toBeVisible();
+  await expect(tags.locator('[data-tag="solo"]')).toBeVisible();
+  await expect(page.getByTestId("studio-gallery-undo")).toBeEnabled();
   await page.keyboard.press("z");
-  await expect(page.getByTestId("studio-triage-tags").locator('[data-tag="smile"]')).toHaveCount(0);
-  expect(captions.tags(assetId(1))).toEqual(["sks", "1girl", "hat", "solo"]);
-  await page.keyboard.press("z");
-  await expect(triage).toHaveAttribute("data-asset", assetId(0));
-  await expect(page.getByTestId("studio-reviewed")).toHaveAttribute("data-count", "0");
-  await expect.poll(() => captions.approved.has(assetId(0))).toBe(false);
-
-  // ←/→ 翻页，Esc 回到网格，焦点落在当前这张。
+  await expect(tags.locator('[data-tag="smile"]')).toHaveCount(0);
+  expect(studio.files(current)?.content).toBe(WITH_HAT_TEXT);
+  await expect(page.getByTestId("studio-gallery-undo")).toBeDisabled();
   await page.keyboard.press("ArrowRight");
-  await expect(triage).toHaveAttribute("data-asset", assetId(1));
+  await expect(triage).toHaveAttribute("data-asset", rootAssets[1]!);
   await page.keyboard.press("Escape");
   await expect(triage).toBeHidden();
   await expect(cell(page, 1)).toHaveAttribute("data-focused", "true");
+});
+
+test("文件夹审核：保留、回收图和同名 TXT、撤销；失败时不移动当前图", async ({ page }) => {
+  const folder = "alpha 精选图";
+  const tree = library.addSource({ name: "来源合集", tree: { [folder]: 2, [`${folder}/nested 子目录`]: 1, [`其它/${folder}`]: 1, "其它": 0 } });
+  source = tree;
+  const folderId = tree.directories[folder]!;
+  const [first, second] = assetIds(folderId) as [string, string];
+  const descendant = assetIds(tree.directories[`${folder}/nested 子目录`]!)[0]!;
+  const outside = assetIds(tree.directories[`其它/${folder}`]!)[0]!;
+  studio.seed(first, "keep me");
+  studio.seed(second, "trash me");
+  studio.seed(descendant, "nested caption");
+  studio.seed(outside, "outside, same filename as first");
+  const pair = { image: `${folder}/${folder}-002.png`, txt: `${folder}/${folder}-002.txt`, content: "trash me" };
+  await install(page);
+
+  // Return one real API error without changing the shared gallery fixture.
+  const trashPath = "/api/v1/gallery/file-operations/trash";
+  const failedBodies: unknown[] = [];
+  await page.route((url) => url.pathname === trashPath, (route) => {
+    if (route.request().method() !== "POST" || failedBodies.length) return route.fallback();
+    failedBodies.push(route.request().postDataJSON());
+    return route.fulfill({ status: 409, json: errorEnvelope("source_offline", "来源离线") });
+  });
+  // Use the real library-folder entry to verify it uses the folder ID, not its name or a dataset ID.
+  const folderUrl = `/#/library/${tree.sourceId}/${folderId}`;
+  await page.goto(folderUrl);
+  const captionsRequest = page.waitForRequest((request) => new URL(request.url()).pathname === `${sourceApi()}/captions`);
+  await page.getByTestId("library-review-link").click();
+  await expect(page).toHaveURL(`${review()}?directory=${folderId}`);
+  expect(new URL((await captionsRequest).url()).searchParams.get("directory_id")).toBe(folderId);
+  await expect(page.getByTestId("studio")).toHaveAttribute("data-directory", folderId);
+  await expect(page.getByTestId("studio-gallery-scope")).toContainText(folder);
+  await expect(page.getByTestId("studio-gallery-back")).toHaveAttribute("href", folderUrl.slice(1));
+  await expect(count(page)).toHaveAttribute("data-count", "3");
+  const grid = page.getByTestId("virtual-grid");
+  await expect(grid.locator("[data-caption]").filter({ hasText: "nested caption" })).toBeVisible();
+  await expect(grid.locator("[data-caption]").filter({ hasText: "outside" })).toHaveCount(0);
+
+  const triage = await enterSingle(page);
+  await expect(triage).toHaveAttribute("data-asset", first);
+  await page.keyboard.press("Enter");
+  await expect(triage).toHaveAttribute("data-asset", second);
+  await expect(page.getByTestId("studio-reviewed")).toHaveAttribute("data-count", "1");
+  const keepPath = `${sourceApi()}/kept`;
+  expect(studio.requests).toContainEqual({ method: "PUT", path: keepPath, body: { asset_ids: [first], kept: true } });
+  expect(studio.kept.has(first)).toBe(true);
+  expect(studio.kept.has(outside)).toBe(false);
+  expect(studio.files(second)).toEqual(pair);
+
+  const trash = page.getByTestId("studio-gallery-trash");
+  await trash.click();
+  await expect(toast(page, "无法将图片移入回收区")).toBeVisible();
+  await expect(triage).toHaveAttribute("data-asset", second);
+  await expect(page.getByTestId("studio-triage-position")).toHaveText("2 / 3");
+  await expect(page.getByTestId("studio-inspector-title")).toHaveAttribute("data-scope", "current");
+  await expect(count(page)).toHaveAttribute("data-count", "3");
+  expect(failedBodies).toEqual([{ asset_ids: [second] }]);
+  expect(library.trashed()).toHaveLength(0);
+  expect(studio.files(second)).toEqual(pair);
+
+  await trash.click();
+  await expect(triage).toHaveAttribute("data-asset", descendant);
+  await expect(count(page)).toHaveAttribute("data-count", "2");
+  expect(library.writes.at(-1)).toEqual({ method: "POST", path: trashPath, body: { asset_ids: [second] } });
+  const operation = library.trashed()[0]!;
+  expect(operation).toMatchObject({ asset_ids: [second], txt_paths: [pair.txt] });
+  expect(studio.files(second)).toBeNull();
+  expect(studio.files(outside)?.content).toBe("outside, same filename as first");
+
+  const undo = page.getByTestId("studio-gallery-undo");
+  await undo.click();
+  await expect(triage).toHaveAttribute("data-asset", second);
+  await expect(count(page)).toHaveAttribute("data-count", "3");
+  await expect(page.getByTestId("studio-triage-text")).toHaveText(pair.content);
+  expect(library.writes.at(-1)).toEqual({
+    method: "POST", path: `/api/v1/gallery/file-operations/${operation.operation_id}/undo`, body: null,
+  });
+  expect(library.trashed()).toHaveLength(0);
+  expect(studio.files(second)).toEqual(pair);
+
+  await undo.click();
+  await expect(triage).toHaveAttribute("data-asset", first);
+  await expect(page.getByTestId("studio-reviewed")).toHaveAttribute("data-count", "0");
+  expect(studio.requests.at(-1)).toEqual({ method: "PUT", path: keepPath, body: { asset_ids: [first], kept: false } });
+  await expect(undo).toBeDisabled();
 });

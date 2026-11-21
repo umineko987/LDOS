@@ -1,6 +1,7 @@
 // 实时任务表：/jobs 快照打底，SSE `job.updated` 逐条合并。纯逻辑，响应式包装在 jobs.svelte.ts。
 
 import { isTerminalStatus, type Job } from "#lib/api/queries/jobs.ts";
+import { galleryStudioPath } from "#lib/components/studio/gallery-studio-state.ts";
 
 /** 和后端 JobRegistry 一致：活动任务常驻，终态任务只留最近这么多条。 */
 export const MAX_FINISHED_JOBS = 200;
@@ -68,8 +69,8 @@ const segment = (value: string) => encodeURIComponent(value);
 const DATASET_STAGE: Readonly<Record<string, string>> = {
   "tagger.tag": "tag",
   "tagger.prepare": "tag",
-  "captions.write": "review",
-  "captions.undo": "review",
+  "captions.write": "tag",
+  "captions.undo": "tag",
   "atlas.run": "atlas",
   "dataset.export": "export",
 };
@@ -89,6 +90,7 @@ export function jobLink(job: Job): string | null {
     return null;
   }
   if (job.kind === "gallery.scan") return ref.source_id ? `/library/${segment(ref.source_id)}` : "/library";
+  if ((job.kind === "captions.write" || job.kind === "captions.undo") && ref.source_id) return galleryStudioPath(ref.source_id);
   if (job.kind === "models.install") return "/settings/models";
   if (job.kind === "tagger.prepare" && !dataset) return "/settings/models";
   const stage = Object.hasOwn(DATASET_STAGE, job.kind) ? DATASET_STAGE[job.kind] : undefined;

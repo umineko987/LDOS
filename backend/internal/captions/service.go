@@ -1,4 +1,4 @@
-// Package captions implements dataset captions and durable, recoverable write journals.
+// Package captions implements gallery and dataset captions with recoverable write journals.
 package captions
 
 import (
@@ -42,6 +42,7 @@ type Dependencies struct {
 	StageInput      func(context.Context, string, string) ([]Row, error)
 	ReadAnnotations func(context.Context, []string) (map[string]Annotation, error)
 	WriteAnnotation func(context.Context, string, *string, AnnotationWrite) (Annotation, error)
+	WithSources     func(context.Context, []string, func(context.Context) error) error
 	Publish         func(string, Row)
 	DatasetUpdated  func(string, string)
 }
@@ -100,8 +101,8 @@ type Service struct {
 }
 
 func New(ctx context.Context, deps Dependencies) (*Service, error) {
-	if deps.Store == nil || deps.StageInput == nil || deps.ReadAnnotations == nil || deps.WriteAnnotation == nil {
-		return nil, errors.New("captions requires Store, StageInput, ReadAnnotations and WriteAnnotation")
+	if deps.Store == nil || deps.StageInput == nil || deps.ReadAnnotations == nil || deps.WriteAnnotation == nil || deps.WithSources == nil {
+		return nil, errors.New("captions requires Store, StageInput, ReadAnnotations, WriteAnnotation and WithSources")
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	return &Service{deps: deps, ctx: ctx, cancel: cancel, locks: map[string]*sync.Mutex{}}, nil
@@ -172,8 +173,8 @@ func (s *Service) read(ctx context.Context, ids []string) (map[string]Annotation
 	}
 	return all, nil
 }
-func (s *Service) selectIDs(ctx context.Context, id string, ids []string) ([]string, error) {
-	rows, e := s.deps.StageInput(ctx, id, "review")
+func (s *Service) selectDatasetIDs(ctx context.Context, id string, ids []string) ([]string, error) {
+	rows, e := s.deps.StageInput(ctx, id, "export")
 	if e != nil {
 		return nil, e
 	}
@@ -195,7 +196,7 @@ func (s *Service) selectIDs(ctx context.Context, id string, ids []string) ([]str
 		}
 	}
 	if len(unknown) > 0 {
-		return nil, &Error{422, "caption_asset_not_in_stage", "有图片不在这一阶段的输入里", Row{"stage": "review", "asset_ids": unknown[:min(20, len(unknown))]}}
+		return nil, &Error{422, "caption_asset_not_in_stage", "有图片不在这一阶段的输入里", Row{"stage": "export", "asset_ids": unknown[:min(20, len(unknown))]}}
 	}
 	return ids, nil
 }
@@ -208,12 +209,12 @@ func (s *Service) write(ctx context.Context, q string, args ...any) error {
 		return e
 	})
 }
-func (s *Service) publish(id, batch, reason string, n int) {
+func (s *Service) publish(owner captionOwner, batch, reason string, n int) {
 	if s.deps.Publish != nil {
-		s.deps.Publish("captions.updated", Row{"dataset_id": id, "batch_id": batch, "reason": reason, "changed": n})
+		s.deps.Publish("captions.updated", owner.project(Row{"batch_id": batch, "reason": reason, "changed": n}))
 	}
-	if s.deps.DatasetUpdated != nil {
-		s.deps.DatasetUpdated(id, "captions")
+	if !owner.source && s.deps.DatasetUpdated != nil {
+		s.deps.DatasetUpdated(owner.id, "captions")
 	}
 }
 func failureReason(e error) (string, string) {
@@ -229,9 +230,9 @@ func failureReason(e error) (string, string) {
 	}
 	return "failed", "caption_write_failed"
 }
-func (s *Service) job(kind, id, dataset string, total int) {
+func (s *Service) job(kind, id string, owner captionOwner, total int) {
 	if s.deps.Jobs != nil {
-		s.deps.Jobs.Start(kind, "Caption", activity.StartOptions{ID: id, Total: &total, Ref: map[string]string{"dataset_id": dataset}})
+		s.deps.Jobs.Start(kind, "Caption", activity.StartOptions{ID: id, Total: &total, Ref: map[string]string{owner.field(): owner.id}})
 	}
 }
 func (s *Service) progress(id string, n, total int) {
