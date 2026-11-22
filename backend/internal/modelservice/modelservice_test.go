@@ -329,11 +329,12 @@ func TestSetupHelper(t *testing.T) {
 	if strings.Contains(strings.Join(os.Args, " "), "--prepare-models") {
 		os.Exit(0)
 	}
+	model := os.Args[len(os.Args)-1]
 	if mode == "fail" {
-		fmt.Println(`{"completeness":{"available":false,"reason":"fixture inference failure"},"ccip":{"available":false,"reason":"fixture inference failure"}}`)
+		fmt.Printf(`{%q:{"available":false,"reason":"fixture inference failure"}}`+"\n", model)
 		os.Exit(1)
 	}
-	fmt.Println(`{"completeness":{"available":true,"reason":""},"ccip":{"available":true,"reason":""}}`)
+	fmt.Printf(`{%q:{"available":true,"reason":""}}`+"\n", model)
 	os.Exit(0)
 }
 func TestNativeDedupSetupAndSettings(t *testing.T) {
@@ -367,7 +368,7 @@ func TestNativeDedupSetupAndSettings(t *testing.T) {
 			must(t, os.WriteFile(filepath.Join(repository, "hubconf.py"), []byte("fixture"), 0600))
 			enabled := false
 			s.deps.OnDedupEnabled = func(context.Context) error { enabled = true; return nil }
-			_, e = s.InstallSetup(context.Background(), "", []string{"dedup", "completeness"})
+			_, e = s.InstallSetup(context.Background(), "", []string{"dedup", "monochrome"})
 			must(t, e)
 			s.mu.Lock()
 			op := s.setup
@@ -381,6 +382,14 @@ func TestNativeDedupSetupAndSettings(t *testing.T) {
 			}
 			status, e := s.SetupStatus(context.Background())
 			must(t, e)
+			caps := status["review_filters"].(map[string]Capability)
+			if caps["filter_monochrome"].Available != (mode == "success") || caps["filter_sketch"] != (Capability{Reason: "缺少 completeness 模型，请先准备模型"}) {
+				t.Fatal(caps)
+			}
+			mono := status["models"].(Record)["monochrome"].(Record)
+			if mono["installed"] != caps["filter_monochrome"].Available || mono["downloaded_bytes"] != int64(len(payload)) || mono["expected_bytes"] != int64(len(payload)) {
+				t.Fatal(mono)
+			}
 			var saved Record
 			must(t, readJSON(s.deps.Settings.Path, &saved))
 			if saved["browser"].(map[string]any)["keep"] != true {

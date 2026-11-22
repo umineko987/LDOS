@@ -5835,7 +5835,7 @@ export interface components {
         /** ModelInstallRequest */
         ModelInstallRequest: {
             /** Models */
-            models?: ("dedup" | "completeness" | "ccip")[];
+            models?: ("dedup" | "completeness" | "monochrome" | "ccip")[];
             /**
              * Proxy Url
              * @default

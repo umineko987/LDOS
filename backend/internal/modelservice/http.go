@@ -36,7 +36,7 @@ func (s *Service) Register(mux *http.ServeMux) {
 			Models []string `json:"models"`
 		}
 		e := decode(w, r, &body)
-		if len(body.Models) > 3 || body.Proxy != nil && utf8.RuneCountInString(*body.Proxy) > 300 {
+		if len(body.Models) > 4 || body.Proxy != nil && utf8.RuneCountInString(*body.Proxy) > 300 {
 			e = validation()
 		}
 		proxy := ""

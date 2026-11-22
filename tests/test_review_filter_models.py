@@ -30,17 +30,20 @@ class FilterInferenceTests(unittest.TestCase):
             infos.append({"path": str(path), "frames": 1})
         return infos
 
-    def test_auxiliary_classes_independent_switches_and_one_inference_per_image(self):
+    def test_auxiliary_classes_independent_switches_and_review_only_flags(self):
         for mono, sketch in ((False, False), (True, False), (False, True), (True, True)):
             with self.subTest(mono=mono, sketch=sketch), tempfile.TemporaryDirectory() as directory:
                 infos = self.image_infos(Path(directory), ["red", "blue", "gray"])
                 runtime = mock.Mock()
                 runtime.completeness.side_effect = ["polished", "rough", "monochrome"]
+                runtime.is_monochrome.side_effect = lambda image: image.getpixel((0, 0)) != (128, 128, 128)
                 result = filters.filter_images(infos, options(filter_monochrome=mono, filter_sketch=sketch), [], models=runtime)
                 self.assertEqual(result, [])
                 self.assertEqual([info.get("classification") for info in infos],
-                                 [None, "rough" if sketch else None, "monochrome" if mono else None])
-                self.assertEqual(runtime.completeness.call_count, 3 if mono or sketch else 0)
+                                 ["monochrome" if mono else None,
+                                  "rough" if sketch else ("monochrome" if mono else None), None])
+                self.assertEqual(runtime.completeness.call_count, 3 if sketch else 0)
+                self.assertEqual(runtime.is_monochrome.call_count, (2 if sketch else 3) if mono else 0)
                 runtime.feature.assert_not_called()
                 runtime.distances.assert_not_called()
 
@@ -71,6 +74,7 @@ class FilterInferenceTests(unittest.TestCase):
                 return Image.open(io.BytesIO(held.getvalue())) if path == infos[0]["path"] else Image.open(path)
             runtime = mock.Mock()
             runtime.completeness.side_effect = ["monochrome", "rough", "polished"]
+            runtime.is_monochrome.side_effect = [True, False]
             runtime.feature.return_value = np.ones(768, dtype=np.float32)
             runtime.distances.side_effect = [np.array([0.8]), np.array([0.8]), np.array([0.2])]
             result = filters.filter_images(infos, options(filter_monochrome=True, filter_sketch=True, filter_character=True),
@@ -89,10 +93,13 @@ class FilterInferenceTests(unittest.TestCase):
             load.assert_called_once_with(Path("models"), ["ccip"])
             load.reset_mock()
             filters.require_filter_capabilities(options(filter_monochrome=True, filter_sketch=True), Path("models"))
-            load.assert_called_once_with(Path("models"), ["completeness"])
+            load.assert_called_once_with(Path("models"), ["monochrome", "completeness"])
             load.reset_mock()
             filters.require_filter_capabilities(options(filter_sketch=True), Path("models"))
             load.assert_called_once_with(Path("models"), ["completeness"])
+            load.reset_mock()
+            filters.require_filter_capabilities(options(filter_monochrome=True), Path("models"))
+            load.assert_called_once_with(Path("models"), ["monochrome"])
         for error in (ImportError("dependency missing"), RuntimeError("corrupt model")):
             with mock.patch.object(filters, "FilterModels", side_effect=error), self.assertRaises(filters.FilterConfigurationError):
                 filters.require_filter_capabilities(options(filter_monochrome=True), Path("models"))
@@ -104,7 +111,7 @@ class FilterInferenceTests(unittest.TestCase):
             with self.subTest(error=type(error).__name__), mock.patch.object(filters, "FilterModels", side_effect=error) as load:
                 with self.assertRaises(filters.FilterConfigurationError) as caught:
                     filters.require_filter_capabilities(enabled, Path("models"))
-                load.assert_called_once_with(Path("models"), ["completeness", "ccip"])
+                load.assert_called_once_with(Path("models"), ["monochrome", "completeness", "ccip"])
                 self.assertEqual(caught.exception.code, "review_filter_unavailable")
                 self.assertEqual([entry["option"] for entry in caught.exception.details["filters"]], list(enabled))
                 self.assertIn(expected, str(caught.exception))
@@ -149,6 +156,19 @@ class FilterInferenceTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "链接"):
                     models.verify_weights(root, "completeness")
                 self.assertTrue(old.is_file())
+
+    def test_monochrome_uses_binary_argmax_not_a_tuned_threshold(self):
+        runtime = models.FilterModels.__new__(models.FilterModels)
+        runtime.np = np
+        session = mock.Mock()
+        runtime.sessions = {"monochrome_mobilenetv3_large_100_dist": session}
+        image = Image.new("RGB", (4, 4), "white")
+        for scores, expected in (([0.545, 0.455], True), ([0.481, 0.519], False)):
+            session.run.return_value = [np.array([scores], dtype=np.float32)]
+            self.assertEqual(runtime.is_monochrome(image), expected)
+        session.run.return_value = [np.array([[np.nan, 0.5]])]
+        with self.assertRaises(RuntimeError):
+            runtime.is_monochrome(image)
 
     def test_runtime_uses_official_metric_and_rejects_invalid_model_outputs(self):
         runtime = models.FilterModels.__new__(models.FilterModels)

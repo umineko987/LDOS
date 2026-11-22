@@ -26,6 +26,7 @@ var dedupEntries = []dedupEntry{
 	{"sscd", "SSCD 拷贝检测", "dedup", "MIT", "https://github.com/facebookresearch/sscd-copy-detection", []string{"dedup"}},
 	{"dino", "DINOv2 ViT-S/14", "dedup", "Apache-2.0", "https://github.com/facebookresearch/dinov2", []string{"dedup", "atlas"}},
 	{"completeness", "画面完整度（anime_completeness）", "completeness", "", "https://huggingface.co/deepghs/anime_completeness", []string{"clean"}},
+	{"monochrome", "单色检测（monochrome_detect）", "monochrome", "", "https://huggingface.co/deepghs/monochrome_detect", []string{"clean"}},
 	{"ccip", "角色一致性（CCIP）", "ccip", "", "https://huggingface.co/deepghs/ccip_onnx", []string{"clean"}},
 }
 
@@ -75,7 +76,7 @@ func (s *Service) CheckFilters(ctx context.Context, names []string) (map[string]
 	defer s.probeMu.Unlock()
 	out := map[string]Capability{}
 	for _, name := range names {
-		if name != "completeness" && name != "ccip" {
+		if name != "completeness" && name != "monochrome" && name != "ccip" {
 			return nil, fmt.Errorf("unknown filter model: %s", name)
 		}
 		signature := s.Settings().Dedup.PythonExecutable
@@ -123,7 +124,8 @@ func (s *Service) SetupStatus(ctx context.Context) (Record, error) {
 	phase, message, enabled, proxy := s.setupPhase, s.setupMessage, s.enabled, s.usingProxy
 	selected := append([]string{}, s.selected...)
 	s.mu.Unlock()
-	caps, e := s.CheckFilters(ctx, []string{"completeness", "ccip"})
+	filters := []string{"completeness", "monochrome", "ccip"}
+	caps, e := s.CheckFilters(ctx, filters)
 	if e != nil {
 		return nil, e
 	}
@@ -133,11 +135,11 @@ func (s *Service) SetupStatus(ctx context.Context) (Record, error) {
 	}
 	done, total := s.setupProgress(selected)
 	models := Record{"sscd": Record{"installed": sscd}, "dino": Record{"installed": dino}}
-	for _, key := range []string{"completeness", "ccip"} {
+	for _, key := range filters {
 		d, t := s.modelProgress(key)
 		models[key] = Record{"installed": caps[key].Available, "downloaded_bytes": d, "expected_bytes": t}
 	}
-	return Record{"phase": phase, "enabled": enabled, "installed": sscd && dino, "using_proxy": phase == "installing" && proxy, "downloaded_bytes": done, "expected_bytes": total, "message": message, "requested_models": selected, "review_filters": map[string]Capability{"filter_monochrome": caps["completeness"], "filter_sketch": caps["completeness"], "filter_character": caps["ccip"]}, "models": models}, nil
+	return Record{"phase": phase, "enabled": enabled, "installed": sscd && dino, "using_proxy": phase == "installing" && proxy, "downloaded_bytes": done, "expected_bytes": total, "message": message, "requested_models": selected, "review_filters": map[string]Capability{"filter_monochrome": caps["monochrome"], "filter_sketch": caps["completeness"], "filter_character": caps["ccip"]}, "models": models}, nil
 }
 func (s *Service) ListModels(ctx context.Context) (Record, error) {
 	status, e := s.SetupStatus(ctx)
@@ -349,7 +351,7 @@ func (s *Service) InstallSetup(ctx context.Context, proxy string, models []strin
 		return nil, failure(422, "invalid_model_proxy", "模型选择无效")
 	}
 	for _, v := range models {
-		if v != "dedup" && v != "completeness" && v != "ccip" {
+		if v != "dedup" && v != "completeness" && v != "monochrome" && v != "ccip" {
 			return nil, failure(422, "invalid_model_proxy", "模型选择无效")
 		}
 	}

@@ -721,11 +721,40 @@ func TestPresetsAndStrictFilterValidation(t *testing.T) {
 	cfg.Options.FilterCharacter = false
 	cfg.Options.FilterMonochrome = true
 	f.s.deps.Gallery.CheckFilters = func(context.Context, []string) (map[string]Capability, error) {
-		return map[string]Capability{"completeness": {Available: false, Reason: "missing model"}}, nil
+		return map[string]Capability{"monochrome": {Available: false, Reason: "missing model"}}, nil
 	}
 	_, e = f.s.CreateGallery(f.ctx, nil, []string{"src-1"}, cfg)
 	expectCode(t, e, "review_filter_unavailable")
 }
+
+func TestCleanFilterCapabilitiesAreIndependent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts FilterOptions
+		want string
+	}{
+		{"monochrome", FilterOptions{FilterMonochrome: true}, "monochrome"},
+		{"sketch", FilterOptions{FilterSketch: true}, "completeness"},
+		{"both", FilterOptions{FilterMonochrome: true, FilterSketch: true}, "monochrome,completeness"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Service{deps: Dependencies{Gallery: GalleryCallbacks{CheckFilters: func(_ context.Context, names []string) (map[string]Capability, error) {
+				if got := strings.Join(names, ","); got != tc.want {
+					t.Fatalf("requested models %q, want %q", got, tc.want)
+				}
+				caps := map[string]Capability{}
+				for _, model := range names {
+					caps[model] = Capability{Available: true}
+				}
+				return caps, nil
+			}}}}
+			if _, err := s.prepareReferences(context.Background(), &FilterConfig{Options: tc.opts}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func waitFile(t *testing.T, path string) string {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

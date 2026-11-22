@@ -52,10 +52,13 @@ class StandaloneReviewWorkerTests(unittest.TestCase):
             for without_proc in (False, True):
                 with self.subTest(without_proc=without_proc):
                     completeness, feature, metric = mock.Mock(), mock.Mock(), mock.Mock()
+                    mono = mock.Mock()
+                    mono.run.return_value = [np.array([[0.9, 0.1]], dtype=np.float32)]
                     completeness.run.return_value = [np.array([[0.1, 0.8, 0.1]], dtype=np.float32)]
                     feature.run.return_value = [np.ones((1, 768), dtype=np.float32)]
                     metric.run.return_value = [np.array([[0, 0.8], [0.8, 0]], dtype=np.float32)]
                     sessions = {"completeness_mobilenetv3_v2.2_dist": completeness,
+                                "monochrome_mobilenetv3_large_100_dist": mono,
                                 "ccip_feat": feature, "ccip_metric": metric}
                     create_session = mock.Mock(side_effect=lambda path, **kwargs: sessions[Path(path).stem])
                     def is_dir(path):
@@ -65,8 +68,8 @@ class StandaloneReviewWorkerTests(unittest.TestCase):
                          mock.patch.object(models, "verify_weights") as verify, \
                          mock.patch.object(Path, "is_dir", is_dir), mock.patch.object(sys, "argv", arguments):
                         self.assertEqual(worker.main(), 0)
-                    self.assertEqual([call.args[1] for call in verify.call_args_list], ["completeness", "ccip"])
-                    self.assertEqual(create_session.call_count, 3)
+                    self.assertEqual([call.args[1] for call in verify.call_args_list], ["monochrome", "completeness", "ccip"])
+                    self.assertEqual(create_session.call_count, 4)
                     for call in create_session.call_args_list:
                         self.assertEqual(call.kwargs["providers"], ["CPUExecutionProvider"])
                         self.assertEqual(call.kwargs["sess_options"].inter_op_num_threads, 1)

@@ -10,9 +10,7 @@ import {
   invalidateTriage,
   isTriageEvent,
   isTriageRunning,
-  parsePresets,
   refreshAfterTriage,
-  reviewPresetsQuery,
   runTriageStage,
   TRIAGE_POLL_MS,
   triageKeys,
@@ -146,55 +144,6 @@ describe("查询", () => {
   });
 });
 
-describe("parsePresets", () => {
-  it("只留下形状对的预设，选项缺省为 false", () => {
-    const presets = parsePresets({
-      items: [
-        { id: "builtin-style", name: "画风", builtin: true, options: { filter_monochrome: true, filter_sketch: true, reference_asset_ids: ["a", 3] } },
-        { id: "custom", name: "  ", options: {} },
-        { id: "", options: {} },
-        { id: "no-options" },
-        "junk",
-      ],
-    });
-    expect(presets).toEqual([
-      {
-        id: "builtin-style",
-        name: "画风",
-        builtin: true,
-        options: {
-          basic_dedup: false,
-          similarity_groups: false,
-          filter_monochrome: true,
-          filter_sketch: true,
-          filter_character: false,
-          reference_asset_ids: ["a"],
-        },
-      },
-      {
-        id: "custom",
-        name: "custom",
-        builtin: false,
-        options: {
-          basic_dedup: false,
-          similarity_groups: false,
-          filter_monochrome: false,
-          filter_sketch: false,
-          filter_character: false,
-          reference_asset_ids: [],
-        },
-      },
-    ]);
-    expect(parsePresets(null)).toEqual([]);
-    expect(parsePresets({ items: "nope" })).toEqual([]);
-  });
-
-  it("查询经过校验", async () => {
-    const { api } = fakeApi(() => ({ status: 200, body: { items: [{ id: "p", name: "P", options: {} }] } }));
-    const presets = await newClient().fetchQuery(reviewPresetsQuery(api));
-    expect(presets.map((preset) => preset.id)).toEqual(["p"]);
-  });
-});
 
 describe("写操作", () => {
   it("运行、定夺、撤销的路径和请求体", async () => {
@@ -204,7 +153,7 @@ describe("写操作", () => {
       if (path.endsWith("/apply")) return { status: 200, body: { batch_id: "b1", applied_groups: 1, kept: ["a"], rejected: ["b"], failed: [], error: null, summary: summary() } };
       return { status: 200, body: { batch_id: "b1", undone_groups: 1, error: null, summary: summary() } };
     });
-    await runTriageStage(api, "d1", "clean", { preset_id: "builtin-style", options: { filter_character: true } });
+    await runTriageStage(api, "d1", "clean", { options: { filter_monochrome: false, filter_sketch: true, filter_character: false, reference_asset_ids: [] } });
     await runTriageStage(api, "d1", "dedup");
     const applied = await applyTriage(api, "d1", "dedup", { run_id: "r1", groups: [{ group_id: "g1", keep: ["a"] }] });
     expect(applied.batch_id).toBe("b1");
@@ -218,7 +167,7 @@ describe("写操作", () => {
       "POST /api/v1/datasets/d1/stages/clean/undo",
     ]);
     expect(requests.map(({ body }) => body)).toEqual([
-      { preset_id: "builtin-style", options: { filter_character: true } },
+      { options: { filter_monochrome: false, filter_sketch: true, filter_character: false, reference_asset_ids: [] } },
       null,
       { run_id: "r1", groups: [{ group_id: "g1", keep: ["a"] }] },
       { batch_id: "b1" },

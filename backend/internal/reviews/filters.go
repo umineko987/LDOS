@@ -265,7 +265,10 @@ func (s *Service) prepareReferences(ctx context.Context, cfg *FilterConfig) ([]S
 		}
 	}
 	names := []string{}
-	if o.FilterMonochrome || o.FilterSketch {
+	if o.FilterMonochrome {
+		names = append(names, "monochrome")
+	}
+	if o.FilterSketch {
 		names = append(names, "completeness")
 	}
 	if o.FilterCharacter {
@@ -282,7 +285,7 @@ func (s *Service) prepareReferences(ctx context.Context, cfg *FilterConfig) ([]S
 	for _, item := range []struct {
 		option, model string
 		enabled       bool
-	}{{"filter_monochrome", "completeness", o.FilterMonochrome}, {"filter_sketch", "completeness", o.FilterSketch}, {"filter_character", "ccip", o.FilterCharacter}} {
+	}{{"filter_monochrome", "monochrome", o.FilterMonochrome}, {"filter_sketch", "completeness", o.FilterSketch}, {"filter_character", "ccip", o.FilterCharacter}} {
 		if !item.enabled {
 			continue
 		}

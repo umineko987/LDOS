@@ -10,7 +10,7 @@ if __package__:
 else:
     from review_filter_models import CCIP_REJECT_DISTANCE, FilterModels, rgb_image
 
-FILTER_MODELS = {"filter_monochrome": "completeness", "filter_sketch": "completeness", "filter_character": "ccip"}
+FILTER_MODELS = {"filter_monochrome": "monochrome", "filter_sketch": "completeness", "filter_character": "ccip"}
 
 
 class FilterConfigurationError(ValueError):
@@ -79,11 +79,11 @@ def filter_images(image_infos: list[dict[str, Any]], options: dict[str, Any], re
         except (OSError, ValueError, Image.DecompressionBombError):
             continue
         reason = None
-        if options["filter_monochrome"] or options["filter_sketch"]:
-            classification = models.completeness(image)
-            if ((classification == "rough" and options["filter_sketch"]) or
-                    (classification == "monochrome" and options["filter_monochrome"])):
-                info["classification"] = classification
+        # The manifest has one review label. Preserve rough when both switches match.
+        if options["filter_sketch"] and models.completeness(image) == "rough":
+            info["classification"] = "rough"
+        elif options["filter_monochrome"] and models.is_monochrome(image):
+            info["classification"] = "monochrome"
         if options["filter_character"]:
             distances = models.distances(feature(image), reference_features)
             # OR references: any match OR any conservative-band case retains it.

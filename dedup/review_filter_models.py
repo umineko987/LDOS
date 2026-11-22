@@ -14,10 +14,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
+MONOCHROME_REVISION = "15df450f9d1c74e192bc15514e90c8a864b56b86"
 COMPLETENESS_REVISION = "315b0207c474c7dd0e9f6e282a51ffe00f3f11bd"
 COMPLETENESS_LABELS = ("polished", "rough", "monochrome")
 CCIP_REVISION = "eb2acdd29af1703388d3d0c04221add322bc9110"
 MODEL_FILES = {
+    "monochrome": (
+        ("monochrome_mobilenetv3_large_100_dist.onnx", 16_822_434,
+         "73d0a20dc80958467956b963bf32ec5fe597d05d6d09e1d1d7c57ba4883ed070",
+         f"https://huggingface.co/deepghs/monochrome_detect/resolve/{MONOCHROME_REVISION}/mobilenetv3_large_100_dist/model.onnx"),
+    ),
     "completeness": (
         ("completeness_mobilenetv3_v2.2_dist.onnx", 16_827_558,
          "41908bb124475dd853707452743ce4599fb03c4adacbd4188d8e35fd8705256f",
@@ -97,11 +103,22 @@ class FilterModels:
         # Check execution, shapes and numerical validity, not merely imports/files.
         from PIL import Image
         test_image = Image.new("RGB", (384, 384), "white")
+        if "monochrome" in names:
+            self.is_monochrome(test_image)
         if "completeness" in names:
             self.completeness(test_image)
         if "ccip" in names:
             feature = self.feature(test_image)
             self.distances(feature, [feature])
+
+    def is_monochrome(self, image: Any) -> bool:
+        output = self.sessions["monochrome_mobilenetv3_large_100_dist"].run(
+            ["output"], {"input": encode_image(image)[None]},
+        )[0]
+        if output.shape != (1, 2) or not self.np.isfinite(output).all():
+            raise RuntimeError("单色模型输出无效")
+        # Pinned label order: monochrome, normal. Use the benchmarked default argmax.
+        return int(self.np.argmax(output[0])) == 0
 
     def completeness(self, image: Any) -> str:
         output = self.sessions["completeness_mobilenetv3_v2.2_dist"].run(

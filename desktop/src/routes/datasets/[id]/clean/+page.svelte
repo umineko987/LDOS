@@ -1,10 +1,8 @@
 <script lang="ts">
   import ArrowRightIcon from "@lucide/svelte/icons/arrow-right";
-  import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import RotateCcwIcon from "@lucide/svelte/icons/rotate-ccw";
   import Undo2Icon from "@lucide/svelte/icons/undo-2";
   import { createInfiniteQuery, createQuery, useQueryClient } from "@tanstack/svelte-query";
-  import { untrack } from "svelte";
   import { toast } from "svelte-sonner";
 
   import { useApi } from "#lib/api/context.ts";
@@ -15,7 +13,6 @@
     cleanItemsQuery,
     FILTER_MODELS,
     invalidateTriage,
-    reviewPresetsQuery,
     runTriageStage,
     triageKeys,
     triagePhase,
@@ -35,11 +32,9 @@
   import TriageStatus from "#lib/components/triage/triage-status.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Checkbox } from "#lib/components/ui/checkbox/index.ts";
-  import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
   import { Kbd } from "#lib/components/ui/kbd/index.ts";
   import { Viewer, type ViewerItem } from "#lib/components/viewer/index.ts";
   import { CLEAN_BATCH, cleanBatches, cleanDecisions } from "#lib/domain/triage-groups.ts";
-  import { useOverlay } from "#lib/keys/bindings.svelte.ts";
   import { currentGroup, groupStatus, keepOf } from "#lib/keys/triage.ts";
   import { m } from "#lib/paraglide/messages.js";
 
@@ -49,9 +44,9 @@
   const client = useQueryClient();
   const dataset = useDataset();
   const id = $derived(dataset.id);
+  const filterId = $props.id();
 
   const MAX_REFERENCES = 20;
-  const DEFAULT_PRESET = "builtin-style";
   type Filter = "filter_monochrome" | "filter_sketch" | "filter_character";
   type ReasonFilter = "all" | CleanReason;
 
@@ -60,17 +55,14 @@
   /** 就绪后点了“重新运行”：先显示运行选项。 */
   let configuring = $state(false);
   let reason = $state<ReasonFilter>("all");
-  let presetId = $state<string | null>(null);
   let filters = $state<Record<Filter, boolean>>({ filter_monochrome: true, filter_sketch: true, filter_character: false });
   let references = $state.raw<string[]>([]);
   let pickerOpen = $state(false);
-  let presetMenuOpen = $state(false);
   let viewerOpen = $state(false);
   let viewerIndex = $state(0);
 
   const summary = createQuery(() => triageSummaryQuery(api, id, "clean"));
   useTriageEvents(() => id, "clean");
-  const presets = createQuery(() => reviewPresetsQuery(api));
   const phase = $derived(triagePhase(summary.data));
   useTriageSettled(() => id, () => phase);
   const ready = $derived(phase === "ready");
@@ -78,29 +70,14 @@
   const counts = $derived(summary.data?.counts);
   const memberCount = $derived(dataset.stage("clean")?.input ?? dataset.detail?.member_count ?? 0);
 
-  // ---- 运行选项：预设打底，三个过滤器可以单独开关 ----
-
-  const presetList = $derived(presets.data ?? []);
-  const preset = $derived(presetList.find((item) => item.id === presetId) ?? null);
-
-  // 预设读回来以后选上默认的那个。
-  $effect(() => {
-    if (presetId === null && presetList.length) untrack(() => choosePreset(presetList.find((item) => item.id === DEFAULT_PRESET)?.id ?? presetList[0]!.id));
-  });
-
-  function choosePreset(next: string) {
-    const chosen = presetList.find((item) => item.id === next);
-    if (!chosen) return;
-    presetId = chosen.id;
-    filters = {
-      filter_monochrome: chosen.options.filter_monochrome,
-      filter_sketch: chosen.options.filter_sketch,
-      filter_character: chosen.options.filter_character && memberCount > 0,
-    };
-    references = chosen.options.reference_asset_ids.slice(0, MAX_REFERENCES);
-  }
+  // ---- 运行选项 ----
 
   const modelKeys = $derived([...new Set((Object.keys(filters) as Filter[]).filter((key) => filters[key]).map((key) => FILTER_MODELS[key]))]);
+  const modelHelp = {
+    monochrome: m.clean_model_monochrome,
+    completeness: m.clean_model_completeness,
+    ccip: m.clean_model_ccip,
+  };
   const anyFilter = $derived(filters.filter_monochrome || filters.filter_sketch || filters.filter_character);
   const runIssue = $derived(
     !anyFilter ? m.clean_need_filter() : filters.filter_character && references.length === 0 ? m.clean_need_references() : null,
@@ -109,7 +86,6 @@
   const canRun = $derived(runIssue === null && (modelKeys.length === 0 || modelsReady));
 
   const runBody = $derived<StageRunRequest>({
-    preset_id: preset?.id ?? null,
     options: { ...filters, reference_asset_ids: filters.filter_character ? references : [] },
   });
 
@@ -212,50 +188,46 @@
       { id: "clean.rerun", label: m.triage_rerun, group, palette: true, when: () => ready && !configuring && !running, run: () => void (configuring = true) },
     ],
   });
-  useOverlay(() => presetMenuOpen, { id: "clean-presets" });
 </script>
 
 {#snippet filterRow(key: Filter, label: string)}
-  <label class="flex items-center gap-2 text-sm text-fg">
-    <Checkbox checked={filters[key]} onCheckedChange={(value) => (filters = { ...filters, [key]: value === true })} data-testid={`clean-${key}`} />
-    {label}
-  </label>
+  {@const descriptionId = `${filterId}-${key}`}
+  <div class="flex flex-col gap-1">
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <label class="flex items-center gap-2 text-sm text-fg">
+        <Checkbox
+          checked={filters[key]}
+          onCheckedChange={(value) => (filters = { ...filters, [key]: value === true })}
+          aria-describedby={filters[key] ? descriptionId : undefined}
+          data-testid={`clean-${key}`}
+        />
+        {label}
+      </label>
+      {#if key === "filter_character" && filters[key]}
+        <Button variant="outline" size="xs" onclick={() => (pickerOpen = true)} data-testid="clean-references">
+          {references.length ? m.clean_references_picked({ count: references.length }) : m.clean_references_pick()}
+        </Button>
+      {/if}
+    </div>
+    {#if filters[key]}
+      <!-- 判定参数对应 dedup/review_filter_models.py 和 review_filters.py。 -->
+      <p id={descriptionId} class="ps-6 text-xs leading-5 text-fg2">
+        {modelHelp[FILTER_MODELS[key]]()}
+        {#if key === "filter_sketch" && filters.filter_monochrome}
+          {m.clean_models_combined()}
+        {/if}
+      </p>
+    {/if}
+  </div>
 {/snippet}
 
 {#snippet runOptions()}
   <div class="flex w-full flex-col gap-3 rounded-lg border border-line bg-bg1 px-4 py-3" data-testid="clean-options">
-    <div class="flex items-center gap-2 text-xs text-fg2">
-      {m.clean_preset()}
-      <DropdownMenu.Root bind:open={presetMenuOpen}>
-        <DropdownMenu.Trigger>
-          {#snippet child({ props })}
-            <Button variant="outline" size="sm" {...props} data-testid="clean-preset">
-              {preset?.name ?? m.clean_preset_none()}<ChevronDownIcon />
-            </Button>
-          {/snippet}
-        </DropdownMenu.Trigger>
-        <DropdownMenu.Content align="start" class="min-w-44">
-          <DropdownMenu.RadioGroup value={presetId ?? ""} onValueChange={(value) => choosePreset(value)}>
-            {#each presetList as item (item.id)}
-              <DropdownMenu.RadioItem value={item.id}>{item.name}</DropdownMenu.RadioItem>
-            {/each}
-          </DropdownMenu.RadioGroup>
-        </DropdownMenu.Content>
-      </DropdownMenu.Root>
-      {#if presets.isError}<span class="text-danger">{apiErrorMessage(presets.error)}</span>{/if}
-    </div>
     <div class="flex flex-col gap-2">
       {@render filterRow("filter_monochrome", m.clean_filter_monochrome())}
       {@render filterRow("filter_sketch", m.clean_filter_sketch())}
       {#if memberCount > 0}
-        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-          {@render filterRow("filter_character", m.clean_filter_character())}
-          {#if filters.filter_character}
-            <Button variant="outline" size="xs" onclick={() => (pickerOpen = true)} data-testid="clean-references">
-              {references.length ? m.clean_references_picked({ count: references.length }) : m.clean_references_pick()}
-            </Button>
-          {/if}
-        </div>
+        {@render filterRow("filter_character", m.clean_filter_character())}
       {:else}
         <p class="text-xs text-fg3" data-testid="clean-character-unavailable">{m.clean_character_unavailable()}</p>
       {/if}

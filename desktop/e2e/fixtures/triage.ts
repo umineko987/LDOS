@@ -83,24 +83,9 @@ export const TRIAGE_MODELS = [
   model("dino", { status: "installed", installed_bytes: 1, used_by: ["dedup", "atlas"] }),
   model("ccip", { status: "installed", installed_bytes: 1, used_by: ["clean"] }),
   model("completeness", { status: "installed", installed_bytes: 1, used_by: ["clean"] }),
+  model("monochrome", { status: "installed", installed_bytes: 1, used_by: ["clean"] }),
 ];
 
-export const REVIEW_PRESETS = {
-  items: [
-    {
-      id: "builtin-style",
-      name: "画风",
-      builtin: true,
-      options: { basic_dedup: false, similarity_groups: false, filter_monochrome: true, filter_sketch: true, filter_character: false, reference_asset_ids: [] },
-    },
-    {
-      id: "builtin-character",
-      name: "角色",
-      builtin: true,
-      options: { basic_dedup: false, similarity_groups: false, filter_monochrome: false, filter_sketch: false, filter_character: true, reference_asset_ids: [] },
-    },
-  ],
-};
 
 function stageOf(request: Request): Stage {
   return new URL(request.url()).pathname.includes("/stages/dedup/") ? "dedup" : "clean";
@@ -308,14 +293,13 @@ export class FakeTriage {
     return this.stages[stage].review === "ready";
   }
 
-  /** 注册两段的分诊接口和清洗预设、模型列表；在 FakeDatasets.install 之后、`page.goto()` 之前调用。 */
+  /** 注册两段的分诊接口和模型列表；在 FakeDatasets.install 之后、`page.goto()` 之前调用。 */
   async install(page: Page): Promise<void> {
     await mockModelsBackend(page, { models: () => TRIAGE_MODELS });
     await page.route(
       (url) => /^\/api\/v1\/gallery\/reviews\/[^/]+\/images\/[^/]+$/.test(url.pathname),
       (route) => route.fulfill({ status: 200, contentType: "image/png", body: PIXEL_PNG }),
     );
-    await mockApi(page, "get", "/api/v1/gallery/review-presets", REVIEW_PRESETS);
 
     await mockApi(page, "get", "/api/v1/datasets/{dataset_id}/stages/{stage}/triage", (request) => {
       const stage = stageOf(request);

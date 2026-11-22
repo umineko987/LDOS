@@ -1,4 +1,4 @@
-// 清洗 / 去重两段的查询：运行、分诊摘要、清洗命中列表、去重分组、定夺与撤销，以及清洗用的过滤预设。
+// 清洗 / 去重两段的查询：运行、分诊摘要、清洗命中列表、去重分组、定夺与撤销。
 //
 // 键都挂在 `datasetKeys.dataset(id)` 下面（["datasets", "item", id, "triage", stage, ...]），
 // 定夺 / 撤销后让整个数据集前缀失效就能连同轨道计数一起刷新（这两个接口不返回漏斗）。
@@ -9,7 +9,7 @@ import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/
 import type { DomainEvents } from "#lib/events/bus.ts";
 
 import { data, type Api } from "../client.ts";
-import { boundedString, isPlainRecord, ownValue } from "../sanitize.ts";
+import { isPlainRecord, ownValue } from "../sanitize.ts";
 import type { components, operations } from "../schema";
 import { applyFunnel, datasetKeys, type DatasetFunnel } from "./datasets.ts";
 
@@ -30,7 +30,6 @@ export type TriageGroupDecision = Schemas["TriageGroupDecision"];
 export type TriageApplyRequest = Schemas["TriageApplyRequest"];
 export type TriageApplyResult = Schemas["TriageApplyResponse"];
 export type TriageUndoResult = Schemas["TriageUndoResponse"];
-export type FilterOptions = Schemas["FilterOptions"];
 
 type CleanQuery = NonNullable<operations["list_dataset_clean_items_api_v1_datasets__dataset_id__stages_clean_items_get"]["parameters"]["query"]>;
 export type CleanReason = NonNullable<CleanQuery["reason"]>;
@@ -46,9 +45,9 @@ export const TRIAGE_APPLY_MAX = 200;
 /** 分析中没有推送时的兜底轮询。 */
 export const TRIAGE_POLL_MS = 3000;
 
-/** 过滤器 → 需要的模型（gdl_backend/review_filters.py 的 FILTER_MODELS）。 */
+/** 过滤器 → 需要的模型（dedup/review_filters.py 的 FILTER_MODELS）。 */
 export const FILTER_MODELS = {
-  filter_monochrome: "completeness",
+  filter_monochrome: "monochrome",
   filter_sketch: "completeness",
   filter_character: "ccip",
 } as const;
@@ -71,7 +70,6 @@ export const triageKeys = {
     [...triageKeys.stage(id, "clean"), "items", { reason: filter.reason ?? null, state: filter.state ?? "all" }] as const,
   dedupGroups: (id: string, filter: DedupFilter = {}) =>
     [...triageKeys.stage(id, "dedup"), "groups", { automatic: filter.automatic ?? false, state: filter.state ?? "all" }] as const,
-  presets: () => ["review-presets"] as const,
 };
 
 const stagePath = (dataset_id: string, stage: TriageStage) => ({ params: { path: { dataset_id, stage } } });
@@ -146,55 +144,10 @@ export function dedupGroupsQuery(api: Api, id: string, filter: DedupFilter = {},
   });
 }
 
-// ---- 过滤预设（/gallery/review-presets 没有响应模型，这里自己校验） ----
-
-export interface ReviewPreset {
-  readonly id: string;
-  readonly name: string;
-  readonly builtin: boolean;
-  readonly options: FilterOptions;
-}
-
-const FILTER_FLAGS = ["basic_dedup", "similarity_groups", "filter_monochrome", "filter_sketch", "filter_character"] as const;
-
-function parsePreset(value: unknown): ReviewPreset | null {
-  if (!isPlainRecord(value)) return null;
-  const id = ownValue(value, "id");
-  const options = ownValue(value, "options");
-  if (typeof id !== "string" || !id || !isPlainRecord(options)) return null;
-  const flags = Object.fromEntries(FILTER_FLAGS.map((key) => [key, ownValue(options, key) === true])) as Record<
-    (typeof FILTER_FLAGS)[number],
-    boolean
-  >;
-  const references = ownValue(options, "reference_asset_ids");
-  return {
-    id: boundedString(id, "", 200),
-    name: boundedString(ownValue(value, "name"), id, 200),
-    builtin: ownValue(value, "builtin") === true,
-    options: {
-      ...flags,
-      reference_asset_ids: Array.isArray(references) ? references.filter((ref): ref is string => typeof ref === "string").slice(0, 200) : [],
-    },
-  };
-}
-
-export function parsePresets(payload: unknown): ReviewPreset[] {
-  const items = isPlainRecord(payload) ? ownValue(payload, "items") : null;
-  if (!Array.isArray(items)) return [];
-  return items.map(parsePreset).filter((preset): preset is ReviewPreset => preset !== null);
-}
-
-export function reviewPresetsQuery(api: Api) {
-  return queryOptions({
-    queryKey: triageKeys.presets(),
-    queryFn: async ({ signal }) => parsePresets(await data(api.client.GET("/api/v1/gallery/review-presets", { signal }))),
-    staleTime: 60_000,
-  });
-}
 
 // ---- 写操作 ----
 
-/** 跑一次（覆盖上一次的分组）。`body` 省略时用后端默认：清洗是内置「画风」预设，去重是基础去重 + 相似分组。 */
+/** 跑一次（覆盖上一次的分组）。`body` 省略时用后端默认：清洗启用黑白和草稿，去重启用基础去重和相似分组。 */
 export function runTriageStage(api: Api, id: string, stage: TriageStage, body?: StageRunRequest): Promise<StageTriageSummary> {
   return data(api.client.POST("/api/v1/datasets/{dataset_id}/stages/{stage}/run", { ...stagePath(id, stage), body: body ?? null }));
 }

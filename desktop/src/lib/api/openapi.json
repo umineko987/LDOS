@@ -11695,11 +11695,12 @@
               "enum": [
                 "dedup",
                 "completeness",
+                "monochrome",
                 "ccip"
               ],
               "type": "string"
             },
-            "maxItems": 3,
+            "maxItems": 4,
             "minItems": 1,
             "title": "Models",
             "type": "array"
