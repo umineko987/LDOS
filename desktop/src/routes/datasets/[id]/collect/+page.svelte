@@ -32,7 +32,6 @@
     type MemberFilter,
   } from "#lib/api/queries/datasets.ts";
   import CrawlDialog from "#lib/components/collect/crawl-dialog.svelte";
-  import DanbooruDialog from "#lib/components/collect/danbooru-dialog.svelte";
   import LibraryPicker from "#lib/components/collect/library-picker.svelte";
   import PathDialog from "#lib/components/collect/path-dialog.svelte";
   import RootsBar from "#lib/components/collect/roots-bar.svelte";
@@ -70,7 +69,6 @@
   let pathOpen = $state(false);
   let libraryOpen = $state(false);
   let crawlOpen = $state(false);
-  let danbooruOpen = $state(false);
   let removing = $state<DatasetRoot | null>(null);
   let viewerOpen = $state(false);
   let viewerIndex = $state(0);
@@ -307,15 +305,6 @@
         crawlOpen = true;
       },
     },
-    {
-      id: "collect.danbooru",
-      label: m.danbooru_add,
-      group,
-      palette: true,
-      run: () => {
-        danbooruOpen = true;
-      },
-    },
   ]);
 
   useOverlay(() => removing !== null, { id: "collect-remove-root" });
@@ -330,9 +319,6 @@
   </Button>
   <Button variant="outline" {size} onclick={() => (crawlOpen = true)} data-testid="collect-add-crawl">
     <GlobeIcon />{m.collect_add_crawl()}
-  </Button>
-  <Button variant="outline" {size} onclick={() => (danbooruOpen = true)} data-testid="collect-add-danbooru">
-    <GlobeIcon data-icon="inline-start" />{m.danbooru_add()}
   </Button>
 {/snippet}
 
@@ -483,7 +469,6 @@
 <PathDialog bind:open={pathOpen} onsubmit={(path) => addRoot({ path }, path)} />
 <LibraryPicker bind:open={libraryOpen} onsubmit={addRoot} />
 <CrawlDialog bind:open={crawlOpen} onsubmit={submitCrawl} />
-<DanbooruDialog bind:open={danbooruOpen} datasetId={id} />
 
 <Dialog.Root
   open={removing !== null}
