@@ -1,0 +1,10 @@
+[
+  [2, {"category":"pixiv","subcategory":"artworks","id":904,"title":"Manga","user":{"id":42,"name":"Pixiv Artist","account":"artist"},"count":3,"page_count":3,"num":0}],
+  [3, "https://i.pximg.net/img-original/img/2025/04/07/03/02/01/904_p0.png", {"id":904,"num":0,"count":3,"extension":"png"}],
+  [2, {"category":"pixiv","subcategory":"artworks","id":904,"title":"Duplicate","user":{"id":42,"name":"Pixiv Artist"},"count":3,"num":0}],
+  [2, {"category":"pixiv","subcategory":"artworks","id":901,"title":"Animation","user":{"id":42,"name":"Pixiv Artist"},"count":1,"page_count":1,"num":0,"type":"ugoira"}],
+  [3, "https://i.pximg.net/img-zip-ugoira/img/2025/04/07/03/02/01/901_ugoira1920x1080.zip", {"id":901,"num":0,"count":1,"extension":"zip"}],
+  [2, {"category":"pixiv","subcategory":"artworks","id":902,"title":"Locked","user":{"id":42,"name":"Pixiv Artist"},"count":0,"page_count":4,"num":0}],
+  [2, {"category":"pixiv","subcategory":"artworks","id":910,"title":"Unsafe thumbnail","user":{"id":42,"name":"Pixiv Artist"},"count":1,"num":0}],
+  [3, "https://i.pximg.net.evil.test/img-original/img/2025/04/07/03/02/01/910_p0.jpg", {"id":910,"num":0,"count":1}]
+]
