@@ -26,7 +26,7 @@
 
   import DanbooruFilters from "./danbooru-filters.svelte";
   import WorkbenchCard from "./workbench-card.svelte";
-  import { emptyScope, isStablePrefix, parsePageRange, projectScope, selectLoadedScope, toggleScopeItem, type CollectionScope, type ScopeItem } from "./workbench-selection.ts";
+  import { emptyScope, isNewestFirst, isStablePrefix, parsePageRange, projectScope, selectLoadedScope, toggleScopeItem, type CollectionScope, type ScopeItem } from "./workbench-selection.ts";
 
   let { datasetId, open = $bindable(false), address, ondiscovery, onlegacy, onjobs, dialogs }: {
     datasetId: string;
@@ -121,7 +121,7 @@
   const focused = $derived(items.find((item) => item.id === focusedId));
   const detailImage = $derived(focused?.sample || focused?.preview || "");
   const canSubmit = $derived(!saving && !searching && !expired && !replacement && !rangeError && projection.ready && projection.ids.length > 0 && projection.ids.length <= maxSelection);
-  const newestFirst = $derived(site !== "danbooru" || (kind === "search" && !/(?:^|\s)order:(?!id_desc(?:\s|$))/i.test(query)));
+  const newestFirst = $derived(isNewestFirst(items, site, kind, query));
 
   function clearSnapshot() {
     posts = [];

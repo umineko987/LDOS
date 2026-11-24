@@ -1,9 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { emptyScope, isStablePrefix, parsePageRange, projectScope, selectLoadedScope, toggleScopeItem, type CollectionScope } from "./workbench-selection.ts";
+import { emptyScope, isNewestFirst, isStablePrefix, parsePageRange, projectScope, selectLoadedScope, toggleScopeItem, type CollectionScope } from "./workbench-selection.ts";
 
 const entry = (id: string, collectable = true) => ({ id, collectable });
 const page = (number: number) => ({ ...entry(`page-${number}`), page: number });
 const items = [entry("newest"), entry("unavailable", false), entry("anchor"), entry("oldest")];
+
+describe("workbench newest-first label", () => {
+  it("compares numeric post IDs exactly, including adjacent X IDs above Number.MAX_SAFE_INTEGER", () => {
+    const newest = entry("1900000000000000002");
+    const older = entry("1900000000000000001");
+    expect(isNewestFirst([newest, older, entry("9")], "twitter", "search", "")).toBe(true);
+    expect(isNewestFirst([older, newest], "twitter", "search", "")).toBe(false);
+    expect(isNewestFirst([older, older], "twitter", "search", "")).toBe(false);
+  });
+
+  it("falls back to source order for out-of-order, nonnumeric, or single-item previews", () => {
+    expect(isNewestFirst([entry("10"), entry("12"), entry("9")], "pixiv", "search", "")).toBe(false);
+    expect(isNewestFirst([entry("12"), entry("post-9")], "pixiv", "search", "")).toBe(false);
+    expect(isNewestFirst([entry("12")], "pixiv", "search", "")).toBe(false);
+  });
+
+  it("requires a Danbooru search with chronological order even if the IDs happen to descend", () => {
+    const descending = [entry("12"), entry("9")];
+    expect(isNewestFirst(descending, "danbooru", "search", "cat ORDER:ID_DESC")).toBe(true);
+    expect(isNewestFirst(descending, "danbooru", "search", "cat")).toBe(true);
+    for (const kind of ["pool", "favorites", "favorite_group"] as const) {
+      expect(isNewestFirst(descending, "danbooru", kind, "")).toBe(false);
+    }
+    for (const query of ["order:score", "order:id_asc", "ordfav:artist", "ordfavgroup:5", "ordpool:1 order:id_desc"]) {
+      expect(isNewestFirst(descending, "danbooru", "search", query)).toBe(false);
+    }
+  });
+});
 
 describe("workbench collection scope", () => {
   it("excludes the newer-than boundary by default and includes it only when requested", () => {

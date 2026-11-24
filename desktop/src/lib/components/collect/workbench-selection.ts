@@ -1,3 +1,6 @@
+import type { DanbooruKind } from "#lib/api/queries/danbooru.ts";
+import type { WorkbenchSource } from "#lib/api/queries/workbench.ts";
+
 export interface ScopeItem {
   id: string;
   page?: number | null;
@@ -14,6 +17,31 @@ export const emptyScope = (): CollectionScope => ({ kind: "manual", ids: new Set
 
 export function isStablePrefix(previous: readonly Pick<ScopeItem, "id">[], incoming: readonly Pick<ScopeItem, "id">[]): boolean {
   return previous.length <= incoming.length && previous.every((item, index) => item.id === incoming[index].id);
+}
+
+export function isNewestFirst(
+  items: readonly Pick<ScopeItem, "id">[],
+  site: WorkbenchSource,
+  danbooruKind: DanbooruKind,
+  query: string,
+): boolean {
+  if (site === "exhentai" || items.length < 2) return false;
+  if (site === "danbooru") {
+    if (danbooruKind !== "search") return false;
+    const terms = query.toLowerCase().split(/\s+/);
+    if (terms.some((term) =>
+      /^(?:ordfav(?:group)?|ordpool):/.test(term) || (term.startsWith("order:") && term !== "order:id_desc"),
+    )) return false;
+  }
+
+  let previous: bigint | undefined;
+  for (const { id } of items) {
+    if (!/^\d+$/.test(id)) return false;
+    const current = BigInt(id);
+    if (previous !== undefined && previous <= current) return false;
+    previous = current;
+  }
+  return true;
 }
 
 export function parsePageRange(start: string, end: string): { start: number; end: number } | null {
