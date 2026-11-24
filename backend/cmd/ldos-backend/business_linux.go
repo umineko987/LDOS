@@ -29,6 +29,7 @@ import (
 	"ldos/backend/internal/search"
 	"ldos/backend/internal/store"
 	"ldos/backend/internal/tasks"
+	"ldos/backend/internal/workbench"
 )
 
 type liveSettings struct {
@@ -51,6 +52,7 @@ type businessRuntime struct {
 	crawls    *crawls.Service
 	discovery *discovery.Service
 	danbooru  *danboorucollect.Service
+	workbench *workbench.Service
 	validator discovery.Validator
 }
 
@@ -177,6 +179,7 @@ func newBusinessRuntime(parent context.Context, settings *liveSettings, db *stor
 	if err != nil {
 		return nil, err
 	}
+	b.workbench = b.newWorkbench(vault)
 	b.danbooru = danboorucollect.New(danboorucollect.Dependencies{
 		Store: db, Datasets: b.datasets, Transport: b.discovery.Danbooru.Transport, Browse: b.discovery.Danbooru.Browse,
 		Request: func(ctx context.Context) (discovery.Request, error) {
@@ -268,6 +271,7 @@ func (b *businessRuntime) register(mux *http.ServeMux) {
 	b.datasets.Register(mux)
 	mux.Handle("/api/v1/danbooru/", b.danbooru.Handler())
 	mux.Handle("POST /api/v1/datasets/{dataset_id}/danbooru/collect", b.danbooru.Handler())
+	b.workbench.Register(mux)
 	b.pipeline.register(mux)
 }
 

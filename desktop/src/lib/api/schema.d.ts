@@ -1002,6 +1002,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/datasets/{dataset_id}/workbench/browse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Browse a collection workbench source */
+        post: operations["browse_workbench"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/workbench/collect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collect selected items from a workbench snapshot */
+        post: operations["collect_workbench"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/workbench/media/{snapshot_id}/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve a local collection workbench preview */
+        get: operations["preview_workbench"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/events": {
         parameters: {
             query?: never;
@@ -7101,6 +7152,44 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        WorkbenchBrowseRequest: {
+            /** @description Maximum number of items to return. ExHentai supports at most 500. */
+            limit: number;
+            /** @enum {string} */
+            site: "pixiv" | "twitter" | "exhentai";
+            url: string;
+        };
+        WorkbenchBrowseResponse: {
+            has_more: boolean;
+            items: components["schemas"]["WorkbenchItem"][];
+            snapshot_id: string;
+            total?: number;
+        };
+        WorkbenchCollectRequest: {
+            /** @description Exact item IDs from this snapshot. */
+            ids: string[];
+            snapshot_id: string;
+        };
+        WorkbenchCollectResponse: {
+            batch_id: string;
+        };
+        WorkbenchErrorResponse: {
+            error: {
+                code: string;
+                details: unknown;
+                message: string;
+                request_id: string;
+            };
+        };
+        WorkbenchItem: {
+            author?: string;
+            id: string;
+            media_count: number;
+            page?: number;
+            /** @description Local preview path, or an empty string when a preview is unavailable. */
+            preview_url: string;
+            title: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -9515,6 +9604,114 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    browse_workbench: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkbenchBrowseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchBrowseResponse"];
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchErrorResponse"];
+                };
+            };
+        };
+    };
+    collect_workbench: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkbenchCollectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchCollectResponse"];
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchErrorResponse"];
+                };
+            };
+        };
+    };
+    preview_workbench: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+                snapshot_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/gif": string;
+                    "image/jpeg": string;
+                    "image/png": string;
+                    "image/webp": string;
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchErrorResponse"];
                 };
             };
         };

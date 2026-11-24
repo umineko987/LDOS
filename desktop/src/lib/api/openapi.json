@@ -15861,6 +15861,173 @@
         ],
         "title": "VaultStatuses",
         "type": "object"
+      },
+      "WorkbenchBrowseRequest": {
+        "additionalProperties": false,
+        "if": {
+          "properties": {
+            "site": {
+              "const": "exhentai"
+            }
+          }
+        },
+        "properties": {
+          "limit": {
+            "description": "Maximum number of items to return. ExHentai supports at most 500.",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "site": {
+            "enum": [
+              "pixiv",
+              "twitter",
+              "exhentai"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "site",
+          "url",
+          "limit"
+        ],
+        "then": {
+          "properties": {
+            "limit": {
+              "maximum": 500
+            }
+          }
+        },
+        "type": "object"
+      },
+      "WorkbenchBrowseResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchItem"
+            },
+            "type": "array"
+          },
+          "snapshot_id": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "WorkbenchCollectRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "description": "Exact item IDs from this snapshot.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "snapshot_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "ids"
+        ],
+        "type": "object"
+      },
+      "WorkbenchCollectResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "batch_id"
+        ],
+        "type": "object"
+      },
+      "WorkbenchErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {},
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "details",
+              "request_id"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "WorkbenchItem": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "media_count": {
+            "type": "integer"
+          },
+          "page": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "preview_url": {
+            "description": "Local preview path, or an empty string when a preview is unavailable.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "preview_url",
+          "media_count"
+        ],
+        "type": "object"
       }
     }
   },
@@ -19996,6 +20163,185 @@
           }
         },
         "summary": "Get Dataset Tagger Candidates"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/workbench/browse": {
+      "post": {
+        "operationId": "browse_workbench",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchBrowseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchBrowseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "summary": "Browse a collection workbench source"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/workbench/collect": {
+      "post": {
+        "operationId": "collect_workbench",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchCollectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchCollectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "summary": "Collect selected items from a workbench snapshot"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/workbench/media/{snapshot_id}/{item_id}": {
+      "get": {
+        "operationId": "preview_workbench",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/gif": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Image preview"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "summary": "Serve a local collection workbench preview"
       }
     },
     "/api/v1/events": {
