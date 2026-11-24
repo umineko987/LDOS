@@ -35,6 +35,7 @@ type Address struct {
 	Label       *string  `json:"label"`
 	AddressType *string  `json:"address_type"`
 	ExtraArgs   []string `json:"extra_args"`
+	EHPages     []int    `json:"eh_pages,omitempty"`
 }
 type Source struct {
 	Options
@@ -84,6 +85,13 @@ func (a *Address) UnmarshalJSON(data []byte) error {
 	}
 	if err := nonnull(raw, "url", "extra_args"); err != nil {
 		return err
+	}
+	for key := range raw {
+		if strings.EqualFold(key, "eh_pages") {
+			if err := nonnull(raw, key); err != nil {
+				return err
+			}
+		}
 	}
 	return json.Unmarshal(data, (*plain)(a))
 }
@@ -196,6 +204,15 @@ func (r *Request) validate() error {
 			}
 			if !bounded(a.ID, 500) || !bounded(a.Label, 500) || !bounded(a.AddressType, 100) || len(a.ExtraArgs) > 128 {
 				return invalid("地址字段超出上限")
+			}
+			if a.EHPages != nil {
+				spec, err := discoverydata.SearchSite(source.Site)
+				if err != nil || spec.Site != "exhentai" || !ehGalleryRE.MatchString(a.URL) {
+					return invalid("eh_pages 仅适用于 EH/EHX 画廊地址")
+				}
+				if err := validateEHPages(a.EHPages); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -310,10 +327,6 @@ func (s *Service) Create(ctx context.Context, body Request, idempotencyKey *stri
 		if source.EHDownload != nil && source.Site != "exhentai" {
 			return nil, false, invalid("eh_download 仅适用于 EH/EHX 来源")
 		}
-		download := map[string]any{}
-		if source.EHDownload != nil {
-			download["eh"] = source.EHDownload
-		}
 		opt := source.effective(body.Options)
 		if err := s.validateArgs(opt.ExtraArgs, opt.DiscoveryExtraArgs); err != nil {
 			return nil, false, err
@@ -352,6 +365,13 @@ func (s *Service) Create(ctx context.Context, body Request, idempotencyKey *stri
 			args := append(append([]string{}, opt.ExtraArgs...), a.ExtraArgs...)
 			if err := s.validateArgs(args, nil); err != nil {
 				return nil, false, err
+			}
+			download := map[string]any{}
+			if source.EHDownload != nil {
+				download["eh"] = source.EHDownload
+			}
+			if a.EHPages != nil {
+				download["eh_pages"] = a.EHPages
 			}
 			addressID := uuid.NewSHA1(id, []byte(fmt.Sprintf("%d:%d:%s", sourceOrder, addressOrder, target))).String()
 			addresses = append(addresses, map[string]any{"id": addressID, "site": source.Site, "source_order": sourceOrder, "address_order": addressOrder, "url": target, "label": text(a.Label), "address_type": text(a.AddressType), "proxy_mode": mode, "max_attempts": attempts, "priority": priority, "credentials_ref": nullable(creds.Reference), "cookies_file": nullable(creds.CookiesFile), "config_file": nullable(creds.ConfigFile), "download_options": download, "extra_args": args, "discovery_args": opt.DiscoveryExtraArgs, "timeout_seconds": timeout})

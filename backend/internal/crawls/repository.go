@@ -99,7 +99,13 @@ func projectBatch(row map[string]any) map[string]any {
 	return row
 }
 func projectAddress(row map[string]any) map[string]any {
-	return projectJSON(row, map[string]any{"download_options_json": map[string]any{}, "extra_args_json": []string{}, "discovery_args_json": []string{}})
+	projectJSON(row, map[string]any{"download_options_json": nil, "extra_args_json": []string{}, "discovery_args_json": []string{}})
+	if options, ok := row["download_options"].(map[string]any); ok {
+		if pages, selected := options["eh_pages"]; selected {
+			row["eh_pages"] = pages
+		}
+	}
+	return row
 }
 func projectTask(row map[string]any) map[string]any {
 	projectBatch(row)

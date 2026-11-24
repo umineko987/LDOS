@@ -86,6 +86,10 @@ func (s *Service) prepareChunk(ctx context.Context, batch, address map[string]an
 			site = str(address["site"])
 		}
 		key := fmt.Sprintf("crawl:%s:%s:%s", batch["id"], address["id"], candidate.Digest[:48])
+		if site == "exhentai" && address["eh_pages"] != nil {
+			// The page link token can change between planning attempts.
+			key = fmt.Sprintf("crawl:%s:%s:eh-page:%s", batch["id"], address["id"], unit.SourceID)
+		}
 		args := append(stringsOf(address["extra_args"]), unit.ExtraArgs...)
 		repo := &preparedRepository{service: s, policy: policy}
 		direct := directTwitterMedia(site, unit.URL)
@@ -111,6 +115,11 @@ func (s *Service) prepareChunk(ctx context.Context, batch, address map[string]an
 		plan, row, err := service.PrepareEnqueue(ctx, body, &key)
 		if err != nil {
 			return nil, err
+		}
+		if plan == nil && site == "exhentai" && address["eh_pages"] != nil && str(row["url"]) != unit.URL {
+			if err := s.deps.ValidateTarget(ctx, unit.URL, str(address["proxy_mode"]), policy); err != nil {
+				return nil, err
+			}
 		}
 		prepared = append(prepared, preparedTask{row, key, offset + index + 1, unit})
 		if plan != nil {
@@ -175,6 +184,12 @@ func (s *Service) enqueueChunk(ctx context.Context, batch, address map[string]an
 				}
 			} else {
 				taskID = str(existing["id"])
+				if str(address["site"]) == "exhentai" && address["eh_pages"] != nil {
+					// A replanned page may have a new link. Refresh only tasks held for this replan.
+					if _, e = tx.ExecContext(ctx, `UPDATE tasks SET url=?,updated_at=?,version=version+1 WHERE id=? AND status='queued' AND next_run_at=? AND url<>?`, item.unit.URL, stamp, taskID, heldUntil, item.unit.URL); e != nil {
+						return e
+					}
+				}
 			}
 			linked, e := store.QueryRowTx(ctx, tx, "SELECT address_id FROM crawl_address_tasks WHERE task_id=?", taskID)
 			if e != nil {
