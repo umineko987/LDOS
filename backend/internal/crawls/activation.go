@@ -351,12 +351,21 @@ func (s *Service) planAddress(ctx context.Context, batch, address map[string]any
 			sourceKeys[str(r["source_key"])] = true
 		}
 	}
-	result, err := s.deps.Discovery.Discover(ctx, discovery.Request{Site: site, URL: target, Limit: maximum + len(sourceKeys) + 1, Policy: policy, ProxyMode: mode, CredentialsRef: str(address["credentials_ref"]), CookiesFile: cookies, ConfigFile: str(address["config_file"]), ExtraArgs: stringsOf(address["discovery_args"]), TimeoutSeconds: number(address["timeout_seconds"])})
+	exactWork := str(address["address_type"]) == "workbench_work" && (site == "pixiv" || site == "twitter")
+	discoveryArgs := stringsOf(address["discovery_args"])
+	if exactWork {
+		filter, err := discoverydata.ExactWorkPostFilter(site, target)
+		if err != nil {
+			return nil, 0, invalid(err.Error())
+		}
+		discoveryArgs = append(discoveryArgs, "--post-filter", filter, "--child-filter", "False")
+	}
+	result, err := s.deps.Discovery.Discover(ctx, discovery.Request{Site: site, URL: target, Limit: maximum + len(sourceKeys) + 1, Policy: policy, ProxyMode: mode, CredentialsRef: str(address["credentials_ref"]), CookiesFile: cookies, ConfigFile: str(address["config_file"]), ExtraArgs: discoveryArgs, TimeoutSeconds: number(address["timeout_seconds"])})
 	if err != nil {
 		return nil, 0, err
 	}
 	candidates := rowsOf(result["candidates"])
-	if str(address["address_type"]) == "workbench_work" && (site == "pixiv" || site == "twitter") {
+	if exactWork {
 		candidates, err = exactWorkCandidates(site, target, candidates)
 		if err != nil {
 			return nil, 0, err
@@ -384,6 +393,10 @@ func (s *Service) planAddress(ctx context.Context, batch, address map[string]any
 }
 
 func exactWorkCandidates(site, target string, candidates []map[string]any) ([]map[string]any, error) {
+	filter, err := discoverydata.ExactWorkPostFilter(site, target)
+	if err != nil {
+		return nil, invalid(err.Error())
+	}
 	work := SourceKeyFromURL(target)
 	if work == nil || !strings.HasPrefix(*work, site+":") {
 		return nil, invalid("所选作品地址必须包含有效的作品 ID")
@@ -410,12 +423,12 @@ func exactWorkCandidates(site, target string, candidates []map[string]any) ([]ma
 			if err != nil {
 				return nil, err
 			}
-			if len(media) < count {
-				// Limit posts and files to the selected ID and disable child extraction.
-				filter := "tweet_id == " + id
-				item["extra_args"] = []string{"--post-filter", filter, "--filter", filter, "--child-filter", "False"}
+			if len(media) >= count {
+				return []map[string]any{item}, nil
 			}
 		}
+		// Apply the work ID to both posts and files, and block queued children.
+		item["extra_args"] = []string{"--post-filter", filter, "--filter", filter, "--child-filter", "False"}
 		return []map[string]any{item}, nil
 	}
 	return nil, &Error{Code: "selected_work_not_found", Message: "提取器未返回所选作品: " + target}

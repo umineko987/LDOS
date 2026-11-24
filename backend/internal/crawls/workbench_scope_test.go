@@ -18,7 +18,7 @@ func TestWorkbenchExactWorkActivation(t *testing.T) {
 		{
 			name: "pixiv with extra artwork", site: "pixiv", url: "https://www.pixiv.net/artworks/101",
 			stdout:  `[[2,{"id":999,"page_count":12}],[2,{"id":101,"page_count":1}]]`,
-			wantURL: "https://www.pixiv.net/artworks/101", wantArgs: []string{},
+			wantURL: "https://www.pixiv.net/artworks/101", wantArgs: []string{"--post-filter", "id == 101", "--filter", "id == 101", "--child-filter", "False"},
 		},
 		{
 			name: "twitter uses only matched post media", site: "twitter", url: "https://x.com/example/status/101",
@@ -28,7 +28,7 @@ func TestWorkbenchExactWorkActivation(t *testing.T) {
 		{
 			name: "twitter fallback restricts extractor output", site: "twitter", url: "https://x.com/example/status/101",
 			stdout:  `[[2,{"tweet_id":999,"count":1}],[2,{"tweet_id":101,"count":1}],[3,"ytdl:https://x.com/i/web/status/101",{"tweet_id":101}]]`,
-			wantURL: "https://x.com/i/web/status/101", wantArgs: []string{"--post-filter", "tweet_id == 101", "--filter", "tweet_id == 101", "--child-filter", "False"},
+			wantURL: "https://x.com/i/web/status/101", wantArgs: []string{"--post-filter", "tweet_id == 101 and not (retweet_id or quote_id)", "--filter", "tweet_id == 101 and not (retweet_id or quote_id)", "--child-filter", "False"},
 		},
 		{
 			name: "no matching work", site: "twitter", url: "https://x.com/example/status/101",
@@ -39,7 +39,15 @@ func TestWorkbenchExactWorkActivation(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			s, _, _ := fixture(t)
 			ctx := context.Background()
-			s.deps.Discovery.Transport.Gallery = captureFunc(func(context.Context, gallery.CaptureRequest) (gallery.CaptureResult, error) {
+			s.deps.Discovery.Transport.Gallery = captureFunc(func(_ context.Context, req gallery.CaptureRequest) (gallery.CaptureResult, error) {
+				filter := "id == 101"
+				if c.site == "twitter" {
+					filter = "tweet_id == 101 and not (retweet_id or quote_id)"
+				}
+				want := []string{"--post-filter", filter, "--child-filter", "False"}
+				if len(req.ExtraArgs) < 7 || !reflect.DeepEqual(req.ExtraArgs[3:7], want) {
+					t.Fatalf("discovery args = %v, want %v after post range", req.ExtraArgs, want)
+				}
 				return gallery.CaptureResult{Stdout: c.stdout}, nil
 			})
 			batch := createBatch(t, s, Request{Concurrency: 1, MaxTasks: 1, Sources: []Source{{Site: c.site, Addresses: []Address{{URL: c.url, AddressType: ptr("workbench_work")}}}}})
