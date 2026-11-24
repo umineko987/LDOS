@@ -20,7 +20,7 @@
   import { Textarea } from "#lib/components/ui/textarea/index.ts";
   import { m } from "#lib/paraglide/messages.js";
 
-  let { draft, onchange }: { draft: DanbooruQueryDraft; onchange: (next: DanbooruQueryDraft) => void } = $props();
+  let { draft, onchange, compact = false }: { draft: DanbooruQueryDraft; onchange: (next: DanbooruQueryDraft) => void; compact?: boolean } = $props();
   const uid = $props.id();
   const api = useApi();
   const requests = createDanbooruRequestScope();
@@ -115,7 +115,7 @@
   {/if}
   <details class="text-xs text-fg2">
     <summary class="w-fit cursor-pointer rounded-sm py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring">{m.danbooru_filters()}</summary>
-    <fieldset class="mt-2 grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+    <fieldset class={["mt-2 grid min-w-0 grid-cols-2 gap-3", !compact && "sm:grid-cols-3 lg:grid-cols-6"]}>
       <legend class="sr-only">{m.danbooru_filters()}</legend>
       <label class="flex min-w-0 flex-col gap-1">
         {m.danbooru_rating()}
