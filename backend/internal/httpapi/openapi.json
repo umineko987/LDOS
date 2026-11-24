@@ -11506,6 +11506,16 @@
             ],
             "title": "Address Type"
           },
+          "eh_pages": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true,
+            "description": "Explicit page selection for an EH gallery. During planning, page numbers must be within the gallery and the selection must fit the remaining crawl task limit."
+          },
           "extra_args": {
             "items": {
               "type": "string"
@@ -11599,6 +11609,16 @@
               }
             ],
             "title": "Address Type"
+          },
+          "eh_pages": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true,
+            "description": "Requested page numbers in the original order, present when the crawl address has an explicit EH page selection."
           },
           "status": {
             "anyOf": [

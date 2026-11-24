@@ -3022,6 +3022,8 @@ export interface components {
         CrawlAddress: {
             /** Address Type */
             address_type?: string | null;
+            /** @description Explicit page selection for an EH gallery. During planning, page numbers must be within the gallery and the selection must fit the remaining crawl task limit. */
+            eh_pages?: number[];
             /** Extra Args */
             extra_args?: string[];
             /** Id */
@@ -3039,6 +3041,8 @@ export interface components {
             address_type?: string | null;
             /** Cancelled Task Count */
             cancelled_task_count?: number | null;
+            /** @description Requested page numbers in the original order, present when the crawl address has an explicit EH page selection. */
+            eh_pages?: number[];
             /** Failed Task Count */
             failed_task_count?: number | null;
             /** Healthy Proxy Count */
