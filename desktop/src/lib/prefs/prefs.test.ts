@@ -4,14 +4,20 @@ import { RENDERER_STORAGE_KEY } from "#lib/gfx/renderer.ts";
 
 import {
   applyHtmlAttributes,
+  COLLECT_SITES_STORAGE_KEY,
+  DEFAULT_COLLECT_SITES,
   DEFAULT_PREFERENCES,
   DENSITY_STORAGE_KEY,
   effectiveReducedMotion,
   htmlAttributes,
   MOTION_STORAGE_KEY,
+  normalizeCollectSites,
+  parseCollectSites,
   parseDensity,
   parseMotion,
+  readCollectSites,
   readPreferences,
+  writeCollectSites,
   writePreferences,
   type PreferenceStorage,
 } from "./prefs.ts";
@@ -95,5 +101,22 @@ describe("preferences", () => {
     };
     applyHtmlAttributes(element, { motion: "on", density: "compact" });
     expect([...attributes]).toEqual([["data-motion", "reduced"]]);
+  });
+
+  it("defaults collect sites to danbooru and normalizes/persists changes", () => {
+    expect(parseCollectSites(null)).toEqual(DEFAULT_COLLECT_SITES);
+    expect(parseCollectSites("not-json")).toEqual(["danbooru"]);
+    expect(parseCollectSites('["unknown"]')).toEqual(["danbooru"]);
+    expect(normalizeCollectSites(["exhentai", "danbooru", "exhentai", "bad"])).toEqual(["danbooru", "exhentai"]);
+
+    const { storage, values } = memoryStorage();
+    expect(readCollectSites(storage)).toEqual(["danbooru"]);
+
+    expect(writeCollectSites(["pixiv", "exhentai"], storage)).toEqual(["pixiv", "exhentai"]);
+    expect(values.get(COLLECT_SITES_STORAGE_KEY)).toBe('["pixiv","exhentai"]');
+    expect(readCollectSites(storage)).toEqual(["pixiv", "exhentai"]);
+
+    expect(writeCollectSites([], storage)).toEqual(["danbooru"]);
+    expect(readCollectSites(broken)).toEqual(["danbooru"]);
   });
 });

@@ -2,8 +2,11 @@ import {
   applyHtmlAttributes,
   browserStorage,
   effectiveReducedMotion,
+  readCollectSites,
   readPreferences,
+  writeCollectSites,
   writePreferences,
+  type CollectSite,
   type Density,
   type MotionPreference,
 } from "./prefs.ts";
@@ -21,6 +24,7 @@ class PreferencesState {
   motion = $state<MotionPreference>("system");
   density = $state<Density>("compact");
   renderer = $state<RendererPreference>("auto");
+  collectSites = $state<CollectSite[]>(["danbooru"]);
   systemReducedMotion = $state(false);
 
   #media: MediaQueryList | null = null;
@@ -63,11 +67,25 @@ class PreferencesState {
     writePreferences({ renderer: next }, browserStorage());
   }
 
+  setCollectSites(next: readonly CollectSite[]): void {
+    this.collectSites = writeCollectSites(next, browserStorage());
+  }
+
+  toggleCollectSite(site: CollectSite): void {
+    const exists = this.collectSites.includes(site);
+    if (exists && this.collectSites.length === 1) return;
+    const next = exists
+      ? this.collectSites.filter((item) => item !== site)
+      : [...this.collectSites, site];
+    this.setCollectSites(next);
+  }
+
   #load(): void {
     const stored = readPreferences(browserStorage());
     this.motion = stored.motion;
     this.density = stored.density;
     this.renderer = stored.renderer;
+    this.collectSites = readCollectSites(browserStorage());
   }
 
   #apply(): void {

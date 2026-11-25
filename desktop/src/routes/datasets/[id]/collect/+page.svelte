@@ -22,17 +22,13 @@
     decideMembers,
     invalidateForDatasetEvent,
     removeDatasetRoot,
-    startDatasetCrawl,
     startHashing,
-    type DatasetCrawlRequest,
     type DatasetMember,
     type DatasetMemberPage,
     type DatasetRoot,
     type DatasetRootCreate,
     type MemberFilter,
   } from "#lib/api/queries/datasets.ts";
-  import type { WorkbenchAddress } from "#lib/api/queries/workbench.ts";
-  import CrawlDialog from "#lib/components/collect/crawl-dialog.svelte";
   import OnlineWorkbench from "#lib/components/collect/online-workbench.svelte";
   import LibraryPicker from "#lib/components/collect/library-picker.svelte";
   import PathDialog from "#lib/components/collect/path-dialog.svelte";
@@ -71,9 +67,6 @@
   let pathOpen = $state(false);
   let libraryOpen = $state(false);
   let workbenchOpen = $state(false);
-  let workbenchAddress = $state.raw<WorkbenchAddress | null>(null);
-  let crawlOpen = $state(false);
-  let crawlMode = $state<"search" | "address">("search");
   let removing = $state<DatasetRoot | null>(null);
   let viewerOpen = $state(false);
   let viewerIndex = $state(0);
@@ -178,24 +171,11 @@
   }
 
   function openWorkbench() {
-    workbenchAddress = null;
     workbenchOpen = true;
-  }
-
-  function openCrawl(mode: "search" | "address") {
-    crawlMode = mode;
-    crawlOpen = true;
   }
 
   function viewCrawl(batchId: string) {
     void goto(`#/jobs/crawls/${encodeURIComponent(batchId)}`);
-  }
-  async function submitCrawl(body: DatasetCrawlRequest, idempotencyKey: string) {
-    const crawl = await startDatasetCrawl(api, id, body, idempotencyKey);
-    void client.invalidateQueries({ queryKey: datasetKeys.crawls(id) });
-    toast.success(m.collect_crawl_started(), {
-      action: { label: m.collect_crawl_view(), onClick: () => viewCrawl(crawl.batch_id) },
-    });
   }
 
   async function hash() {
@@ -486,12 +466,7 @@
 
 <PathDialog bind:open={pathOpen} onsubmit={(path) => addRoot({ path }, path)} />
 <LibraryPicker bind:open={libraryOpen} onsubmit={addRoot} />
-<OnlineWorkbench datasetId={id} bind:open={workbenchOpen} address={workbenchAddress}
-  ondiscovery={() => openCrawl("search")} onlegacy={() => openCrawl("address")} onjobs={viewCrawl}>
-  {#snippet dialogs()}
-    <CrawlDialog bind:open={crawlOpen} initialMode={crawlMode} onsubmit={submitCrawl} onpreview={(address) => (workbenchAddress = address)} />
-  {/snippet}
-</OnlineWorkbench>
+<OnlineWorkbench datasetId={id} bind:open={workbenchOpen} onjobs={viewCrawl} />
 
 <Dialog.Root
   open={removing !== null}
