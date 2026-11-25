@@ -1,7 +1,9 @@
 <script lang="ts">
+  import CheckIcon from "@lucide/svelte/icons/check";
   import ImageOffIcon from "@lucide/svelte/icons/image-off";
+  import ZoomInIcon from "@lucide/svelte/icons/zoom-in";
   import { Badge } from "#lib/components/ui/badge/index.ts";
-  import { Checkbox } from "#lib/components/ui/checkbox/index.ts";
+  import { buttonVariants } from "#lib/components/ui/button/index.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
 
@@ -18,28 +20,59 @@
     onfocusitem: (trigger: HTMLButtonElement) => void;
     ontoggle: () => void;
   } = $props();
+  const descriptionId = $props.id();
+  let inspectLabel = $derived(m.collect_workbench_open_item({ title }));
   let failedPreview = $state("");
 </script>
 
-<article class={cn("relative min-w-0 rounded-md border bg-bg1", selected ? "border-gold bg-gold-12" : focused ? "border-fg2" : "border-line")} data-workbench-item={id}>
-  <button type="button" class="group block w-full min-w-0 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={m.collect_workbench_open_item({ title })} aria-expanded={focused} onclick={(event) => onfocusitem(event.currentTarget)}>
-    <div class="aspect-square overflow-hidden rounded-t-[5px] bg-bg2">
+<article class={cn("relative min-w-0 rounded-md border bg-bg1", selected ? "border-gold bg-gold-12 ring-2 ring-gold" : focused ? "border-fg2" : "border-line")} data-workbench-item={id}>
+  <button
+    type="button"
+    class="group flex h-full w-full min-w-0 flex-col rounded-md text-left enabled:cursor-pointer focus-visible:outline-offset-4"
+    {disabled}
+    aria-label={m.collect_workbench_select_item({ title })}
+    aria-pressed={selected}
+    aria-describedby={descriptionId}
+    onclick={ontoggle}
+  >
+    <span class="relative block aspect-square w-full shrink-0 overflow-hidden rounded-t-[5px] bg-bg2">
       {#if preview && failedPreview !== preview}
         <img src={preview} alt="" crossorigin="anonymous" loading="lazy" decoding="async" class="size-full object-cover" onerror={() => (failedPreview = preview)} />
       {:else}
-        <div class="grid size-full place-content-center text-fg2"><ImageOffIcon aria-hidden="true" class="size-5" /></div>
+        <span class="grid size-full place-content-center text-fg2"><ImageOffIcon aria-hidden="true" class="size-5" /></span>
       {/if}
-    </div>
-    <div class="flex flex-col gap-0.5 p-2">
-      <span class="truncate text-xs font-medium group-hover:underline" {title}>{title}</span>
-      <span class="truncate text-2xs text-fg2">{meta}</span>
-      {#if status}<span class="truncate text-2xs text-fg2" title={status}>{status}</span>{/if}
-    </div>
+      {#if selected || !disabled}
+        <span
+          aria-hidden="true"
+          class={cn("absolute top-2 left-2 grid size-6 place-items-center rounded-sm border", selected ? "border-gold bg-gold text-gold-ink" : "border-fg2 bg-bg1 group-hover:border-gold")}
+        >
+          {#if selected}<CheckIcon class="size-4" />{/if}
+        </span>
+      {/if}
+      {#if checkpoint}
+        <Badge class="absolute bottom-2 left-2 max-w-[calc(100%-1rem)]">
+          <span class="truncate">{m.collect_workbench_last_submitted()}</span>
+        </Badge>
+      {/if}
+    </span>
+    <span class="flex w-full flex-col gap-0.5 p-2">
+      <span class="truncate text-xs font-medium group-enabled:group-hover:underline" {title}>{title}</span>
+      <span id={descriptionId} class="flex min-w-0 flex-col gap-0.5 text-2xs text-fg2">
+        <span class="truncate">{meta}</span>
+        {#if status}<span class="truncate" title={status}>{status}</span>{/if}
+      </span>
+    </span>
   </button>
-  <div class="pointer-events-none absolute inset-x-2 top-2 flex flex-wrap items-start justify-between gap-1">
-    <div class="pointer-events-auto rounded-sm bg-bg1 p-1.5">
-      <Checkbox checked={selected} {disabled} aria-label={m.collect_workbench_select_item({ title })} onCheckedChange={ontoggle} />
-    </div>
-    {#if checkpoint}<Badge variant="default">{m.collect_workbench_last_submitted()}</Badge>{/if}
-  </div>
+  <button
+    type="button"
+    class={cn(buttonVariants({ size: "icon-lg" }), "absolute top-2 right-2 cursor-pointer pointer-coarse:size-11")}
+    data-inspect
+    aria-label={inspectLabel}
+    aria-expanded={focused}
+    aria-describedby={disabled ? descriptionId : undefined}
+    title={inspectLabel}
+    onclick={(event) => onfocusitem(event.currentTarget)}
+  >
+    <ZoomInIcon aria-hidden="true" />
+  </button>
 </article>
