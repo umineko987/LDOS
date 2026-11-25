@@ -204,10 +204,58 @@ test("批次详情：摘要、地址、任务列表、日志和取消", async ({
   await expect(log.locator('[data-stream="stderr"]')).toContainText("HTTP 504 Gateway Timeout");
   await log.getByRole("button", { name: "事件" }).click();
   await expect(log.locator('[data-event="attempt_started"]')).toBeVisible();
+  const detailsToggle = page.getByRole("button", { name: "任务详情", exact: true });
+  await detailsToggle.click();
+  await expect(detailsToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(log).toBeHidden();
+  await expect(page.getByTestId("crawl-tasks")).toBeHidden();
+  await expect(page.locator('[data-source="0"]')).toBeHidden();
+  await expect(summary).toBeVisible();
+  await page.keyboard.press("j");
+  await expect(rows.nth(1)).toHaveAttribute("aria-pressed", "true");
+  await detailsToggle.press("Enter");
+  await expect(detailsToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(log.locator('[data-event="attempt_started"]')).toBeVisible();
   await page.keyboard.press("k");
   await expect(page.locator('[data-task-row="task-1"]')).toHaveAttribute("aria-pressed", "true");
 
   await page.getByTestId("crawl-cancel").click();
   await expect(page.locator("[data-sonner-toast]", { hasText: "已请求取消批次" })).toBeVisible();
   expect(cancelled).toBe(1);
+});
+
+test("批次详情：独立收起来源的地址和任务，总开关保留来源状态", async ({ page }) => {
+  await mockBatch(page);
+  await mockApi(page, "get", "/api/v1/crawls/{batch_id}", {
+    ...CRAWL_BATCH,
+    sources: [
+      ...(CRAWL_BATCH.sources ?? []),
+      { order: 1, site: "pixiv", status: "pending", addresses: [{ id: "a3", label: "pixiv artist" }] },
+    ],
+  });
+  await mockApi(page, "get", "/api/v1/crawls/{batch_id}/tasks", {
+    items: [...(CRAWL_TASKS.items ?? []), { id: "task-4", site: "pixiv", source_order: 1, crawl_address_id: "a3" }],
+  });
+  await page.goto("/#/jobs/crawls/batch-7");
+
+  const danbooru = page.locator('[data-source="0"]').getByRole("button");
+  const pixiv = page.locator('[data-source="1"]');
+  const rows = page.getByTestId("crawl-tasks").locator("[data-task-row]");
+  await danbooru.click();
+  await expect(danbooru).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator('[data-address="a2"]')).toBeHidden();
+  await expect(pixiv.locator('[data-address="a3"]')).toBeVisible();
+  await expect(rows).toHaveCount(1);
+  await page.keyboard.press("j");
+  await expect(page.getByTestId("task-log")).toHaveAttribute("data-task", "task-4");
+
+  const details = page.getByRole("button", { name: "任务详情", exact: true });
+  await details.click();
+  await expect(pixiv).toBeHidden();
+  await details.press("Enter");
+  await expect(danbooru).toHaveAttribute("aria-expanded", "false");
+  await expect(pixiv.locator('[data-address="a3"]')).toBeVisible();
+  await danbooru.press("Enter");
+  await expect(page.locator('[data-address="a2"]')).toBeVisible();
+  await expect(rows).toHaveCount(4);
 });

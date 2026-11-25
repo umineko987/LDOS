@@ -3,6 +3,7 @@
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import { createQuery, keepPreviousData, useQueryClient } from "@tanstack/svelte-query";
   import { onDestroy } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import { toast } from "svelte-sonner";
 
   import { page } from "$app/state";
@@ -50,6 +51,8 @@
 
   let offset = $state(0);
   let selected = $state<string | null>(null);
+  let detailsOpen = $state(true);
+  const collapsedSources = new SvelteSet<number>();
   let pending = $state<CrawlOperation | null>(null);
 
   // 在批次之间跳转时页面组件会复用：换批次就回到第一页、清掉选中。
@@ -57,6 +60,8 @@
     void batchId;
     offset = 0;
     selected = null;
+    detailsOpen = true;
+    collapsedSources.clear();
   });
 
   const batch = createQuery(() => ({
@@ -65,7 +70,7 @@
   }));
   const tasks = createQuery(() => ({
     ...crawlTasksQuery(api, batchId, offset, batch.data?.status),
-    enabled: valid,
+    enabled: valid && detailsOpen,
     placeholderData: keepPreviousData,
   }));
 
@@ -92,8 +97,13 @@
   });
 
   const taskItems = $derived(tasks.data?.items ?? []);
-  const selectedTask = $derived(taskItems.find((task) => task.id === selected) ?? null);
+  const visibleTasks = $derived(taskItems.filter((task) => !collapsedSources.has(task.sourceOrder)));
+  const selectedTask = $derived(visibleTasks.find((task) => task.id === selected) ?? null);
 
+  function toggleSource(order: number) {
+    if (collapsedSources.has(order)) collapsedSources.delete(order);
+    else collapsedSources.add(order);
+  }
   const DONE: Record<CrawlOperation, () => string> = {
     cancel: m.crawl_done_cancel,
     retry: m.crawl_done_retry,
@@ -117,7 +127,7 @@
 
   function step(delta: 1 | -1) {
     selected = stepSelection(
-      taskItems.map((task) => task.id),
+      visibleTasks.map((task) => task.id),
       selected,
       delta,
     );
@@ -129,12 +139,12 @@
     selected = null;
   }
 
-  useBindings("page", () => [
+  useBindings("page", () => !detailsOpen || !visibleTasks.length ? [] : [
     { id: "crawl.task.next", keys: ["j", "arrowdown"], label: m.jobs_key_next, group: m.nav_jobs, run: () => step(1) },
     { id: "crawl.task.previous", keys: ["k", "arrowup"], label: m.jobs_key_previous, group: m.nav_jobs, run: () => step(-1) },
   ]);
   useEscape("selection", () => {
-    if (selected === null) return false;
+    if (!detailsOpen || !selectedTask) return false;
     selected = null;
     return true;
   });
@@ -192,112 +202,124 @@
       {/if}
     </section>
 
-    {#if summary.sources.length}
-      <section aria-labelledby="crawl-sources" class="flex max-w-[980px] flex-col gap-1.5">
-        <h2 id="crawl-sources" class="text-sm font-semibold">{m.crawl_sources()}</h2>
-        {#each summary.sources as source (source.order)}
-          <div class="flex flex-col" data-source={source.order}>
-            <div class="flex items-center gap-2 pb-1 text-xs">
-              <span class="font-medium text-fg">{source.site}</span>
-              <span class={TONE_TEXT[statusTone(source.status)]}>{statusLabel(source.status)}</span>
-            </div>
-            <ul class="flex flex-col border-t border-line">
-              {#each source.addresses as address (address.id)}
-                <li
-                  class="grid min-h-row grid-cols-[14px_minmax(0,1fr)_88px_120px] items-center gap-x-3 border-b border-line py-1.5"
-                  data-address={address.id}
-                  data-status={address.status}
-                >
-                  <StatusIcon status={address.status} />
-                  <span class="flex min-w-0 flex-col">
-                    <span class="truncate text-xs text-fg" title={address.label}>{address.label || address.id}</span>
-                    {#if address.planningError}
-                      <span class="truncate text-2xs text-danger" title={address.planningError}>{m.crawl_planning_error({ reason: address.planningError })}</span>
-                    {/if}
-                  </span>
-                  <span class={cn("truncate text-2xs", TONE_TEXT[statusTone(address.status)])}>{statusLabel(address.status)}</span>
-                  <span class="text-right text-2xs text-fg2 tabular-nums">
-                    {m.crawl_address_counts({ succeeded: address.succeeded, planned: address.planned, failed: address.failed })}
-                  </span>
-                </li>
-              {/each}
-            </ul>
-          </div>
-        {/each}
-        {#if summary.addressesTruncated}<p class="text-2xs text-fg3">{m.crawl_addresses_truncated()}</p>{/if}
-      </section>
-    {/if}
-
-    {#if summary.review}
-      <section aria-labelledby="crawl-review" class="flex max-w-[980px] flex-col gap-1" data-testid="crawl-review">
-        <h2 id="crawl-review" class="text-sm font-semibold">{m.crawl_review()}</h2>
-        <p class="text-xs text-fg2">
-          <span class={TONE_TEXT[statusTone(summary.review.status)]}>{statusLabel(summary.review.status)}</span>
-          · {m.crawl_review_counts({
-            decided: summary.review.decidedGroups,
-            total: summary.review.totalGroups,
-            images: summary.review.totalImages,
-          })}
-        </p>
-      </section>
-    {/if}
-
-    <section aria-labelledby="crawl-tasks" class="flex flex-col gap-2" data-testid="crawl-tasks">
-      <div class="flex items-center gap-3">
-        <h2 id="crawl-tasks" class="text-sm font-semibold">{m.crawl_tasks()}</h2>
-        {#if taskItems.length}
-          <span class="text-2xs text-fg3 tabular-nums">{m.crawl_tasks_range({ from: offset + 1, to: offset + taskItems.length })}</span>
-        {/if}
-        <span class="text-2xs text-fg3">{m.crawl_tasks_keys()}</span>
-        <div class="ml-auto flex items-center gap-1">
-          <Button variant="ghost" size="icon-sm" disabled={offset === 0} onclick={() => turn(-1)} aria-label={m.crawl_tasks_previous()}>
-            <ChevronLeftIcon />
-          </Button>
-          <Button variant="ghost" size="icon-sm" disabled={!tasks.data?.hasMore} onclick={() => turn(1)} aria-label={m.crawl_tasks_next()}>
-            <ChevronRightIcon />
-          </Button>
-        </div>
-      </div>
-      <div class="grid h-[min(560px,70vh)] grid-cols-[minmax(0,1fr)_minmax(300px,45%)] gap-5">
-        <div class="flex min-h-0 flex-col">
-          {#if tasks.error}
-            <p class="text-sm text-danger" role="alert">{m.jobs_load_failed({ reason: apiErrorMessage(tasks.error) })}</p>
-          {:else if tasks.data && taskItems.length === 0}
-            <p class="py-4 text-sm text-fg3">{m.crawl_tasks_empty()}</p>
-          {:else}
-            <ul class="flex min-h-0 flex-col overflow-y-auto border-t border-line">
-              {#each taskItems as task (task.id)}
-                <li>
-                  <button
-                    type="button"
-                    aria-pressed={selected === task.id}
-                    data-task-row={task.id}
-                    data-status={task.status}
-                    class="grid min-h-row w-full grid-cols-[14px_48px_72px_minmax(0,1fr)_56px] items-center gap-x-3 border-b border-line px-1 py-1.5 text-left transition-colors duration-(--t-color) hover:bg-bg1 aria-pressed:bg-bg2"
-                    onclick={() => (selected = task.id)}
+    <h2>
+      <Button variant="ghost" size="sm" aria-expanded={detailsOpen} aria-controls="crawl-details" onclick={() => (detailsOpen = !detailsOpen)}>
+        <ChevronRightIcon data-icon="inline-start" class={detailsOpen ? "rotate-90" : ""} />
+        {m.crawl_task_view()}
+      </Button>
+    </h2>
+    <div id="crawl-details" hidden={!detailsOpen} class="flex flex-col gap-5">
+      {#if summary.sources.length}
+        <section aria-labelledby="crawl-sources" class="flex max-w-[980px] flex-col gap-1.5">
+          <h2 id="crawl-sources" class="text-sm font-semibold">{m.crawl_sources()}</h2>
+          {#each summary.sources as source (source.order)}
+            {@const sourceOpen = !collapsedSources.has(source.order)}
+            <div class="flex flex-col" data-source={source.order}>
+              <Button variant="ghost" size="sm" class="w-fit" aria-expanded={sourceOpen} aria-controls={`crawl-source-${source.order}`} onclick={() => toggleSource(source.order)}>
+                <ChevronRightIcon data-icon="inline-start" class={sourceOpen ? "rotate-90" : ""} />
+                <span class="font-medium text-fg">{source.site}</span>
+                <span class={TONE_TEXT[statusTone(source.status)]}>{statusLabel(source.status)}</span>
+              </Button>
+              <ul id={`crawl-source-${source.order}`} hidden={!sourceOpen} class="flex flex-col border-t border-line">
+                {#each source.addresses as address (address.id)}
+                  <li
+                    class="grid min-h-row grid-cols-[14px_minmax(0,1fr)_88px_120px] items-center gap-x-3 border-b border-line py-1.5"
+                    data-address={address.id}
+                    data-status={address.status}
                   >
-                    <StatusIcon status={task.status} />
-                    <span class="text-2xs text-fg3 tabular-nums">#{task.sequence}</span>
-                    <span class="truncate text-xs text-fg2">{task.site}</span>
-                    <span class="flex min-w-0 items-center gap-2">
-                      <span class={cn("flex-none text-xs", TONE_TEXT[statusTone(task.status)])}>{statusLabel(task.status)}</span>
-                      {#if task.errorClass}<span class="truncate font-mono text-2xs text-danger">{task.errorClass}</span>{/if}
+                    <StatusIcon status={address.status} />
+                    <span class="flex min-w-0 flex-col">
+                      <span class="truncate text-xs text-fg" title={address.label}>{address.label || address.id}</span>
+                      {#if address.planningError}
+                        <span class="truncate text-2xs text-danger" title={address.planningError}>{m.crawl_planning_error({ reason: address.planningError })}</span>
+                      {/if}
                     </span>
-                    <span class="text-right text-2xs text-fg3 tabular-nums">{m.jobs_attempts({ count: task.attempts, max: task.maxAttempts })}</span>
-                  </button>
-                </li>
-              {/each}
-            </ul>
+                    <span class={cn("truncate text-2xs", TONE_TEXT[statusTone(address.status)])}>{statusLabel(address.status)}</span>
+                    <span class="text-right text-2xs text-fg2 tabular-nums">
+                      {m.crawl_address_counts({ succeeded: address.succeeded, planned: address.planned, failed: address.failed })}
+                    </span>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/each}
+          {#if summary.addressesTruncated}<p class="text-2xs text-fg3">{m.crawl_addresses_truncated()}</p>{/if}
+        </section>
+      {/if}
+
+      {#if summary.review}
+        <section aria-labelledby="crawl-review" class="flex max-w-[980px] flex-col gap-1" data-testid="crawl-review">
+          <h2 id="crawl-review" class="text-sm font-semibold">{m.crawl_review()}</h2>
+          <p class="text-xs text-fg2">
+            <span class={TONE_TEXT[statusTone(summary.review.status)]}>{statusLabel(summary.review.status)}</span>
+            · {m.crawl_review_counts({
+              decided: summary.review.decidedGroups,
+              total: summary.review.totalGroups,
+              images: summary.review.totalImages,
+            })}
+          </p>
+        </section>
+      {/if}
+
+      <section aria-labelledby="crawl-tasks" class="flex flex-col gap-2" data-testid="crawl-tasks">
+        <div class="flex items-center gap-3">
+          <h2 id="crawl-tasks" class="text-sm font-semibold">{m.crawl_tasks()}</h2>
+          {#if taskItems.length}
+            <span class="text-2xs text-fg3 tabular-nums">{m.crawl_tasks_range({ from: offset + 1, to: offset + taskItems.length })}</span>
           {/if}
+          <span class="text-2xs text-fg3">{m.crawl_tasks_keys()}</span>
+          <div class="ml-auto flex items-center gap-1">
+            <Button variant="ghost" size="icon-sm" disabled={offset === 0} onclick={() => turn(-1)} aria-label={m.crawl_tasks_previous()}>
+              <ChevronLeftIcon />
+            </Button>
+            <Button variant="ghost" size="icon-sm" disabled={!tasks.data?.hasMore} onclick={() => turn(1)} aria-label={m.crawl_tasks_next()}>
+              <ChevronRightIcon />
+            </Button>
+          </div>
         </div>
-        {#if selectedTask}
-          {#key selectedTask.id}
-            <TaskLog taskId={selectedTask.id} active={!isTerminalTaskStatus(selectedTask.status)} class="h-full" />
-          {/key}
-        {:else}
-          <p class="pt-1 text-xs text-fg3">{m.crawl_task_none()}</p>
-        {/if}
-      </div>
-    </section>
+        <div hidden={!tasks.error && taskItems.length > 0 && !visibleTasks.length} class="grid h-[min(560px,70vh)] grid-cols-[minmax(0,1fr)_minmax(300px,45%)] gap-5">
+          <div class="flex min-h-0 flex-col">
+            {#if tasks.error}
+              <p class="text-sm text-danger" role="alert">{m.jobs_load_failed({ reason: apiErrorMessage(tasks.error) })}</p>
+            {:else if tasks.data && taskItems.length === 0}
+              <p class="py-4 text-sm text-fg3">{m.crawl_tasks_empty()}</p>
+            {:else}
+              <ul class="flex min-h-0 flex-col overflow-y-auto border-t border-line">
+                {#each visibleTasks as task (task.id)}
+                  <li>
+                    <button
+                      type="button"
+                      aria-pressed={selected === task.id}
+                      data-task-row={task.id}
+                      data-status={task.status}
+                      class="grid min-h-row w-full grid-cols-[14px_48px_72px_minmax(0,1fr)_56px] items-center gap-x-3 border-b border-line px-1 py-1.5 text-left transition-colors duration-(--t-color) hover:bg-bg1 aria-pressed:bg-bg2"
+                      onclick={() => (selected = task.id)}
+                    >
+                      <StatusIcon status={task.status} />
+                      <span class="text-2xs text-fg3 tabular-nums">#{task.sequence}</span>
+                      <span class="truncate text-xs text-fg2">{task.site}</span>
+                      <span class="flex min-w-0 items-center gap-2">
+                        <span class={cn("flex-none text-xs", TONE_TEXT[statusTone(task.status)])}>{statusLabel(task.status)}</span>
+                        {#if task.errorClass}<span class="truncate font-mono text-2xs text-danger">{task.errorClass}</span>{/if}
+                      </span>
+                      <span class="text-right text-2xs text-fg3 tabular-nums">{m.jobs_attempts({ count: task.attempts, max: task.maxAttempts })}</span>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+          <div class="min-h-0 min-w-0">
+            {#if selectedTask}
+              {#key selectedTask.id}
+                <TaskLog taskId={selectedTask.id} active={!isTerminalTaskStatus(selectedTask.status)} enabled={detailsOpen} class="h-full" />
+              {/key}
+            {:else}
+              <p class="pt-1 text-xs text-fg3">{m.crawl_task_none()}</p>
+            {/if}
+          </div>
+        </div>
+      </section>
+    </div>
   {/if}
 </div>
