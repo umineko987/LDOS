@@ -4,6 +4,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -13,6 +15,7 @@ var (
 	twitterMediaPath  = regexp.MustCompile(`^/([a-zA-Z0-9_]{1,15})(?:/media)?/?$`)
 	twitterStatusPath = regexp.MustCompile(`^/([a-zA-Z0-9_]{1,15}|i/web)/status/([1-9][0-9]{0,19})(?:/(?:photo|video)/[1-9][0-9]*)?/?$`)
 	timelineWorkID    = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
+	twitterQueryToken = regexp.MustCompile(`(?:[^\s\p{Zs}"]|"(?:\\.|[^"\\])*")+|"`)
 )
 
 func httpsAddress(raw string) *url.URL {
@@ -38,7 +41,7 @@ func timelineHandle(name string) bool {
 	return twitterHandle.MatchString(name) && !reserved(name) && !contains([]string{"settings", "login", "logout", "signup", "account", "compose", "messages", "notifications", "bookmarks", "communities", "tos", "privacy", "about", "help", "download", "oauth", "jobs", "premium"}, strings.ToLower(name))
 }
 
-// CanonicalTimelineAddress admits only Pixiv artwork feeds and X media timelines.
+// CanonicalTimelineAddress admits Pixiv and X creator feeds and keyword searches.
 func CanonicalTimelineAddress(site, raw string) (string, error) {
 	spec, err := SearchSite(site)
 	if err == nil {
@@ -48,14 +51,55 @@ func CanonicalTimelineAddress(site, raw string) (string, error) {
 				if m := pixivTimelinePath.FindStringSubmatch(u.Path); m != nil {
 					return "https://www.pixiv.net/users/" + m[1] + "/artworks", nil
 				}
+				if u.Path == "/search.php" {
+					if keyword := timelineKeyword(u, "word"); keyword != "" {
+						query := url.Values{"word": {keyword}, "s_mode": {"s_tag"}, "order": {"date_d"}}
+						return "https://www.pixiv.net/search.php?" + query.Encode(), nil
+					}
+				}
 			case "twitter":
 				if m := twitterMediaPath.FindStringSubmatch(u.Path); m != nil && timelineHandle(m[1]) {
 					return "https://x.com/" + strings.ToLower(m[1]) + "/media", nil
 				}
+				if u.Path == "/search" {
+					if keyword := timelineKeyword(u, "q"); keyword != "" {
+						return "https://x.com/search?q=" + url.QueryEscape(keyword+" "+twitterMediaOperator), nil
+					}
+				}
 			}
 		}
 	}
-	return "", &Error{Code: "invalid_timeline_url", Message: "请输入该站点的 Pixiv 作者作品页或 X 媒体时间线地址"}
+	return "", &Error{Code: "invalid_timeline_url", Message: "请输入该站点的 Pixiv 作者作品页、X 媒体时间线或关键词搜索地址"}
+}
+
+const (
+	maxTimelineKeywordRunes = 500
+	twitterMediaOperator    = "filter:media"
+)
+
+func timelineKeyword(u *url.URL, key string) string {
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil || len(query[key]) != 1 {
+		return ""
+	}
+	keyword := query.Get(key)
+	if !utf8.ValidString(keyword) || strings.ContainsFunc(keyword, unicode.IsControl) {
+		return ""
+	}
+	keyword = strings.TrimSpace(keyword)
+	if key == "q" {
+		// Re-append one operator outside quoted phrases, including when reusing a canonical URL.
+		keyword = strings.TrimSpace(twitterQueryToken.ReplaceAllStringFunc(keyword, func(token string) string {
+			if strings.EqualFold(token, twitterMediaOperator) {
+				return ""
+			}
+			return token
+		}))
+	}
+	if utf8.RuneCountInString(keyword) > maxTimelineKeywordRunes {
+		return ""
+	}
+	return keyword
 }
 
 // CanonicalWorkAddress admits only individual artworks and statuses. Use this

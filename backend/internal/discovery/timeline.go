@@ -9,7 +9,7 @@ import (
 
 const MaxTimelineLimit = 1000
 
-// BrowseTimeline returns a prefix of a Pixiv artwork feed or X media timeline.
+// BrowseTimeline returns a prefix of a Pixiv or X creator feed or keyword search.
 func (s *Service) BrowseTimeline(ctx context.Context, request Request) (items []map[string]any, hasMore bool, err error) {
 	if request.Limit < 1 || request.Limit > MaxTimelineLimit {
 		return nil, false, &Error{Code: "invalid_timeline_limit", Message: "时间线作品数必须在 1 到 1000 之间"}
@@ -58,7 +58,7 @@ func timelineError(err error) error {
 		case "task_timeout", "network_timeout":
 			return &Error{Code: "discovery_failed", Message: "读取时间线超时，请检查网络或缩小作品数"}
 		case "not_found":
-			return &Error{Code: "discovery_failed", Message: "找不到该用户的时间线"}
+			return &Error{Code: "discovery_failed", Message: "找不到该站点的作品来源"}
 		}
 	}
 	return &Error{Code: "discovery_failed", Message: "无法读取完整的时间线，请检查网络、代理和账户权限后重试"}

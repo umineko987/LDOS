@@ -137,7 +137,7 @@ func TestBrowseTimelineFailsClosedOnExtractorErrors(t *testing.T) {
 			})
 			policy := scheduler.DefaultPolicy()
 			policy.RetryLimit = 0
-			items, more, err := New(tr).BrowseTimeline(context.Background(), Request{Site: "twitter", URL: "https://x.com/artist/media", Limit: 1, ProxyMode: "direct", Policy: policy})
+			items, more, err := New(tr).BrowseTimeline(context.Background(), Request{Site: "twitter", URL: "https://x.com/search?q=art", Limit: 1, ProxyMode: "direct", Policy: policy})
 			var public *Error
 			if !errors.As(err, &public) || public.Code != tc.wantCode || strings.Contains(public.Error(), secret) || public.Details != nil || items != nil || more {
 				t.Fatalf("items=%v, more=%v, err=%#v", items, more, err)

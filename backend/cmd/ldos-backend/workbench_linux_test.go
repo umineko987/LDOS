@@ -14,13 +14,16 @@ import (
 	"ldos/backend/internal/workbench"
 )
 
-type workbenchFixtureCapture struct{ t *testing.T }
+type workbenchFixtureCapture struct {
+	t                  *testing.T
+	site, target, dump string
+}
 
 func (f workbenchFixtureCapture) Capture(_ context.Context, request gallery.CaptureRequest) (gallery.CaptureResult, error) {
-	if request.URL != "https://www.pixiv.net/users/9/artworks" || request.Site != "pixiv" {
+	if request.URL != f.target || request.Site != f.site {
 		f.t.Fatalf("unexpected discovery request %s %s", request.Site, request.URL)
 	}
-	return gallery.CaptureResult{Stdout: `[[2,{"id":101,"title":"Selected","page_count":2,"user":{"name":"Fixture"}}],[3,"https://i.pximg.net/img-original/img/2025/01/01/00/00/00/101_p0.jpg",{"id":101}],[2,{"id":102,"title":"Outside prefix"}]]`}, nil
+	return gallery.CaptureResult{Stdout: f.dump}, nil
 }
 
 type workbenchFixtureValidator struct{ network.URLValidator }
@@ -31,10 +34,32 @@ func (v workbenchFixtureValidator) ValidateDirect(_ context.Context, target stri
 }
 
 func TestNativeWorkbenchBrowseAndCollect(t *testing.T) {
+	for _, tc := range []struct{ site, source, target, dump, selected string }{
+		{
+			"pixiv", "https://pixiv.net/search.php?word=猫+C%2B%2B&token=unused",
+			"https://www.pixiv.net/search.php?order=date_d&s_mode=s_tag&word=%E7%8C%AB+C%2B%2B",
+			`[[2,{"id":101,"title":"Selected","page_count":2,"user":{"name":"Fixture"}}],[3,"https://i.pximg.net/img-original/img/2025/01/01/00/00/00/101_p0.jpg",{"id":101}],[2,{"id":102,"page_count":1}],[2,{"id":103,"page_count":1}]]`,
+			"https://www.pixiv.net/artworks/101",
+		},
+		{
+			"twitter", "https://twitter.com/search?q=%23猫&f=user",
+			"https://x.com/search?q=%23%E7%8C%AB+filter%3Amedia",
+			`[[2,{"tweet_id":101,"count":2,"author":{"name":"Fixture"}}],[3,"https://pbs.twimg.com/media/Photo?format=jpg",{"tweet_id":101}],[2,{"tweet_id":102,"count":1}],[2,{"tweet_id":103,"count":1}]]`,
+			"https://x.com/fixture/status/101",
+		},
+	} {
+		t.Run(tc.site, func(t *testing.T) {
+			testNativeWorkbenchBrowseAndCollect(t, workbenchFixtureCapture{t: t, site: tc.site, target: tc.target, dump: tc.dump}, tc.source, tc.selected)
+		})
+	}
+}
+
+func testNativeWorkbenchBrowseAndCollect(t *testing.T, capture workbenchFixtureCapture, source, selected string) {
+	t.Helper()
 	b, _ := nativeBusinessFixture(t, false)
 	// Leave the real crawl creation and dataset registration wired, without executing queued work.
 	nativeOK(t, b.crawls.Stop())
-	b.discovery.Transport.Gallery = workbenchFixtureCapture{t}
+	b.discovery.Transport.Gallery = capture
 	b.discovery.Transport.Validator = workbenchFixtureValidator{}
 	dataset, err := b.datasets.Create(b.ctx, datasets.CreateOptions{Name: "Workbench", Kind: "character"})
 	nativeOK(t, err)
@@ -48,12 +73,12 @@ func TestNativeWorkbenchBrowseAndCollect(t *testing.T) {
 		mux.ServeHTTP(w, r)
 		return w
 	}
-	browse := post("browse", `{"site":"pixiv","url":"https://pixiv.net/users/9","limit":1}`, "")
+	browse := post("browse", `{"site":"`+capture.site+`","url":"`+source+`","limit":2}`, "")
 	var result workbench.BrowseResult
-	if err := json.Unmarshal(browse.Body.Bytes(), &result); browse.Code != 200 || err != nil || !result.HasMore || len(result.Items) != 1 || result.Items[0].ID != "101" || result.Items[0].MediaCount != 2 || !strings.HasPrefix(result.Items[0].PreviewURL, "/api/v1/datasets/"+datasetID+"/workbench/media/") {
+	if err := json.Unmarshal(browse.Body.Bytes(), &result); browse.Code != 200 || err != nil || !result.HasMore || len(result.Items) != 2 || result.Items[0].ID != "101" || result.Items[1].ID != "102" || result.Items[0].MediaCount != 2 || !strings.HasPrefix(result.Items[0].PreviewURL, "/api/v1/datasets/"+datasetID+"/workbench/media/") {
 		t.Fatalf("browse %d: %s (%v)", browse.Code, browse.Body.String(), err)
 	}
-	outside := post("collect", `{"snapshot_id":"`+result.SnapshotID+`","ids":["102"]}`, "outside")
+	outside := post("collect", `{"snapshot_id":"`+result.SnapshotID+`","ids":["101","103"]}`, "outside")
 	if outside.Code != 422 {
 		t.Fatalf("outside prefix %d: %s", outside.Code, outside.Body.String())
 	}
@@ -67,7 +92,7 @@ func TestNativeWorkbenchBrowseAndCollect(t *testing.T) {
 	}
 	rows, err := b.db.QueryRows(b.ctx, "SELECT batch_id, url, address_type FROM crawl_addresses")
 	nativeOK(t, err)
-	if len(rows) != 1 || rows[0]["batch_id"] != collected.BatchID || rows[0]["url"] != "https://www.pixiv.net/artworks/101" || rows[0]["address_type"] != "workbench_work" {
+	if len(rows) != 1 || rows[0]["batch_id"] != collected.BatchID || rows[0]["url"] != selected || rows[0]["address_type"] != "workbench_work" {
 		t.Fatalf("unexpected crawl addresses: %+v", rows)
 	}
 	links, err := b.datasets.ListCrawls(b.ctx, datasetID)

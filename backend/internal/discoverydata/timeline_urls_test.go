@@ -1,6 +1,10 @@
 package discoverydata
 
-import "testing"
+import (
+	"net/url"
+	"strings"
+	"testing"
+)
 
 func TestTimelineAndExactWorkAddresses(t *testing.T) {
 	for _, tc := range []struct{ site, input, want, filter string }{
@@ -50,6 +54,48 @@ func TestTimelineAndExactWorkAddresses(t *testing.T) {
 	} {
 		if _, err := ExactWorkPostFilter(tc.site, tc.input); err == nil {
 			t.Fatalf("exact work filter accepted %q", tc.input)
+		}
+	}
+}
+
+func TestCanonicalTimelineSearchAddress(t *testing.T) {
+	for _, tc := range []struct{ site, input, want string }{
+		{"pixiv", "https://pixiv.net/search.php?word=猫+C%2B%2B+%23fan&order=popular_d&s_mode=s_tc&q=ignored&token=secret#fragment", "https://www.pixiv.net/search.php?order=date_d&s_mode=s_tag&word=%E7%8C%AB+C%2B%2B+%23fan"},
+		{"x", "https://mobile.twitter.com/search?q=%23猫%20C%2B%2B&f=user&token=secret#fragment", "https://x.com/search?q=%23%E7%8C%AB+C%2B%2B+filter%3Amedia"},
+		{"twitter", "https://x.com/search?q=art+FILTER%3Amedia+filter%3Amedia", "https://x.com/search?q=art+filter%3Amedia"},
+		{"x", "https://x.com/search?q=%22art++filter%3Amedia%22", "https://x.com/search?q=%22art++filter%3Amedia%22+filter%3Amedia"},
+		{"x", "https://x.com/search?q=" + url.QueryEscape(strings.Repeat("猫", 500)), "https://x.com/search?q=" + url.QueryEscape(strings.Repeat("猫", 500)+" filter:media")},
+	} {
+		if got, err := CanonicalTimelineAddress(tc.site, tc.input); err != nil || got != tc.want {
+			t.Fatalf("CanonicalTimelineAddress(%q, %q) = %q, %v; want %q", tc.site, tc.input, got, err, tc.want)
+		}
+		if got, err := CanonicalTimelineAddress(tc.site, tc.want); err != nil || got != tc.want {
+			t.Fatalf("canonical URL changed on reuse: %q, %v", got, err)
+		}
+		if _, err := ExactWorkPostFilter(tc.site, tc.want); err == nil {
+			t.Fatalf("exact work filter accepted a search URL: %q", tc.want)
+		}
+	}
+	for _, tc := range []struct{ site, input string }{
+		{"pixiv", "https://www.pixiv.net/search.php?word=+++"},
+		{"pixiv", "https://www.pixiv.net/search.php?word=cat&%77ord=dog"},
+		{"pixiv", "https://www.pixiv.net/search.php?word=%ff"},
+		{"pixiv", "https://www.pixiv.net/search.php?word=%"},
+		{"pixiv", "https://www.pixiv.net/search.php?q=cat"},
+		{"pixiv", "https://www.pixiv.net/search?word=cat"},
+		{"pixiv", "https://x.com/search?q=cat"},
+		{"x", "https://www.pixiv.net/search.php?word=cat"},
+		{"x", "https://x.com.evil.test/search?q=cat"},
+		{"x", "https://user:secret@x.com/search?q=cat"},
+		{"x", "https://x.com/search?q=cat&token=%"},
+		{"x", "https://x.com/search?q=cat%0Adog"},
+		{"x", "https://x.com/search?q=filter%3Amedia"},
+		{"x", "https://x.com/search?q=" + url.QueryEscape(strings.Repeat("猫", 501))},
+		{"x", "https://x.com/%73earch?q=cat"},
+		{"x", "https://x.com/search/other?q=cat"},
+	} {
+		if got, err := CanonicalTimelineAddress(tc.site, tc.input); err == nil || got != "" {
+			t.Fatalf("accepted invalid search URL %q: %q, %v", tc.input, got, err)
 		}
 	}
 }
