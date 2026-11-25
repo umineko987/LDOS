@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -21,57 +20,101 @@ import (
 	"ldos/backend/internal/scheduler"
 )
 
-var ehGalleryRE = regexp.MustCompile(`(?i)^https?://(?:e-|ex)hentai\.org/g/([0-9]+)/([0-9a-f]{10})/?`)
-var ehPageRE = regexp.MustCompile(`(?i)^https?://(?:e-|ex)hentai\.org/s/[0-9a-f]{10}/([0-9]+)-([0-9]+)`)
-var hrefRE = regexp.MustCompile(`(?i)href=["']([^"']+/s/[0-9a-f]{10}/[0-9]+-[0-9]+)["']`)
-var lengthRE = regexp.MustCompile(`(?i)>Length:</td><td[^>]*>\s*([0-9]+)\s+(?:pages?|files?)`)
-var titleRE = regexp.MustCompile(`(?is)<h1\s+id="gn">(.*?)</h1>`)
-var tagRE = regexp.MustCompile(`<[^>]+>`)
+var ehGalleryRE = regexp.MustCompile(`(?i)^https?://(?:e-|ex)hentai\.org/g/([0-9]+)/([0-9a-f]{10})/?(?:[?#]|$)`)
 
-func parseEH(page, base, galleryID string) (string, int, map[int]string) {
-	title := ""
-	if m := titleRE.FindStringSubmatch(page); m != nil {
-		title = strings.TrimSpace(html.UnescapeString(tagRE.ReplaceAllString(m[1], "")))
-	}
-	total := 0
-	if m := lengthRE.FindStringSubmatch(page); m != nil {
-		total, _ = strconv.Atoi(m[1])
-	}
-	out := map[int]string{}
-	u, _ := url.Parse(base)
-	for _, m := range hrefRE.FindAllStringSubmatch(page, -1) {
-		link, e := url.Parse(html.UnescapeString(m[1]))
-		if e != nil {
-			continue
-		}
-		target := u.ResolveReference(link).String()
-		match := ehPageRE.FindStringSubmatch(target)
-		if match == nil || strings.TrimLeft(match[1], "0") != strings.TrimLeft(galleryID, "0") {
-			continue
-		}
-		n, _ := strconv.Atoi(match[2])
-		out[n] = target
-	}
-	return title, total, out
+type ehIndex struct {
+	galleryID, title string
+	total            int
+	pages            map[int]ehPage
 }
 
-type ehResult struct {
-	units []Unit
-	title string
+// BrowseEHPages returns the first limit page entries, in gallery order, and the
+// gallery's full page count. Sprite offsets are signed CSS background positions.
+func (s *Service) BrowseEHPages(ctx context.Context, target string, policy scheduler.Policy, mode, cookies string, limit int) ([]map[string]any, int, error) {
+	if limit <= 0 {
+		return nil, 0, invalid("EH 预览 limit 必须大于 0")
+	}
+	index, _, err := s.readEHIndex(ctx, target, policy, mode, cookies, nil, limit, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]map[string]any, 0, min(index.total, limit))
+	for n := 1; n <= min(index.total, limit); n++ {
+		page := index.pages[n]
+		item := map[string]any{"id": strconv.Itoa(n), "title": fmt.Sprintf("%s · P%d", index.title, n), "page": n, "thumbnail_url": page.thumbnail, "media_count": 1}
+		if page.sprite != nil {
+			item["thumbnail_sprite"] = page.sprite
+		}
+		items = append(items, item)
+	}
+	return items, index.total, nil
 }
 
 func (s *Service) planEH(ctx context.Context, target string, policy scheduler.Policy, mode, cookies string, maxTasks int) ([]Unit, map[string]any, error) {
+	return s.planEHPages(ctx, target, policy, mode, cookies, maxTasks, nil)
+}
+
+func validateEHPages(pages []int) error {
+	if len(pages) == 0 {
+		return invalid("eh_pages 至少需要一个页码")
+	}
+	seen := make(map[int]bool, len(pages))
+	for _, page := range pages {
+		if page < 1 || seen[page] {
+			return invalid("eh_pages 必须包含互不重复的正整数页码")
+		}
+		seen[page] = true
+	}
+	return nil
+}
+func (s *Service) planEHPages(ctx context.Context, target string, policy scheduler.Policy, mode, cookies string, maxTasks int, selected []int) ([]Unit, map[string]any, error) {
+	index, route, err := s.readEHIndex(ctx, target, policy, mode, cookies, selected, 0, maxTasks)
+	if err != nil {
+		return nil, nil, err
+	}
+	unit := func(n int) Unit {
+		return Unit{URL: index.pages[n].url, Site: "exhentai", Kind: "media", SourceID: fmt.Sprintf("%s:%d", index.galleryID, n), ExtraArgs: []string{"--range", "1"}}
+	}
+	var units []Unit
+	if selected == nil {
+		units = make([]Unit, 0, index.total)
+		for n := 1; n <= index.total; n++ {
+			units = append(units, unit(n))
+		}
+	} else {
+		units = make([]Unit, 0, len(selected))
+		for _, n := range selected {
+			units = append(units, unit(n))
+		}
+	}
+	proxy := map[string]any{"gallery_id": index.galleryID, "title": index.title, "node_id": route["node_id"]}
+	if route["used"] == true {
+		proxy["node_name"] = route["node_name"]
+		proxy["protocol"] = route["protocol"]
+	}
+	return units, proxy, nil
+}
+
+func (s *Service) readEHIndex(ctx context.Context, target string, policy scheduler.Policy, mode, cookies string, selected []int, previewLimit, maxTasks int) (ehIndex, map[string]any, error) {
 	match := ehGalleryRE.FindStringSubmatch(target)
-	if match == nil {
-		return nil, nil, &Error{Code: "invalid_eh_gallery", Message: "EH 画廊 URL 格式无效"}
+	base, parseErr := url.Parse(target)
+	if match == nil || parseErr != nil {
+		return ehIndex{}, nil, &Error{Status: 422, Code: "invalid_eh_gallery", Message: "EH 画廊 URL 格式无效"}
 	}
 	galleryID := strings.TrimLeft(match[1], "0")
 	if galleryID == "" {
 		galleryID = "0"
 	}
-	normalized := target
-	if !strings.HasSuffix(normalized, "/") {
-		normalized += "/"
+	if !strings.HasSuffix(base.Path, "/") {
+		base.Path += "/"
+	}
+	base.Fragment = ""
+	query := base.Query()
+	query.Del("p")
+	base.RawQuery = query.Encode()
+	wanted := make(map[int]bool, len(selected))
+	for _, n := range selected {
+		wanted[n] = true
 	}
 	transport := s.deps.Discovery.Transport
 	outcome, err := transport.Execute(ctx, discovery.ExecuteOptions{URL: target, Mode: mode, Policy: policy, Prefix: "eh-plan", AcquireErrorFatal: mode == "required", RequiredMessage: "当前没有可用于 EH 索引规划的健康代理节点", Operation: func(ctx context.Context, attempt discovery.Attempt) (any, error) {
@@ -97,60 +140,73 @@ func (s *Service) planEH(ctx context.Context, target string, policy scheduler.Po
 			}
 			return s.validateHTTP(ctx, req.URL.String(), attempt.Endpoint())
 		}
-		title, expected, emptyPages := "", 0, 0
-		links := map[int]string{}
+		result := ehIndex{galleryID: galleryID, pages: map[int]ehPage{}}
+		expected, found, emptyPages := 0, 0, 0
 		for index := 0; index < 1000; index++ {
-			pageURL := normalized
+			pageURL := *base
 			if index > 0 {
-				pageURL += "?p=" + strconv.Itoa(index)
+				q := base.Query()
+				q.Set("p", strconv.Itoa(index))
+				pageURL.RawQuery = q.Encode()
 			}
-			page, err := s.fetchEH(ctx, &clone, pageURL, attempt.Endpoint())
+			body, err := s.fetchEH(ctx, &clone, pageURL.String(), attempt.Endpoint())
 			if err != nil {
 				return nil, err
 			}
-			pageTitle, pageTotal, pageLinks := parseEH(page, normalized, galleryID)
+			title, total, entries := parseEH(body, &pageURL, galleryID)
+			if title == "" || total <= 0 {
+				if err := ehIndexPageError(body); err != nil {
+					return nil, err
+				}
+			}
 			if index == 0 {
-				title, expected = pageTitle, pageTotal
-				if title == "" || expected <= 0 {
+				if title == "" || total <= 0 {
 					return nil, errors.New("EH 画廊首页缺少标题或图片总数")
 				}
-				if expected > maxTasks {
+				result.title, result.total = title, total
+				expected = total
+				switch {
+				case previewLimit > 0:
+					expected = min(total, previewLimit)
+				case selected != nil:
+					expected = len(selected)
+					for _, n := range selected {
+						if n > total {
+							return nil, &discovery.Error{Code: "invalid_eh_pages", Message: fmt.Sprintf("EH 页码 %d 超出画廊总页数 %d", n, total), Details: map[string]any{"page": n, "total": total}}
+						}
+					}
+				}
+				if previewLimit == 0 && expected > maxTasks {
 					return nil, &discovery.Error{Code: "crawl_plan_too_large", Message: fmt.Sprintf("EH 画廊图片数 %d 超过剩余 max_tasks=%d", expected, maxTasks), Details: map[string]any{"gallery_id": galleryID, "planned": expected, "max_tasks": maxTasks}}
 				}
 			}
-			before := len(links)
-			for n, v := range pageLinks {
-				links[n] = v
+			before := len(result.pages)
+			for n, page := range entries {
+				if n > result.total {
+					continue
+				}
+				previous, exists := result.pages[n]
+				if !exists && ((selected == nil && n <= expected) || wanted[n]) {
+					found++
+				}
+				if page.thumbnail == "" {
+					page.thumbnail, page.sprite = previous.thumbnail, previous.sprite
+				}
+				result.pages[n] = page
 			}
-			if len(links) == before {
+			if found == expected {
+				return result, nil
+			}
+			if len(result.pages) == before {
 				emptyPages++
+				if emptyPages >= 2 {
+					break
+				}
 			} else {
 				emptyPages = 0
 			}
-			if len(links) >= expected {
-				break
-			}
-			if emptyPages >= 2 {
-				return nil, fmt.Errorf("EH 画廊索引提前结束: collected=%d, expected=%d", len(links), expected)
-			}
 		}
-		missing, first := 0, 0
-		for n := 1; n <= expected; n++ {
-			if _, ok := links[n]; !ok {
-				missing++
-				if first == 0 {
-					first = n
-				}
-			}
-		}
-		if missing > 0 {
-			return nil, fmt.Errorf("EH 画廊索引缺少 %d 页，首个缺页=%d", missing, first)
-		}
-		units := make([]Unit, 0, expected)
-		for n := 1; n <= expected; n++ {
-			units = append(units, Unit{URL: links[n], Site: "exhentai", Kind: "media", SourceID: fmt.Sprintf("%s:%d", galleryID, n), ExtraArgs: []string{"--range", "1"}})
-		}
-		return ehResult{units, title}, nil
+		return nil, fmt.Errorf("EH 画廊索引缺少所需页面: collected=%d, expected=%d", found, expected)
 	}, Classify: func(err error, a discovery.Attempt) *discovery.Failure {
 		message := redaction.Text(err.Error(), 1000, a.Endpoint())
 		decision := scheduler.Classify(ptr(1), message, false, false)
@@ -159,22 +215,41 @@ func (s *Service) planEH(ctx context.Context, target string, policy scheduler.Po
 	if err != nil {
 		var exhausted *discovery.Exhausted
 		if errors.As(err, &exhausted) {
-			code := "eh_gallery_plan_failed"
-			if exhausted.Failure.ErrorClass == "authentication" {
-				code = "authentication"
-				transport.NotifyAuthFailure(ctx, "exhentai", cookies, exhausted.Failure.Message)
+			code, status := "eh_gallery_plan_failed", 0
+			if previewLimit > 0 {
+				code, status = "eh_gallery_browse_failed", 502
 			}
-			return nil, nil, &Error{Code: code, Message: exhausted.Failure.Message, Details: map[string]any{"gallery_id": galleryID, "attempts": exhausted.Attempts}}
+			switch exhausted.Failure.ErrorClass {
+			case "authentication":
+				code, status = "authentication", 401
+				transport.NotifyAuthFailure(ctx, "exhentai", cookies, exhausted.Failure.Message)
+			case "eh_gallery_capacity":
+				code, status = "eh_gallery_capacity", 503
+			}
+			return ehIndex{}, nil, &Error{Status: status, Code: code, Message: exhausted.Failure.Message, Details: map[string]any{"gallery_id": galleryID, "attempts": exhausted.Attempts}}
 		}
-		return nil, nil, err
+		return ehIndex{}, nil, err
 	}
-	result := outcome.Value.(ehResult)
-	proxy := map[string]any{"gallery_id": galleryID, "title": result.title, "node_id": outcome.Proxy["node_id"]}
-	if outcome.Proxy["used"] == true {
-		proxy["node_name"] = outcome.Proxy["node_name"]
-		proxy["protocol"] = outcome.Proxy["protocol"]
+	return outcome.Value.(ehIndex), outcome.Proxy, nil
+}
+
+func ehCapacity() *discovery.Failure {
+	return &discovery.Failure{ErrorClass: "eh_gallery_capacity", Message: "EH 画廊服务暂时超出容量", Retryable: true}
+}
+
+func ehIndexPageError(body string) error {
+	message := strings.ToLower(strings.Join(strings.Fields(ehTagRE.ReplaceAllString(body, " ")), " "))
+	for _, marker := range []string{"login required", "please log in", "only accessible to logged in users", "only available to logged in users", "only available to users who are logged in"} {
+		if strings.Contains(message, marker) {
+			return errors.New("AuthorizationError: EH 画廊需要登录或 Cookie 已失效")
+		}
 	}
-	return result.units, proxy, nil
+	for _, marker := range []string{"experiencing a heavy load", "currently overloaded", "currently at capacity", "bandwidth limit exceeded"} {
+		if strings.Contains(message, marker) {
+			return ehCapacity()
+		}
+	}
+	return nil
 }
 func (s *Service) validateHTTP(ctx context.Context, target, endpoint string) error {
 	validator := s.deps.Discovery.Transport.Validator
@@ -214,7 +289,13 @@ func (s *Service) fetchEH(ctx context.Context, client *http.Client, target, endp
 		return "", err
 	}
 	defer response.Body.Close()
-	if response.StatusCode >= 400 {
+	switch response.StatusCode {
+	case http.StatusUnauthorized:
+		return "", errors.New("AuthorizationError: EH 画廊需要登录或 Cookie 已失效")
+	case 509: // Bandwidth Limit Exceeded
+		return "", ehCapacity()
+	}
+	if response.StatusCode >= 400 && response.StatusCode != http.StatusNotFound {
 		return "", fmt.Errorf("HTTP %d %s", response.StatusCode, http.StatusText(response.StatusCode))
 	}
 	b, err := io.ReadAll(io.LimitReader(response.Body, (32<<20)+1))
@@ -223,6 +304,12 @@ func (s *Service) fetchEH(ctx context.Context, client *http.Client, target, endp
 	}
 	if len(b) > 32<<20 {
 		return "", errors.New("画廊索引超过大小限制")
+	}
+	if response.StatusCode == http.StatusNotFound {
+		if strings.Contains(string(b), "Gallery Not Available") {
+			return "", errors.New("AuthorizationError: EH 画廊需要登录或 Cookie 已失效")
+		}
+		return "", errors.New("HTTP 404 Not Found")
 	}
 	if len(b) == 0 && len(response.Header.Values("Cache-Control")) == 0 {
 		return "", errors.New("AuthorizationError: ExHentai 登录已失效（返回空白页）")

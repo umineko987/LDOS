@@ -1937,6 +1937,476 @@
         "title": "CleanItemResponse",
         "type": "object"
       },
+      "CollectBrowseItem": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "downloadable": {
+            "type": "boolean"
+          },
+          "file_ext": {
+            "type": "string"
+          },
+          "file_size": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "local_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "local_state": {
+            "type": "string"
+          },
+          "media_count": {
+            "type": "integer"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preview_url": {
+            "type": "string"
+          },
+          "rating": {
+            "type": "string"
+          },
+          "sample_url": {
+            "type": "string"
+          },
+          "score": {
+            "type": "integer"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "tags": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          },
+          "title": {
+            "type": "string"
+          },
+          "unavailable_reason": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "width": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "media_count",
+          "url",
+          "downloadable",
+          "local_state"
+        ],
+        "title": "CollectBrowseItem",
+        "type": "object"
+      },
+      "CollectBrowseRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CollectSourceSpec"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "CollectBrowseRequest",
+        "type": "object"
+      },
+      "CollectBrowseResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CollectBrowseItem"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CollectSourceSpec"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "source",
+          "items",
+          "next_cursor",
+          "warnings"
+        ],
+        "title": "CollectBrowseResponse",
+        "type": "object"
+      },
+      "CollectResolveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "type": "string"
+          },
+          "sites": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "CollectResolveRequest",
+        "type": "object"
+      },
+      "CollectResolveResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "resolved_mode": {
+            "type": "string"
+          },
+          "site_statuses": {
+            "items": {
+              "$ref": "#/components/schemas/CollectSiteStatus"
+            },
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/CollectSourceSpec"
+            },
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "resolved_mode",
+          "sources",
+          "site_statuses",
+          "warnings"
+        ],
+        "title": "CollectResolveResponse",
+        "type": "object"
+      },
+      "CollectSiteStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "authorized": {
+            "type": "boolean"
+          },
+          "site": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "site",
+          "authorized",
+          "state",
+          "summary"
+        ],
+        "title": "CollectSiteStatus",
+        "type": "object"
+      },
+      "CollectSourceSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_enable": {
+            "type": "boolean"
+          },
+          "badge": {
+            "type": "string"
+          },
+          "cover_url": {
+            "type": "string"
+          },
+          "default_mode": {
+            "type": "string"
+          },
+          "default_top_n": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "site": {
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit_kind": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "work_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "site",
+          "kind",
+          "label",
+          "unit_kind",
+          "default_mode"
+        ],
+        "title": "CollectSourceSpec",
+        "type": "object"
+      },
+      "CollectSubmitItem": {
+        "additionalProperties": false,
+        "properties": {
+          "file_ext": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "local_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "media_count": {
+            "type": "integer"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url"
+        ],
+        "title": "CollectSubmitItem",
+        "type": "object"
+      },
+      "CollectSubmitRange": {
+        "additionalProperties": false,
+        "properties": {
+          "excluded_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "excluded_pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "extra_pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CollectSubmitItem"
+            },
+            "type": "array"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "page_end": {
+            "type": "integer"
+          },
+          "page_start": {
+            "type": "integer"
+          },
+          "top_n": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "CollectSubmitRange",
+        "type": "object"
+      },
+      "CollectSubmitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/CollectSubmitSource"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sources"
+        ],
+        "title": "CollectSubmitRequest",
+        "type": "object"
+      },
+      "CollectSubmitResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queued_count": {
+            "type": "integer"
+          },
+          "queued_sources": {
+            "type": "integer"
+          },
+          "reused_count": {
+            "type": "integer"
+          },
+          "skipped_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "batch_id",
+          "queued_sources",
+          "queued_count",
+          "reused_count",
+          "skipped_count"
+        ],
+        "title": "CollectSubmitResponse",
+        "type": "object"
+      },
+      "CollectSubmitSource": {
+        "additionalProperties": false,
+        "properties": {
+          "range": {
+            "$ref": "#/components/schemas/CollectSubmitRange"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CollectSourceSpec"
+          }
+        },
+        "required": [
+          "source",
+          "range"
+        ],
+        "title": "CollectSubmitSource",
+        "type": "object"
+      },
       "CrawlAddress": {
         "properties": {
           "address_type": {
@@ -1950,6 +2420,16 @@
               }
             ],
             "title": "Address Type"
+          },
+          "eh_pages": {
+            "description": "Explicit page selection for an EH gallery. During planning, page numbers must be within the gallery and the selection must fit the remaining crawl task limit.",
+            "items": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
           },
           "extra_args": {
             "items": {
@@ -2031,6 +2511,16 @@
               }
             ],
             "title": "Cancelled Task Count"
+          },
+          "eh_pages": {
+            "description": "Requested page numbers in the original order, present when the crawl address has an explicit EH page selection.",
+            "items": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
           },
           "failed_task_count": {
             "anyOf": [
@@ -15861,6 +16351,173 @@
         ],
         "title": "VaultStatuses",
         "type": "object"
+      },
+      "WorkbenchBrowseRequest": {
+        "additionalProperties": false,
+        "if": {
+          "properties": {
+            "site": {
+              "const": "exhentai"
+            }
+          }
+        },
+        "properties": {
+          "limit": {
+            "description": "Maximum number of items to return. ExHentai supports at most 500.",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "site": {
+            "enum": [
+              "pixiv",
+              "twitter",
+              "exhentai"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "site",
+          "url",
+          "limit"
+        ],
+        "then": {
+          "properties": {
+            "limit": {
+              "maximum": 500
+            }
+          }
+        },
+        "type": "object"
+      },
+      "WorkbenchBrowseResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchItem"
+            },
+            "type": "array"
+          },
+          "snapshot_id": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "items",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "WorkbenchCollectRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "description": "Exact item IDs from this snapshot.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "snapshot_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "ids"
+        ],
+        "type": "object"
+      },
+      "WorkbenchCollectResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "batch_id"
+        ],
+        "type": "object"
+      },
+      "WorkbenchErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {},
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "details",
+              "request_id"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "WorkbenchItem": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "media_count": {
+            "type": "integer"
+          },
+          "page": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "preview_url": {
+            "description": "Local preview path, or an empty string when a preview is unavailable.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "preview_url",
+          "media_count"
+        ],
+        "type": "object"
       }
     }
   },
@@ -16780,6 +17437,63 @@
           }
         },
         "summary": "Undo Caption Batch"
+      }
+    },
+    "/api/v1/collect/media/{token}": {
+      "get": {
+        "operationId": "collect_media",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/gif": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Image preview"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "summary": "Serve a signed local media preview proxy image"
       }
     },
     "/api/v1/config": {
@@ -18616,6 +19330,160 @@
         "summary": "Edit Dataset Caption"
       }
     },
+    "/api/v1/datasets/{dataset_id}/collect/browse": {
+      "post": {
+        "operationId": "browse_collect",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectBrowseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectBrowseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "summary": "Browse paginated items for a resolved collect source"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/collect/resolve": {
+      "post": {
+        "operationId": "resolve_collect",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectResolveResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "summary": "Resolve multi-source collection input (URLs, handles, or keywords)"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/collect/submit": {
+      "post": {
+        "operationId": "submit_collect",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectSubmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectSubmitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "summary": "Submit merged declarative collect ranges across multiple sources"
+      }
+    },
     "/api/v1/datasets/{dataset_id}/crawls": {
       "get": {
         "operationId": "list_dataset_crawls_api_v1_datasets__dataset_id__crawls_get",
@@ -19996,6 +20864,185 @@
           }
         },
         "summary": "Get Dataset Tagger Candidates"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/workbench/browse": {
+      "post": {
+        "operationId": "browse_workbench",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchBrowseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchBrowseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "summary": "Browse a collection workbench source"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/workbench/collect": {
+      "post": {
+        "operationId": "collect_workbench",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchCollectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchCollectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "summary": "Collect selected items from a workbench snapshot"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/workbench/media/{snapshot_id}/{item_id}": {
+      "get": {
+        "operationId": "preview_workbench",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/gif": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Image preview"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "summary": "Serve a local collection workbench preview"
       }
     },
     "/api/v1/events": {

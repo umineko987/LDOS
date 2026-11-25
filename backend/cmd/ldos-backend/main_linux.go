@@ -115,7 +115,7 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("initialize native search: %w", err)
 	}
-	business, err := newBusinessRuntime(ctx, &liveSettings{value: settings}, db, jobs, bus, task, proxy.pool, vault, businessOptions{Downloads: downloadSettings})
+	business, err := newBusinessRuntime(ctx, &liveSettings{value: settings}, db, jobs, bus, task, proxy.pool, vault, businessOptions{Downloads: downloadSettings, Search: search, AuthStatus: auth.Status})
 	if err != nil {
 		return fmt.Errorf("initialize native services: %w", err)
 	}

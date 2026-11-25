@@ -11,7 +11,7 @@
 
   // 单个下载任务的日志尾部 / 事件时间线。任务还没结束时定时重拉；
   // 日志贴底时新行到来自动滚到底，用户往上翻了就不打扰。
-  let { taskId, active, class: className }: { taskId: string; active: boolean; class?: string } = $props();
+  let { taskId, active, enabled = true, class: className }: { taskId: string; active: boolean; enabled?: boolean; class?: string } = $props();
 
   const LOG_POLL_MS = 2_000;
   const EVENT_POLL_MS = 3_000;
@@ -23,12 +23,12 @@
 
   const logs = createQuery(() => ({
     ...taskLogsQuery(api, taskId),
-    enabled: view === "logs",
+    enabled: enabled && view === "logs",
     refetchInterval: active ? LOG_POLL_MS : false,
   }));
   const events = createQuery(() => ({
     ...taskEventsQuery(api, taskId),
-    enabled: view === "events",
+    enabled: enabled && view === "events",
     refetchInterval: active ? EVENT_POLL_MS : false,
   }));
 

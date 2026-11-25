@@ -12,7 +12,11 @@ import (
 
 // ParseOutput consumes gallery-dl DataJob messages. A late extractor error is
 // soft only when at least one candidate survived the requested limit.
-func ParseOutput(site, stdout, sourceURL string, limit int) (candidates, authors []map[string]any, err error) {
+func ParseOutput(site, stdout, sourceURL string, limit int) ([]map[string]any, []map[string]any, error) {
+	return parseOutput(site, stdout, sourceURL, limit, false)
+}
+
+func parseOutput(site, stdout, sourceURL string, limit int, timeline bool) (candidates, authors []map[string]any, err error) {
 	decoder := json.NewDecoder(strings.NewReader(stdout))
 	decoder.UseNumber()
 	var payload any
@@ -42,6 +46,7 @@ func ParseOutput(site, stdout, sourceURL string, limit int) (candidates, authors
 	byID := map[string]object{}
 	authorKeys := map[string]bool{}
 	extractorErrors := []string{}
+	posts := 0
 	add := func(candidate object, related []object) {
 		if candidate != nil {
 			key := str(candidate["id"])
@@ -90,8 +95,24 @@ func ParseOutput(site, stdout, sourceURL string, limit int) (candidates, authors
 		}
 		switch {
 		case code == -1 && len(message) > 1:
-			extractorErrors = append(extractorErrors, str(first(d["message"], d["error"], "extractor error")))
+			message := str(first(d["message"], d["error"], "extractor error"))
+			if timeline {
+				message = stringOr(d["error"]) + " " + message
+			}
+			extractorErrors = append(extractorErrors, message)
 		case code == 2 && len(message) >= 2:
+			if timeline {
+				posts++
+				id := timelineID(site, d)
+				if id == "" {
+					return nil, nil, &Error{Code: "invalid_gallery_output", Message: "时间线提取器未提供有效的作品 ID"}
+				}
+				if candidate := timelineCandidate(site, id, d); candidate != nil {
+					candidate["thumbnail_url"] = timelineWorkThumbnail(site, id, d)
+					add(candidate, nil)
+				}
+				continue
+			}
 			switch site {
 			case "twitter":
 				add(twitterCandidate(d))
@@ -105,6 +126,9 @@ func ParseOutput(site, stdout, sourceURL string, limit int) (candidates, authors
 				add(pawchiveCandidate(d))
 			}
 		case code == 6 && len(message) >= 3:
+			if timeline {
+				return nil, nil, &Error{Code: "invalid_gallery_output", Message: "时间线提取器返回了其他地址"}
+			}
 			u := str(message[1])
 			switch site {
 			case "exhentai":
@@ -115,6 +139,13 @@ func ParseOutput(site, stdout, sourceURL string, limit int) (candidates, authors
 				add(pawchiveQueue(u, d))
 			}
 		case code == 3 && len(message) >= 3:
+			if timeline {
+				id := timelineID(site, d)
+				if candidate := byID[id]; candidate != nil && candidate["thumbnail_url"] == "" {
+					candidate["thumbnail_url"] = timelineThumbnail(site, id, stringOr(message[1]))
+				}
+				continue
+			}
 			id := d["id"]
 			if site == "twitter" {
 				id = d["tweet_id"]
@@ -146,12 +177,15 @@ func ParseOutput(site, stdout, sourceURL string, limit int) (candidates, authors
 			}
 		}
 	}
-	if len(extractorErrors) > 0 && len(candidates) == 0 {
+	if len(extractorErrors) > 0 && (timeline || len(candidates) == 0) {
 		safe := []string{}
 		for _, e := range extractorErrors[:min(5, len(extractorErrors))] {
 			safe = append(safe, redaction.Text(e, 500))
 		}
 		return nil, nil, &Error{Code: "extractor_error", Message: redaction.Text(extractorErrors[0], 1000), Details: object{"errors": safe}}
+	}
+	if timeline && posts >= limit && len(candidates) < limit {
+		return nil, nil, &Error{Code: "invalid_gallery_output", Message: "时间线提取器返回了重复或替代作品，无法确认是否还有更多作品"}
 	}
 	return candidates, authors, nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"ldos/backend/internal/discoverydata"
 	"ldos/backend/internal/gallery"
@@ -22,6 +23,7 @@ type Request struct {
 	ProxyMode, CredentialsRef, CookiesFile, ConfigFile string
 	ExtraArgs                                          []string
 	TimeoutSeconds                                     float64
+	timeline                                           bool
 }
 type GalleryPlan struct {
 	Site, RangeKind         string
@@ -43,6 +45,9 @@ func BuildGalleryPlan(request Request) (GalleryPlan, error) {
 		if err != nil {
 			return GalleryPlan{}, err
 		}
+	}
+	if request.timeline && spec.Site == "twitter" {
+		args = append(args, "--post-filter", discoverydata.TwitterOriginalPostFilter)
 	}
 	kind := request.RangeKind
 	if kind == "" {
@@ -70,7 +75,7 @@ func (a *GalleryAdapter) Discover(ctx context.Context, request Request) (map[str
 	if mode == "" {
 		mode = request.Policy.ProxyMode
 	}
-	secure := request.Keyword != nil
+	secure := request.Keyword != nil || request.timeline
 	outcome, err := a.Transport.Execute(ctx, ExecuteOptions{URL: request.URL, Mode: mode, Prefix: "discover", Policy: request.Policy, Secure: secure, AcquireErrorFatal: secure || mode == "required", NodeTags: request.Policy.NodeTags, Cleanup: a.Transport.CleanupOperation,
 		Operation: func(ctx context.Context, attempt Attempt) (any, error) {
 			result, err := a.Transport.Gallery.Capture(ctx, gallery.CaptureRequest{Request: gallery.Request{ID: attempt.ID, URL: request.URL, OutputDir: a.Transport.OperationDirectory(attempt.ID), ProxyURL: attempt.Endpoint(), HTTPTimeout: duration(request.Policy.HTTPTimeout), GalleryRetries: request.Policy.GalleryRetries, TaskTimeout: duration(request.TimeoutSeconds), CookiesFile: request.CookiesFile, ConfigFile: request.ConfigFile, CredentialsRef: request.CredentialsRef, Site: plan.Site, ExtraArgs: plan.Args}})
@@ -80,11 +85,19 @@ func (a *GalleryAdapter) Discover(ctx context.Context, request Request) (map[str
 				}
 				return nil, err
 			}
-			decision := scheduler.Classify(&result.ExitCode, result.Stderr, false, result.TimedOut)
+			exit := result.ExitCode
+			if request.timeline && exit == 0 && strings.Contains(strings.ToLower(result.Stderr), "[error]") {
+				exit = 1
+			}
+			decision := scheduler.Classify(&exit, result.Stderr, false, result.TimedOut)
 			if decision.ErrorClass != "success" {
 				return nil, &Failure{Message: decision.Message, ErrorClass: decision.ErrorClass, Retryable: decision.Retryable, ProxyFault: decision.ProxyFault, AuthContext: result.Stderr}
 			}
-			candidates, authors, err := discoverydata.ParseOutput(plan.Site, result.Stdout, request.URL, plan.ResultLimit)
+			parse := discoverydata.ParseOutput
+			if request.timeline {
+				parse = discoverydata.ParseTimelineOutput
+			}
+			candidates, authors, err := parse(plan.Site, result.Stdout, request.URL, plan.ResultLimit)
 			if err != nil {
 				var parseError *Error
 				if !errors.As(err, &parseError) {
@@ -120,13 +133,16 @@ func (a *GalleryAdapter) Discover(ctx context.Context, request Request) (map[str
 		}
 		failure := exhausted.Failure
 		details := map[string]any{"attempts": exhausted.AttemptCount, "message": failure.Message, "proxy": exhausted.Proxy}
-		if public, ok := failure.Details["public_code"].(string); ok && public != "" && !failure.Retryable {
+		if public, ok := failure.Details["public_code"].(string); ok && public != "" && !failure.Retryable && (!request.timeline || failure.ErrorClass != "authentication") {
 			if values, ok := failure.Details["errors"]; ok {
 				details["errors"] = values
 			}
 			return nil, &Error{Code: public, Message: failure.Message, Details: details}
 		}
 		public := "discovery_failed"
+		if request.timeline {
+			public = failure.ErrorClass
+		}
 		if failure.ErrorClass == "authentication" {
 			public = "authentication"
 			message := failure.AuthContext

@@ -197,6 +197,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collect/media/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve a signed local media preview proxy image */
+        get: operations["collect_media"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/config": {
         parameters: {
             query?: never;
@@ -677,6 +694,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/datasets/{dataset_id}/collect/browse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Browse paginated items for a resolved collect source */
+        post: operations["browse_collect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/collect/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve multi-source collection input (URLs, handles, or keywords) */
+        post: operations["resolve_collect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/collect/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit merged declarative collect ranges across multiple sources */
+        post: operations["submit_collect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasets/{dataset_id}/crawls": {
         parameters: {
             query?: never;
@@ -994,6 +1062,57 @@ export interface paths {
         };
         /** Get Dataset Tagger Candidates */
         get: operations["get_dataset_tagger_candidates_api_v1_datasets__dataset_id__tagger_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/workbench/browse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Browse a collection workbench source */
+        post: operations["browse_workbench"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/workbench/collect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collect selected items from a workbench snapshot */
+        post: operations["collect_workbench"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{dataset_id}/workbench/media/{snapshot_id}/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve a local collection workbench preview */
+        get: operations["preview_workbench"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2967,10 +3086,128 @@ export interface components {
             /** Width */
             width: number;
         };
+        /** CollectBrowseItem */
+        CollectBrowseItem: {
+            author?: string;
+            downloadable: boolean;
+            file_ext?: string;
+            file_size?: number;
+            height?: number;
+            id: string;
+            local_asset_id?: string | null;
+            local_state: string;
+            media_count: number;
+            page?: number | null;
+            preview_url?: string;
+            rating?: string;
+            sample_url?: string;
+            score?: number;
+            source_url?: string;
+            tags?: {
+                [key: string]: string[];
+            };
+            title: string;
+            unavailable_reason?: string;
+            url: string;
+            width?: number;
+        };
+        /** CollectBrowseRequest */
+        CollectBrowseRequest: {
+            cursor?: string;
+            limit?: number;
+            source: components["schemas"]["CollectSourceSpec"];
+        };
+        /** CollectBrowseResponse */
+        CollectBrowseResponse: {
+            items: components["schemas"]["CollectBrowseItem"][];
+            next_cursor: string;
+            source: components["schemas"]["CollectSourceSpec"];
+            total?: number | null;
+            warnings: string[];
+        };
+        /** CollectResolveRequest */
+        CollectResolveRequest: {
+            input: string;
+            sites?: string[];
+        };
+        /** CollectResolveResponse */
+        CollectResolveResponse: {
+            resolved_mode: string;
+            site_statuses: components["schemas"]["CollectSiteStatus"][];
+            sources: components["schemas"]["CollectSourceSpec"][];
+            warnings: string[];
+        };
+        /** CollectSiteStatus */
+        CollectSiteStatus: {
+            authorized: boolean;
+            site: string;
+            state: string;
+            summary: string;
+            warnings?: string[];
+        };
+        /** CollectSourceSpec */
+        CollectSourceSpec: {
+            auto_enable?: boolean;
+            badge?: string;
+            cover_url?: string;
+            default_mode: string;
+            default_top_n?: number;
+            id: string;
+            kind: string;
+            label: string;
+            query?: string;
+            reference?: string;
+            site: string;
+            total?: number | null;
+            unit_kind: string;
+            url?: string;
+            work_id?: string;
+        };
+        /** CollectSubmitItem */
+        CollectSubmitItem: {
+            file_ext?: string;
+            id: string;
+            local_asset_id?: string | null;
+            media_count?: number;
+            page?: number | null;
+            source_url?: string;
+            title?: string;
+            url: string;
+        };
+        /** CollectSubmitRange */
+        CollectSubmitRange: {
+            excluded_ids?: string[];
+            excluded_pages?: number[];
+            extra_pages?: number[];
+            items?: components["schemas"]["CollectSubmitItem"][];
+            mode: string;
+            page_end?: number;
+            page_start?: number;
+            top_n?: number;
+        };
+        /** CollectSubmitRequest */
+        CollectSubmitRequest: {
+            sources: components["schemas"]["CollectSubmitSource"][];
+        };
+        /** CollectSubmitResponse */
+        CollectSubmitResponse: {
+            batch_id: string | null;
+            queued_count: number;
+            queued_sources: number;
+            reused_count: number;
+            skipped_count: number;
+        };
+        /** CollectSubmitSource */
+        CollectSubmitSource: {
+            range: components["schemas"]["CollectSubmitRange"];
+            source: components["schemas"]["CollectSourceSpec"];
+        };
         /** CrawlAddress */
         CrawlAddress: {
             /** Address Type */
             address_type?: string | null;
+            /** @description Explicit page selection for an EH gallery. During planning, page numbers must be within the gallery and the selection must fit the remaining crawl task limit. */
+            eh_pages?: number[];
             /** Extra Args */
             extra_args?: string[];
             /** Id */
@@ -2988,6 +3225,8 @@ export interface components {
             address_type?: string | null;
             /** Cancelled Task Count */
             cancelled_task_count?: number | null;
+            /** @description Requested page numbers in the original order, present when the crawl address has an explicit EH page selection. */
+            eh_pages?: number[];
             /** Failed Task Count */
             failed_task_count?: number | null;
             /** Healthy Proxy Count */
@@ -7101,6 +7340,44 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        WorkbenchBrowseRequest: {
+            /** @description Maximum number of items to return. ExHentai supports at most 500. */
+            limit: number;
+            /** @enum {string} */
+            site: "pixiv" | "twitter" | "exhentai";
+            url: string;
+        };
+        WorkbenchBrowseResponse: {
+            has_more: boolean;
+            items: components["schemas"]["WorkbenchItem"][];
+            snapshot_id: string;
+            total?: number;
+        };
+        WorkbenchCollectRequest: {
+            /** @description Exact item IDs from this snapshot. */
+            ids: string[];
+            snapshot_id: string;
+        };
+        WorkbenchCollectResponse: {
+            batch_id: string;
+        };
+        WorkbenchErrorResponse: {
+            error: {
+                code: string;
+                details: unknown;
+                message: string;
+                request_id: string;
+            };
+        };
+        WorkbenchItem: {
+            author?: string;
+            id: string;
+            media_count: number;
+            page?: number;
+            /** @description Local preview path, or an empty string when a preview is unavailable. */
+            preview_url: string;
+            title: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -7642,6 +7919,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    collect_media: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/gif": string;
+                    "image/jpeg": string;
+                    "image/png": string;
+                    "image/webp": string;
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchErrorResponse"];
                 };
             };
         };
@@ -8743,6 +9054,113 @@ export interface operations {
             };
         };
     };
+    browse_collect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectBrowseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectBrowseResponse"];
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchErrorResponse"];
+                };
+            };
+        };
+    };
+    resolve_collect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectResolveResponse"];
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchErrorResponse"];
+                };
+            };
+        };
+    };
+    submit_collect: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectSubmitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectSubmitResponse"];
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchErrorResponse"];
+                };
+            };
+        };
+    };
     list_dataset_crawls_api_v1_datasets__dataset_id__crawls_get: {
         parameters: {
             query?: never;
@@ -9515,6 +9933,114 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    browse_workbench: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkbenchBrowseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchBrowseResponse"];
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchErrorResponse"];
+                };
+            };
+        };
+    };
+    collect_workbench: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkbenchCollectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchCollectResponse"];
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchErrorResponse"];
+                };
+            };
+        };
+    };
+    preview_workbench: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+                snapshot_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/gif": string;
+                    "image/jpeg": string;
+                    "image/png": string;
+                    "image/webp": string;
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchErrorResponse"];
                 };
             };
         };

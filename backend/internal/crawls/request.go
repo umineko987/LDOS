@@ -35,6 +35,9 @@ type Address struct {
 	Label       *string  `json:"label"`
 	AddressType *string  `json:"address_type"`
 	ExtraArgs   []string `json:"extra_args"`
+	EHPages     []int    `json:"eh_pages,omitempty"`
+	ItemLimit   *int     `json:"item_limit,omitempty"`
+	ExcludedIDs []string `json:"excluded_ids,omitempty"`
 }
 type Source struct {
 	Options
@@ -82,8 +85,15 @@ func (a *Address) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil || raw == nil {
 		return fmt.Errorf("地址必须是对象")
 	}
-	if err := nonnull(raw, "url", "extra_args"); err != nil {
+	if err := nonnull(raw, "url", "extra_args", "item_limit", "excluded_ids"); err != nil {
 		return err
+	}
+	for key := range raw {
+		if strings.EqualFold(key, "eh_pages") {
+			if err := nonnull(raw, key); err != nil {
+				return err
+			}
+		}
 	}
 	return json.Unmarshal(data, (*plain)(a))
 }
@@ -175,8 +185,8 @@ func (r *Request) validate() error {
 			return invalid("sources 中同一来源只保留一个分组")
 		}
 		seen[source.Site] = true
-		if len(source.Addresses) < 1 || len(source.Addresses) > 500 {
-			return invalid("addresses 数量必须介于 1 和 500")
+		if len(source.Addresses) < 1 || len(source.Addresses) > 2000 {
+			return invalid("addresses 数量必须介于 1 和 2000")
 		}
 		if err := source.Options.validate(); err != nil {
 			return err
@@ -196,6 +206,26 @@ func (r *Request) validate() error {
 			}
 			if !bounded(a.ID, 500) || !bounded(a.Label, 500) || !bounded(a.AddressType, 100) || len(a.ExtraArgs) > 128 {
 				return invalid("地址字段超出上限")
+			}
+			if a.ItemLimit != nil && (*a.ItemLimit < 1 || *a.ItemLimit > 10000) {
+				return invalid("item_limit 必须介于 1 和 10000")
+			}
+			if len(a.ExcludedIDs) > 2000 {
+				return invalid("excluded_ids 数量超出上限")
+			}
+			for _, eid := range a.ExcludedIDs {
+				if strings.TrimSpace(eid) == "" || utf8.RuneCountInString(eid) > 200 {
+					return invalid("excluded_ids 包含无效条目")
+				}
+			}
+			if a.EHPages != nil {
+				spec, err := discoverydata.SearchSite(source.Site)
+				if err != nil || spec.Site != "exhentai" || !ehGalleryRE.MatchString(a.URL) {
+					return invalid("eh_pages 仅适用于 EH/EHX 画廊地址")
+				}
+				if err := validateEHPages(a.EHPages); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -310,10 +340,6 @@ func (s *Service) Create(ctx context.Context, body Request, idempotencyKey *stri
 		if source.EHDownload != nil && source.Site != "exhentai" {
 			return nil, false, invalid("eh_download 仅适用于 EH/EHX 来源")
 		}
-		download := map[string]any{}
-		if source.EHDownload != nil {
-			download["eh"] = source.EHDownload
-		}
 		opt := source.effective(body.Options)
 		if err := s.validateArgs(opt.ExtraArgs, opt.DiscoveryExtraArgs); err != nil {
 			return nil, false, err
@@ -352,6 +378,19 @@ func (s *Service) Create(ctx context.Context, body Request, idempotencyKey *stri
 			args := append(append([]string{}, opt.ExtraArgs...), a.ExtraArgs...)
 			if err := s.validateArgs(args, nil); err != nil {
 				return nil, false, err
+			}
+			download := map[string]any{}
+			if source.EHDownload != nil {
+				download["eh"] = source.EHDownload
+			}
+			if a.EHPages != nil {
+				download["eh_pages"] = a.EHPages
+			}
+			if a.ItemLimit != nil {
+				download["item_limit"] = *a.ItemLimit
+			}
+			if len(a.ExcludedIDs) > 0 {
+				download["excluded_ids"] = a.ExcludedIDs
 			}
 			addressID := uuid.NewSHA1(id, []byte(fmt.Sprintf("%d:%d:%s", sourceOrder, addressOrder, target))).String()
 			addresses = append(addresses, map[string]any{"id": addressID, "site": source.Site, "source_order": sourceOrder, "address_order": addressOrder, "url": target, "label": text(a.Label), "address_type": text(a.AddressType), "proxy_mode": mode, "max_attempts": attempts, "priority": priority, "credentials_ref": nullable(creds.Reference), "cookies_file": nullable(creds.CookiesFile), "config_file": nullable(creds.ConfigFile), "download_options": download, "extra_args": args, "discovery_args": opt.DiscoveryExtraArgs, "timeout_seconds": timeout})

@@ -28,6 +28,11 @@ export const MOTION_PREFERENCES: readonly MotionPreference[] = ["system", "on", 
 export const DENSITIES: readonly Density[] = ["compact", "comfortable"];
 export { RENDERER_PREFERENCES };
 
+export type CollectSite = "danbooru" | "pixiv" | "twitter" | "exhentai" | "pawchive";
+export const COLLECT_SITES: readonly CollectSite[] = ["danbooru", "pixiv", "twitter", "exhentai", "pawchive"];
+export const COLLECT_SITES_STORAGE_KEY = "ldos.collect.sites";
+export const DEFAULT_COLLECT_SITES: readonly CollectSite[] = ["danbooru"];
+
 export const MOTION_STORAGE_KEY = "ldos.motion";
 export const DENSITY_STORAGE_KEY = "ldos.density";
 
@@ -108,4 +113,38 @@ export function applyHtmlAttributes(
     if (value === null) element.removeAttribute(name);
     else element.setAttribute(name, value);
   }
+}
+
+export function normalizeCollectSites(values: unknown): CollectSite[] {
+  if (!Array.isArray(values)) return [...DEFAULT_COLLECT_SITES];
+  const wanted = new Set<CollectSite>();
+  for (const item of values) {
+    if (typeof item === "string" && (COLLECT_SITES as readonly string[]).includes(item)) {
+      wanted.add(item as CollectSite);
+    }
+  }
+  const ordered = COLLECT_SITES.filter((site) => wanted.has(site));
+  return ordered.length > 0 ? ordered : [...DEFAULT_COLLECT_SITES];
+}
+
+export function parseCollectSites(raw: string | null): CollectSite[] {
+  if (!raw) return [...DEFAULT_COLLECT_SITES];
+  try {
+    return normalizeCollectSites(JSON.parse(raw));
+  } catch {
+    return [...DEFAULT_COLLECT_SITES];
+  }
+}
+
+export function readCollectSites(storage: PreferenceStorage | null = browserStorage()): CollectSite[] {
+  return parseCollectSites(read(storage, COLLECT_SITES_STORAGE_KEY));
+}
+
+export function writeCollectSites(
+  sites: readonly CollectSite[],
+  storage: PreferenceStorage | null = browserStorage(),
+): CollectSite[] {
+  const normalized = normalizeCollectSites(sites);
+  write(storage, COLLECT_SITES_STORAGE_KEY, JSON.stringify(normalized));
+  return normalized;
 }

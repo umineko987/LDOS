@@ -23,7 +23,9 @@ LDOS 的业务逻辑、SQLite 存储、调度、HTTP/SSE 和进程管理已迁�
 
 代理节点保留旧 PyYAML ID 契约；同一 owner 只获得一个租约。搜索与发现使用 `prefer` 时，有可用节点就使用代理，没有节点则直连；`required` 不回退直连。请求只检查 URL 格式，不执行额外的 DNS 预检。搜索保持来源顺序、别名扩搜和响应预算；显式凭据仍受允许目录限制。
 
-授权保留 legacy/vault 响应、共享浏览器互斥与取消。X/EH 通过 Chromium CDP 导出 Cookie；Pixiv 的 PKCE 和授权码交换由 Go 完成，缓存可由 gallery-dl 读取。取消后的迟到结果不会写回凭据；重置浏览器资料保留已导出的凭据。授权代理独立于任务代理池，返回值隐藏密码与 Token。
+授权保留 legacy/vault 响应、共享浏览器互斥与取消。X/EH 通过 Chromium CDP 或 Firefox WebDriver BiDi 导出 Cookie；Pixiv 的 PKCE 和授权码交换由 Go 完成，缓存可由 gallery-dl 读取。取消后的迟到结果不会写回凭据；重置浏览器资料保留已导出的凭据。授权代理独立于任务代理池，返回值隐藏密码与 Token。
+
+自动检测保留 Chrome、Chromium、Edge 的原有优先级，之后尝试 `firefox`、`firefox-esr`。同时安装多个浏览器时，可在现有 `auth.chrome_executable` 配置项指定 Firefox 的可执行路径（如 `/usr/bin/firefox`）。Firefox 需支持 WebDriver BiDi，无需安装 geckodriver；登录使用项目专属资料，不读取个人 Firefox 配置。历史 API 标识 `project_chrome` 保持兼容，实际浏览器名称见 `GET /api/v1/auth/browser`。
 
 `gallery.migrate_default_auth` 默认开启，只尝试导入默认 gallery-dl 缓存中的 Pixiv 数据，不覆盖有效托管 Token；损坏的可选缓存不会阻止启动。隔离测试设置为 `false`。
 

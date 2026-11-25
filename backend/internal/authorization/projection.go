@@ -110,7 +110,7 @@ func vaultProfile(row map[string]any) map[string]any {
 func vaultRuntime(row map[string]any) map[string]any {
 	available := row["available"] == true
 	name := text(row["name"])
-	if !available || (name != "Google Chrome" && name != "Chromium" && name != "Microsoft Edge" && name != "Chromium 浏览器") {
+	if !available || (name != "Google Chrome" && name != "Chromium" && name != "Microsoft Edge" && name != "Firefox" && name != "Chromium 浏览器") {
 		name = ""
 	}
 	source := text(row["source"])

@@ -29,6 +29,7 @@ type host struct {
 	port     int
 	endpoint string // guarded by Browser.mu
 	proxy    string
+	firefox  *firefoxSession // non-nil after BiDi session.new succeeds
 	ctx      context.Context
 	cancel   context.CancelFunc
 	done     chan struct{} // closed only after Wait and group cleanup
@@ -100,12 +101,22 @@ func (b *Browser) Ensure(ctx context.Context, executable, proxy string) error {
 	if err != nil {
 		return err
 	}
+	path, name, err := Discover(executable)
+	if err != nil {
+		return err
+	}
 	b.mu.Lock()
 	h := b.host
 	b.mu.Unlock()
-	if h != nil && h.ctx.Err() == nil && h.proxy == proxy {
+	if h != nil && h.ctx.Err() == nil && h.proxy == proxy && h.cmd.Path == path {
 		probeCtx, finish := hostContext(ctx, h, time.Second)
-		endpoint, probeErr := browserEndpoint(probeCtx, h.port)
+		endpoint := h.endpoint
+		var probeErr error
+		if h.firefox != nil {
+			probeErr = h.firefox.request(probeCtx, "session.status", nil, nil)
+		} else {
+			endpoint, probeErr = browserEndpoint(probeCtx, h.port)
+		}
 		finish()
 		if probeErr == nil && ctx.Err() == nil && h.ctx.Err() == nil {
 			b.mu.Lock()
@@ -120,10 +131,6 @@ func (b *Browser) Ensure(ctx context.Context, executable, proxy string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	path, _, err := Discover(executable)
-	if err != nil {
-		return err
-	}
 	if err := prepareProfile(b.profileDir); err != nil {
 		return err
 	}
@@ -133,13 +140,22 @@ func (b *Browser) Ensure(ctx context.Context, executable, proxy string) error {
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
-	args := []string{
-		"--user-data-dir=" + b.profileDir, "--profile-directory=Default",
-		"--remote-debugging-port=" + strconv.Itoa(port), "--remote-debugging-address=127.0.0.1",
-		"--start-maximized", "--no-first-run", "--no-default-browser-check", "--disable-default-apps",
-	}
-	if proxyArg != "" {
-		args = append(args, "--proxy-server="+proxyArg)
+	var args []string
+	if name == "Firefox" {
+		profile := filepath.Join(b.profileDir, "firefox")
+		if err := prepareProfile(profile); err != nil {
+			return err
+		}
+		args = []string{"-no-remote", "-profile", profile, "--remote-debugging-port", strconv.Itoa(port)}
+	} else {
+		args = []string{
+			"--user-data-dir=" + b.profileDir, "--profile-directory=Default",
+			"--remote-debugging-port=" + strconv.Itoa(port), "--remote-debugging-address=127.0.0.1",
+			"--start-maximized", "--no-first-run", "--no-default-browser-check", "--disable-default-apps",
+		}
+		if proxyArg != "" {
+			args = append(args, "--proxy-server="+proxyArg)
+		}
 	}
 	args = append(args, "about:blank")
 	cmd := exec.Command(path, args...)
@@ -165,12 +181,24 @@ func (b *Browser) Ensure(ctx context.Context, executable, proxy string) error {
 	startupCtx, finish := hostContext(ctx, h, startupTimeout)
 	defer finish()
 	for {
-		endpoint, probeErr := browserEndpoint(startupCtx, port)
+		var endpoint string
+		var firefox *firefoxSession
+		var probeErr error
+		if name == "Firefox" {
+			endpoint = "ws://127.0.0.1:" + strconv.Itoa(port) + "/session"
+			firefox, probeErr = startFirefox(startupCtx, h, endpoint, proxyArg)
+		} else {
+			endpoint, probeErr = browserEndpoint(startupCtx, port)
+		}
 		if probeErr == nil && startupCtx.Err() == nil {
 			b.mu.Lock()
 			h.endpoint = endpoint
+			h.firefox = firefox
 			b.mu.Unlock()
 			return nil
+		}
+		if firefox != nil {
+			firefox.close()
 		}
 		if err := pause(startupCtx, 100*time.Millisecond); err != nil {
 			stopErr := b.stopLocked()
@@ -236,6 +264,10 @@ func (b *Browser) stopLocked() error {
 // Give Chromium a chance to flush profile data. Failure never prevents group
 // termination, and this private request is independent of cancelled session work.
 func gracefulClose(h *host) {
+	if h.firefox != nil {
+		h.firefox.close()
+		return // Firefox handles SIGTERM; the cancelled BiDi session cannot close it.
+	}
 	if h.endpoint == "" {
 		return
 	}

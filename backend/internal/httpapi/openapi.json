@@ -158,6 +158,185 @@
         }
       }
     },
+    "/api/v1/datasets/{dataset_id}/workbench/browse": {
+      "post": {
+        "summary": "Browse a collection workbench source",
+        "operationId": "browse_workbench",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchBrowseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchBrowseResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/workbench/collect": {
+      "post": {
+        "summary": "Collect selected items from a workbench snapshot",
+        "operationId": "collect_workbench",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchCollectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchCollectResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/workbench/media/{snapshot_id}/{item_id}": {
+      "get": {
+        "summary": "Serve a local collection workbench preview",
+        "operationId": "preview_workbench",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image preview",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/gif": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/danbooru/media/{token}": {
       "get": {
         "summary": "Serve a bounded local Danbooru preview",
@@ -8909,6 +9088,217 @@
           }
         }
       }
+    },
+    "/api/v1/datasets/{dataset_id}/collect/resolve": {
+      "post": {
+        "summary": "Resolve multi-source collection input (URLs, handles, or keywords)",
+        "operationId": "resolve_collect",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectResolveResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/collect/browse": {
+      "post": {
+        "summary": "Browse paginated items for a resolved collect source",
+        "operationId": "browse_collect",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectBrowseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectBrowseResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/collect/submit": {
+      "post": {
+        "summary": "Submit merged declarative collect ranges across multiple sources",
+        "operationId": "submit_collect",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectSubmitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectSubmitResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/collect/media/{token}": {
+      "get": {
+        "summary": "Serve a signed local media preview proxy image",
+        "operationId": "collect_media",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image preview",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/gif": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -9196,6 +9586,173 @@
           "queued_count",
           "reused_count",
           "skipped_count"
+        ]
+      },
+      "WorkbenchBrowseRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "site": {
+            "type": "string",
+            "enum": [
+              "pixiv",
+              "twitter",
+              "exhentai"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Maximum number of items to return. ExHentai supports at most 500."
+          }
+        },
+        "required": [
+          "site",
+          "url",
+          "limit"
+        ],
+        "if": {
+          "properties": {
+            "site": {
+              "const": "exhentai"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "limit": {
+              "maximum": 500
+            }
+          }
+        }
+      },
+      "WorkbenchItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "preview_url": {
+            "type": "string",
+            "description": "Local preview path, or an empty string when a preview is unavailable."
+          },
+          "media_count": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "preview_url",
+          "media_count"
+        ]
+      },
+      "WorkbenchBrowseResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "snapshot_id": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchItem"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "items",
+          "has_more"
+        ]
+      },
+      "WorkbenchCollectRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "snapshot_id": {
+            "type": "string"
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 500,
+            "uniqueItems": true,
+            "description": "Exact item IDs from this snapshot."
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "ids"
+        ]
+      },
+      "WorkbenchCollectResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "batch_id"
+        ]
+      },
+      "WorkbenchErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {},
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "details",
+              "request_id"
+            ]
+          }
+        },
+        "required": [
+          "error"
         ]
       },
       "AtlasAssetsRequest": {
@@ -10059,10 +10616,16 @@
       "CaptionBatchResult": {
         "properties": {
           "source_id": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "dataset_id": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "title": "Dataset Id"
           },
           "dry_run": {
@@ -10133,10 +10696,16 @@
             "title": "Batch Id"
           },
           "source_id": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "dataset_id": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "title": "Dataset Id"
           },
           "kind": {
@@ -10655,10 +11224,16 @@
             "title": "Batch Id"
           },
           "source_id": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "dataset_id": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "title": "Dataset Id"
           },
           "undone": {
@@ -11160,6 +11735,16 @@
             ],
             "title": "Address Type"
           },
+          "eh_pages": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true,
+            "description": "Explicit page selection for an EH gallery. During planning, page numbers must be within the gallery and the selection must fit the remaining crawl task limit."
+          },
           "extra_args": {
             "items": {
               "type": "string"
@@ -11253,6 +11838,16 @@
               }
             ],
             "title": "Address Type"
+          },
+          "eh_pages": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true,
+            "description": "Requested page numbers in the original order, present when the crawl address has an explicit EH page selection."
           },
           "status": {
             "anyOf": [
@@ -13126,7 +13721,10 @@
       "DatasetExportJobResponse": {
         "properties": {
           "gallery_warning": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Gallery registration or indexing warning after a successful file export."
           },
           "export_id": {
@@ -24752,6 +25350,476 @@
           "response_profile"
         ],
         "title": "VaultStatuses"
+      },
+      "CollectSourceSpec": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "site": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "badge": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "work_id": {
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cover_url": {
+            "type": "string"
+          },
+          "unit_kind": {
+            "type": "string"
+          },
+          "default_mode": {
+            "type": "string"
+          },
+          "default_top_n": {
+            "type": "integer"
+          },
+          "auto_enable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "site",
+          "kind",
+          "label",
+          "unit_kind",
+          "default_mode"
+        ],
+        "title": "CollectSourceSpec"
+      },
+      "CollectSiteStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "site": {
+            "type": "string"
+          },
+          "authorized": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "site",
+          "authorized",
+          "state",
+          "summary"
+        ],
+        "title": "CollectSiteStatus"
+      },
+      "CollectResolveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "type": "string"
+          },
+          "sites": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "CollectResolveRequest"
+      },
+      "CollectResolveResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resolved_mode": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollectSourceSpec"
+            }
+          },
+          "site_statuses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollectSiteStatus"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "resolved_mode",
+          "sources",
+          "site_statuses",
+          "warnings"
+        ],
+        "title": "CollectResolveResponse"
+      },
+      "CollectBrowseRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/CollectSourceSpec"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "CollectBrowseRequest"
+      },
+      "CollectBrowseItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "preview_url": {
+            "type": "string"
+          },
+          "sample_url": {
+            "type": "string"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "file_ext": {
+            "type": "string"
+          },
+          "file_size": {
+            "type": "integer"
+          },
+          "rating": {
+            "type": "string"
+          },
+          "score": {
+            "type": "integer"
+          },
+          "media_count": {
+            "type": "integer"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "downloadable": {
+            "type": "boolean"
+          },
+          "unavailable_reason": {
+            "type": "string"
+          },
+          "local_state": {
+            "type": "string"
+          },
+          "local_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tags": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "media_count",
+          "url",
+          "downloadable",
+          "local_state"
+        ],
+        "title": "CollectBrowseItem"
+      },
+      "CollectBrowseResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/CollectSourceSpec"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollectBrowseItem"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "source",
+          "items",
+          "next_cursor",
+          "warnings"
+        ],
+        "title": "CollectBrowseResponse"
+      },
+      "CollectSubmitItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "file_ext": {
+            "type": "string"
+          },
+          "media_count": {
+            "type": "integer"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "local_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "url"
+        ],
+        "title": "CollectSubmitItem"
+      },
+      "CollectSubmitRange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "top_n": {
+            "type": "integer"
+          },
+          "page_start": {
+            "type": "integer"
+          },
+          "page_end": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollectSubmitItem"
+            }
+          },
+          "excluded_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "excluded_pages": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "extra_pages": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "CollectSubmitRange"
+      },
+      "CollectSubmitSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/CollectSourceSpec"
+          },
+          "range": {
+            "$ref": "#/components/schemas/CollectSubmitRange"
+          }
+        },
+        "required": [
+          "source",
+          "range"
+        ],
+        "title": "CollectSubmitSource"
+      },
+      "CollectSubmitRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollectSubmitSource"
+            }
+          }
+        },
+        "required": [
+          "sources"
+        ],
+        "title": "CollectSubmitRequest"
+      },
+      "CollectSubmitResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queued_sources": {
+            "type": "integer"
+          },
+          "queued_count": {
+            "type": "integer"
+          },
+          "reused_count": {
+            "type": "integer"
+          },
+          "skipped_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "batch_id",
+          "queued_sources",
+          "queued_count",
+          "reused_count",
+          "skipped_count"
+        ],
+        "title": "CollectSubmitResponse"
       }
     }
   }

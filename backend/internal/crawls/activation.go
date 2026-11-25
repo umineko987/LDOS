@@ -3,6 +3,7 @@ package crawls
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"ldos/backend/internal/discovery"
+	"ldos/backend/internal/discoverydata"
 	"ldos/backend/internal/redaction"
 	"ldos/backend/internal/scheduler"
 	"ldos/backend/internal/store"
@@ -317,10 +319,46 @@ func (s *Service) probePolicy(ctx context.Context, address map[string]any, polic
 func (s *Service) planAddress(ctx context.Context, batch, address map[string]any, policy scheduler.Policy, maximum int) ([]Unit, int, error) {
 	site := str(address["site"])
 	mode := str(address["proxy_mode"])
-	candidates := []map[string]any{}
+	target := str(address["url"])
+	cookies := str(address["cookies_file"])
+	if site == "exhentai" {
+		var pages []int
+		if raw, exists := address["download_options"]; exists {
+			options, ok := raw.(map[string]any)
+			if !ok {
+				return nil, 0, invalid("EH download_options 格式无效")
+			}
+			if selected, exists := options["eh_pages"]; exists {
+				if err := json.Unmarshal([]byte(jsonText(selected)), &pages); err != nil {
+					return nil, 0, invalid("eh_pages 必须是页码数组")
+				}
+				if err := validateEHPages(pages); err != nil {
+					return nil, 0, err
+				}
+				sort.Ints(pages)
+			}
+		}
+		units, _, err := s.planEHPages(ctx, target, policy, mode, cookies, maximum, pages)
+		return units, 0, err
+	}
 	sourceKeys := map[string]bool{}
 	if site == "pixiv" || site == "twitter" {
-		rows, err := s.deps.Store.QueryRows(ctx, `SELECT DISTINCT ctsk.source_key FROM crawl_task_source_keys ctsk JOIN tasks t ON t.id=ctsk.task_id JOIN crawl_address_tasks cat ON cat.task_id=t.id JOIN crawl_addresses ca ON ca.id=cat.address_id WHERE ca.batch_id=? AND t.site='danbooru' AND t.status='succeeded' AND ctsk.source_key LIKE ?`, batch["id"], site+":%")
+		rows, err := s.deps.Store.QueryRows(ctx, `SELECT DISTINCT ctsk.source_key
+			FROM crawl_task_source_keys ctsk
+			JOIN tasks t ON t.id=ctsk.task_id
+			JOIN crawl_address_tasks cat ON cat.task_id=t.id
+			JOIN crawl_addresses ca ON ca.id=cat.address_id
+			WHERE t.status='succeeded' AND ctsk.source_key LIKE ? AND (
+				(ca.batch_id=? AND t.site='danbooru')
+				OR EXISTS (
+					SELECT 1
+					FROM dataset_crawls cur
+					JOIN dataset_crawls hist ON hist.dataset_id=cur.dataset_id
+					JOIN gallery_sources gs ON gs.batch_id=hist.batch_id AND gs.availability='available'
+					JOIN dataset_roots dr ON dr.dataset_id=cur.dataset_id AND dr.source_id=gs.id
+					WHERE cur.batch_id=? AND hist.batch_id=ca.batch_id
+				)
+			)`, site+":%", batch["id"], batch["id"])
 		if err != nil {
 			return nil, 0, err
 		}
@@ -328,21 +366,60 @@ func (s *Service) planAddress(ctx context.Context, batch, address map[string]any
 			sourceKeys[str(r["source_key"])] = true
 		}
 	}
-	if site == "exhentai" {
-		candidates = append(candidates, map[string]any{"id": address["id"], "site": site, "kind": "gallery", "url": address["url"]})
-	} else {
-		result, err := s.deps.Discovery.Discover(ctx, discovery.Request{Site: site, URL: str(address["url"]), Limit: maximum + len(sourceKeys) + 1, Policy: policy, ProxyMode: mode, CredentialsRef: str(address["credentials_ref"]), CookiesFile: str(address["cookies_file"]), ConfigFile: str(address["config_file"]), ExtraArgs: stringsOf(address["discovery_args"]), TimeoutSeconds: number(address["timeout_seconds"])})
+	var itemLimit int
+	excludedSet := map[string]bool{}
+	if raw, exists := address["download_options"]; exists {
+		if options, ok := raw.(map[string]any); ok {
+			if n := integer(options["item_limit"]); n > 0 {
+				itemLimit = n
+			}
+			for _, eid := range stringsOf(options["excluded_ids"]) {
+				if eid = strings.TrimSpace(eid); eid != "" {
+					excludedSet[eid] = true
+				}
+			}
+		}
+	}
+	exactWork := str(address["address_type"]) == "workbench_work" && (site == "pixiv" || site == "twitter")
+	discoveryArgs := stringsOf(address["discovery_args"])
+	if exactWork {
+		filter, err := discoverydata.ExactWorkPostFilter(site, target)
+		if err != nil {
+			return nil, 0, invalid(err.Error())
+		}
+		discoveryArgs = append(discoveryArgs, "--post-filter", filter, "--child-filter", "False")
+	}
+	discoverLimit := maximum + len(sourceKeys) + 1
+	if !exactWork && itemLimit > 0 {
+		discoverLimit = min(maximum, itemLimit)
+	}
+	result, err := s.deps.Discovery.Discover(ctx, discovery.Request{Site: site, URL: target, Limit: discoverLimit, Policy: policy, ProxyMode: mode, CredentialsRef: str(address["credentials_ref"]), CookiesFile: cookies, ConfigFile: str(address["config_file"]), ExtraArgs: discoveryArgs, TimeoutSeconds: number(address["timeout_seconds"])})
+	if err != nil {
+		return nil, 0, err
+	}
+	candidates := rowsOf(result["candidates"])
+	if exactWork {
+		candidates, err = exactWorkCandidates(site, target, candidates)
 		if err != nil {
 			return nil, 0, err
 		}
-		candidates = rowsOf(result["candidates"])
-		if len(candidates) == 0 {
-			return nil, 0, &Error{Code: "address_empty", Message: fmt.Sprintf("该地址没有发现作品: %v", address["url"])}
-		}
+	} else if itemLimit > 0 && len(candidates) > itemLimit {
+		candidates = candidates[:itemLimit]
+	}
+	if len(candidates) == 0 {
+		return nil, 0, &Error{Code: "address_empty", Message: fmt.Sprintf("该地址没有发现作品: %s", target)}
 	}
 	skipped := 0
 	kept := make([]map[string]any, 0, len(candidates))
 	for _, item := range candidates {
+		if excludedSet[str(item["id"])] {
+			count, err := mediaCount(item["media_count"])
+			if err != nil {
+				count = 1
+			}
+			skipped += count
+			continue
+		}
 		key := CandidateSourceKey(site, item["id"], candidateURL(item))
 		if key != nil && sourceKeys[*key] {
 			count, err := mediaCount(item["media_count"])
@@ -354,8 +431,50 @@ func (s *Service) planAddress(ctx context.Context, batch, address map[string]any
 			kept = append(kept, item)
 		}
 	}
-	units, _, err := s.PlanMedia(ctx, kept, policy, mode, str(address["cookies_file"]), maximum)
+	units, _, err := s.PlanMedia(ctx, kept, policy, mode, cookies, maximum)
 	return units, skipped, err
+}
+
+func exactWorkCandidates(site, target string, candidates []map[string]any) ([]map[string]any, error) {
+	filter, err := discoverydata.ExactWorkPostFilter(site, target)
+	if err != nil {
+		return nil, invalid(err.Error())
+	}
+	work := SourceKeyFromURL(target)
+	if work == nil || !strings.HasPrefix(*work, site+":") {
+		return nil, invalid("所选作品地址必须包含有效的作品 ID")
+	}
+	id := strings.TrimPrefix(*work, site+":")
+	for _, item := range candidates {
+		canonical, err := discoverydata.CanonicalWorkAddress(site, str(item["url"]))
+		key := SourceKeyFromURL(canonical)
+		if err != nil || str(item["site"]) != site || str(item["id"]) != id || key == nil || *key != *work {
+			continue
+		}
+		item["download_url"] = canonical
+		if site == "twitter" {
+			var media []string
+			seen := map[string]bool{}
+			for _, source := range stringsOf(item["media_urls"]) {
+				if directTwitterMedia(site, source) && !seen[source] {
+					media = append(media, source)
+					seen[source] = true
+				}
+			}
+			item["media_urls"] = media
+			count, err := mediaCount(item["media_count"])
+			if err != nil {
+				return nil, err
+			}
+			if len(media) >= count {
+				return []map[string]any{item}, nil
+			}
+		}
+		// Apply the work ID to both posts and files, and block queued children.
+		item["extra_args"] = []string{"--post-filter", filter, "--filter", filter, "--child-filter", "False"}
+		return []map[string]any{item}, nil
+	}
+	return nil, &Error{Code: "selected_work_not_found", Message: "提取器未返回所选作品: " + target}
 }
 func (s *Service) preDeduplicated(ctx context.Context, addressID string, skipped int) (bool, error) {
 	finished := false

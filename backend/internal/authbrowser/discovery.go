@@ -16,6 +16,8 @@ func BrowserName(path string) string {
 	normalized := strings.ToLower(strings.ReplaceAll(path, "\\", "/"))
 	name := filepath.Base(normalized)
 	switch name {
+	case "firefox", "firefox-esr", "firefox-bin":
+		return "Firefox"
 	case "msedge", "microsoft-edge", "microsoft-edge-stable", "microsoft edge":
 		return "Microsoft Edge"
 	case "chromium", "chromium-browser":
@@ -64,6 +66,13 @@ func Discover(explicit string) (path, name string, err error) {
 		for _, candidate := range []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge", "microsoft-edge-stable"} {
 			candidates = append(candidates, filepath.Join("/usr/bin", candidate))
 		}
+		// Keep the existing Chromium-family candidates ahead of Firefox.
+		for _, name := range []string{"firefox", "firefox-esr"} {
+			if path, err := exec.LookPath(name); err == nil {
+				candidates = append(candidates, path)
+			}
+			candidates = append(candidates, filepath.Join("/usr/bin", name))
+		}
 	}
 	for _, candidate := range candidates {
 		resolved, e := filepath.EvalSymlinks(candidate)
@@ -76,6 +85,11 @@ func Discover(explicit string) (path, name string, err error) {
 		}
 		info, e := os.Stat(resolved)
 		if e == nil && info.Mode().IsRegular() && info.Mode().Perm()&0111 != 0 {
+			// A distribution launcher may dispatch on argv[0] (e.g. a snap symlink).
+			if BrowserName(candidate) == "Firefox" && BrowserName(resolved) != "Firefox" {
+				path, e := filepath.Abs(candidate)
+				return path, "Firefox", e
+			}
 			return resolved, BrowserName(resolved), nil
 		}
 	}

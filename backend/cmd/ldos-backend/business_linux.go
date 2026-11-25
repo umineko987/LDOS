@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"ldos/backend/internal/activity"
+	"ldos/backend/internal/collect"
 	"ldos/backend/internal/config"
 	"ldos/backend/internal/crawls"
 	"ldos/backend/internal/credentials"
@@ -29,6 +30,7 @@ import (
 	"ldos/backend/internal/search"
 	"ldos/backend/internal/store"
 	"ldos/backend/internal/tasks"
+	"ldos/backend/internal/workbench"
 )
 
 type liveSettings struct {
@@ -51,6 +53,8 @@ type businessRuntime struct {
 	crawls    *crawls.Service
 	discovery *discovery.Service
 	danbooru  *danboorucollect.Service
+	workbench *workbench.Service
+	collect   *collect.Service
 	validator discovery.Validator
 }
 
@@ -79,6 +83,8 @@ func runtimePolicy(ctx context.Context, settings config.Settings, db *store.Stor
 type businessOptions struct {
 	ReviewRunner func(context.Context, reviews.WorkerInput) (reviews.Manifest, string, error)
 	Downloads    *downloads.Store
+	Search       *search.Service
+	AuthStatus   func(context.Context, string) (map[string]any, error)
 }
 
 func newBusinessRuntime(parent context.Context, settings *liveSettings, db *store.Store, jobs *activity.Registry, events *activity.Bus, task *taskRuntime, pool *proxypool.Pool, vault *credentials.Store, options businessOptions) (_ *businessRuntime, err error) {
@@ -177,6 +183,7 @@ func newBusinessRuntime(parent context.Context, settings *liveSettings, db *stor
 	if err != nil {
 		return nil, err
 	}
+	b.workbench = b.newWorkbench(vault)
 	b.danbooru = danboorucollect.New(danboorucollect.Dependencies{
 		Store: db, Datasets: b.datasets, Transport: b.discovery.Danbooru.Transport, Browse: b.discovery.Danbooru.Browse,
 		Request: func(ctx context.Context) (discovery.Request, error) {
@@ -198,6 +205,9 @@ func newBusinessRuntime(parent context.Context, settings *liveSettings, db *stor
 			return map[string]any{"id": link["batch_id"]}, nil
 		},
 	})
+	if b.collect, err = b.newCollect(vault, task.runner, options.Search, options.AuthStatus); err != nil {
+		return nil, err
+	}
 	b.gallery.AddScanListener(func(id string) {
 		if err := b.datasets.OnScanCommitted(ctx, id); err != nil && ctx.Err() == nil {
 			log.Printf("dataset scan reconciliation: %v", err)
@@ -268,6 +278,8 @@ func (b *businessRuntime) register(mux *http.ServeMux) {
 	b.datasets.Register(mux)
 	mux.Handle("/api/v1/danbooru/", b.danbooru.Handler())
 	mux.Handle("POST /api/v1/datasets/{dataset_id}/danbooru/collect", b.danbooru.Handler())
+	b.workbench.Register(mux)
+	b.collect.Register(mux)
 	b.pipeline.register(mux)
 }
 
