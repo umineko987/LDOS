@@ -59,13 +59,14 @@ function timelineReference(site: "pixiv" | "twitter", url: URL): string | null {
   }
   if (site === "twitter" && /^(?:(?:www|mobile)\.)?(?:twitter|x)\.com$/.test(url.hostname)) {
     const handle = /^\/([A-Za-z0-9_]{1,15})(?:\/media)?\/?$/.exec(url.pathname)?.[1];
-    return handle ? `https://x.com/${handle.toLowerCase()}/media` : null;
+    if (!handle || /^(?:i|home|search|intent|share|hashtag|explore|settings|login|logout|signup|account|compose|messages|notifications|bookmarks|communities|tos|privacy|about|help|download|oauth|jobs|premium)$/i.test(handle)) return null;
+    return `https://x.com/${handle.toLowerCase()}/media`;
   }
   return null;
 }
 
 /** Discovery results without a supported preview remain available for address crawling. */
-export function workbenchAddress(candidate: DiscoveryCandidate): WorkbenchAddress | null {
+export function workbenchAddress(candidate: Pick<DiscoveryCandidate, "site" | "url" | "addressType">): WorkbenchAddress | null {
   const url = httpUrl(candidate.url);
   if (!url || url.username || url.password || url.port) return null;
   const site = candidate.site;

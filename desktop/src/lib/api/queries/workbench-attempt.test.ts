@@ -36,6 +36,7 @@ describe("workbench submission and navigation", () => {
     const profile = "https://x.com/artist/media";
     expect(workbenchCheckpointSource("twitter", "search", "", "http://name:secret@mobile.twitter.com/ARTIST?share=token#media")).toBe(profile);
     expect(workbenchCheckpointSource("twitter", "search", "", "https://x.com/artist/media/")).toBe(profile);
+    expect(workbenchCheckpointSource("twitter", "search", "", "https://x.com/search?q=landscape")).toBeNull();
     const artist = "https://www.pixiv.net/users/12/artworks";
     expect(workbenchCheckpointSource("pixiv", "search", "", "https://pixiv.net/en/users/12?ref=token#artworks")).toBe(artist);
     expect(workbenchCheckpointSource("pixiv", "search", "", artist)).toBe(artist);
