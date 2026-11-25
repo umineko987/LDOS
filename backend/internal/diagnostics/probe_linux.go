@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+	"ldos/backend/internal/authbrowser"
 	"ldos/backend/internal/config"
 )
 
@@ -143,13 +144,8 @@ func privateFiles(label string, paths ...string) Component {
 	return result
 }
 func chrome(settings config.Settings) Component {
-	if executable(settings.Auth.ChromeExecutable) {
-		return component("ok", "检测到 Chrome/Chromium；桌面授权仍需要图形会话", false)
+	if _, _, err := authbrowser.Discover(settings.Auth.ChromeExecutable); err == nil {
+		return component("ok", "检测到授权浏览器；桌面授权仍需要图形会话", false)
 	}
-	for _, name := range []string{"chromium", "chromium-browser", "google-chrome", "google-chrome-stable"} {
-		if path, err := exec.LookPath(name); err == nil && executable(path) {
-			return component("ok", "检测到 Chrome/Chromium；桌面授权仍需要图形会话", false)
-		}
-	}
-	return component("optional_missing", "未检测到 Chrome/Chromium；仅影响桌面授权", false)
+	return component("optional_missing", "未检测到可用的授权浏览器；仅影响桌面授权", false)
 }

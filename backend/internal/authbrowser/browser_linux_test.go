@@ -53,7 +53,8 @@ func fakeBrowserProcess(mode string) {
 	args, _ := json.Marshal(os.Args[1:])
 	os.WriteFile(filepath.Join(profile, "helper-args.json"), args, 0600)
 	if mode == "stalled" {
-		select {}
+		time.Sleep(time.Hour) // Stay alive until signalled, including in pure-Go builds.
+		return
 	}
 	if mode == "stubborn" {
 		signal.Ignore(syscall.SIGTERM)

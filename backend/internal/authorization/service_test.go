@@ -334,6 +334,20 @@ func TestTimeoutAndOpaqueBrowserFailures(t *testing.T) {
 		}
 	}
 }
+func TestSelectFirefoxForAuthorization(t *testing.T) {
+	s, _ := fixture(t, &fakeBrowser{})
+	path := filepath.Join(t.TempDir(), "firefox-esr")
+	if err := os.WriteFile(path, nil, 0700); err != nil {
+		t.Fatal(err)
+	}
+	status, err := s.SetBrowser(context.Background(), path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := vaultRuntime(status); v["available"] != true || v["name"] != "Firefox" || v["source"] != "configured" {
+		t.Fatalf("selected Firefox not visible in vault: %v", v)
+	}
+}
 func TestAuthorizationHTTPContract(t *testing.T) {
 	s, _ := fixture(t, &fakeBrowser{})
 	handler := s.Handler()

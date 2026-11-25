@@ -42,7 +42,7 @@ export interface PlatformDependencies {
 export interface PlatformCapabilities {
   /** 本机目录选择（图库导入/重关联/导出目标）。 */
   readonly selectDirectory: boolean;
-  /** 选择 Chrome、Chromium 或 Edge 可执行文件。 */
+  /** 选择 Chrome、Chromium、Edge 或 Firefox 可执行文件。 */
   readonly selectBrowserExecutable: boolean;
   /** 在系统文件管理器中定位结果。 */
   readonly revealInFileManager: boolean;

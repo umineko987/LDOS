@@ -190,7 +190,7 @@ func (s *Service) BrowserStatus() map[string]any {
 	configured := strings.TrimSpace(executable) != ""
 	_, name, err := authbrowser.Discover(executable)
 	if err != nil {
-		source, message := "none", "未检测到 Chrome、Chromium 或 Microsoft Edge"
+		source, message := "none", "未检测到 Chrome、Chromium、Microsoft Edge 或 Firefox"
 		if configured {
 			source, message = "configured", "已选择的浏览器不可用，请重新选择"
 		}
@@ -210,7 +210,7 @@ func (s *Service) SetBrowser(ctx context.Context, value string, clear bool) (map
 	if !clear {
 		value = strings.TrimSpace(value)
 		if authbrowser.BrowserName(value) == "" {
-			return nil, problem("invalid_browser_executable", "请选择 Chrome、Chromium 或 Microsoft Edge 的可执行文件")
+			return nil, problem("invalid_browser_executable", "请选择 Chrome、Chromium、Microsoft Edge 或 Firefox 的可执行文件")
 		}
 		var err error
 		path, _, err = authbrowser.Discover(value)

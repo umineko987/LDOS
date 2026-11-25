@@ -35,7 +35,7 @@ func selectPath(ctx context.Context, directory bool) (*string, error) {
 	}
 	title := "选择目录"
 	if !directory {
-		title = "选择 Chrome、Chromium 或 Microsoft Edge"
+		title = "选择 Chrome、Chromium、Microsoft Edge 或 Firefox"
 	}
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: mygo.CallerWindow(ctx), Title: title, Directory: directory})
 	if err != nil {

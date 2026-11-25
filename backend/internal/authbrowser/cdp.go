@@ -71,6 +71,9 @@ func validEndpoint(raw string, port int, kind string) bool {
 	if err != nil || p != port || port < 1 || port > 65535 {
 		return false
 	}
+	if kind == "bidi" {
+		return u.Path == "/session"
+	}
 	prefix := "/devtools/" + kind + "/"
 	if !strings.HasPrefix(u.Path, prefix) {
 		return false
@@ -294,6 +297,9 @@ func (b *Browser) request(ctx context.Context, method string, params, result any
 }
 
 func (b *Browser) Open(ctx context.Context, loginURL string) (string, error) {
+	if s := b.firefox(); s != nil {
+		return s.open(ctx, loginURL)
+	}
 	var result struct {
 		Target string `json:"targetId"`
 	}
@@ -310,6 +316,9 @@ func (b *Browser) Cookies(ctx context.Context, site string) ([]Cookie, error) {
 	spec, ok := Sites[site]
 	if !ok {
 		return nil, ErrSite
+	}
+	if s := b.firefox(); s != nil {
+		return s.cookies(ctx, spec)
 	}
 	var result struct {
 		Cookies []Cookie `json:"cookies"`
@@ -330,6 +339,9 @@ func (b *Browser) LoginReady(ctx context.Context, site, target string) (bool, er
 	if site != "twitter" {
 		return true, nil
 	}
+	if s := b.firefox(); s != nil {
+		return s.loginReady(ctx, target)
+	}
 	var result struct {
 		Targets []struct {
 			ID   string `json:"targetId"`
@@ -341,28 +353,32 @@ func (b *Browser) LoginReady(ctx context.Context, site, target string) (bool, er
 		return false, err
 	}
 	for _, page := range result.Targets {
-		if page.ID != target || page.Type != "page" {
-			continue
-		}
-		u, err := url.Parse(page.URL)
-		if err != nil || u.User != nil || (u.Scheme != "https" && u.Scheme != "http") {
-			continue
-		}
-		host := strings.ToLower(u.Hostname())
-		if host != "x.com" && host != "www.x.com" && host != "twitter.com" {
-			continue
-		}
-		path := strings.ToLower(u.Path)
-		if !strings.HasPrefix(path, "/i/flow/login") && !strings.HasPrefix(path, "/account/access") {
+		if page.ID == target && page.Type == "page" && twitterReadyURL(page.URL) {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
+func twitterReadyURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil || (u.Scheme != "https" && u.Scheme != "http") {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "x.com" && host != "www.x.com" && host != "twitter.com" {
+		return false
+	}
+	path := strings.ToLower(u.Path)
+	return !strings.HasPrefix(path, "/i/flow/login") && !strings.HasPrefix(path, "/account/access")
+}
+
 func (b *Browser) CloseTarget(ctx context.Context, target string) error {
 	if target == "" {
 		return nil
+	}
+	if s := b.firefox(); s != nil {
+		return s.request(ctx, "browsingContext.close", map[string]string{"context": target}, nil)
 	}
 	return b.request(ctx, "Target.closeTarget", map[string]string{"targetId": target}, nil, 2*time.Second)
 }
@@ -396,6 +412,9 @@ func pixivCallback(raw string) bool {
 func (b *Browser) CapturePixiv(ctx context.Context, target, loginURL string) (string, error) {
 	if _, ok := pixivURL(loginURL, "/web/v1/login"); !ok {
 		return "", ErrLoginURL
+	}
+	if s := b.firefox(); s != nil {
+		return s.capturePixiv(ctx, target, loginURL)
 	}
 	ctx, cancel, _, port, err := b.connection(ctx, 600*time.Second)
 	if err != nil {
