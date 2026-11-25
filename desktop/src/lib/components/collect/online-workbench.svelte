@@ -1,5 +1,7 @@
 <script lang="ts">
+  import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down";
+  import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import ImagesIcon from "@lucide/svelte/icons/images";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import SearchIcon from "@lucide/svelte/icons/search";
@@ -26,6 +28,7 @@
 
   import DanbooruFilters from "./danbooru-filters.svelte";
   import WorkbenchCard from "./workbench-card.svelte";
+  import { resolveWorkbenchCreator, resolveWorkbenchSearch, type SearchResolution } from "./workbench-search.ts";
   import { emptyScope, isNewestFirst, isStablePrefix, parsePageRange, projectScope, selectLoadedScope, toggleScopeItem, type CollectionScope, type ScopeItem } from "./workbench-selection.ts";
 
   let { datasetId, open = $bindable(false), address, ondiscovery, onlegacy, onjobs, dialogs }: {
@@ -40,9 +43,15 @@
 
   type Item = ScopeItem & { title: string; author: string; preview: string; sample: string; meta: string; status: string };
   type RemotePage = { response: WorkbenchPreview; requested: number };
+  type BrowseSource = Exclude<WorkbenchAddress, { site: "danbooru" }> | { site: "danbooru"; kind: DanbooruKind; query: string; reference: string };
+  type GalleryChoice = Extract<SearchResolution, { kind: "galleries" }>["choices"][number];
+  type SearchRequest = { site: WorkbenchSource; input: string };
+  type CreatorRequest = { site: "pixiv" | "twitter"; input: string };
+  type CreatorOrigin = { request: CreatorRequest; source: BrowseSource; page: RemotePage; scrollTop: number };
   const uid = $props.id();
   const api = useApi();
   const client = useQueryClient();
+  const resolvingSearch = createDanbooruRequestScope();
   const browsing = createDanbooruRequestScope();
   const collecting = createDanbooruRequestScope();
   const sources = $derived([
@@ -59,9 +68,21 @@
   ]);
 
   let site = $state<WorkbenchSource>("danbooru");
-  let kind = $state<DanbooruKind>("search");
-  let draft = $state<DanbooruQueryDraft>(clearDanbooruQuery());
-  let location = $state("");
+  let input = $state("");
+  let searchInput = $state<HTMLInputElement | null>(null);
+  let source = $state.raw<BrowseSource | null>(null);
+  let resolving = $state(false);
+  let searchError = $state<{ message: string; request: SearchRequest; retryable: boolean } | null>(null);
+  let galleries = $state.raw<GalleryChoice[] | null>(null);
+  let chosenGallery = $state.raw<GalleryChoice | null>(null);
+  let backButton = $state<HTMLButtonElement | null>(null);
+  let keywordSearch = $state.raw<CreatorRequest | null>(null);
+  let creatorOrigin = $state.raw<CreatorOrigin | null>(null);
+  let creatorButton = $state<HTMLButtonElement | null>(null);
+  let optionsOpen = $state(false);
+  let advancedKind = $state<DanbooruKind>("search");
+  let advancedDraft = $state<DanbooruQueryDraft>(clearDanbooruQuery());
+  let advancedReference = $state("");
   let posts = $state.raw<DanbooruPost[]>([]);
   let cursor = $state("");
   let warnings = $state.raw<string[]>([]);
@@ -87,9 +108,17 @@
   let attempt = $state.raw<WorkbenchAttempt | null>(null);
   let checkpoint = $state<string | null>(null);
 
-  const query = $derived(site === "danbooru" && kind === "search" ? danbooruQueryText(draft) : "");
-  const sourceKey = $derived(workbenchCheckpointSource(site, kind, query, location));
-  const canBrowse = $derived(site === "danbooru" && (kind === "search" || kind === "favorites") || location.trim().length > 0);
+  const kind = $derived(source?.site === "danbooru" ? source.kind : "search");
+  const query = $derived(source?.site === "danbooru" ? source.query : "");
+  const sourceKey = $derived(source && workbenchCheckpointSource(source.site, kind, query, source.site === "danbooru" ? source.reference : source.url));
+  const searchPlaceholder = $derived({
+    danbooru: m.collect_workbench_search_danbooru(),
+    pixiv: m.collect_workbench_search_pixiv(),
+    twitter: m.collect_workbench_search_x(),
+    exhentai: m.collect_workbench_search_eh(),
+  }[site]);
+  const searchExample = $derived({ danbooru: "scenery rating:g", pixiv: "初音ミク", twitter: "watercolor", exhentai: "landscape" }[site]);
+  const invalidInput = $derived(searchError?.retryable === false && searchError.request.input === input.trim());
   const canEdit = $derived(!saving && !attempt && !replacement);
   const items = $derived<Item[]>(site === "danbooru" ? posts.map((post) => ({
     id: post.id,
@@ -107,9 +136,9 @@
     author: item.author ?? "",
     preview: danbooruMediaUrl(api, item.preview_url),
     sample: "",
-    collectable: true,
-    meta: item.page != null ? m.collect_workbench_page({ page: item.page }) : m.collect_crawl_media({ count: item.media_count }),
-    status: "",
+    collectable: site === "exhentai" || item.media_count > 0,
+    meta: item.page != null ? m.collect_workbench_page({ page: item.page }) : item.media_count > 0 ? m.collect_crawl_media({ count: item.media_count }) : "",
+    status: site !== "exhentai" && item.media_count === 0 ? m.danbooru_unavailable() : "",
   })));
   const projection = $derived(projectScope(items, scope));
   const selected = $derived(new Set(projection.ids));
@@ -120,8 +149,11 @@
   const canLoadMore = $derived(hasMore && !expired && (site === "danbooru" || (remote?.requested ?? 0) < browseLimit));
   const focused = $derived(items.find((item) => item.id === focusedId));
   const detailImage = $derived(focused?.sample || focused?.preview || "");
-  const canSubmit = $derived(!saving && !searching && !expired && !replacement && !rangeError && projection.ready && projection.ids.length > 0 && projection.ids.length <= maxSelection);
+  const canSubmit = $derived(!saving && !resolving && !searching && !expired && !replacement && !rangeError && projection.ready && projection.ids.length > 0 && projection.ids.length <= maxSelection);
   const newestFirst = $derived(isNewestFirst(items, site, kind, query));
+  const creatorLookup = $derived(!creatorOrigin && keywordSearch && source && remote && canEdit && !searching && !expired && !browseError && !selected.size && scope.kind === "manual"
+    ? { request: keywordSearch, source, page: remote } : null);
+  const creatorAction = $derived(site === "pixiv" ? m.collect_workbench_find_artist() : m.collect_workbench_find_account());
 
   function clearSnapshot() {
     posts = [];
@@ -141,59 +173,172 @@
     attempt = null;
   }
 
-  function clearSource() {
+  function clearBrowse() {
     browsing.cancel();
     searching = false;
     browseError = "";
     retryBrowse = null;
+    source = null;
     startPage = "1";
     endPage = "";
     clearSnapshot();
+    if (gallery) gallery.scrollTop = 0;
+  }
+
+  function cancelResolution() {
+    resolvingSearch.cancel();
+    resolving = false;
+    searchError = null;
+  }
+
+  function clearSearch() {
+    cancelResolution();
+    clearBrowse();
+    galleries = null;
+    chosenGallery = null;
+    keywordSearch = null;
+    creatorOrigin = null;
   }
 
   $effect.pre(() => {
     const next = address;
     const id = datasetId;
     if (open) untrack(() => {
-      clearSource();
+      clearSearch();
       site = next?.site ?? "danbooru";
-      kind = "search";
-      draft = next?.site === "danbooru" ? { mode: "raw", text: next.query } : clearDanbooruQuery();
-      location = next && next.site !== "danbooru" ? next.url : "";
+      input = next ? next.site === "danbooru" ? next.query : next.url : "";
+      optionsOpen = false;
+      advancedKind = "search";
+      advancedDraft = clearDanbooruQuery();
+      advancedReference = "";
       saving = false;
-      if (next) void browse(false, undefined, id);
+      if (next) browseAddress(next, id);
     });
-    return () => { browsing.cancel(); collecting.cancel(); };
+    return () => { resolvingSearch.cancel(); browsing.cancel(); collecting.cancel(); };
   });
 
   function changeSite(next: WorkbenchSource) {
     if (!canEdit || site === next) return;
-    clearSource();
+    clearSearch();
     site = next;
-    kind = "search";
-    location = "";
+    optionsOpen = false;
   }
 
-  function changeKind(next: DanbooruKind) {
-    if (!canEdit || kind === next) return;
-    clearSource();
-    kind = next;
-    location = "";
+  function browseAddress(next: WorkbenchAddress, id = datasetId) {
+    site = next.site;
+    source = next.site === "danbooru" ? { ...next, kind: "search", reference: "" } : next;
+    void browse(false, undefined, id);
   }
 
-  function changeDraft(next: DanbooruQueryDraft) {
-    if (danbooruQueryText(next) !== query) clearSource();
-    draft = next;
+  function search(submitted: SearchRequest) {
+    if (!canEdit || !submitted.input) return;
+    clearSearch();
+    optionsOpen = false;
+    void resolveSearch(submitted);
   }
 
-  function changeLocation(next: string) {
-    if (next.trim() !== location.trim()) clearSource();
-    location = next;
+  async function resolveSearch(submitted: SearchRequest) {
+    const creator = creatorOrigin?.request;
+    cancelResolution();
+    const request = resolvingSearch.begin();
+    resolving = true;
+    try {
+      const result = creator
+        ? await resolveWorkbenchCreator(api, creator.site, creator.input, request.signal)
+        : await resolveWorkbenchSearch(api, submitted.site, submitted.input, request.signal);
+      if (!request.isCurrent()) return;
+      if (result.kind === "browse") {
+        const { site, input } = submitted;
+        // Search URLs can also be pasted. Offer name lookup only for typed keywords.
+        if (!creator && (site === "pixiv" || site === "twitter") && result.address.site === site
+          && !/^https?:\/\//i.test(input) && new URL(result.address.url).pathname === (site === "pixiv" ? "/search.php" : "/search")) {
+          keywordSearch = { site, input };
+        }
+        browseAddress(result.address);
+      } else if (result.kind === "galleries") {
+        galleries = result.choices;
+        if (result.choices.length === 1) {
+          chosenGallery = result.choices[0];
+          browseAddress(chosenGallery.address);
+        }
+      } else searchError = { message: m.collect_workbench_invalid_link(), request: submitted, retryable: false };
+    } catch (error) {
+      if (request.isCurrent() && !isAbortError(error)) searchError = { message: apiErrorMessage(error), request: submitted, retryable: true };
+    } finally {
+      if (request.isCurrent()) resolving = false;
+    }
   }
 
-  function stopBrowse() {
-    browsing.cancel();
-    searching = false;
+  function useSearchExample() {
+    input = searchExample;
+    searchInput?.focus();
+    search({ site, input });
+  }
+
+  function submitSearch(event: SubmitEvent) {
+    event.preventDefault();
+    search({ site, input: input.trim() });
+  }
+
+  function submitAdvanced(event: SubmitEvent) {
+    event.preventDefault();
+    if (!canEdit) return;
+    const query = advancedKind === "search" ? danbooruQueryText(advancedDraft) : "";
+    const reference = advancedKind === "search" ? "" : advancedReference.trim();
+    clearSearch();
+    source = { site: "danbooru", kind: advancedKind, query, reference };
+    input = query;
+    optionsOpen = false;
+    searchInput?.focus();
+    void browse();
+  }
+
+  async function openGallery(choice: GalleryChoice) {
+    if (!canEdit) return;
+    chosenGallery = choice;
+    if (gallery) gallery.scrollTop = 0;
+    browseAddress(choice.address);
+    await tick();
+    if (chosenGallery === choice) backButton?.focus({ preventScroll: true });
+  }
+
+  async function backToGalleries() {
+    if (!canEdit || !galleries || !chosenGallery) return;
+    const index = galleries.indexOf(chosenGallery);
+    cancelResolution();
+    clearBrowse();
+    chosenGallery = null;
+    await tick();
+    gallery?.querySelector<HTMLButtonElement>(`[data-gallery-index="${index}"]`)?.focus();
+  }
+
+  async function findCreator() {
+    if (!creatorLookup) return;
+    const origin = { ...creatorLookup, scrollTop: gallery?.scrollTop ?? 0 };
+    creatorOrigin = origin;
+    clearBrowse();
+    optionsOpen = false;
+    void resolveSearch(origin.request);
+    await tick();
+    if (creatorOrigin === origin) backButton?.focus({ preventScroll: true });
+  }
+
+  async function backToPictures() {
+    if (!canEdit || !creatorOrigin) return;
+    const origin = creatorOrigin;
+    cancelResolution();
+    clearBrowse();
+    galleries = null;
+    chosenGallery = null;
+    creatorOrigin = null;
+    source = origin.source;
+    remote = origin.page;
+    loaded = true;
+    await tick();
+    if (source === origin.source) {
+      if (gallery) gallery.scrollTop = origin.scrollTop;
+      creatorButton?.focus({ preventScroll: true });
+    }
   }
 
   function loadCheckpoint(key: string | null) {
@@ -206,17 +351,17 @@
   }
 
   async function browse(more = false, limit?: number, id = datasetId) {
-    if (!canBrowse || !canEdit || searching || (more && !canLoadMore)) return;
+    const current = source;
+    if (!current || !canEdit || searching || (more && !canLoadMore)) return;
     const request = browsing.begin();
     const key = sourceKey;
-    const url = location.trim();
     searching = true;
     browseError = "";
     retryBrowse = { more, limit };
     try {
-      if (site === "danbooru") {
+      if (current.site === "danbooru") {
         const page = await browseDanbooru(api, {
-          dataset_id: id, kind, query, reference: url, cursor: more ? cursor : "", limit: WORKBENCH_PAGE_SIZE, count: !more,
+          dataset_id: id, kind: current.kind, query: current.query, reference: current.reference, cursor: more ? cursor : "", limit: WORKBENCH_PAGE_SIZE, count: !more,
         }, request.signal);
         if (!request.isCurrent()) return;
         if (!more) clearSnapshot();
@@ -227,7 +372,7 @@
       } else {
         const previousLimit = remote?.requested ?? 0;
         const requested = limit ?? (more ? Math.min(previousLimit * 2, browseLimit) : WORKBENCH_PAGE_SIZE);
-        const response = await browseWorkbench(api, id, site, url, requested, request.signal);
+        const response = await browseWorkbench(api, id, current.site, current.url, requested, request.signal);
         if (!request.isCurrent()) return;
         if (more && remote && !isStablePrefix(remote.response.items, response.items)) {
           replacement = { response, requested };
@@ -313,7 +458,7 @@
 
   function showCheckpoint() {
     if (!checkpoint) return;
-    const trigger = gallery?.querySelector<HTMLButtonElement>(`[data-workbench-item="${CSS.escape(checkpoint)}"] > button`);
+    const trigger = gallery?.querySelector<HTMLButtonElement>(`[data-workbench-item="${CSS.escape(checkpoint)}"] [data-inspect]`);
     trigger?.focus();
     trigger?.click();
   }
@@ -377,7 +522,7 @@
     if (scope.kind === "interval") return scope.start && scope.end
       ? m.collect_workbench_scope_interval({ start: scope.start, end: scope.end }) : m.collect_workbench_interval_pending();
     if (scope.kind === "pages") return m.collect_workbench_scope_pages({ start: scope.start, end: scope.end });
-    return m.collect_workbench_scope_manual();
+    return "";
   }
 
   useOverlay(() => open, { id: "collect-workbench" });
@@ -386,102 +531,131 @@
 <Dialog.Root bind:open>
   <Dialog.Content class="top-[2dvh] flex h-[96dvh] w-[97vw] flex-col gap-0 overflow-hidden p-0"
     showCloseButton={false} data-testid="collect-workbench" interactOutsideBehavior="ignore"
+    onOpenAutoFocus={(event) => {
+      event.preventDefault();
+      searchInput?.focus();
+    }}
     onEscapeKeydown={(event) => {
       if (focused || saving) event.preventDefault();
       if (focused) closeInspector();
     }}>
-    <Dialog.Header class="relative flex-none gap-1 border-b border-line px-3 py-3 pr-12 sm:px-5 sm:pr-14">
-      <Dialog.Title class="text-lg">{m.collect_workbench_title()}</Dialog.Title>
-      <Dialog.Description class="text-xs">{m.collect_workbench_hint()}</Dialog.Description>
+    <Dialog.Header class="relative flex-none gap-3 border-b border-line px-3 py-3 sm:px-5">
+      <Dialog.Title class="pr-9 text-lg">{m.collect_workbench_title()}</Dialog.Title>
+      <Dialog.Description class="sr-only">{m.collect_workbench_hint()}</Dialog.Description>
       <Dialog.Close>
         {#snippet child({ props })}
           <Button variant="ghost" size="icon-sm" class="absolute top-3 right-3" aria-label={m.common_close()} disabled={saving} {...props}><XIcon /></Button>
         {/snippet}
       </Dialog.Close>
+      <form class="flex max-w-4xl flex-wrap items-center gap-2" onsubmit={submitSearch}>
+        <fieldset disabled={!canEdit} class="min-w-0 max-w-full basis-full min-[44rem]:basis-auto">
+          <legend class="sr-only">{m.collect_workbench_sources()}</legend>
+          <Segmented options={sources} value={site} onchange={changeSite} label={m.collect_workbench_sources()} size="sm" class="h-control max-w-full" />
+        </fieldset>
+        <div class="flex min-w-0 flex-1 gap-2">
+          <Input bind:ref={searchInput} bind:value={input} aria-label={searchPlaceholder} placeholder={searchPlaceholder}
+            aria-invalid={invalidInput || undefined} aria-describedby={invalidInput ? uid + "-search-error" : undefined}
+            autocomplete="off" spellcheck={false} enterkeyhint="search" class="flex-1" disabled={!canEdit} />
+          <Button type="submit" variant="outline" disabled={!canEdit || !input.trim()}>
+            <SearchIcon data-icon="inline-start" />{m.collect_crawl_search()}
+          </Button>
+        </div>
+      </form>
     </Dialog.Header>
 
-    <div class="flex min-h-0 flex-1 flex-col md:flex-row">
-      <section class="source-panel min-h-0 flex-none overflow-y-auto border-b border-line bg-bg1 px-3 py-3 md:w-76 md:border-r md:border-b-0 md:px-4" aria-label={m.collect_workbench_sources()}>
-        <div class="flex flex-col gap-3">
-          <Segmented options={sources} value={site} onchange={changeSite} label={m.collect_workbench_sources()} size="sm" class="w-fit max-w-full flex-wrap" />
-          <form class="flex flex-col gap-2.5" onsubmit={(event) => { event.preventDefault(); void browse(); }}>
-            <fieldset class="flex min-w-0 flex-col gap-2.5" disabled={!canEdit}>
-              <legend class="sr-only">{m.collect_workbench_sources()}</legend>
-              {#if site === "danbooru"}
-                <Segmented options={danbooruKinds} value={kind} onchange={changeKind} label={m.danbooru_source_type()} class="w-fit max-w-full flex-wrap" />
-                {#if kind === "search"}
-                  <DanbooruFilters {draft} onchange={changeDraft} compact />
-                {:else}
-                  <label class="flex flex-col gap-1 text-xs text-fg2" for="{uid}-address">
-                    {kind === "favorites" ? m.danbooru_favorites_reference() : m.danbooru_collection_reference()}
-                    <Input id="{uid}-address" autocomplete="off" value={location} oninput={(event) => changeLocation(event.currentTarget.value)} />
-                  </label>
-                {/if}
-              {:else}
-                <label for="{uid}-address" class="flex flex-col gap-1 text-xs text-fg2">
-                  {site === "pixiv" ? m.collect_workbench_pixiv_address() : site === "twitter" ? m.collect_workbench_x_address() : m.collect_workbench_eh_address()}
-                  <Input id="{uid}-address" type="url" autocomplete="off" placeholder="https://" value={location}
-                    oninput={(event) => changeLocation(event.currentTarget.value)} />
-                </label>
-              {/if}
-            </fieldset>
-            <div class="flex flex-wrap items-center gap-2">
-              <Button type="submit" size="sm" variant="outline" disabled={!canBrowse || !canEdit || searching}>
-                <SearchIcon data-icon="inline-start" />{loaded ? m.collect_workbench_refresh() : m.collect_workbench_preview()}
-              </Button>
-              {#if searching}<Button type="button" size="sm" variant="ghost" onclick={stopBrowse}>{m.danbooru_stop_loading()}</Button>{/if}
-            </div>
-          </form>
-          <div class="flex flex-wrap gap-1.5 border-t border-line pt-2.5">
-            <Button size="sm" variant="ghost" disabled={!canEdit} onclick={ondiscovery}>{m.collect_workbench_find_sources()}</Button>
-            <Button size="sm" variant="ghost" disabled={!canEdit} onclick={onlegacy}>{m.collect_workbench_address_mode()}</Button>
-          </div>
-          {#if site === "exhentai" && loaded}
-            <form class="flex flex-col gap-2 border-t border-line pt-2.5" onsubmit={applyPages}>
-              <h3 class="text-sm font-medium">{m.collect_workbench_page_range()}</h3>
-              <div class="grid grid-cols-2 gap-2">
-                <label class="flex flex-col gap-0.5 text-xs text-fg2" for="{uid}-first">{m.collect_workbench_page_start()}
-                  <Input id="{uid}-first" inputmode="numeric" bind:value={startPage} disabled={!canEdit || expired} />
-                </label>
-                <label class="flex flex-col gap-0.5 text-xs text-fg2" for="{uid}-last">{m.collect_workbench_page_end()}
-                  <Input id="{uid}-last" inputmode="numeric" bind:value={endPage} disabled={!canEdit || expired} />
-                </label>
-              </div>
-              <Button type="submit" size="sm" variant="outline" class="self-start" disabled={!canEdit || searching || expired}>{m.collect_workbench_apply_pages()}</Button>
-              {#if rangeError}<p role="alert" class="text-xs text-danger">{rangeError}</p>{/if}
-            </form>
-          {/if}
-        </div>
-      </section>
-
+    <div class="flex min-h-0 flex-1 flex-col">
       <section class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-bg0" aria-label={m.collect_workbench_canvas()}>
-        <div class="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-bg1 px-3 py-2 sm:px-4">
-          <div class="mr-auto flex flex-wrap items-center gap-2">
-            <h3 class="text-sm font-medium">{m.collect_workbench_canvas()}</h3>
-            {#if loaded}<span class="text-xs text-fg2 tabular-nums" role="status">{m.danbooru_loaded({ count: items.length })}{#if total != null} · {m.collect_workbench_total({ count: total })}{/if}</span>{/if}
-          </div>
-          {#if items.length}
-            <Button size="sm" variant="ghost" disabled={!canEdit || expired} onclick={() => setScope(selectLoadedScope(items))}>{m.collect_workbench_select_loaded()}</Button>
-            <Button size="sm" variant="ghost" disabled={!canEdit || (scope.kind === "manual" && !selected.size)} onclick={() => setScope(emptyScope())}>{m.collect_clear_selection()}</Button>
+        <div bind:this={gallery} class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-5" inert={!!focused}>
+          {#if chosenGallery || creatorOrigin}
+            <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+              {#if chosenGallery && galleries && galleries.length > 1}
+                <Button bind:ref={backButton} size="sm" variant="ghost" disabled={!canEdit} onclick={backToGalleries}>
+                  <ArrowLeftIcon data-icon="inline-start" />{creatorOrigin ? m.collect_workbench_back_to_creators() : m.collect_workbench_back_to_galleries()}
+                </Button>
+              {:else if creatorOrigin}
+                <Button bind:ref={backButton} size="sm" variant="ghost" disabled={!canEdit} onclick={backToPictures}>
+                  <ArrowLeftIcon data-icon="inline-start" />{m.collect_workbench_back_to_pictures()}
+                </Button>
+              {/if}
+              {#if chosenGallery}<h3 class="min-w-0 [overflow-wrap:anywhere] text-sm font-medium">{chosenGallery.label}</h3>{/if}
+            </div>
           {/if}
-        </div>
+          <details bind:open={optionsOpen} class="mb-3 text-sm">
+            <summary class="w-fit cursor-pointer rounded-sm px-1 py-1 text-xs text-fg2 outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-ring">{m.collect_workbench_options()}</summary>
+            {#if optionsOpen}
+              <div class="mt-2 flex max-w-3xl flex-col gap-3 rounded-md border border-line bg-bg1 p-3">
+                {#if site === "danbooru"}
+                  <form class="flex flex-col gap-2" onsubmit={submitAdvanced}>
+                    <fieldset class="flex min-w-0 flex-col gap-2" disabled={!canEdit}>
+                      <legend class="sr-only">{m.danbooru_source_type()}</legend>
+                      <Segmented options={danbooruKinds} value={advancedKind} onchange={(next) => { advancedKind = next; advancedReference = ""; }} label={m.danbooru_source_type()} class="w-fit max-w-full flex-wrap" />
+                      {#if advancedKind === "search"}
+                        <DanbooruFilters draft={advancedDraft} onchange={(next) => (advancedDraft = next)} compact />
+                      {:else}
+                        <label class="flex flex-col gap-1 text-xs text-fg2" for="{uid}-address">
+                          {advancedKind === "favorites" ? m.danbooru_favorites_reference() : m.danbooru_collection_reference()}
+                          <Input id="{uid}-address" autocomplete="off" bind:value={advancedReference} />
+                        </label>
+                      {/if}
+                    </fieldset>
+                    <Button type="submit" size="sm" variant="outline" class="self-start"
+                      disabled={!canEdit || (advancedKind !== "search" && advancedKind !== "favorites" && !advancedReference.trim())}>
+                      {m.collect_workbench_apply_source()}
+                    </Button>
+                  </form>
+                {/if}
+                {#if site === "exhentai" && items.length}
+                  <form class="flex max-w-sm flex-col gap-2" onsubmit={applyPages}>
+                    <h3 class="text-sm font-medium">{m.collect_workbench_page_range()}</h3>
+                    <div class="grid grid-cols-2 gap-2">
+                      <label class="flex flex-col gap-1 text-xs text-fg2" for="{uid}-first">{m.collect_workbench_page_start()}
+                        <Input id="{uid}-first" inputmode="numeric" bind:value={startPage} disabled={!canEdit || expired} />
+                      </label>
+                      <label class="flex flex-col gap-1 text-xs text-fg2" for="{uid}-last">{m.collect_workbench_page_end()}
+                        <Input id="{uid}-last" inputmode="numeric" bind:value={endPage} disabled={!canEdit || expired} />
+                      </label>
+                    </div>
+                    <Button type="submit" size="sm" variant="outline" class="self-start" disabled={!canEdit || searching || expired}>{m.collect_workbench_apply_pages()}</Button>
+                  </form>
+                {/if}
+                <div class="flex flex-wrap gap-1.5">
+                  {#if items.some((item) => item.collectable)}
+                    <Button size="sm" variant="ghost" disabled={!canEdit || expired} onclick={() => setScope(selectLoadedScope(items))}>{m.collect_workbench_select_loaded()}</Button>
+                  {/if}
+                  {#if scope.kind !== "manual" && !selected.size}
+                    <Button size="sm" variant="ghost" disabled={!canEdit} onclick={() => setScope(emptyScope())}>{m.collect_workbench_reset_range()}</Button>
+                  {/if}
+                  <Button size="sm" variant="ghost" disabled={!canEdit} onclick={ondiscovery}>{m.collect_workbench_find_sources()}</Button>
+                  <Button size="sm" variant="ghost" disabled={!canEdit} onclick={onlegacy}>{m.collect_workbench_collect_by_link()}</Button>
+                </div>
+                {#if checkpoint}
+                  <div class="flex flex-wrap items-center gap-2 border-t border-line pt-2 text-xs text-fg2">
+                    <Badge variant="outline">{m.collect_workbench_last_submitted()}</Badge>
+                    <span class="font-mono">#{checkpoint}</span>
+                    {#if items.some(({ id }) => id === checkpoint)}
+                      <Button variant="ghost" size="sm" onclick={showCheckpoint}>{m.collect_workbench_find_checkpoint()}</Button>
+                    {:else}<span>{m.collect_workbench_checkpoint_missing()}</span>{/if}
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </details>
 
-        <div bind:this={gallery} class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4" aria-busy={searching || undefined} inert={!!focused}>
-          {#if checkpoint}
-            <div class="mb-3 flex flex-wrap items-center gap-2 border-b border-line pb-2 text-xs text-fg2">
-              <Badge variant="outline">{m.collect_workbench_last_submitted()}</Badge>
-              <span class="font-mono">#{checkpoint}</span>
-              {#if items.some(({ id }) => id === checkpoint)}
-                <Button variant="ghost" size="sm" onclick={showCheckpoint}>{m.collect_workbench_find_checkpoint()}</Button>
-              {:else}<span>{m.collect_workbench_checkpoint_missing()}</span>{/if}
+          {#if searchError}
+            {@const failure = searchError}
+            <div id="{uid}-search-error" class="flex flex-wrap items-center gap-2 rounded-md border border-line bg-bg1 p-3 text-sm text-danger" role="alert">
+              <span>{failure.message}</span>
+              {#if failure.retryable}
+                <Button size="sm" variant="outline" disabled={!canEdit} onclick={() => creatorOrigin ? void resolveSearch(failure.request) : search(failure.request)}>{m.common_retry()}</Button>
+              {/if}
             </div>
           {/if}
           {#if browseError}
             <div class="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-line bg-bg1 p-3 text-xs text-danger" role="alert">
               <span>{loaded && !expired ? m.collect_workbench_browse_failed({ error: browseError }) : browseError}</span>
-              {#if retryBrowse}
+              {#if retryBrowse && !expired}
                 {@const retry = retryBrowse}
-                <Button size="sm" variant="outline" disabled={searching || !canEdit} onclick={() => void browse(retry.more, retry.limit)}>{expired ? m.danbooru_reload() : m.common_retry()}</Button>
+                <Button size="sm" variant="outline" disabled={searching || !canEdit} onclick={() => void browse(retry.more, retry.limit)}>{m.common_retry()}</Button>
               {/if}
             </div>
           {/if}
@@ -496,19 +670,52 @@
           {#if warnings.length}
             <ul class="mb-3 grid gap-1 text-xs text-warn" aria-label={m.danbooru_warnings()}>{#each warnings as warning (warning)}<li>{warning}</li>{/each}</ul>
           {/if}
-          {#if items.length}
+          {#if galleries && !chosenGallery && galleries.length}
+            <h3 class="mb-2 text-sm font-medium" role="status">
+              {creatorOrigin ? site === "pixiv" ? m.collect_workbench_choose_artist() : m.collect_workbench_choose_account() : m.collect_workbench_choose_gallery()}
+            </h3>
+            <ul class="grid max-w-3xl gap-2">
+              {#each galleries as choice, index (choice.address)}
+                <li>
+                  <Button variant="outline" class="h-auto w-full justify-between py-2 text-left whitespace-normal" data-gallery-index={index}
+                    disabled={!canEdit} onclick={() => void openGallery(choice)}>
+                    <span class="min-w-0 [overflow-wrap:anywhere]">{choice.label}</span><ChevronRightIcon data-icon="inline-end" />
+                  </Button>
+                </li>
+              {/each}
+            </ul>
+          {:else if items.length}
+            <div class="mb-2 flex min-h-6 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <p class="text-xs text-fg2 tabular-nums" role="status">
+                {m.danbooru_loaded({ count: items.length })}{#if total != null} · {m.collect_workbench_total({ count: total })}{/if}
+              </p>
+              {#if creatorLookup}
+                <Button bind:ref={creatorButton} variant="link" size="sm" onclick={findCreator}>{creatorAction}</Button>
+              {/if}
+            </div>
             <div class="media-grid grid gap-2.5">
               {#each items as item (item.id)}
                 <WorkbenchCard id={item.id} title={item.title} preview={item.preview} meta={item.meta} status={item.status}
-                  selected={selected.has(item.id)} disabled={!canToggle(item)} focused={focusedId === item.id} checkpoint={checkpoint === item.id}
+                  selected={selected.has(item.id)} disabled={!canToggle(item)} focused={focusedId === item.id} checkpoint={optionsOpen && checkpoint === item.id}
                   onfocusitem={(trigger) => void showInspector(item, trigger)} ontoggle={() => toggle(item)} />
               {/each}
             </div>
-          {:else}
-            <div class="flex min-h-28 flex-col items-center justify-center gap-2 px-3 text-center text-fg2" role="status">
-              {#if searching}<LoaderCircleIcon class="size-5 animate-spin" aria-hidden="true" />
-              {:else}<ImagesIcon class="size-6" aria-hidden="true" />{/if}
-              <p class="max-w-sm text-sm">{searching ? m.danbooru_loading() : loaded ? m.collect_workbench_empty() : m.collect_workbench_idle()}</p>
+          {:else if !searchError && !browseError}
+            <div class="flex flex-col items-center gap-2 px-3 py-14 text-center sm:py-20">
+              {#if resolving || searching}
+                <LoaderCircleIcon class="size-5 motion-safe:animate-spin text-fg2" aria-hidden="true" />
+                <p role="status" class="text-sm text-fg2">{resolving ? m.collect_workbench_searching() : m.collect_workbench_loading_pictures()}</p>
+              {:else}
+                <ImagesIcon class="size-6 text-fg2" aria-hidden="true" />
+                <p role="status" class="text-sm font-medium">
+                  {loaded ? m.collect_workbench_empty() : galleries ? creatorOrigin ? site === "pixiv" ? m.collect_workbench_no_artists() : m.collect_workbench_no_accounts() : m.collect_workbench_no_galleries() : m.collect_workbench_idle()}
+                </p>
+                {#if creatorLookup}
+                  <Button bind:ref={creatorButton} variant="outline" onclick={findCreator}>{creatorAction}</Button>
+                {:else if !loaded && !galleries}
+                  <Button variant="link" onclick={useSearchExample}>{m.collect_workbench_example({ example: searchExample })}</Button>
+                {/if}
+              {/if}
             </div>
           {/if}
           {#if canLoadMore}
@@ -532,7 +739,7 @@
             {#if detailImage && previewFailed !== detailImage}
               <img src={detailImage} alt={focused.title} crossorigin="anonymous" decoding="async" class="max-h-[38dvh] w-full rounded-md bg-bg0 object-contain" onerror={() => (previewFailed = detailImage)} />
             {:else}<p class="rounded-md bg-bg0 px-3 py-6 text-center text-xs text-fg2">{detailImage ? m.danbooru_preview_failed() : m.danbooru_no_preview()}</p>{/if}
-            <p class="break-words text-xs text-fg2">{focused.meta}{#if focused.author} · {focused.author}{/if}{#if focused.status} · {focused.status}{/if}</p>
+            <p class="break-words text-xs text-fg2">{[focused.meta, focused.author, focused.status].filter(Boolean).join(" · ")}</p>
             <div class="flex flex-wrap gap-2 border-t border-line pt-3">
               <Button size="sm" variant="outline" disabled={!canToggle(focused)} onclick={() => focused && toggle(focused)}>{selected.has(focused.id) ? m.collect_exclude() : m.collect_workbench_select()}</Button>
               {#if site !== "exhentai"}
@@ -548,12 +755,19 @@
 
     <footer class="flex flex-none flex-wrap items-center gap-2 border-t border-line bg-bg1 px-3 py-3 sm:px-5" data-testid="collect-workbench-scope">
       <div class="mr-auto flex min-w-0 flex-col gap-0.5" aria-live="polite">
-        <p class="font-medium tabular-nums">{m.collect_workbench_selected({ count: selected.size })}</p>
-        <p class="break-words text-xs text-fg2">
-          {scopeLabel()}
-          {#if scope.kind !== "manual" && scope.excluded.size} · {m.collect_workbench_excluded({ count: scope.excluded.size })}{/if}
-        </p>
-        {#if scope.kind === "pages" && !projection.ready}<p class="text-xs text-warn">{m.collect_workbench_pages_missing()}</p>{/if}
+        {#if selected.size}
+          <div class="flex flex-wrap items-center gap-x-2">
+            <p class="font-medium tabular-nums">{m.collect_workbench_selected({ count: selected.size })}</p>
+            <Button size="sm" variant="ghost" disabled={!canEdit} onclick={() => setScope(emptyScope())}>{m.collect_clear_selection()}</Button>
+          </div>
+        {/if}
+        {#if scope.kind !== "manual"}
+          <p class="break-words text-xs text-fg2">
+            {scopeLabel()}{#if scope.excluded.size} · {m.collect_workbench_excluded({ count: scope.excluded.size })}{/if}
+          </p>
+        {/if}
+        {#if rangeError}<p class="text-xs text-danger" role="alert">{rangeError}</p>
+        {:else if scope.kind === "pages" && !projection.ready}<p class="text-xs text-warn">{m.collect_workbench_pages_missing()}</p>{/if}
         {#if selected.size > maxSelection}<p class="text-xs text-danger" role="alert">{m.collect_workbench_submit_limit({ max: maxSelection })}</p>{/if}
         {#if submitError}<p class="text-xs text-danger" role="alert">{submitError}</p>{/if}
         {#if attempt && submitError}<p class="text-xs text-fg2">{m.collect_workbench_retry_hint()}</p>{/if}
@@ -570,9 +784,9 @@
       {:else if attempt && submitError}
         <Button size="sm" variant="ghost" onclick={() => { attempt = null; submitError = ""; }}>{m.collect_workbench_edit_scope()}</Button>
       {/if}
-      <Button size="sm" variant="primary" disabled={!canSubmit} onclick={() => void submit()} data-testid="collect-workbench-submit">
+      <Button variant="primary" disabled={!canSubmit} onclick={() => void submit()} data-testid="collect-workbench-submit">
         {#if saving}<LoaderCircleIcon class="animate-spin" data-icon="inline-start" />{/if}
-        {attempt && submitError ? m.collect_workbench_retry_submit() : m.collect_workbench_submit({ count: selected.size })}
+        {attempt && submitError ? m.collect_workbench_retry_submit() : selected.size ? m.collect_workbench_submit({ count: selected.size }) : m.collect_workbench_start()}
       </Button>
     </footer>
     {@render dialogs()}
@@ -581,7 +795,4 @@
 
 <style>
   .media-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 8rem), 1fr)); }
-  @media (width < 48rem) {
-    .source-panel { max-height: 39dvh; }
-  }
 </style>
