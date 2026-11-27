@@ -14,6 +14,7 @@ import (
 	_ "image/jpeg"
 	"image/png"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -294,8 +295,13 @@ func (s *Service) fetchHTTPMedia(ctx context.Context, site, target string) ([]by
 			}
 			return io.ReadAll(io.LimitReader(response.Body, maxMediaBytes+1))
 		},
-		Classify: func(error, discovery.Attempt) *discovery.Failure {
-			return &discovery.Failure{Message: "无法获取站点图片预览", ErrorClass: "preview_failed"}
+		Classify: func(err error, attempt discovery.Attempt) *discovery.Failure {
+			var op *net.OpError
+			var timeout net.Error
+			fault := attempt.Lease != nil && (errors.Is(err, proxytransport.ErrProxyConnect) ||
+				errors.As(err, &op) || (errors.As(err, &timeout) && timeout.Timeout()) ||
+				errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF))
+			return &discovery.Failure{Message: "无法获取站点图片预览", ErrorClass: "preview_failed", Retryable: fault, ProxyFault: fault}
 		},
 	})
 	if err != nil {

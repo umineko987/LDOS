@@ -3,11 +3,15 @@ package proxytransport
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"time"
 )
+
+// ErrProxyConnect identifies a rejected HTTP tunnel or failed SOCKS negotiation.
+var ErrProxyConnect = errors.New("proxy connect failed")
 
 type authorizedTransport struct {
 	transport     *http.Transport
@@ -54,13 +58,19 @@ func NewHTTPClient(ctx context.Context, endpoint string, timeout time.Duration) 
 				transport.ProxyConnectHeader = http.Header{"Proxy-Authorization": []string{authorization}}
 			}
 			transport.Proxy = http.ProxyURL(proxy)
+			transport.OnProxyConnectResponse = func(_ context.Context, _ *url.URL, _ *http.Request, res *http.Response) error {
+				if res.StatusCode != http.StatusOK {
+					return fmt.Errorf("%w: HTTP %d", ErrProxyConnect, res.StatusCode)
+				}
+				return nil
+			}
 		case "socks4", "socks5", "socks5h":
 			transport.DialContext = func(_ context.Context, network, address string) (net.Conn, error) {
 				dialCtx, cancel := context.WithTimeout(ctx, timeout)
 				defer cancel()
 				conn, err := dialSOCKS(dialCtx, proxy, address)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("%w: %w", ErrProxyConnect, err)
 				}
 				return &probeConn{Conn: conn, timeout: timeout}, nil
 			}

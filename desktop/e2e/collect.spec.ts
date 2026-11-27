@@ -91,6 +91,8 @@ test("默认勾选 Danbooru 并记忆图源勾选、跨源独立设范围、合�
   };
 
   let browseCalls = 0;
+  let releaseFirstBrowse!: () => void;
+  const firstBrowse = new Promise<void>((resolve) => (releaseFirstBrowse = resolve));
   let capturedSubmit: Schemas["CollectSubmitRequest"] | null = null;
 
   await mockApi(page, "post", "/api/v1/datasets/{dataset_id}/collect/resolve", async (req) => {
@@ -134,6 +136,7 @@ test("默认勾选 Danbooru 并记忆图源勾选、跨源独立设范围、合�
 
   await mockApi(page, "post", "/api/v1/datasets/{dataset_id}/collect/browse", async (req) => {
     browseCalls += 1;
+    if (browseCalls === 1) await firstBrowse;
     const body = req.postDataJSON() as Schemas["CollectBrowseRequest"];
     if (body.source.site === "danbooru") {
       return {
@@ -226,6 +229,13 @@ test("默认勾选 Danbooru 并记忆图源勾选、跨源独立设范围、合�
   await expect(rail.locator('[data-source-id="pixiv:timeline:42"]')).toBeVisible();
   await expect(rail.locator('[data-source-id="exhentai:gallery:9"]')).toBeVisible();
 
+  // 在首屏未返回时切源，再切回来应重新加载，而不是永久显示加载中。
+  await expect.poll(() => browseCalls).toBe(1);
+  await rail.locator('[data-source-id="pixiv:timeline:42"]').getByRole("button").click();
+  await expect(dialog.locator('[data-collect-card="pix-1"]')).toBeVisible();
+  releaseFirstBrowse();
+  await rail.locator('[data-source-id="danbooru:search:silver_hair"]').getByRole("button").click();
+  await expect(dialog.locator('[data-collect-card="dan-1"]')).toBeVisible();
   // Danbooru 点第 1 项 + Shift 点第 3 项 -> 选中 1..3 项
   await dialog.locator('[data-collect-card="dan-1"]').click();
   await dialog.locator('[data-collect-card="dan-3"]').click({ modifiers: ["Shift"] });

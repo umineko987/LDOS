@@ -314,6 +314,13 @@
   }
 
   function selectSource(sourceId: string) {
+    if (activeSourceId && activeSourceId !== sourceId) {
+      const previous = pagesBySource[activeSourceId];
+      if (previous?.loading) {
+        browseScope.cancel();
+        pagesBySource = { ...pagesBySource, [activeSourceId]: { ...previous, loading: false } };
+      }
+    }
     activeSourceId = sourceId;
     const cache = pagesBySource[sourceId];
     if (!cache || (!cache.loading && cache.items.length === 0 && !cache.error)) {
