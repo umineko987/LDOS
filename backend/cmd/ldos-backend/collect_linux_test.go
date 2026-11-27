@@ -104,6 +104,13 @@ func TestCollectEndpointsWiredWithOriginGuard(t *testing.T) {
 		t.Fatalf("expected 404 for missing dataset, got %d body=%s", missingDS.Code, missingDS.Body.String())
 	}
 
+	capacity := doJSON("GET", "/api/v1/collect/preview-capacity/pixiv", "", "http://127.0.0.1:8787", nil)
+	var window map[string]int
+	nativeOK(t, json.Unmarshal(capacity.Body.Bytes(), &window))
+	if limit, ok := window["limit"]; capacity.Code != http.StatusOK || !ok || limit < 0 || limit > 8 {
+		t.Fatalf("unexpected preview capacity: %d %v", capacity.Code, window)
+	}
+
 	// Media endpoint responds 400 cleanly for invalid token when wired
 	mediaRec := doJSON("GET", "/api/v1/collect/media/invalid", "", "http://127.0.0.1:8787", nil)
 	if mediaRec.Code != http.StatusBadRequest {

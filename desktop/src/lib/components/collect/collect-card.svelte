@@ -12,11 +12,13 @@
   import { isCollectableItem } from "#lib/domain/collect-range.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
+  import type { PreviewQueue } from "./preview-queue.ts";
 
   let {
     item,
     index,
     previewUrl = null,
+    previews,
     selected = false,
     excluded = false,
     onclick,
@@ -25,13 +27,14 @@
     item: CollectBrowseItem;
     index: number;
     previewUrl?: string | null;
+    previews: PreviewQueue;
     selected?: boolean;
     excluded?: boolean;
     onclick: (index: number, shiftKey: boolean) => void;
     onselectuntil: (index: number) => void;
   } = $props();
 
-  let imageFailed = $state(false);
+  let failedUrl = $state<string | null>(null);
   const collectable = $derived(isCollectableItem(item));
   const title = $derived(item.title || `#${item.id}`);
   const metaText = $derived.by(() => {
@@ -72,15 +75,14 @@
       onclick={(event) => onclick(index, event.shiftKey)}
     >
       <div class="relative aspect-[4/3] w-full overflow-hidden bg-bg2">
-        {#if previewUrl && !imageFailed}
+        {#if previewUrl && failedUrl !== previewUrl}
           <img
-            src={previewUrl}
+            {@attach previews.image(previewUrl, index)}
             alt={title}
-            loading="lazy"
             decoding="async"
             crossorigin="anonymous"
             class="size-full object-cover transition-transform duration-150 group-hover:scale-[1.02]"
-            onerror={() => (imageFailed = true)}
+            onerror={() => (failedUrl = previewUrl)}
           />
         {:else}
           <div class="flex size-full flex-col items-center justify-center gap-1 px-2 text-fg3">

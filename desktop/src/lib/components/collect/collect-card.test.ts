@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { m } from "#lib/paraglide/messages.js";
 import CollectCard from "./collect-card.svelte";
+import { PreviewQueue } from "./preview-queue.ts";
 
 const baseItem = {
   id: "42",
@@ -24,6 +25,7 @@ describe("collect-card", () => {
         item: { ...baseItem, media_count: 3 },
         index: 0,
         previewUrl: "http://127.0.0.1:8787/api/v1/collect/media/tok",
+        previews: new PreviewQueue(),
         selected: false,
         excluded: false,
         onclick: () => {},
@@ -32,7 +34,7 @@ describe("collect-card", () => {
     });
 
     expect(body).toContain('crossorigin="anonymous"');
-    expect(body).toContain('src="http://127.0.0.1:8787/api/v1/collect/media/tok"');
+    expect(body).not.toContain('src="http://127.0.0.1:8787/api/v1/collect/media/tok"');
     expect(body).toContain("1600×900 · PNG");
     expect(body).toContain(m.collect_v2_badge_pages({ count: 3 }));
     expect(body).toContain('aria-pressed="false"');
@@ -44,6 +46,7 @@ describe("collect-card", () => {
         item: { ...baseItem, local_state: "in_library", local_asset_id: "asset-1" },
         index: 0,
         previewUrl: null,
+        previews: new PreviewQueue(),
         selected: true,
         excluded: false,
         onclick: () => {},
@@ -60,6 +63,7 @@ describe("collect-card", () => {
         item: { ...baseItem, local_state: "in_dataset" },
         index: 0,
         previewUrl: null,
+        previews: new PreviewQueue(),
         selected: false,
         excluded: false,
         onclick: () => {},

@@ -25,6 +25,7 @@ import (
 	_ "golang.org/x/image/webp"
 
 	"ldos/backend/internal/discovery"
+	"ldos/backend/internal/proxypool"
 	"ldos/backend/internal/proxytransport"
 )
 
@@ -244,6 +245,28 @@ func (s *Service) Media(ctx context.Context, token string) ([]byte, string, erro
 	return data, contentType, nil
 }
 
+func previewPrefix(site string) string { return "collect-preview-" + site }
+
+func (s *Service) previewCapacity(ctx context.Context, site string) (int, error) {
+	if !slices.Contains(defaultSiteOrder, site) {
+		return 0, problem(422, "invalid_collect_site", "不支持的图源站点")
+	}
+	policy, err := s.deps.PolicyFor(ctx, site)
+	if err != nil {
+		return 0, err
+	}
+	if policy.ProxyMode == "direct" {
+		return cap(s.mediaSlots), nil
+	}
+	slots, matched := s.deps.PoolCapacity(proxypool.Request{
+		NodeTags: policy.NodeTags, AllowedIDs: policy.AllowedProxyIDs, ProbeBeforeUse: policy.ProbeBeforeUse,
+	}, previewPrefix(site)+"-")
+	if !matched && policy.ProxyMode == "prefer" {
+		return cap(s.mediaSlots), nil // Same direct fallback as Transport.Execute.
+	}
+	return min(cap(s.mediaSlots), slots), nil
+}
+
 func (s *Service) fetchHTTPMedia(ctx context.Context, site, target string) ([]byte, error) {
 	if s.deps.Transport == nil || s.deps.PolicyFor == nil {
 		return nil, problem(503, "media_unavailable", "媒体预览服务尚未就绪")
@@ -258,9 +281,10 @@ func (s *Service) fetchHTTPMedia(ctx context.Context, site, target string) ([]by
 		URL:               target,
 		Mode:              policy.ProxyMode,
 		Policy:            policy,
-		Prefix:            "collect-preview",
+		Prefix:            previewPrefix(site),
 		Secure:            true,
 		AcquireErrorFatal: true,
+		WaitIfBusy:        true,
 		Operation: func(ctx context.Context, attempt discovery.Attempt) (any, error) {
 			if attempt.Mode == "prefer" && attempt.Lease == nil {
 				if err := s.deps.Transport.ValidateDirect(ctx, target); err != nil {

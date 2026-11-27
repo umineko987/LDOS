@@ -29,6 +29,45 @@ func eligible(r *record, request Request) bool {
 	}
 	return (!wanted || matched) && (request.ProbeBeforeUse || r.healthy)
 }
+
+// Capacity counts matching idle nodes plus this consumer's own reservations, so
+// starting a request doesn't shrink its advertised window. Busy nodes belonging
+// to other consumers can become available again without changing site policy.
+func (p *Pool) Capacity(req Request, ownerPrefix string) (slots int, matched bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.running {
+		return 0, false
+	}
+	now := p.deps.now()
+	probeable := false
+	for _, r := range p.records {
+		if !eligible(r, req) || r.cooldown.After(now) {
+			continue
+		}
+		matched = true
+		if r.owner == "" || strings.HasPrefix(r.owner, ownerPrefix) {
+			if r.healthy {
+				slots++
+			} else {
+				probeable = true
+			}
+		}
+	}
+	if slots == 0 && probeable {
+		slots = 1
+	}
+	return slots, matched
+}
+
+func (p *Pool) releaseSlotLocked(r *record) {
+	r.owner = ""
+	if p.slotReleased != nil {
+		close(p.slotReleased)
+		p.slotReleased = nil
+	}
+}
+
 func (p *Pool) Acquire(ctx context.Context, request Request) (*Lease, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -85,11 +124,16 @@ func (p *Pool) Acquire(ctx context.Context, request Request) (*Lease, error) {
 		}
 		p.mu.Lock()
 		var selected *record
+		busy := false
 		if p.running && p.generation == generation {
 			for offset := range len(p.records) {
 				i := (p.cursor + offset) % len(p.records)
 				r := p.records[i]
-				if tried[r] || r.owner != "" || r.cooldown.After(p.deps.now()) || !eligible(r, request) {
+				if tried[r] || r.cooldown.After(p.deps.now()) || !eligible(r, request) {
+					continue
+				}
+				if r.owner != "" {
+					busy = true
 					continue
 				}
 				selected = r
@@ -98,12 +142,25 @@ func (p *Pool) Acquire(ctx context.Context, request Request) (*Lease, error) {
 				break
 			}
 		}
+		if selected == nil && busy && request.WaitIfBusy {
+			if p.slotReleased == nil {
+				p.slotReleased = make(chan struct{})
+			}
+			released := p.slotReleased
+			p.mu.Unlock()
+			select {
+			case <-workCtx.Done():
+				return nil, workCtx.Err()
+			case <-released:
+				continue
+			}
+		}
 		p.mu.Unlock()
 		if selected == nil {
 			return nil, nil
 		}
 		tried[selected] = true
-		releaseReservation := func() { p.mu.Lock(); selected.owner = ""; p.mu.Unlock() }
+		releaseReservation := func() { p.mu.Lock(); p.releaseSlotLocked(selected); p.mu.Unlock() }
 		if request.ProbeBeforeUse {
 			result := p.probeEndpoint(workCtx, selected, target, public, generation, false)
 			if err := workCtx.Err(); err != nil {
@@ -113,7 +170,7 @@ func (p *Pool) Acquire(ctx context.Context, request Request) (*Lease, error) {
 			if !result.Healthy {
 				p.mu.Lock()
 				selected.failures++
-				selected.owner = ""
+				p.releaseSlotLocked(selected)
 				p.mu.Unlock()
 				continue
 			}
@@ -135,7 +192,7 @@ func (p *Pool) Acquire(ctx context.Context, request Request) (*Lease, error) {
 				selected.failures++
 				selected.lastError = redaction.Text(err.Error(), 300)
 				selected.cooldown = p.deps.now().Add(p.settings.FailCooldown)
-				selected.owner = ""
+				p.releaseSlotLocked(selected)
 				p.mu.Unlock()
 				continue
 			}
@@ -166,7 +223,7 @@ func (p *Pool) Release(_ context.Context, owner string, proxyFault bool, reason 
 	}
 	delete(p.leases, owner)
 	r := held.node
-	r.owner = ""
+	p.releaseSlotLocked(r)
 	if proxyFault {
 		r.failures++
 		r.healthy = false

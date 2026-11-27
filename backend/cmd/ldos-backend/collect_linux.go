@@ -9,12 +9,14 @@ import (
 	"ldos/backend/internal/discovery"
 	"ldos/backend/internal/discoverydata"
 	"ldos/backend/internal/gallery"
+	"ldos/backend/internal/proxypool"
 	"ldos/backend/internal/scheduler"
 	"ldos/backend/internal/search"
 )
 
 func (b *businessRuntime) newCollect(
 	vault *credentials.Store,
+	pool *proxypool.Pool,
 	runner *gallery.Runner,
 	searchSvc *search.Service,
 	authStatus func(context.Context, string) (map[string]any, error),
@@ -111,6 +113,7 @@ func (b *businessRuntime) newCollect(
 			request.URL, request.Limit, request.RangeKind = target, limit, rangeKind
 			return b.discovery.Discover(ctx, request)
 		},
-		Transport: b.discovery.Transport,
+		Transport:    b.discovery.Transport,
+		PoolCapacity: pool.Capacity,
 	}), nil
 }

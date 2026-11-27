@@ -12,6 +12,7 @@
   import {
     browseCollect,
     collectMediaUrl,
+    collectPreviewCapacity,
     createCollectSubmitTracker,
     resolveCollect,
     submitCollect,
@@ -60,6 +61,7 @@
   import CollectCard from "./collect-card.svelte";
   import CollectRangeBar from "./collect-range-bar.svelte";
   import CollectSourceRail from "./collect-source-rail.svelte";
+  import { PreviewQueue } from "./preview-queue.ts";
 
   let {
     datasetId,
@@ -161,6 +163,18 @@
   const activeCache = $derived(
     activeSource ? pagesBySource[activeSource.id] ?? null : null,
   );
+
+  const previews = new PreviewQueue();
+  const capacity = createQuery(() => {
+    const site = activeSource?.site as CollectSite | undefined;
+    return {
+      queryKey: ["collect", "preview-capacity", site],
+      enabled: open && !!site && !!activeCache?.items.length,
+      queryFn: ({ signal }: { signal: AbortSignal }) => collectPreviewCapacity(api, site!, signal),
+      refetchInterval: 3000,
+    };
+  });
+  $effect(() => previews.setLimit(open ? capacity.data?.limit ?? 0 : 0));
 
   const compiledSubmit = $derived.by(() => {
     const entries: { source: CollectSourceSpec; state: SourceSelectionState }[] = [];
@@ -643,12 +657,18 @@
                 {m.collect_v2_empty_grid()}
               </div>
             {:else}
+              {#if capacity.isError}
+                <p class="py-2 text-xs text-danger" role="alert">{apiErrorMessage(capacity.error)}</p>
+              {:else if capacity.data?.limit === 0}
+                <p class="py-2 text-xs text-fg3" role="status">{m.collect_v2_preview_waiting()}</p>
+              {/if}
               <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {#each activeCache.items as item, idx (item.id)}
                   <CollectCard
                     {item}
                     index={idx}
                     previewUrl={collectMediaUrl(api, item.preview_url)}
+                    {previews}
                     selected={isItemSelected(activeSource, activeSelection, item, idx)}
                     excluded={isItemExplicitlyExcluded(activeSource, activeSelection, item, idx)}
                     onclick={(itemIdx, shiftKey) =>

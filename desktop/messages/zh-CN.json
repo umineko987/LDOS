@@ -297,6 +297,7 @@
   "collect_v2_input_placeholder": "输入搜索标签，或每行粘贴一个链接 / @用户名（支持 Danbooru · Pixiv · X · EH · Pawchive）",
   "collect_v2_load_more": "加载更多",
   "collect_v2_loading": "正在载入…",
+  "collect_v2_preview_waiting": "正在等待可用节点，恢复后会自动加载预览。",
   "collect_v2_menu_exclude": "从此范围排除",
   "collect_v2_menu_include": "加入采集范围",
   "collect_v2_menu_open_web": "在浏览器打开原页",

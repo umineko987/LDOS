@@ -297,6 +297,7 @@
   "collect_v2_input_placeholder": "Enter search tags or paste URLs / @handles (one per line)",
   "collect_v2_load_more": "Load more",
   "collect_v2_loading": "Loading…",
+  "collect_v2_preview_waiting": "Waiting for an available proxy node. Previews will resume automatically.",
   "collect_v2_menu_exclude": "Exclude from range",
   "collect_v2_menu_include": "Include in range",
   "collect_v2_menu_open_web": "Open source page",

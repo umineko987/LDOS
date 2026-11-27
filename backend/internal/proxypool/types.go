@@ -40,6 +40,7 @@ type Request struct {
 	NodeTags, ExcludeIDs, AllowedIDs []string // nil AllowedIDs means unrestricted; empty means no nodes.
 	ProbeBeforeUse                   bool
 	ProbeURL                         string
+	WaitIfBusy                       bool
 }
 type Lease struct {
 	Owner, NodeID, Name, Protocol, Endpoint string
@@ -104,6 +105,7 @@ type Pool struct {
 	deps                 dependencies
 	lifecycle            chan struct{}
 	mu                   sync.Mutex
+	slotReleased         chan struct{}
 	records              []*record
 	leases               map[string]heldLease
 	pending              map[string]*pendingAcquire

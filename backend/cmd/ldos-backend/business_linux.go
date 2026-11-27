@@ -205,7 +205,7 @@ func newBusinessRuntime(parent context.Context, settings *liveSettings, db *stor
 			return map[string]any{"id": link["batch_id"]}, nil
 		},
 	})
-	if b.collect, err = b.newCollect(vault, task.runner, options.Search, options.AuthStatus); err != nil {
+	if b.collect, err = b.newCollect(vault, pool, task.runner, options.Search, options.AuthStatus); err != nil {
 		return nil, err
 	}
 	b.gallery.AddScanListener(func(id string) {

@@ -17496,6 +17496,61 @@
         "summary": "Serve a signed local media preview proxy image"
       }
     },
+    "/api/v1/collect/preview-capacity/{site}": {
+      "get": {
+        "operationId": "collect_preview_capacity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "site",
+            "required": true,
+            "schema": {
+              "enum": [
+                "danbooru",
+                "pixiv",
+                "twitter",
+                "exhentai",
+                "pawchive"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "limit": {
+                      "maximum": 8,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "limit"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Available preview slots"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "summary": "Current preview concurrency for a collection site"
+      }
+    },
     "/api/v1/config": {
       "get": {
         "operationId": "public_config_api_v1_config_get",

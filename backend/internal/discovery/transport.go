@@ -105,6 +105,7 @@ type ExecuteOptions struct {
 	URL, Mode, Prefix, RequiredMessage            string
 	Policy                                        scheduler.Policy
 	Secure, AcquireErrorFatal, DirectPrevalidated bool
+	WaitIfBusy                                    bool
 	NodeTags, FallbackTags                        []string
 	Operation                                     func(context.Context, Attempt) (any, error)
 	Classify                                      func(error, Attempt) *Failure
@@ -161,7 +162,7 @@ func (t *Transport) acquire(ctx context.Context, id, mode string, opts ExecuteOp
 	if opts.Policy.ProbeURL != nil {
 		probeURL = *opts.Policy.ProbeURL
 	}
-	request := proxypool.Request{Owner: id, NodeTags: tags, ExcludeIDs: tried, AllowedIDs: opts.Policy.AllowedProxyIDs, ProbeBeforeUse: opts.Policy.ProbeBeforeUse, ProbeURL: probeURL}
+	request := proxypool.Request{Owner: id, NodeTags: tags, ExcludeIDs: tried, AllowedIDs: opts.Policy.AllowedProxyIDs, ProbeBeforeUse: opts.Policy.ProbeBeforeUse, ProbeURL: probeURL, WaitIfBusy: opts.WaitIfBusy}
 	lease, err := t.Pool.Acquire(ctx, request)
 	if err == nil && lease == nil && opts.FallbackTags != nil {
 		request.NodeTags = opts.FallbackTags

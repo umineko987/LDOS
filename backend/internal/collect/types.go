@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 
 	"ldos/backend/internal/discovery"
+	"ldos/backend/internal/proxypool"
 	"ldos/backend/internal/scheduler"
 	"ldos/backend/internal/search"
 	"ldos/backend/internal/store"
@@ -149,6 +150,7 @@ type Dependencies struct {
 	BrowseEHPages  func(context.Context, string, int) ([]map[string]any, int, error)
 	Discover       func(context.Context, string, string, int, string) (map[string]any, error)
 	Transport      *discovery.Transport
+	PoolCapacity   func(proxypool.Request, string) (int, bool)
 	FetchMedia     func(context.Context, string, string) ([]byte, error)
 }
 

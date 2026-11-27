@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"ldos/backend/internal/proxyparse"
@@ -86,6 +87,64 @@ func TestStatusSourceCountUsesCurrentSnapshot(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestPreviewWaitsForMatchingLease(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p, _, _ := testPool(t)
+		ctx := t.Context()
+		request := Request{Owner: "download", NodeTags: []string{"jp"}}
+		held, err := p.Acquire(ctx, request)
+		if err != nil || held == nil {
+			t.Fatal(held, err)
+		}
+		request.Owner, request.WaitIfBusy = "preview-1", true
+		if slots, matched := p.Capacity(request, "preview-"); slots != 0 || !matched {
+			t.Fatalf("busy node counted as free or missing: %d %v", slots, matched)
+		}
+		acquire := func(ctx context.Context, req Request) <-chan error {
+			done := make(chan error, 1)
+			go func() {
+				got, err := p.Acquire(ctx, req)
+				if err == nil && (got == nil || got.NodeID != held.NodeID) {
+					err = errors.New("did not acquire matching node")
+				}
+				done <- err
+			}()
+			return done
+		}
+		done := acquire(ctx, request)
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatalf("did not wait: %v", err)
+		default:
+		}
+		if err := p.Release(ctx, "download", false, ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if slots, _ := p.Capacity(request, "preview-"); slots != 1 {
+			t.Fatalf("own lease reduced the window to %d", slots)
+		}
+		waitCtx, cancel := context.WithCancel(ctx)
+		request.Owner = "preview-2"
+		waiting := acquire(waitCtx, request)
+		synctest.Wait()
+		cancel()
+		if err := <-waiting; !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled wait: %v", err)
+		}
+		if err := p.Release(ctx, "preview-1", true, "offline"); err != nil {
+			t.Fatal(err)
+		}
+		request.ProbeBeforeUse = true
+		if slots, _ := p.Capacity(request, "preview-"); slots != 0 {
+			t.Fatalf("cooling node counted: %d", slots)
+		}
+	})
 }
 
 func TestLeaseIsolationAndRelease(t *testing.T) {

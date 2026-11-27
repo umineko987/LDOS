@@ -13,6 +13,33 @@ import (
 	"ldos/backend/internal/scheduler"
 )
 
+func TestPreviewCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		mode    string
+		slots   int
+		matched bool
+		want    int
+	}{
+		{"required", 3, true, 3},
+		{"required", 12, true, 8},
+		{"required", 0, false, 0},
+		{"prefer", 0, true, 0}, // busy, not absent
+		{"prefer", 0, false, 8},
+		{"direct", 0, false, 8},
+	} {
+		s := New(Dependencies{
+			PolicyFor: func(context.Context, string) (scheduler.Policy, error) {
+				return scheduler.Policy{ProxyMode: tc.mode}, nil
+			},
+			PoolCapacity: func(proxypool.Request, string) (int, bool) { return tc.slots, tc.matched },
+		})
+		got, err := s.previewCapacity(t.Context(), "pixiv")
+		if err != nil || got != tc.want {
+			t.Fatalf("%+v: got %d, %v", tc, got, err)
+		}
+	}
+}
+
 type previewTestPool struct {
 	endpoints []string
 	faults    []bool

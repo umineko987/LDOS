@@ -50,6 +50,8 @@ test("默认勾选 Danbooru 并记忆图源勾选、跨源独立设范围、合�
 
   await mockApi(page, "get", "/api/v1/search/autocomplete", { items: [] });
 
+  let previewLimit = 0;
+  await mockApi(page, "get", "/api/v1/collect/preview-capacity/{site}", () => ({ body: { limit: previewLimit } }));
   await page.route("**/api/v1/collect/media/**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -233,6 +235,11 @@ test("默认勾选 Danbooru 并记忆图源勾选、跨源独立设范围、合�
   await expect.poll(() => browseCalls).toBe(1);
   await rail.locator('[data-source-id="pixiv:timeline:42"]').getByRole("button").click();
   await expect(dialog.locator('[data-collect-card="pix-1"]')).toBeVisible();
+  const pixImage = dialog.locator('[data-collect-card="pix-1"] img');
+  await expect(dialog.getByRole("status").filter({ hasText: "正在等待可用节点" })).toBeVisible();
+  await expect(pixImage).not.toHaveAttribute("src");
+  previewLimit = 2;
+  await expect(pixImage).toHaveAttribute("src", /\/collect\/media\//, { timeout: 7000 });
   releaseFirstBrowse();
   await rail.locator('[data-source-id="danbooru:search:silver_hair"]').getByRole("button").click();
   await expect(dialog.locator('[data-collect-card="dan-1"]')).toBeVisible();

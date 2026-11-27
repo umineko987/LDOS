@@ -214,6 +214,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collect/preview-capacity/{site}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current preview concurrency for a collection site */
+        get: operations["collect_preview_capacity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/config": {
         parameters: {
             query?: never;
@@ -7944,6 +7961,39 @@ export interface operations {
                     "image/jpeg": string;
                     "image/png": string;
                     "image/webp": string;
+                };
+            };
+            /** @description API error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchErrorResponse"];
+                };
+            };
+        };
+    };
+    collect_preview_capacity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site: "danbooru" | "pixiv" | "twitter" | "exhentai" | "pawchive";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Available preview slots */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        limit: number;
+                    };
                 };
             };
             /** @description API error */

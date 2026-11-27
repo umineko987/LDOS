@@ -9243,6 +9243,61 @@
         }
       }
     },
+    "/api/v1/collect/preview-capacity/{site}": {
+      "get": {
+        "summary": "Current preview concurrency for a collection site",
+        "operationId": "collect_preview_capacity",
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "danbooru",
+                "pixiv",
+                "twitter",
+                "exhentai",
+                "pawchive"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Available preview slots",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "limit"
+                  ],
+                  "properties": {
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/collect/media/{token}": {
       "get": {
         "summary": "Serve a signed local media preview proxy image",

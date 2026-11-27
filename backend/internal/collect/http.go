@@ -18,6 +18,15 @@ import (
 )
 
 func (s *Service) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/collect/preview-capacity/{site}", func(w http.ResponseWriter, r *http.Request) {
+		limit, err := s.previewCapacity(r.Context(), r.PathValue("site"))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		httpapi.JSON(w, http.StatusOK, map[string]int{"limit": limit})
+	})
 	mux.HandleFunc("POST /api/v1/datasets/{dataset_id}/collect/resolve", func(w http.ResponseWriter, r *http.Request) {
 		var body ResolveRequest
 		if err := decodeBody(w, r, &body, 64<<10); err != nil {

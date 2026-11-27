@@ -1,3 +1,4 @@
+import type { CollectSite } from "#lib/prefs/prefs.ts";
 import { data, idempotent, type Api } from "../client.ts";
 import { createIdempotencyKey } from "../ids.ts";
 import type { components } from "../schema";
@@ -39,6 +40,12 @@ export function browseCollect(
       signal,
     }),
   );
+}
+
+export function collectPreviewCapacity(api: Api, site: CollectSite, signal: AbortSignal) {
+  return data(api.client.GET("/api/v1/collect/preview-capacity/{site}", {
+    params: { path: { site } }, signal,
+  }));
 }
 
 export function submitCollect(
