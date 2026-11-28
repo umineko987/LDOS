@@ -15,6 +15,11 @@ skills-lock.json
 *.swp
 *.tmp
 
+# Local AOCI index and runtime assets
+/.aoci/
+/aoci.txt
+/aoci.*.txt
+
 # Python caches, environments, coverage and build output (repository-wide)
 **/__pycache__/
 **/*.py[cod]
@@ -58,6 +63,9 @@ skills-lock.json
 **/*.pid
 /artifacts/
 /downloads/
+
+# Local experiments
+/experiments/
 
 # Browser authentication material and persistent login profiles
 **/*.cookies.txt
